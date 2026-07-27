@@ -84,7 +84,7 @@ for msg in agent.daily_stream():
 
 ## 手机推送（ntfy）
 
-- App：ntfy（蓝铃铛图标），订阅频道 `maamaru-honmaru-237a0e45cfae`
+- App：ntfy（蓝铃铛图标），订阅你在 `touken_config.json` 里配的频道
 - 频道名就是密码，别外传；以后给别人用就一人开一个频道
 - 日课跑完自动推成绩单：全绿 🎉，有翻车 ⚠️ 高优先级
 
