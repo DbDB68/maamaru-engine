@@ -1,11 +1,15 @@
-# 本丸托管所（刀剑乱舞自动日课）
+# まあ丸 — 刀剑乱舞·近侍引擎
 
 [!["maamaru-engine"](https://img.shields.io/badge/pip-maamaru--engine-purple)](https://pypi.org/project/maamaru-engine/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 
-基于 MaaFramework 的刀剑乱舞自动托管。模拟器里开着游戏，脚本自己把每天的活儿干了，
-成绩单打三个地方：看板「本丸托管所」、电脑桌面通知、手机 ntfy 推送。
+**不只是自动化脚本，更是你的本丸近侍。**
+
+基于 MaaFramework 的刀剑乱舞自动托管引擎。模拟器里开着游戏，她（引擎）自己把每天的活儿干了，
+成绩单打三个地方：看板、电脑桌面通知、手机 ntfy 推送。
+
+长期目标：成为能跟你聊天、会帮你打工、像游戏里的近侍一样陪在身边的刀男（或任意角色）。
 
 ## 快速安装
 
