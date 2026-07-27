@@ -1,0 +1,1278 @@
+{
+  "_schema_version": "1.0",
+  "_description": "刀剑乱舞ONLINE 角色识别数据库 (MaaFW格式)",
+  "_game": "touken_ranbu",
+  "_generated": "2026-07-26",
+  "chars": {
+    "touken_011_imagiri_no_toshiro": {
+      "name": "今剣",
+      "name_zh": "今剑",
+      "name_en": "Imagiri no Toshiro",
+      "type": "短刀",
+      "school": "三条",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_031_hirano_toushirou": {
+      "name": "平野藤四郎",
+      "name_zh": "平野藤四郎",
+      "name_en": "Hirano Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_033_atsushi_toushirou": {
+      "name": "厚藤四郎",
+      "name_zh": "厚藤四郎",
+      "name_en": "Atsushi Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_035_gotou_toushirou": {
+      "name": "後藤藤四郎",
+      "name_zh": "后藤藤四郎",
+      "name_en": "Gotou Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_037_shinano_toushirou": {
+      "name": "信濃藤四郎",
+      "name_zh": "信浓藤四郎",
+      "name_en": "Shinano Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_039_maeda_toushirou": {
+      "name": "前田藤四郎",
+      "name_zh": "前田藤四郎",
+      "name_en": "Maeda Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_041_akita_toushirou": {
+      "name": "秋田藤四郎",
+      "name_zh": "秋田藤四郎",
+      "name_en": "Akita Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_043_hakata_toushirou": {
+      "name": "博多藤四郎",
+      "name_zh": "博多藤四郎",
+      "name_en": "Hakata Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_045_midare_toushirou": {
+      "name": "乱藤四郎",
+      "name_zh": "乱藤四郎",
+      "name_en": "Midare Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_047_gokotai": {
+      "name": "五虎退",
+      "name_zh": "五虎退",
+      "name_en": "Gokotai",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_049_yagen_toushirou": {
+      "name": "薬研藤四郎",
+      "name_zh": "药研藤四郎",
+      "name_en": "Yagen Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_051_houchou_toushirou": {
+      "name": "包丁藤四郎",
+      "name_zh": "包丁藤四郎",
+      "name_en": "Houchou Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_061_aizen_kunitoshi": {
+      "name": "愛染国俊",
+      "name_zh": "爱染国俊",
+      "name_en": "Aizen Kunitoshi",
+      "type": "短刀",
+      "school": "来",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_069_taikobune_sadamune": {
+      "name": "太鼓鐘貞宗",
+      "name_zh": "太鼓钟贞宗",
+      "name_en": "Taikobune Sadamune",
+      "type": "短刀",
+      "school": "贞宗",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_083_sayo_samonji": {
+      "name": "小夜左文字",
+      "name_zh": "小夜左文字",
+      "name_en": "Sayo Samonji",
+      "type": "短刀",
+      "school": "左文字",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_120_fudou_yukimitsu": {
+      "name": "不動行光",
+      "name_zh": "不动行光",
+      "name_en": "Fudou Yukimitsu",
+      "type": "短刀",
+      "school": "",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_142_mouri_toushirou": {
+      "name": "毛利藤四郎",
+      "name_zh": "毛利藤四郎",
+      "name_en": "Mouri Toushirou",
+      "type": "短刀",
+      "school": "粟田口",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_146_kenshin_kagetsu": {
+      "name": "謙信景光",
+      "name_zh": "谦信景光",
+      "name_en": "Kenshin Kagetsu",
+      "type": "短刀",
+      "school": "长船",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_150_hyuuga_masamune": {
+      "name": "日向正宗",
+      "name_zh": "日向正宗",
+      "name_en": "Hyuuga Masamune",
+      "type": "短刀",
+      "school": "正宗",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_170_chatan_nakiri": {
+      "name": "北谷菜切",
+      "name_zh": "北谷菜切",
+      "name_en": "Chatan Nakiri",
+      "type": "短刀",
+      "school": "",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_190_taikou_samonji": {
+      "name": "太閤左文字",
+      "name_zh": "太阁左文字",
+      "name_en": "Taikou Samonji",
+      "type": "短刀",
+      "school": "左文字",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_222_kyougoku_masamune": {
+      "name": "京極正宗",
+      "name_zh": "京极正宗",
+      "name_en": "Kyougoku Masamune",
+      "type": "短刀",
+      "school": "正宗",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_234_kuki_masamune": {
+      "name": "九鬼正宗",
+      "name_zh": "九鬼正宗",
+      "name_en": "Kuki Masamune",
+      "type": "短刀",
+      "school": "正宗",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_246_kurikara_gou": {
+      "name": "倶利伽羅江",
+      "name_zh": "俱利伽罗江",
+      "name_en": "Kurikara Gou",
+      "type": "短刀",
+      "school": "江",
+      "rarity": 1,
+      "slots": 1,
+      "range": "単"
+    },
+    "touken_019_nikkari_aoe": {
+      "name": "にっかり青江",
+      "name_zh": "笑面青江",
+      "name_en": "Nikkari Aoe",
+      "type": "脇差",
+      "school": "青江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_027_nazuo_toushirou": {
+      "name": "鯰尾藤四郎",
+      "name_zh": "鲶尾藤四郎",
+      "name_en": "Nazuo Toushirou",
+      "type": "脇差",
+      "school": "粟田口",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_029_honebami_toushirou": {
+      "name": "骨喰藤四郎",
+      "name_zh": "骨喰藤四郎",
+      "name_en": "Honebami Toushirou",
+      "type": "脇差",
+      "school": "粟田口",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_067_monoyoshi_sadamune": {
+      "name": "物吉貞宗",
+      "name_zh": "物吉贞宗",
+      "name_en": "Monoyoshi Sadamune",
+      "type": "脇差",
+      "school": "贞宗",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_099_horikawa_kunihiro": {
+      "name": "堀川国広",
+      "name_zh": "堀川国广",
+      "name_en": "Horikawa Kunihiro",
+      "type": "脇差",
+      "school": "堀川",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_103_urashima_kotetsu": {
+      "name": "浦島虎徹",
+      "name_zh": "浦岛虎彻",
+      "name_en": "Urashima Kotetsu",
+      "type": "脇差",
+      "school": "虎彻",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_144_kotegiri_gou": {
+      "name": "篭手切江",
+      "name_zh": "笼手切江",
+      "name_en": "Kotegiri Gou",
+      "type": "脇差",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_168_hizen_tadahiro": {
+      "name": "肥前忠広",
+      "name_zh": "肥前忠广",
+      "name_en": "Hizen Tadahiro",
+      "type": "脇差",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_186_chigane_maru": {
+      "name": "治金丸",
+      "name_zh": "治金丸",
+      "name_en": "Chigane Maru",
+      "type": "脇差",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_196_hanjin": {
+      "name": "泛塵",
+      "name_zh": "泛尘",
+      "name_en": "Hanjin",
+      "type": "脇差",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_228_kasha_kiri": {
+      "name": "火車切",
+      "name_zh": "火车切",
+      "name_en": "Kasha Kiri",
+      "type": "脇差",
+      "school": "广光",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_023_nakigitsune": {
+      "name": "鳴狐",
+      "name_zh": "鸣狐",
+      "name_en": "Nakigitsune",
+      "type": "打刀",
+      "school": "粟田口",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_063_senji_muramasa": {
+      "name": "千子村正",
+      "name_zh": "千子村正",
+      "name_en": "Senji Muramasa",
+      "type": "打刀",
+      "school": "村正",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_071_kamenari_sadamune": {
+      "name": "亀甲貞宗",
+      "name_zh": "龟甲贞宗",
+      "name_en": "Kamenari Sadamune",
+      "type": "打刀",
+      "school": "贞宗",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_081_sousan_samonji": {
+      "name": "宗三左文字",
+      "name_zh": "宗三左文字",
+      "name_en": "Sousan Samonji",
+      "type": "打刀",
+      "school": "左文字",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_085_kashuu_kiyomitsu": {
+      "name": "加州清光",
+      "name_zh": "加州清光",
+      "name_en": "Kashuu Kiyomitsu",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_087_yamato_no_kami_yasusada": {
+      "name": "大和守安定",
+      "name_zh": "大和守安定",
+      "name_en": "Yamato no Kami Yasusada",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_089_kasen_kanesada": {
+      "name": "歌仙兼定",
+      "name_zh": "歌仙兼定",
+      "name_en": "Kasen Kanesada",
+      "type": "打刀",
+      "school": "兼定",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_091_izumi_no_kami_kanesada": {
+      "name": "和泉守兼定",
+      "name_zh": "和泉守兼定",
+      "name_en": "Izumi no Kami Kanesada",
+      "type": "打刀",
+      "school": "兼定",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_093_mutsu_no_kami_yoshiyuki": {
+      "name": "陸奥守吉行",
+      "name_zh": "陆奥守吉行",
+      "name_en": "Mutsu no Kami Yoshiyuki",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_095_yamanbagiri_kunihiro": {
+      "name": "山姥切国広",
+      "name_zh": "山姥切国广",
+      "name_en": "Yamanbagiri Kunihiro",
+      "type": "打刀",
+      "school": "堀川",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_101_hachisuka_kotetsu": {
+      "name": "蜂須賀虎徹",
+      "name_zh": "蜂须贺虎彻",
+      "name_en": "Hachisuka Kotetsu",
+      "type": "打刀",
+      "school": "虎彻",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_105_nagosone_kotetsu": {
+      "name": "長曽祢虎徹",
+      "name_zh": "长曾祢虎彻",
+      "name_en": "Nagosone Kotetsu",
+      "type": "打刀",
+      "school": "虎彻",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_116_ookurikara": {
+      "name": "大倶利伽羅",
+      "name_zh": "大俱利伽罗",
+      "name_en": "Ookurikara",
+      "type": "打刀",
+      "school": "广光",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_118_heshikiri_hasebe": {
+      "name": "へし切長谷部",
+      "name_zh": "压切长谷部",
+      "name_en": "Heshikiri Hasebe",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_128_dou_tanuki_masakuni": {
+      "name": "同田貫正国",
+      "name_zh": "同田贯正国",
+      "name_en": "Dou Tanuki Masakuni",
+      "type": "打刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_154_nansen_ichimonji": {
+      "name": "南泉一文字",
+      "name_zh": "南泉一文字",
+      "name_en": "Nansen Ichimonji",
+      "type": "打刀",
+      "school": "福岡一文字",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_158_yamanbagiri_nagayoshi": {
+      "name": "山姥切長義",
+      "name_zh": "山姥切长义",
+      "name_en": "Yamanbagiri Nagayoshi",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_160_buzen_gou": {
+      "name": "豊前江",
+      "name_zh": "丰前江",
+      "name_en": "Buzen Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_166_nankai_tarou_asa_mune": {
+      "name": "南海太郎朝尊",
+      "name_zh": "南海太郎朝尊",
+      "name_en": "Nankai Tarou Asa Mune",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_172_kuwana_gou": {
+      "name": "桑名江",
+      "name_zh": "桑名江",
+      "name_en": "Kuwana Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_174_suishinshi_masahide": {
+      "name": "水心子正秀",
+      "name_zh": "水心子正秀",
+      "name_en": "Suishinshi Masahide",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_176_minamoto_kiyomaro": {
+      "name": "源清麿",
+      "name_zh": "源清麿",
+      "name_en": "Minamoto Kiyomaro",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_178_matsui_gou": {
+      "name": "松井江",
+      "name_zh": "松井江",
+      "name_en": "Matsui Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_184_jizou_yukihira": {
+      "name": "地蔵行平",
+      "name_zh": "地藏行平",
+      "name_en": "Jizou Yukihira",
+      "type": "打刀",
+      "school": "豊後国行平",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_192_samidare_gou": {
+      "name": "五月雨江",
+      "name_zh": "五月雨江",
+      "name_en": "Samidare Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_200_murakumo_gou": {
+      "name": "村雲江",
+      "name_zh": "村云江",
+      "name_en": "Murakumo Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_210_inaba_gou": {
+      "name": "稲葉江",
+      "name_zh": "稻叶江",
+      "name_en": "Inaba Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_218_ishida_masamune": {
+      "name": "石田正宗",
+      "name_zh": "石田正宗",
+      "name_en": "Ishida Masamune",
+      "type": "打刀",
+      "school": "正宗",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_224_magoroku_kanemoto": {
+      "name": "孫六兼元",
+      "name_zh": "孙六兼元",
+      "name_en": "Magoroku Kanemoto",
+      "type": "打刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_226_goke_kanemitsu": {
+      "name": "後家兼光",
+      "name_zh": "后家兼光",
+      "name_en": "Goke Kanemitsu",
+      "type": "打刀",
+      "school": "长船",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_230_tomita_gou": {
+      "name": "富田江",
+      "name_zh": "富田江",
+      "name_en": "Tomita Gou",
+      "type": "打刀",
+      "school": "江",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_232_daikei_naotane": {
+      "name": "大慶直胤",
+      "name_zh": "大庆直胤",
+      "name_en": "Daikei Naotane",
+      "type": "打刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_250_atagi_kiri": {
+      "name": "安宅切",
+      "name_zh": "安宅切",
+      "name_en": "Atagi Kiri",
+      "type": "打刀",
+      "school": "长船",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_252_futasujihi_sadamune": {
+      "name": "二筋樋貞宗",
+      "name_zh": "二筋樋贞宗",
+      "name_en": "Futasujihi Sadamune",
+      "type": "打刀",
+      "school": "贞宗",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_254_kumoshige": {
+      "name": "雲重",
+      "name_zh": "云重",
+      "name_en": "Kumoshige",
+      "type": "打刀",
+      "school": "鵜飼",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_003_mikazuki_munechika": {
+      "name": "三日月宗近",
+      "name_zh": "三日月宗近",
+      "name_en": "Mikazuki Munechika",
+      "type": "太刀",
+      "school": "三条",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_005_kogitsune_maru": {
+      "name": "小狐丸",
+      "name_zh": "小狐丸",
+      "name_en": "Kogitsune Maru",
+      "type": "太刀",
+      "school": "三条",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_013_ootenta_mitsuyo": {
+      "name": "大典太光世",
+      "name_zh": "大典太光世",
+      "name_en": "Ootenta Mitsuyo",
+      "type": "太刀",
+      "school": "三池",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_015_sohayano_tsurugi": {
+      "name": "ソハヤノツルキ",
+      "name_zh": "骚速剑",
+      "name_en": "Sohayano Tsurugi",
+      "type": "太刀",
+      "school": "三池",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_017_juzumaru_tsunetsugu": {
+      "name": "数珠丸恒次",
+      "name_zh": "数珠丸恒次",
+      "name_en": "Juzumaru Tsunetsugu",
+      "type": "太刀",
+      "school": "青江",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_021_onimaru_kunitsuna": {
+      "name": "鬼丸国綱",
+      "name_zh": "鬼丸国纲",
+      "name_en": "Onimaru Kunitsuna",
+      "type": "太刀",
+      "school": "粟田口",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_025_ichigo_hitofuri": {
+      "name": "一期一振",
+      "name_zh": "一期一振",
+      "name_en": "Ichigo Hitofuri",
+      "type": "太刀",
+      "school": "粟田口",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_053_ookanehira": {
+      "name": "大包平",
+      "name_zh": "大包平",
+      "name_en": "Ookanehira",
+      "type": "太刀",
+      "school": "古备前",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_055_uguisumaru": {
+      "name": "鶯丸",
+      "name_zh": "莺丸",
+      "name_en": "Uguisumaru",
+      "type": "太刀",
+      "school": "古备前",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_057_akashi_kuniyuki": {
+      "name": "明石国行",
+      "name_zh": "明石国行",
+      "name_en": "Akashi Kuniyuki",
+      "type": "太刀",
+      "school": "来",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_073_shokudaikiri_mitsutada": {
+      "name": "燭台切光忠",
+      "name_zh": "烛台切光忠",
+      "name_en": "Shokudaikiri Mitsutada",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_075_daihannya_nagamitsu": {
+      "name": "大般若長光",
+      "name_zh": "大般若长光",
+      "name_en": "Daihannya Nagamitsu",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_077_koryuu_kagemitsu": {
+      "name": "小竜景光",
+      "name_zh": "小龙景光",
+      "name_en": "Koryuu Kagemitsu",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_079_kousetsu_samonji": {
+      "name": "江雪左文字",
+      "name_zh": "江雪左文字",
+      "name_en": "Kousetsu Samonji",
+      "type": "太刀",
+      "school": "左文字",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_097_yamabushi_kunihiro": {
+      "name": "山伏国広",
+      "name_zh": "山伏国广",
+      "name_en": "Yamabushi Kunihiro",
+      "type": "太刀",
+      "school": "堀川",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_107_higekiri": {
+      "name": "髭切",
+      "name_zh": "髭切",
+      "name_en": "Higekiri",
+      "type": "太刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_112_hizamaru": {
+      "name": "膝丸",
+      "name_zh": "膝丸",
+      "name_en": "Hizamaru",
+      "type": "太刀",
+      "school": "",
+      "rarity": 2,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_122_shishiou": {
+      "name": "獅子王",
+      "name_zh": "狮子王",
+      "name_en": "Shishiou",
+      "type": "太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_124_kogarasumaru": {
+      "name": "小烏丸",
+      "name_zh": "小乌丸",
+      "name_en": "Kogarasumaru",
+      "type": "太刀",
+      "school": "",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_126_nukemaru": {
+      "name": "抜丸",
+      "name_zh": "拔丸",
+      "name_en": "Nukemaru",
+      "type": "太刀",
+      "school": "",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_130_tsurumaru_kuninaga": {
+      "name": "鶴丸国永",
+      "name_zh": "鹤丸国永",
+      "name_en": "Tsurumaru Kuninaga",
+      "type": "太刀",
+      "school": "",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_148_azuki_nagamitsu": {
+      "name": "小豆長光",
+      "name_zh": "小豆长光",
+      "name_en": "Azuki Nagamitsu",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_156_chiyoganemaru": {
+      "name": "千代金丸",
+      "name_zh": "千代金丸",
+      "name_en": "Chiyoganemaru",
+      "type": "太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_180_yamatorige": {
+      "name": "山鳥毛",
+      "name_zh": "山鸟毛",
+      "name_en": "Yamatorige",
+      "type": "太刀",
+      "school": "福岡一文字",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_182_kokindenju_no_tachi": {
+      "name": "古今伝授の太刀",
+      "name_zh": "古今传授之太刀",
+      "name_en": "Kokindenju no Tachi",
+      "type": "太刀",
+      "school": "豊後国行平",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_188_nikko_ichimonji": {
+      "name": "日光一文字",
+      "name_zh": "日光一文字",
+      "name_en": "Nikko Ichimonji",
+      "type": "太刀",
+      "school": "福岡一文字",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_198_ichimonji_norimune": {
+      "name": "一文字則宗",
+      "name_zh": "一文字则宗",
+      "name_en": "Ichimonji Norimune",
+      "type": "太刀",
+      "school": "福岡一文字",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_202_himetsuru_ichimonji": {
+      "name": "姫鶴一文字",
+      "name_zh": "姬鹤一文字",
+      "name_en": "Himetsuru Ichimonji",
+      "type": "太刀",
+      "school": "福岡一文字",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_204_fukushima_mitsutada": {
+      "name": "福島光忠",
+      "name_zh": "福岛光忠",
+      "name_en": "Fukushima Mitsutada",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_212_sasanuki": {
+      "name": "笹貫",
+      "name_zh": "笹贯",
+      "name_en": "Sasanuki",
+      "type": "太刀",
+      "school": "波平",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_216_hatchou_nenbutsu": {
+      "name": "八丁念仏",
+      "name_zh": "八丁念佛",
+      "name_en": "Hatchou Nenbutsu",
+      "type": "太刀",
+      "school": "古备前",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_220_jikkyuu_mitsutada": {
+      "name": "実休光忠",
+      "name_zh": "实休光忠",
+      "name_en": "Jikkyuu Mitsutada",
+      "type": "太刀",
+      "school": "长船",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_236_unshou": {
+      "name": "雲生",
+      "name_zh": "云生",
+      "name_en": "Unshou",
+      "type": "太刀",
+      "school": "鵜飼",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_238_douyo_ichimonji": {
+      "name": "道誉一文字",
+      "name_zh": "道誉一文字",
+      "name_en": "Douyo Ichimonji",
+      "type": "太刀",
+      "school": "福岡一文字",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_240_kumoji": {
+      "name": "雲次",
+      "name_zh": "云次",
+      "name_en": "Kumoji",
+      "type": "太刀",
+      "school": "鵜飼",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_242_omokage": {
+      "name": "面影",
+      "name_zh": "面影",
+      "name_en": "Omokage",
+      "type": "太刀",
+      "school": "来",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_244_kobizen_nobufusa": {
+      "name": "古備前信房",
+      "name_zh": "古备前信房",
+      "name_en": "Kobizen Nobufusa",
+      "type": "太刀",
+      "school": "古备前",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_248_saburou_kunimune": {
+      "name": "三郎国宗",
+      "name_zh": "三郎国宗",
+      "name_en": "Saburou Kunimune",
+      "type": "太刀",
+      "school": "",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_258_hanhira_yukiyasu": {
+      "name": "波平行安",
+      "name_zh": "波平行安",
+      "name_en": "Hanhira Yukiyasu",
+      "type": "太刀",
+      "school": "波平",
+      "rarity": 3,
+      "slots": 2,
+      "range": "単"
+    },
+    "touken_260_doujigiri_yasutsuna": {
+      "name": "童子切安綱",
+      "name_zh": "童子切安纲",
+      "name_en": "Doujigiri Yasutsuna",
+      "type": "太刀",
+      "school": "",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_007_ishikirimaru": {
+      "name": "石切丸",
+      "name_zh": "石切丸",
+      "name_en": "Ishikirimaru",
+      "type": "大太刀",
+      "school": "三条",
+      "rarity": 3,
+      "slots": 2,
+      "range": "複"
+    },
+    "touken_059_hotarumaru": {
+      "name": "蛍丸",
+      "name_zh": "萤丸",
+      "name_en": "Hotarumaru",
+      "type": "大太刀",
+      "school": "来",
+      "rarity": 4,
+      "slots": 3,
+      "range": "複"
+    },
+    "touken_132_taroutachi": {
+      "name": "太郎太刀",
+      "name_zh": "太郎太刀",
+      "name_en": "Taroutachi",
+      "type": "大太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "複"
+    },
+    "touken_134_jiroutachi": {
+      "name": "次郎太刀",
+      "name_zh": "次郎太刀",
+      "name_en": "Jiroutachi",
+      "type": "大太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "複"
+    },
+    "touken_162_nenekirimaru": {
+      "name": "祢々切丸",
+      "name_zh": "祢祢切丸",
+      "name_en": "Nenekirimaru",
+      "type": "大太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "複"
+    },
+    "touken_256_kashiwa_tachi": {
+      "name": "柏太刀",
+      "name_zh": "柏太刀",
+      "name_en": "Kashiwa Tachi",
+      "type": "大太刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "複"
+    },
+    "touken_065_tonbokiri": {
+      "name": "蜻蛉切",
+      "name_zh": "蜻蛉切",
+      "name_en": "Tonbokiri",
+      "type": "槍",
+      "school": "村正",
+      "rarity": 3,
+      "slots": 2,
+      "range": "貫"
+    },
+    "touken_136_nihongou": {
+      "name": "日本号",
+      "name_zh": "日本号",
+      "name_en": "Nihongou",
+      "type": "槍",
+      "school": "",
+      "rarity": 4,
+      "slots": 3,
+      "range": "貫"
+    },
+    "touken_138_oteuchi": {
+      "name": "御手杵",
+      "name_zh": "御手杵",
+      "name_en": "Oteuchi",
+      "type": "槍",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "貫"
+    },
+    "touken_194_oochidori_juumonji_yari": {
+      "name": "大千鳥十文字槍",
+      "name_zh": "大千鸟十文字枪",
+      "name_en": "Oochidori Juumonji Yari",
+      "type": "槍",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "貫"
+    },
+    "touken_214_ningen_mukotsu": {
+      "name": "人間無骨",
+      "name_zh": "人间无骨",
+      "name_en": "Ningen Mukotsu",
+      "type": "槍",
+      "school": "兼定",
+      "rarity": 3,
+      "slots": 2,
+      "range": "貫"
+    },
+    "touken_009_iwa_toushi": {
+      "name": "岩融",
+      "name_zh": "岩融",
+      "name_en": "Iwa Toushi",
+      "type": "薙刀",
+      "school": "三条",
+      "rarity": 3,
+      "slots": 2,
+      "range": "全"
+    },
+    "touken_140_tomoe_gata_naginata": {
+      "name": "巴形薙刀",
+      "name_zh": "巴形薙刀",
+      "name_en": "Tomoe Gata Naginata",
+      "type": "薙刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "全"
+    },
+    "touken_152_shizuka_gata_naginata": {
+      "name": "静形薙刀",
+      "name_zh": "静形薙刀",
+      "name_en": "Shizuka Gata Naginata",
+      "type": "薙刀",
+      "school": "",
+      "rarity": 3,
+      "slots": 2,
+      "range": "全"
+    },
+    "touken_164_hakusan_yoshimitsu": {
+      "name": "白山吉光",
+      "name_zh": "白山吉光",
+      "name_en": "Hakusan Yoshimitsu",
+      "type": "剣",
+      "school": "粟田口",
+      "rarity": 4,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_206_shichiseiken": {
+      "name": "七星剣",
+      "name_zh": "七星剑",
+      "name_en": "Shichiseiken",
+      "type": "剣",
+      "school": "",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    },
+    "touken_208_heishi_shourinken": {
+      "name": "丙子椒林剣",
+      "name_zh": "丙子椒林剑",
+      "name_en": "Heishi Shourinken",
+      "type": "剣",
+      "school": "",
+      "rarity": 5,
+      "slots": 3,
+      "range": "単"
+    }
+  }
+}

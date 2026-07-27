@@ -1,0 +1,1279 @@
+{
+  "version": "1.0",
+  "game": "刀剑乱舞",
+  "resolution": "1280x720",
+  "login": {
+    "点击登录": {
+      "template": "登录.png",
+      "action": "Click"
+    },
+    "关闭公告弹窗": {
+      "template": "今日不再弹出.png",
+      "roi": [
+        1059,
+        457,
+        1118,
+        653
+      ],
+      "action": "Click",
+      "repeat": "until_gone"
+    },
+    "领取签到": {
+      "template": "领取奖励.png",
+      "roi": [
+        799,
+        563,
+        1018,
+        646
+      ],
+      "action": "Click"
+    },
+    "关闭公告": {
+      "template": "通用_关闭.png",
+      "roi": [
+        1175,
+        4,
+        1226,
+        56
+      ],
+      "action": "Click"
+    }
+  },
+  "navigation": {
+    "通用入口": {
+      "template": "目录.png",
+      "roi": [
+        1173,
+        0,
+        1279,
+        74
+      ],
+      "verify_open": {
+        "primary": {
+          "type": "OCR",
+          "expected": "目录",
+          "roi": [
+            600,
+            38,
+            678,
+            76
+          ]
+        },
+        "fallback": {
+          "type": "TemplateMatch",
+          "template": "menu/ui目录.png",
+          "roi": [
+            600,
+            38,
+            678,
+            76
+          ]
+        }
+      }
+    },
+    "本丸": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "本丸",
+        "roi": [
+          1040,
+          168,
+          1133,
+          210
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_本丸.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui本丸.png",
+        "threshold": 0.5
+      }
+    },
+    "出阵": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "出阵",
+        "roi": [
+          169,
+          169,
+          244,
+          208
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_出阵.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui出阵.png",
+        "threshold": 0.5
+      }
+    },
+    "演练": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "演练",
+        "roi": [
+          169,
+          382,
+          244,
+          417
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_演练.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "OCR",
+        "expected": "演练对手选择",
+        "roi": [
+          450,
+          60,
+          830,
+          110
+        ]
+      }
+    },
+    "远征": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "远征",
+        "roi": [
+          172,
+          277,
+          243,
+          309
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_远征.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui远征.png",
+        "threshold": 0.5
+      }
+    },
+    "内番": {
+      "from": "通用入口",
+      "primary": {
+        "type": "TemplateMatch",
+        "template": "menu/角标目录_内番.png",
+        "threshold": 0.7
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_内番.png",
+        "threshold": 0.7
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui内番.png",
+        "threshold": 0.5
+      }
+    },
+    "修复": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "修复",
+        "roi": [
+          453,
+          381,
+          531,
+          417
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_修复.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "OCR",
+        "expected": "修复状况",
+        "roi": [
+          500,
+          55,
+          780,
+          105
+        ]
+      }
+    },
+    "强化": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "强化",
+        "roi": [
+          457,
+          273,
+          534,
+          311
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_强化.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui强化.png",
+        "threshold": 0.5
+      }
+    },
+    "锻刀": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "锻刀",
+        "roi": [
+          748,
+          276,
+          819,
+          310
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_锻刀.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui锻刀.png",
+        "threshold": 0.5
+      }
+    },
+    "刀装": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "刀装",
+        "roi": [
+          751,
+          378,
+          826,
+          415
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_刀装.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui刀装.png",
+        "threshold": 0.5
+      }
+    },
+    "编队": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "编队",
+        "roi": [
+          1118,
+          520,
+          1170,
+          545
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_编队.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "OCR",
+        "expected": "部队编成",
+        "roi": [
+          480,
+          0,
+          800,
+          60
+        ]
+      }
+    },
+    "万屋": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "万屋",
+        "roi": [
+          1043,
+          273,
+          1120,
+          305
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_万屋.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui万屋.png",
+        "threshold": 0.5
+      }
+    },
+    "收件箱": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "收件箱",
+        "roi": [
+          982,
+          406,
+          1058,
+          437
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_收件箱.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui收件箱.png",
+        "threshold": 0.5
+      }
+    },
+    "任务": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "任务",
+        "roi": [
+          993,
+          517,
+          1049,
+          545
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_任务.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui任务.png",
+        "threshold": 0.5
+      }
+    },
+    "公告": {
+      "from": "通用入口",
+      "primary": {
+        "type": "OCR",
+        "expected": "公告",
+        "roi": [
+          1114,
+          408,
+          1168,
+          433
+        ]
+      },
+      "fallback": {
+        "type": "TemplateMatch",
+        "template": "menu/目录_公告.png",
+        "threshold": 0.5
+      },
+      "verify": {
+        "type": "TemplateMatch",
+        "template": "ui公告.png",
+        "threshold": 0.5
+      }
+    }
+  },
+  "map_select": {
+    "合战场": {
+      "chapters": {
+        "1": [
+          243,
+          378
+        ],
+        "2": [
+          351,
+          505
+        ],
+        "3": [
+          449,
+          381
+        ],
+        "4": [
+          548,
+          509
+        ],
+        "5": [
+          649,
+          380
+        ],
+        "6": [
+          754,
+          510
+        ],
+        "7": [
+          854,
+          385
+        ],
+        "8": [
+          958,
+          514
+        ]
+      },
+      "maps": {
+        "1": [
+          222,
+          241
+        ],
+        "2": [
+          526,
+          241
+        ],
+        "3": [
+          823,
+          241
+        ],
+        "4": [
+          1126,
+          241
+        ]
+      },
+      "confirm": [
+        1205,
+        641
+      ]
+    },
+    "活动": {
+      "entry": {
+        "target": [
+          24,
+          341
+        ],
+        "template": "决定.png",
+        "roi": [
+          1130,
+          589,
+          1274,
+          687
+        ]
+      },
+      "verify_templates": [
+        "ui联队战.png",
+        "ui挖地.png"
+      ],
+      "verify_roi": [
+        326,
+        60,
+        1038,
+        129
+      ]
+    },
+    "远征": {
+      "chapters": {
+        "1": [
+          299,
+          205
+        ],
+        "2": [
+          505,
+          205
+        ],
+        "3": [
+          706,
+          205
+        ],
+        "4": [
+          905,
+          205
+        ],
+        "5": [
+          1108,
+          198
+        ]
+      },
+      "maps": {
+        "1": [
+          215,
+          417
+        ],
+        "2": [
+          538,
+          417
+        ],
+        "3": [
+          839,
+          417
+        ],
+        "4": [
+          1136,
+          417
+        ]
+      }
+    },
+    "演练": {
+      "teams": {
+        "1": [
+          1190,
+          189
+        ],
+        "2": [
+          1190,
+          300
+        ],
+        "3": [
+          1190,
+          413
+        ],
+        "4": [
+          1190,
+          525
+        ],
+        "5": [
+          1190,
+          637
+        ]
+      }
+    }
+  },
+  "team_select": {
+    "enter_button": {
+      "template": "team/部队选择.png"
+    },
+    "teams": {
+      "1": [
+        150,
+        91
+      ],
+      "2": [
+        274,
+        91
+      ],
+      "3": [
+        394,
+        91
+      ],
+      "4": [
+        516,
+        91
+      ],
+      "5": [
+        638,
+        91
+      ]
+    },
+    "depart": [
+      1198,
+      625
+    ],
+    "team_record": {
+      "button": {
+        "template": "team/部队记录.png"
+      },
+      "ocr_fallback": {
+        "expected": "部队记录",
+        "roi": [
+          1148,
+          134,
+          1256,
+          163
+        ]
+      },
+      "records": {
+        "1": [
+          1225,
+          179
+        ],
+        "2": [
+          1225,
+          287
+        ],
+        "3": [
+          1225,
+          397
+        ],
+        "4": [
+          1225,
+          500
+        ],
+        "5": [
+          1223,
+          605
+        ]
+      },
+      "save_confirm": {
+        "template": "team/进行记录.png",
+        "roi": [
+          422,
+          48,
+          548,
+          120
+        ]
+      },
+      "load_confirm": {
+        "template": "team/使用记录.png"
+      },
+      "yes_button": {
+        "template": "team/是.png"
+      }
+    },
+    "auto_march": {
+      "check_delegated": {
+        "template": "team/ui委托中.png",
+        "roi": [
+          1100,
+          340,
+          1279,
+          430
+        ]
+      },
+      "enable_button": {
+        "template": "team/自动行军.png"
+      },
+      "delegate_button": {
+        "template": "team/委托.png"
+      },
+      "close_window": [
+        1038,
+        47
+      ]
+    }
+  },
+  "popup": {
+    "联队战道具": {
+      "triple": {
+        "target": [
+          326,
+          308
+        ],
+        "check_roi": [
+          309,
+          295,
+          345,
+          332
+        ]
+      },
+      "ten": {
+        "target": [
+          327,
+          464
+        ],
+        "check_roi": [
+          310,
+          455,
+          344,
+          489
+        ]
+      },
+      "check_template": "道具勾选.png",
+      "confirm": {
+        "template": "通用_确定.png",
+        "roi": [
+          536,
+          565,
+          742,
+          637
+        ]
+      }
+    },
+    "远征确认": {
+      "confirm": {
+        "template": "通用_确定.png",
+        "roi": [
+          678,
+          531,
+          890,
+          604
+        ]
+      }
+    },
+    "内番确认": {
+      "confirm": {
+        "template": "通用_确定.png",
+        "roi": [
+          678,
+          531,
+          890,
+          604
+        ]
+      },
+      "cancel": {
+        "template": "通用_取消.png",
+        "roi": [
+          394,
+          477,
+          598,
+          547
+        ]
+      }
+    }
+  },
+  "formation": {
+    "verify": {
+      "template": "battle/ui阵形选择.png",
+      "roi": [
+        571,
+        5,
+        707,
+        44
+      ]
+    },
+    "formations": {
+      "鱼鳞阵": [
+        210,
+        218
+      ],
+      "横队阵": [
+        627,
+        223
+      ],
+      "雁行阵": [
+        1035,
+        222
+      ],
+      "鹤翼阵": [
+        213,
+        423
+      ],
+      "方阵": [
+        625,
+        426
+      ],
+      "逆行阵": [
+        1034,
+        420
+      ]
+    },
+    "double_click": true
+  },
+  "shop": {
+    "free_gift": {
+      "name": "暖心礼包",
+      "find_text": {
+        "type": "OCR",
+        "expected": "暖心",
+        "roi": [
+          0,
+          100,
+          1280,
+          400
+        ],
+        "match_mode": "contains"
+      },
+      "claim_button": {
+        "template": "领取.png",
+        "roi": [
+          500,
+          280,
+          600,
+          360
+        ]
+      },
+      "popup_verify": {
+        "type": "OCR",
+        "expected": "0",
+        "roi": [
+          806,
+          400,
+          911,
+          435
+        ],
+        "match_mode": "contains"
+      },
+      "popup_buy": {
+        "template": "购买.png",
+        "roi": [
+          400,
+          450,
+          900,
+          600
+        ],
+        "fallback_target": [
+          638,
+          502
+        ]
+      },
+      "popup_close": {
+        "template": "通用_关闭.png"
+      }
+    }
+  },
+  "task_reward": {
+    "tabs": {
+      "日常": [
+        48,
+        204
+      ],
+      "月常": [
+        49,
+        339
+      ],
+      "活动": [
+        52,
+        615
+      ]
+    },
+    "claim_button": {
+      "template": "一键领取.png"
+    },
+    "popup_close": {
+      "template": "通用_关闭.png"
+    },
+    "verify": {
+      "template": "ui任务.png"
+    }
+  },
+  "raid": {
+    "team_no": 3,
+    "difficulty_target": [
+      1118,
+      328
+    ],
+    "activity_entry": {
+      "template": "活动.png"
+    },
+    "ui_title": {
+      "template": "lulian/ui陆联.png"
+    },
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "confirm_ui": {
+      "template": "team/ui出阵确认.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png",
+      "roi": [
+        536,
+        565,
+        742,
+        637
+      ]
+    },
+    "triple": {
+      "click": [
+        326,
+        308
+      ],
+      "check_template": "team/ui道具勾选.png",
+      "check_roi": [
+        309,
+        295,
+        345,
+        332
+      ]
+    },
+    "battle_ocr": {
+      "expected": "战斗",
+      "roi": [
+        1034,
+        586,
+        1154,
+        646
+      ]
+    },
+    "round_end": {
+      "template": "lulian/ui陆联.png",
+      "roi": [
+        320,
+        55,
+        640,
+        135
+      ],
+      "threshold": 0.9
+    },
+    "skip_tap": [
+      775,
+      695
+    ],
+    "ticket_recover": {
+      "recover_button": {
+        "template": "team/恢复一个.png"
+      },
+      "confirm_button": {
+        "template": "通用_确定.png"
+      },
+      "popup_button": {
+        "template": "team/补充.png"
+      },
+      "close_button": {
+        "template": "team/关闭.png"
+      }
+    },
+    "auto_buy_ticket": true,
+    "max_buys_per_run": 10
+  },
+  "naihanka": {
+    "start_button": {
+      "template": "内番开始.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png"
+    },
+    "skip_tap": [
+      993,
+      690
+    ],
+    "cancel_button": {
+      "template": "通用_取消.png"
+    },
+    "running_marker": {
+      "template": "内番中.png",
+      "roi": [
+        900,
+        500,
+        1280,
+        720
+      ]
+    },
+    "ui_title": {
+      "template": "ui内番.png"
+    }
+  },
+  "sortie": {
+    "decide_button": {
+      "template": "决定.png"
+    },
+    "area_select_ui": {
+      "template": "ui地域选择.png"
+    },
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "injury_stamp": {
+      "template": "battle/ui重伤.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "injury_deny_button": {
+      "template": "否.png"
+    },
+    "march_stop_button": {
+      "template": "battle/返回本丸.png"
+    },
+    "home_ui": {
+      "template": "ui本丸.png"
+    },
+    "skip_tap": [
+      775,
+      695
+    ],
+    "march_stop_ocr": {
+      "expected": "自动行军停止",
+      "roi": [
+        600,
+        150,
+        950,
+        260
+      ]
+    },
+    "return_home_confirm": {
+      "template": "team/是.png"
+    }
+  },
+  "expedition": {
+    "_说明": "远征派遣。时代卡/翻页坐标来自 1280x720 实测截图估算，首跑需校准；小图用OCR点名字",
+    "eras": {
+      "1": [
+        300,
+        200
+      ],
+      "2": [
+        518,
+        200
+      ],
+      "3": [
+        730,
+        200
+      ],
+      "4": [
+        950,
+        200
+      ],
+      "5": [
+        1114,
+        200
+      ]
+    },
+    "page_prev": [
+      175,
+      256
+    ],
+    "page_next": [
+      1248,
+      256
+    ],
+    "map_ocr_roi": [
+      60,
+      280,
+      1230,
+      580
+    ],
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
+    },
+    "start_button": {
+      "template": "远征开始.png"
+    },
+    "start_ocr": {
+      "expected": "远征开始",
+      "roi": [
+        1100,
+        560,
+        1280,
+        700
+      ]
+    },
+    "confirm_ocr": {
+      "expected": "确认",
+      "roi": [
+        650,
+        520,
+        950,
+        640
+      ]
+    },
+    "running_ocr": {
+      "expected": "远征中",
+      "roi": [
+        60,
+        280,
+        1230,
+        580
+      ]
+    },
+    "injury_stamp": {
+      "template": "battle/ui重伤.png"
+    },
+    "verify_ui": {
+      "template": "ui远征.png"
+    },
+    "return_banner_ocr": {
+      "expected": "归",
+      "roi": [
+        380,
+        180,
+        900,
+        480
+      ],
+      "_说明": "书法字OCR会拆成单字（归远/来征），用单字归做包含匹配最稳；横幅自己也会自动翻页，双保险"
+    },
+    "result_title_ocr": {
+      "expected": "远征结果",
+      "roi": [
+        480,
+        0,
+        800,
+        80
+      ]
+    },
+    "collect_tap": [
+      640,
+      600
+    ],
+    "home_ui": {
+      "template": "ui本丸.png"
+    },
+    "map_slots": {
+      "1": [
+        224,
+        430
+      ],
+      "2": [
+        521,
+        430
+      ],
+      "3": [
+        816,
+        430
+      ],
+      "4": [
+        1114,
+        430
+      ],
+      "_说明": "小图卡一行四张的中心坐标，算法派图直接点位置不用认名字"
+    },
+    "settlement_team_roi": [
+      20,
+      25,
+      220,
+      105
+    ],
+    "settlement_map_roi": [
+      900,
+      0,
+      1280,
+      80
+    ]
+  },
+  "repair": {
+    "_说明": "手入。blacklist(碰瓷队极化太刀)看到名字就跳过不修；speedup_teams 部队的成员修时勾加速符（要继续打的队）；坐标基于1280x720实测；翻页后行位置不对齐固定网格，所以整列OCR拿文字自带坐标再按y配对，不用row_tops",
+    "blacklist": [
+      "烛台切光忠",
+      "莺丸",
+      "千代金丸",
+      "明石国行",
+      "三日月宗近",
+      "鹤丸国永",
+      "一期一振",
+      "骚速剑",
+      "大包平",
+      "鬼丸国纲",
+      "小豆长光",
+      "狮子王",
+      "大典太光世",
+      "小龙景光",
+      "数珠丸恒次",
+      "大般若长光",
+      "小狐丸",
+      "小乌丸",
+      "膝丸",
+      "髭切",
+      "山伏国广",
+      "江雪左文字"
+    ],
+    "speedup_teams": [
+      3
+    ],
+    "speedup_checkbox": [
+      1162,
+      251
+    ],
+    "start_button": {
+      "template": "修复开始.png"
+    },
+    "scroll_from": [
+      640,
+      480
+    ],
+    "scroll_to": [
+      640,
+      240
+    ],
+    "free_slot_ocr": {
+      "expected": "未使用",
+      "roi": [
+        300,
+        140,
+        1120,
+        540
+      ]
+    },
+    "select_ui_ocr": {
+      "expected": "刀剑男士选择",
+      "roi": [
+        450,
+        60,
+        830,
+        110
+      ]
+    },
+    "name_col_roi": [
+      490,
+      100,
+      720,
+      660
+    ],
+    "prefix_col_roi": [
+      445,
+      100,
+      505,
+      660
+    ],
+    "select_btn_x": 1065,
+    "select_offset_y": -28,
+    "speedup_use_ocr": {
+      "expected": "使用",
+      "roi": [
+        1120,
+        210,
+        1260,
+        300
+      ],
+      "_说明": "复选框在使用二字左边约33px"
+    }
+  },
+  "practice": {
+    "team_no": 2,
+    "formation": "逆行",
+    "max_wins": 3
+  },
+  "daily": {
+    "expedition_redispatch": "same",
+    "sortie": {
+      "mode": "raid",
+      "rounds": 3
+    },
+    "logout": {
+      "kill_game": true,
+      "close_emulator": false,
+      "sleep_pc": false,
+      "package": "com.youzu.djlw",
+      "emulator_processes": [
+        "MuMuPlayer.exe",
+        "MuMuNxDevice.exe"
+      ]
+    }
+  },
+  "notify": {
+    "enabled": false,
+    "server": "https://ntfy.sh",
+    "topic": "YOUR_NTFY_TOPIC_HERE"
+  }
+}

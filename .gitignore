@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv-cache/
+dist/
+*.egg-info/
+
+# Runtime data
+debug/
+status/
+config/
+
+# Project scaffolding (not part of the engine)
+_archive/
+.create-maa-project/
+
+# IDE
+.vscode/
+.idea/
+
+# WorkBuddy
+.workbuddy/
+
+# OS
+.DS_Store
+Thumbs.db

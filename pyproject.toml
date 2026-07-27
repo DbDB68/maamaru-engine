@@ -1,0 +1,24 @@
+[project]
+name = "maamaru-engine"
+version = "0.1.0"
+description = "刀剑乱舞自动化引擎 (Touken Ranbu automation engine based on MaaFramework)"
+requires-python = ">=3.12"
+license = {text = "AGPL-3.0-or-later"}
+keywords = ["touken-ranbu", "maa", "automation", "game"]
+dependencies = [
+    "maafw>=5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["touken"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
