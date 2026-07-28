@@ -1,8 +1,8 @@
 # まあ丸 `🦊` — 刀剑乱舞·近侍引擎
 
-[!["maamaru-engine"](https://img.shields.io/badge/pip-maamaru--engine-purple)](https://pypi.org/project/maamaru-engine/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
+[![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
 
 **不只是自动化脚本，更是你的本丸近侍。**
 
