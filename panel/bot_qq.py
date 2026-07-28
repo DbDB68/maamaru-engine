@@ -20,20 +20,29 @@ _HERE = Path(__file__).resolve().parent
 _PANEL_CONFIG = _HERE / "panel_config.json"
 
 BOT_CONFIG = {
-    "snowluma_http": "http://127.0.0.1:8081",       # SnowLuma HTTP API 地址
-    "snowluma_ws": "ws://127.0.0.1:8081",            # SnowLuma WebSocket
-    "admin_qq": [],                                    # 管理员 QQ 号（空=所有人可用）
-    "agent_url": "http://127.0.0.1:8080/api/agent",   # Agent 网关地址
-    "poll_interval": 1.5,                              # 轮询间隔（秒）
+    "snowluma_http": "http://127.0.0.1:5500",       # SnowLuma HTTP API（本地跑，默认 5500）
+    "admin_qq": [],                                   # 管理员 QQ 号（空=谁都能用）
+    "agent_url": "http://127.0.0.1:8080/api/agent",  # 面板 Agent 网关（本地）
+    "poll_interval": 1.5,                             # 轮询间隔（秒）
 }
+
+
+def _read_config() -> dict:
+    """从 panel_config.json 读覆盖设置"""
+    try:
+        d = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+        return d.get("bot", {}).get("qq", {})
+    except Exception:
+        return {}
 
 
 class QQBot:
     """SnowLuma OneBot 适配 Bot"""
 
     def __init__(self, agent: AgentGateway, config: dict = None):
-        self._agent = agent
-        self._cfg = {**BOT_CONFIG, **(config or {})}
+        # 默认配置 + panel_config.json 覆盖 + 手动传参覆盖
+        overrides = {**_read_config(), **(config or {})}
+        self._cfg = {**BOT_CONFIG, **overrides}
         self._running = False
         self._thread = None
         self._last_msg_id = 0

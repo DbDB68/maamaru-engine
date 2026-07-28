@@ -13,6 +13,10 @@
     "enabled": false,
     "platform": "telegram",
     "token": "",
-    "allowed_users": []
+    "allowed_users": [],
+    "qq": {
+      "snowluma_http": "http://127.0.0.1:5500",
+      "admin_qq": []
+    }
   }
 }
