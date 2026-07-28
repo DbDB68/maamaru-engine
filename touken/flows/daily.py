@@ -41,35 +41,56 @@ def _is_fail(msg: str) -> bool:
 class DailyMixin:
     """一键日课。依赖宿主类已注册的各流程 Mixin。"""
 
-    def daily_stream(self, logout: bool = False):
+    def daily_stream(self, logout: bool = False, only=None, after: str = None,
+                     sortie_override: dict = None):
         """
         流式一键日课
 
         Args:
-            logout: 最后是否下线（还没实现，先占坑）
+            logout: 最后是否下线（老参数，等价于 after="logout"）
+            only: 只跑指定步骤（名字列表，如 ["签到","演练","出阵"]），
+                  None = 全跑。面板勾选功能用的就是这个。
+            after: 跑完干啥（可选，默认啥也不干——被黑屏吓过，必须手动选）：
+                  "none"     啥也不干
+                  "logout"   退出游戏
+                  "shutdown" 退出游戏 + 关模拟器
+                  "sleep"    退出游戏 + 关模拟器 + 电脑休眠
+            sortie_override: 覆盖出阵安排（面板传的），如
+                  {"mode":"none"} / {"mode":"raid","rounds":3} /
+                  {"mode":"sortie","chapter":1,"map_no":1,"loops":2,"team_no":3}
 
         Yields:
             str: 执行状态消息
         """
+        if after is None:
+            after = "logout" if logout else "none"
         plan = self.config.get("daily", {})
+        if sortie_override is not None:
+            plan = dict(plan)
+            plan["sortie"] = sortie_override
         report = []
+        wanted = set(only) if only else None
+
+        def _w(name):
+            return wanted is None or name in wanted
 
         # ========== ① 登录 + 弹窗扫地 ==========
-        yield "========== ① 登录 =========="
-        try:
-            for msg in self._ensure_game_started():
-                yield msg
-            self.login()
-            if self._popup_sweep():
-                report.append(("登录", "✓"))
-            else:
-                report.append(("登录", "✗ 没到本丸"))
-                yield "[日课] 登录后没等到本丸，后面大概率连环翻车"
-        except Exception as exc:
-            report.append(("登录", f"✗ {exc}"))
-            yield f"[日课] 登录翻车: {exc}（可能已在游戏内，继续）"
-        self._flush_report(report, finished=False)
-        time.sleep(1.0)
+        if _w("登录"):
+            yield "========== ① 登录 =========="
+            try:
+                for msg in self._ensure_game_started():
+                    yield msg
+                self.login()
+                if self._popup_sweep():
+                    report.append(("登录", "✓"))
+                else:
+                    report.append(("登录", "✗ 没到本丸"))
+                    yield "[日课] 登录后没等到本丸，后面大概率连环翻车"
+            except Exception as exc:
+                report.append(("登录", f"✗ {exc}"))
+                yield f"[日课] 登录翻车: {exc}（可能已在游戏内，继续）"
+            self._flush_report(report, finished=False)
+            time.sleep(1.0)
 
         # ========== ②~⑧ 各步 ==========
         steps = [
@@ -80,7 +101,7 @@ class DailyMixin:
                 redispatch=plan.get("expedition_redispatch", "same"))),
             ("内番", lambda: self.naihanka_stream()),
             ("锻刀", lambda: self.forge_stream(times=plan.get("forge_times", 3))),
-            ("刀解", lambda: self.dismantle_stream(max_dismantle=1)),
+            ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),
             ("库存快照", lambda: self.status_snapshot_stream()),
@@ -98,13 +119,22 @@ class DailyMixin:
             "库存快照": "⑫ 库存快照（看板数据）",
         }
 
+        # 出阵插到任务奖励前面（就算没勾任务奖励，单勾出阵也能跑）
+        seq = []
         for name, fn in steps:
             if name == "任务奖励":
-                # ⑪ 出阵插在任务前面
+                seq.append(("出阵", None))
+            seq.append((name, fn))
+
+        for name, fn in seq:
+            if not _w(name):
+                continue
+            if name == "出阵":
                 yield "========== ⑩ 出阵 =========="
                 for msg in self._sortie_step(plan, report):
                     yield msg
                 time.sleep(1.0)
+                continue
 
             yield f"========== {titles[name]} =========="
             ok = True
@@ -121,7 +151,7 @@ class DailyMixin:
             time.sleep(1.0)
 
         # ========== ⑬ 下线 ==========
-        if logout:
+        if after in ("logout", "shutdown", "sleep"):
             yield "========== ⑬ 下线 =========="
             try:
                 for msg in self.logout_stream():
@@ -149,6 +179,28 @@ class DailyMixin:
         except Exception as exc:
             yield f"[日课] 手机推送翻车（不影响跑）: {exc}"
 
+        # ========== ⑭ 收尾（可选项，推完成绩单才干，休眠放最后）==========
+        if after in ("shutdown", "sleep"):
+            yield "[日课] 关模拟器..."
+            try:
+                from ..emulator import shutdown_emulator
+                mgr = self.config.get("emulator_manager")
+                inst = int(self.config.get("emulator_instance", 0))
+                if mgr and shutdown_emulator(mgr, inst):
+                    yield "[日课] ✓ 模拟器已关闭，辛苦了"
+                else:
+                    yield "[日课] ⚠️ 模拟器没关成（没配管家路径？），你手动关一下"
+            except Exception as exc:
+                yield f"[日课] 关模拟器翻车（不影响成绩单）: {exc}"
+        if after == "sleep":
+            yield "[日课] 😴 成绩单已推送，电脑 10 秒后休眠，晚安"
+            time.sleep(10)
+            try:
+                from ..emulator import sleep_computer
+                sleep_computer()
+            except Exception as exc:
+                yield f"[日课] 休眠翻车: {exc}"
+
     def _flush_report(self, report, finished: bool):
         """
         成绩单落盘。每跑完一步就写一次（finished=False），防超时被杀丢数据；
@@ -174,6 +226,14 @@ class DailyMixin:
 
     # ========== 出阵步 ==========
 
+    def _dismantle_step(self):
+        """日课的刀解步：今天已经解过（比如锻刀收刀腾位置顺手解的）就跳过"""
+        from .smith import dismantled_today
+        if dismantled_today():
+            yield "[日课] ✓ 今天已经刀解过了（锻刀收刀腾位置时顺手解的），这步跳过"
+            return
+        yield from self.dismantle_stream(max_dismantle=1)
+
     def _sortie_step(self, plan, report):
         sortie_plan = plan.get("sortie", {"mode": "none"})
         mode = sortie_plan.get("mode", "none")
@@ -192,7 +252,8 @@ class DailyMixin:
                 for msg in self.sortie_stream(
                         chapter=sortie_plan["chapter"],
                         map_no=sortie_plan["map_no"],
-                        team_no=sortie_plan.get("team_no", 3)):
+                        team_no=sortie_plan.get("team_no", 3),
+                        max_loops=sortie_plan.get("loops", 1)):
                     yield msg
                     if _is_fail(msg):
                         ok = False

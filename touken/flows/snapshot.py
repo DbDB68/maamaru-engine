@@ -2,10 +2,11 @@
 """
 上层业务：库存快照——日课收尾时把家底 OCR 一遍落盘，给看板吃
 
-抓什么（都在锻刀界面一屏搞定）：
-  顶栏整条：木炭/玉钢/冷却材/砥石/小判（按 x 顺序认）
-  右栏：委托符/加速符·极/所持刀剑
-  三炉：完成/空闲/锻造中（剩多少时间）
+抓什么：
+  锻刀界面：顶栏整条 木炭/玉钢/冷却材/砥石/甲州金（按 x 顺序认）
+            右栏 委托符/加速符·极/所持刀剑
+            三炉 完成/空闲/锻造中（剩多少时间）
+  所持道具界面：右上「所持小判」（真小判只在这看，顶栏那个是甲州金！）
 
 落盘 status/inventory.json，看板的读取任务自己算剩余时间。
 写坏了不影响日课（调用方自己兜 try）。
@@ -14,6 +15,7 @@
   顶栏条 (400,5,1100,52)，数字按 x 升序
   委托符 (1145,355,1255,390) 加速符 (1145,510,1255,550) 所持 (840,45,1080,85)
   炉行心 y [205,345,475]，状态/倒计时框 (150,cy-55,780,cy+55)
+  所持小判 (940,20,1210,80) —— 目录→所持道具界面右上，读出 "672,416 枚"
 """
 
 import json
@@ -25,7 +27,7 @@ from ..maa_adapter import roi_4to4
 
 _STATUS_DIR = Path(__file__).resolve().parent.parent.parent / "status"
 _SLOT_CY = [205, 345, 475]
-_RES_NAMES = ["木炭", "玉钢", "冷却材", "砥石", "小判"]
+_RES_NAMES = ["木炭", "玉钢", "冷却材", "砥石", "甲州金"]
 
 
 def _to_int(text: str):
@@ -96,6 +98,13 @@ class SnapshotMixin:
                 remain = f"{m2.group(1)}:{m2.group(2)}:{m2.group(3)}" if m2 else None
                 furnaces.append({"slot": i, "state": "锻造中", "remain": remain})
 
+        # ---- 所持道具界面读真小判（顶栏那个是甲州金，真小判只在这看）----
+        koban = self._read_koban()
+        if koban is not None:
+            resources["小判"] = koban
+        else:
+            yield "[快照] 小判读取失败（不影响其他数据）"
+
         payload = {
             "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "resources": resources,
@@ -106,6 +115,38 @@ class SnapshotMixin:
         (_STATUS_DIR / "inventory.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        yield (f"[快照] 落盘：小判{resources.get('小判')} 委托符{resources.get('委托符')} "
-               f"加速符{resources.get('加速符')} 所持{doko} "
+        yield (f"[快照] 落盘：小判{resources.get('小判')} 甲州金{resources.get('甲州金')} "
+               f"委托符{resources.get('委托符')} 加速符{resources.get('加速符')} 所持{doko} "
                f"炉:{'/'.join(f['state'] for f in furnaces)}")
+
+    def _read_koban(self):
+        """目录→所持道具→右上 OCR 所持小判。失败返回 None，绝不抛异常。"""
+        try:
+            # 打开目录
+            if not self._open_menu():
+                return None
+            time.sleep(1.0)
+            self.maa.screenshot(force=True)
+            pt = self.maa.template_match("menu/目录_所持道具.png")
+            if not pt:
+                return None
+            self.maa.click(pt)
+            time.sleep(2.5)
+            self.maa.screenshot(force=True)
+            if not self.maa.exists("ui所持.png"):
+                return None
+            # 右上「所持小判 672,416 枚」：取最长数字串
+            tokens = self.maa.ocr_all(roi_4to4(940, 20, 1210, 80))
+            best = None
+            for t, _ in tokens:
+                v = _to_int(t)
+                if v is not None and (best is None or v > best):
+                    best = v
+            # 点 X 关掉所持道具，别给后面的步骤留弹窗
+            from ..maa_adapter import Point
+            self.maa.click(Point(1248, 35))
+            time.sleep(0.8)
+            return best
+        except Exception as e:  # noqa: BLE001 - 快照兜底，任何错都不许炸日课
+            print(f"[快照] 小判读取异常: {e}")
+            return None

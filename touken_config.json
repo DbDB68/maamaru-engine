@@ -2,6 +2,10 @@
   "version": "1.0",
   "game": "刀剑乱舞",
   "resolution": "1280x720",
+  "adb_path": "D:\\MUMU\\MuMuPlayer\\nx_device\\12.0\\shell\\adb.exe",
+  "adb_address": "127.0.0.1:16384",
+  "emulator_manager": "D:\\MUMU\\MuMuPlayer\\nx_main\\MuMuManager.exe",
+  "emulator_instance": 0,
   "login": {
     "点击登录": {
       "template": "登录.png",

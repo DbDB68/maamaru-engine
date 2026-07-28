@@ -90,7 +90,9 @@ class MAAAdapter:
     """
 
     def __init__(self, adb_path: str, adb_address: str, resource_dir: str,
-                 project_root: Optional[str] = None):
+                 project_root: Optional[str] = None,
+                 manager_path: Optional[str] = None,
+                 emulator_instance: int = 0):
         """
         初始化 MAA 适配器
 
@@ -99,6 +101,8 @@ class MAAAdapter:
             adb_address: ADB 设备地址，如 "127.0.0.1:16384"
             resource_dir: 资源包目录路径（如 "resource/base"）
             project_root: 项目根目录（用于设置日志目录）
+            manager_path: MuMuManager.exe 路径（给了就支持模拟器自启动）
+            emulator_instance: MuMu 实例编号
         """
         if not MAAFW_AVAILABLE:
             raise RuntimeError("maa 模块未安装，请先执行 `uv sync`")
@@ -107,6 +111,8 @@ class MAAAdapter:
         self.adb_address = adb_address
         self.resource_dir = resource_dir
         self.project_root = project_root or "."
+        self.manager_path = manager_path
+        self.emulator_instance = emulator_instance
 
         self.resource: Optional[Resource] = None
         self.controller: Optional[AdbController] = None
@@ -142,11 +148,25 @@ class MAAAdapter:
 
         self.controller = AdbController(adb_path=self.adb_path, address=self.adb_address)
         if not self.controller.post_connection().wait().succeeded:
+            # 连不上就试试把模拟器拉起来再连一次（配了 MuMuManager 才会）
+            if self.manager_path:
+                from .emulator import ensure_emulator
+                if ensure_emulator(self.adb_path, self.adb_address,
+                                   manager_path=self.manager_path,
+                                   instance=self.emulator_instance):
+                    self.controller = AdbController(
+                        adb_path=self.adb_path, address=self.adb_address)
+                    if self.controller.post_connection().wait().succeeded:
+                        print("[MAA] ADB 连接成功（模拟器自启动）")
+                        return self._bind_tasker()
             print("[MAA 错误] ADB 连接失败，请确认模拟器已启动")
             return False
         print("[MAA] ADB 连接成功")
 
-        # 4. 绑定 Tasker
+        return self._bind_tasker()
+
+    def _bind_tasker(self) -> bool:
+        """绑定 Tasker（init 的收尾，自启动重连也走这）"""
         self.tasker = Tasker()
         if not self.tasker.bind(self.resource, self.controller) or not self.tasker.inited:
             print("[MAA 错误] Tasker 绑定失败")

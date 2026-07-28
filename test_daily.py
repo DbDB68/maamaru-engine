@@ -16,7 +16,9 @@ maa = MAAAdapter(
     adb_path=r"D:\MUMU\MuMuPlayer\nx_device\12.0\shell\adb.exe",
     adb_address="127.0.0.1:16384",
     resource_dir=str(Path(__file__).parent / "resource" / "base"),
-    project_root=str(Path(__file__).parent)
+    project_root=str(Path(__file__).parent),
+    manager_path=r"D:\MUMU\MuMuPlayer\nx_main\MuMuManager.exe",
+    emulator_instance=0,
 )
 
 if not maa.init():

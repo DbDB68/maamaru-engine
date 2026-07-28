@@ -20,8 +20,10 @@
   大刀解 (1200,615)，确认弹窗 确认 (785,630)
 """
 
+import json
 import re
 import time
+from pathlib import Path
 
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
@@ -30,6 +32,29 @@ _SLOT_CY = [205, 345, 475]
 _ROW_TOP = 147
 _ROW_PITCH = 96
 _VISIBLE_ROWS = 6
+
+_STATUS_DIR = Path(__file__).resolve().parent.parent.parent / "status"
+_FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
+
+
+def _mark_dismantled_today():
+    """今天已经刀解过了（锻刀收刀腾位置也会解）——日课的刀解步据此跳过"""
+    try:
+        _STATUS_DIR.mkdir(exist_ok=True)
+        _FLAGS_PATH.write_text(json.dumps(
+            {"date": time.strftime("%Y-%m-%d"), "dismantled": True},
+            ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def dismantled_today() -> bool:
+    """今天是否已经成功刀解过（任何途径：日课、锻刀腾位置、手动单跑）"""
+    try:
+        d = json.loads(_FLAGS_PATH.read_text(encoding="utf-8"))
+        return d.get("date") == time.strftime("%Y-%m-%d") and bool(d.get("dismantled"))
+    except Exception:
+        return False
 
 # 刀解白名单（用户给的，不稀有的刀）
 DISMANTLE_WHITELIST = [
@@ -41,18 +66,34 @@ DISMANTLE_WHITELIST = [
 ]
 
 
+def _dur_to_sec(s):
+    """'3:20:00' / '03：20：00' → 秒数。认不出来返回 None"""
+    m = re.match(r"^\s*(\d{1,2})\s*[:：]\s*(\d{1,2})\s*[:：]\s*(\d{1,2})\s*$", s or "")
+    if not m:
+        return None
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+
+
 class SmithMixin:
     """锻刀+刀解。依赖宿主类的 navigate_to_stream、maa。"""
 
     # ==================== 锻刀 ====================
 
-    def forge_stream(self, times: int = 3):
+    def forge_stream(self, times: int = 3, watch: list | None = None):
         """
         流式锻刀：收完成的炉，给空闲炉点火，一天锻 times 次
+
+        Args:
+            times: 点几炉
+            watch: 目标时长清单（限锻刀的时间身份证，如 ["03:20:00"]）。
+                   点火后倒计时命中（±90秒，倒计时会走字）就报喜+手机推送
 
         Yields:
             str: 执行状态消息
         """
+        watch_secs = {s for s in (_dur_to_sec(w) for w in (watch or [])) if s}
+        if watch_secs:
+            yield f"[锻刀] 🎯 盯梢目标时长：{'、'.join(watch or [])}"
         yield "[锻刀] 正在导航到锻刀..."
         for nav_msg in self.navigate_to_stream("锻刀"):
             yield nav_msg
@@ -93,6 +134,15 @@ class SmithMixin:
                 yield f"[锻刀] 给炉子点火（第 {forged + 1}/{times} 炉）"
                 if self._start_forge(cy):
                     forged += 1
+                    hit = self._check_watch(cy, watch_secs)
+                    if hit:
+                        yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
+                        try:
+                            from ..notify import notify
+                            notify(f"锻刀命中目标时长 {hit}！快去看炉子",
+                                   title="🎉 限锻喜报", tags="tada,sword")
+                        except Exception:
+                            pass
                 else:
                     yield "[锻刀] 点火失败，停"
                     break
@@ -151,6 +201,26 @@ class SmithMixin:
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 return True
         return False
+
+    def _check_watch(self, cy: int, watch_secs: set):
+        """点火后读这炉的倒计时，命中目标时长（倒计时走字，容忍少 90 秒）就报"""
+        if not watch_secs:
+            return None
+        try:
+            self.maa.screenshot(force=True)
+            tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            text = "".join(t for t, _ in tokens)
+            m = re.search(r"(\d{1,2})\s*[:：]\s*(\d{1,2})\s*[:：]\s*(\d{1,2})", text)
+            if not m:
+                return None
+            shown = f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}"
+            secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+            for target in watch_secs:
+                if target - 90 <= secs <= target:
+                    return shown
+        except Exception:
+            pass
+        return None
 
     # ==================== 刀解 ====================
 
@@ -220,6 +290,7 @@ class SmithMixin:
             self.maa.click(Point(785, 630))  # 确认
             time.sleep(2.5)
             dismantled += 1
+            _mark_dismantled_today()
             yield f"[刀解] 分解完成: {name}（{dismantled}/{max_dismantle}）"
             if dismantled >= max_dismantle:
                 return

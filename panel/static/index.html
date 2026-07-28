@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>まあ丸 — 本丸近侍パネル</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ====== 顶栏 ====== -->
+  <header id="topbar">
+    <div class="logo">
+      <span class="logo-icon">🦊</span>
+      <span class="logo-text">まあ丸</span>
+      <span class="logo-sub">本丸近侍面板</span>
+    </div>
+    <div class="top-right">
+      <span id="status-dot" class="dot dot-green"></span>
+      <span id="status-text" class="status-label">待命中</span>
+      <button id="btn-settings" class="icon-btn" title="设置">⚙</button>
+    </div>
+  </header>
+
+  <!-- ====== 选项卡 ====== -->
+  <nav id="tabs">
+    <button class="tab active" data-tab="logs">📋 日志</button>
+    <button class="tab" data-tab="control">🎮 控制</button>
+    <button class="tab" data-tab="chat">💬 近侍</button>
+  </nav>
+
+  <!-- ====== 面板内容 ====== -->
+  <main id="main">
+
+    <!-- ── 日志 ── -->
+    <section id="panel-logs" class="tab-panel active">
+      <div class="panel-header">
+        <h2>📋 日志流</h2>
+        <div class="panel-actions">
+          <div class="view-toggle" id="log-view-toggle" title="日志显示模式">
+            <button class="vt-btn active" data-view="visual">📊 可视化</button>
+            <button class="vt-btn" data-view="raw">💻 源代码</button>
+          </div>
+          <button id="btn-noise" class="small-btn" title="可视化模式下显示/隐藏导航流水账">🦊 细节</button>
+          <button id="btn-clear-logs" class="small-btn" title="清屏">清屏</button>
+          <button id="btn-auto-scroll" class="small-btn active" title="自动滚动">自动滚动</button>
+        </div>
+      </div>
+      <div id="log-container">
+        <div id="log-list"></div>
+      </div>
+      <div class="log-bar">
+        <span id="log-count">0 条日志</span>
+        <span id="log-status" class="bar-status">● 空闲</span>
+      </div>
+    </section>
+
+    <!-- ── 控制 ── -->
+    <section id="panel-control" class="tab-panel">
+      <div class="panel-header">
+        <h2>🎮 本丸控制台</h2>
+        <div class="panel-actions">
+          <span id="task-indicator" class="badge badge-idle">空闲</span>
+          <button id="btn-save-settings" class="small-btn" title="保存当前参数到服务器，重启面板后自动恢复">💾 保存</button>
+        </div>
+      </div>
+      <div id="honmaru-status" class="status-strip">正在读取本丸状态…</div>
+      <div id="script-grid"></div>
+
+      <!-- 远征时刻表：自己排 几时几分 部队x 去 x-x -->
+      <div class="sched-card">
+        <div class="sched-head">
+          <span class="s-label">🕐 远征时刻表</span>
+          <span class="sched-hint">面板开着才会到点派遣</span>
+        </div>
+        <div class="sched-rows" id="sched-rows"></div>
+        <div class="sched-tools">
+          <button id="sched-add" class="small-btn">＋ 添加一行</button>
+          <button id="sched-save" class="small-btn">💾 保存</button>
+          <span id="sched-msg" class="sched-msg"></span>
+        </div>
+      </div>
+
+      <div class="control-footer">
+        <button id="btn-stop-all" class="btn-danger" disabled>■ 紧急停止</button>
+      </div>
+    </section>
+
+    <!-- ── 聊天 ── -->
+    <section id="panel-chat" class="tab-panel">
+      <div class="panel-header">
+        <h2>💬 狐之助</h2>
+        <button id="btn-clear-chat" class="small-btn" title="清空对话">清空</button>
+      </div>
+      <div id="chat-container">
+        <div id="chat-messages">
+          <div class="msg msg-system">
+            <div class="msg-avatar">🦊</div>
+            <div class="msg-bubble">
+              <div class="msg-name">狐之助</div>
+              <div class="msg-text">主君，您来了！本丸一切正常，有什么需要我帮忙的吗？</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <input type="text" id="chat-input" placeholder="跟狐之助说点什么…" autocomplete="off">
+        <button id="chat-send" disabled>发送</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ====== 设置弹窗 ====== -->
+<div id="settings-modal" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>⚙ 设置</h3>
+      <button class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label>AI API Key</label>
+      <input type="password" id="cfg-api-key" placeholder="sk-...">
+      <label>API 地址</label>
+      <input type="text" id="cfg-api-url" placeholder="https://api.openai.com/v1">
+      <label>模型</label>
+      <input type="text" id="cfg-model" placeholder="gpt-4o-mini">
+      <p class="hint">修改后重启面板生效。API Key 存在 panel/panel_config.json 里。</p>
+    </div>
+    <div class="modal-footer">
+      <button id="cfg-save" class="btn-primary">保存</button>
+      <button id="cfg-close" class="btn-secondary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

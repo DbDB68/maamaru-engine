@@ -67,7 +67,7 @@ class SortieMixin:
             return
 
         for loop_no in range(1, max_loops + 1):
-            yield f"[出阵] ===== 第 {loop_no}/{max_loops} 圈：{chapter}章-{map_no}图，部队{team_no} ====="
+            yield f"[出阵] ⚔️ 第 {loop_no}/{max_loops} 圈：{chapter}章-{map_no}图，部队{team_no}准备上场"
 
             # ========== 2. 选章节 → 决定 ==========
             self._click_point(map_cfg["chapters"][str(chapter)])
@@ -152,7 +152,7 @@ class SortieMixin:
                 yield "[出阵] 🛑 队员重伤确认弹窗，已点【否】。有重伤绝不出阵，停"
                 return
 
-            yield "[出阵] 出发，进入行军监控"
+            yield f"[出阵] 🐎 部队{team_no}出发！行军监控开着呢，我全程盯着"
 
             # ========== 8. 行军监控：打完自动回本丸 / 中断则返回本丸 ==========
             march_done = False
@@ -165,6 +165,7 @@ class SortieMixin:
                 fcfg = self.config.get("formation", {})
                 fv = fcfg.get("verify", {})
                 if fv and self.maa.exists(fv["template"], roi_4to4(*fv["roi"])):
+                    yield f"[出阵] 🛡️ 阵形选择蹦出来了，选「{cfg.get('formation', '鱼鳞阵')}」继续"
                     self.select_formation(cfg.get("formation", "鱼鳞阵"))
                     time.sleep(1.0)
                     continue
@@ -172,6 +173,7 @@ class SortieMixin:
                 # 手动行军决策屏（委托没挂上时每个节点都问）：点"行军"继续
                 # ——刷花实测：_enable_auto_march 会静默失败，不能全指望委托
                 if self.maa.ocr("行军", roi_4to4(1080, 550, 1215, 680)):
+                    yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
                     self._click_point([1146, 617])
                     time.sleep(1.0)
                     continue
@@ -212,7 +214,7 @@ class SortieMixin:
                 time.sleep(0.8)
 
             if march_done:
-                yield f"[出阵] 第 {loop_no} 圈打完，已回本丸"
+                yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
             elif interrupted:
                 yield "[出阵] ⚠️ 行军中断（可能有人中伤），已返回本丸。去看看伤势，本次停止"
                 return
@@ -220,5 +222,5 @@ class SortieMixin:
                 yield "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了"
                 return
 
-        yield "[出阵] 全部圈数跑完，收工"
+        yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return

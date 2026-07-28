@@ -155,13 +155,18 @@ class BattleMixin:
         return True
 
     def _enable_auto_march(self) -> bool:
-        """启用自动行军"""
+        """启用自动行军（委托）
+        真机校准的完整流程：点"自动行军"开弹窗 → 等"委托"按钮出现 →
+        点它只是【选中单选框】→ 必须再点 X 关闭弹窗才生效。
+        每步都验证绝不盲点——旧版 0.3s 短睡，弹窗没开就点 X，
+        把部队选择面板关掉的 bug 就是这么来的。
+        """
         march_config = self.config["team_select"]["auto_march"]
-
-        # 检查是否已经在委托中
         check_roi_raw = march_config["check_delegated"]["roi"]
         check_roi = roi_4to4(check_roi_raw[0], check_roi_raw[1],
                              check_roi_raw[2], check_roi_raw[3])
+
+        # 检查是否已经在委托中
         delegated = self.maa.exists(
             march_config["check_delegated"]["template"],
             check_roi
@@ -171,16 +176,34 @@ class BattleMixin:
             return True
 
         # 点击自动行军
-        self._click_template_config(march_config["enable_button"])
-        time.sleep(0.3)
+        if not self._click_template_config(march_config["enable_button"]):
+            print("[AUTO_MARCH] 没找到自动行军按钮")
+            return False
 
-        # 点击委托
-        self._click_template_config(march_config["delegate_button"])
-        time.sleep(0.3)
+        # 等弹窗里的"委托"按钮出现（弹窗动画要时间，旧版 0.3s 必漏）
+        delegate_tpl = march_config["delegate_button"]["template"]
+        pt = None
+        for _ in range(10):
+            time.sleep(0.5)
+            self.maa.screenshot(force=True)
+            pt = self.maa.template_match(delegate_tpl)
+            if pt:
+                break
+        if not pt:
+            print("[AUTO_MARCH] 委托弹窗没开，放弃（不盲点关闭）")
+            return False
 
-        # 关闭窗口
+        # 点"委托"只是选中单选框，点 X 关闭弹窗才生效
+        self.maa.click(pt)
+        time.sleep(0.5)
         self._click_point(march_config["close_window"])
-        return True
+        time.sleep(1.0)
+
+        # 验证结果
+        self.maa.screenshot(force=True)
+        ok = self.maa.exists(march_config["check_delegated"]["template"], check_roi)
+        print(f"[AUTO_MARCH] 委托{'成功' if ok else '失败（标记没出现）'}")
+        return ok
 
     # ==================== 阵形选择 ====================
 

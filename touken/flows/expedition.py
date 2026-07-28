@@ -105,7 +105,7 @@ class ExpeditionMixin:
         time.sleep(1.0)
 
         # ========== 2. 选时代卡 ==========
-        yield f"[远征] 选择时代{era}..."
+        yield f"[远征] 🗺️ 翻去时代{era}..."
         self._click_point(cfg["eras"][str(era)])
         time.sleep(1.0)
 
@@ -115,11 +115,11 @@ class ExpeditionMixin:
             if str(map_slot) not in slots:
                 yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
                 return
-            yield f"[远征] 点小图卡位{map_slot}..."
+            yield f"[远征] 🗺️ 点小图卡位{map_slot}..."
             self._click_point(slots[str(map_slot)])
             time.sleep(1.0)
         elif map_name:
-            yield f"[远征] 找小图「{map_name}」..."
+            yield f"[远征] 🔍 找小图「{map_name}」..."
             map_roi = roi_4to4(*cfg["map_ocr_roi"])
             map_pt = None
             for _ in range(6):
@@ -195,7 +195,7 @@ class ExpeditionMixin:
             yield "[远征] 确认弹窗没出现，停，你去看看卡哪了"
             return
         self.maa.click(confirm)
-        yield "[远征] 已确认，出发远征过场中..."
+        yield "[远征] 🐎 确认完毕，出发远征！过场动画跑着..."
 
         # ========== 9. 过场自动完 → 验证"远征中" ==========
         running_ocr = cfg["running_ocr"]
@@ -259,7 +259,7 @@ class ExpeditionMixin:
         home_tpl = cfg["home_ui"]["template"]
 
         # ========== 1. 换场景回本丸，触发归来动画 ==========
-        yield "[收菜] 先绕去远征界面再回本丸，触发归来动画..."
+        yield "[收菜] 🧺 先绕去远征界面再回本丸，勾一下归来动画..."
         for nav_msg in self.navigate_to_stream("远征"):
             yield nav_msg
         if self.current_location != "远征":
@@ -330,7 +330,7 @@ class ExpeditionMixin:
         if collected > 0:
             yield f"[收菜] ✅ 收了 {collected} 份远征奖励"
         else:
-            yield "[收菜] 没有远征回来（或者动画没触发），本丸风平浪静"
+            yield "[收菜] ✓ 没有远征回来，本丸风平浪静～"
             return
 
         # ========== 3. 顺手再派 ==========

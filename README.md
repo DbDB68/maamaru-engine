@@ -1,4 +1,4 @@
-# まあ丸 — 刀剑乱舞·近侍引擎
+# まあ丸 `🦊` — 刀剑乱舞·近侍引擎
 
 [!["maamaru-engine"](https://img.shields.io/badge/pip-maamaru--engine-purple)](https://pypi.org/project/maamaru-engine/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -6,12 +6,47 @@
 
 **不只是自动化脚本，更是你的本丸近侍。**
 
-基于 MaaFramework 的刀剑乱舞自动托管引擎。模拟器里开着游戏，**他**自己把每天的活儿干了，
-成绩单打三个地方：看板、电脑桌面通知、手机 ntfy 推送。
+基于 [MaaFramework](https://github.com/MaaXYZ/MaaFramework)（魔改调用，但还是由衷感谢 Maa 团队）的刀剑乱舞自动托管引擎。模拟器里开着游戏，**他**自己把每天的活儿干了——
+现在连模拟器都不用手动开了，ADB 连不上会自动拉 MuMu 起来。
 
-长期目标：成为能跟你聊天、会帮你打工、像游戏里的近侍一样陪在身边的刀男（或任意角色）。
+长期目标：成为能跟你聊天、会帮你打工、像游戏里的近侍一样陪在身边的狐之助。
 
-## 快速安装
+## 近侍面板（网页 GUI）— 推荐
+
+```bash
+npm run dev        # 一键启动，绑定 0.0.0.0，手机也能连
+```
+或者：
+```bash
+./.venv/Scripts/python.exe -m panel.server --port 8080
+```
+
+打开 http://localhost:8080（手机跟电脑同一 WiFi 就访问电脑 IP:8080）。
+
+**面板能干什么：**
+
+| 功能 | 说明 |
+|------|------|
+| 📋 **日志流** | 实时滚动，分级着色，支持可视化/源代码两种模式，Ctrl+C 后历史还在 |
+| 🎮 **控制台** | 每张脚本卡片带参数表单，日课可**勾选步骤**，出阵可选打联队战还是推图 |
+| 💬 **近侍聊天** | 狐之助角色扮演，配好 OpenAI API Key 就能聊天（暂未测试，待折腾） |
+| 🕐 **远征时刻表** | 自己排"几时几分 部队x 去 x-x"，到点自动派遣（面板开着才会派） |
+| 💾 **设置持久化** | 点「保存」按钮把参数存到服务器文件，面板重启不丢 |
+
+已注册脚本：一键日课（可勾选步骤）、联队战、出阵推图、刷花、演练、远征收菜、锻刀（支持限锻时长盯梢）、炼糖、库存快照。
+
+AI Key 填在 `panel/panel_config.json`：
+```json
+{
+  "ai": {
+    "api_key": "sk-your-key-here",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini"
+  }
+}
+```
+
+## 快速安装（作为 pip 包）
 
 ```bash
 pip install maamaru-engine
@@ -40,37 +75,63 @@ for msg in agent.daily_stream():
     print(msg)
 ```
 
-`touken_config.json` 需要按你的环境配置（模拟器分辨率 1280x720 已校准）。
+`touken_config.json` 现在支持在顶层配 ADB 和 MuMuManager 路径：
+
+```json
+{
+  "adb_path": "D:\\MUMU\\MuMuPlayer\\nx_device\\12.0\\shell\\adb.exe",
+  "adb_address": "127.0.0.1:16384",
+  "emulator_manager": "D:\\MUMU\\MuMuPlayer\\nx_main\\MuMuManager.exe",
+  "emulator_instance": 0
+}
+```
 
 ## 每天自动跑什么
 
-**每天 15:07**（定时任务「刀剑乱舞日课 · 每天15:07」）自动跑一键日课：
+一键日课（`daily_stream`）：
 
-1. 登录（游戏没开会自己点图标冷启动，顺手关公告/推完结算动画）
-2. 签到
-3. 万屋领免费鸡蛋（暖心礼包）
-4. 演练（认人避战：躲极短队和丙子椒林剑，赢够 3 场收工）
-5. 远征（收菜 + 自动派回原图）
-6. 内番（安排上工）
-7. 锻刀（每日 3 炉，收完成的点空闲的）
-8. 刀解（白名单一把）
-9. 合成（白名单喂一把）
-10. 出阵（联队战 3 圈，部队三）
-11. 领任务奖励
-12. 库存快照（给看板供数据）
+1. **登录** — 游戏没开会自己点图标冷启动；ADB 连不上会自动拉模拟器；顺手关公告/推完结算动画
+2. **签到**
+3. **万屋领免费鸡蛋**（暖心礼包，自动验证价格 0 才点）
+4. **演练** — 认人避战：躲极短队和丙子椒林剑，赢够 3 场收工
+5. **远征** — 收菜 + 自动派回原图
+6. **内番** — 安排上工
+7. **锻刀** — 每日 3 炉，收完成的点空闲的，刀位满自动刀解腾位置
+8. **刀解** — 白名单一把（今天锻刀腾位置解过了就自动跳过这步）
+9. **合成** — 白名单喂一把
+10. **出阵** — 联队战 3 圈 / 推图 / 不打 均支持配置或面板动态传
+11. **领任务奖励**
+12. **库存快照** — 读甲州金（顶栏那个！）+ 真小判（从所持道具界面读）
+13. **收尾** — 可选：退出游戏 / 关模拟器 / 电脑休眠
 
-炼糖和收件箱**不在**日课里，是要用了手动跑的（见下）。
+**日课高级参数（通过面板或代码传入）：**
 
-## 手动使唤（在 W:\Maamaru 下）
+```python
+# 只跑签到和锻刀
+for msg in agent.daily_stream(only=["签到", "锻刀"]):
+    print(msg)
 
-一律用这个python：`./.venv/Scripts/python.exe`
+# 跑完退出游戏 + 关模拟器 + 电脑休眠
+for msg in agent.daily_stream(after="sleep"):
+    print(msg)
+
+# 动态覆盖出阵配置（面板传的）
+for msg in agent.daily_stream(
+    sortie_override={"mode": "sortie", "chapter": 5, "map_no": 3, "loops": 2}
+):
+    print(msg)
+```
+
+炼糖和收件箱不在日课里，是要用了在面板点或手动跑的。
+
+## 手动使唤
 
 | 命令 | 干啥 |
 |---|---|
 | `test_daily.py` | 手动跑一遍完整日课 |
-| `test_sakura.py --team 1 --slot 1` | 刷花：队长单挑 1-1 刷疲劳到 100（队长满了会自动找疲劳<50的人换进来） |
-| `test_sakura.py --team 1 --slot 1 --check` | 只读疲劳值，不动手 |
-| `test_sugar.py` | 炼糖：收件箱清狗粮 + 习合循环，喂到邮件里没刀为止 |
+| `test_daily.py --signin` | 只签到 |
+| `test_sakura.py --team 1 --slot 1` | 刷花：队长单挑 1-1 刷疲劳到 100 |
+| `test_sugar.py` | 炼糖：收件箱清狗粮 + 习合循环 |
 | `test_raid.py` | 单测联队战 |
 | `test_practice.py` | 单测演练 |
 | `test_expedition.py` | 单测远征收菜 |
@@ -82,77 +143,76 @@ for msg in agent.daily_stream():
 
 翻车了就再跑一遍——链路是幂等的，做过的步骤会自己跳过。
 
+## 关键功能一览
+
+### 模拟器自启动
+
+配好 `emulator_manager` 后：
+- ADB 连不上时自动调用 `MuMuManager launch` 启动实例
+- 轮流询安卓开机状态（最长等 6 分钟）
+- 系统起来后 `adb connect` + 等 `sys.boot_completed`
+- 日课可配置跑完后 `shutdown` 关模拟器或 `sleep` 电脑休眠
+
+### 锻刀限锻盯梢
+
+面板锻刀卡片可以填"目标时长"（如 `03:20:00, 04:00:00`），点火后脚本自动读倒计时，命中目标时长直接手机 ntfy 推送喊你去看炉。
+
+### 自动行军（委托）修复
+
+委托流程现在完整验证三步：点自动行军按钮 → 轮询等委托弹窗出现 → 点委托选中单选框 → 点 X 关闭弹窗才生效 → 验证委托标记出现。不再盲点。
+
+### 库存快照
+
+修复了甲州金 vs 小判的混淆——顶栏数字是甲州金（万屋氪金货币），真小判要去所持道具界面 OCR 读取。
+
+### 日志持久化
+
+所有脚本的 `yield` 消息同时写入 `status/maamaru_logs.db`（SQLite），即使 Ctrl+C 或面板重启，历史日志全在。
+
 ## 手机推送（ntfy）
 
 - App：ntfy（蓝铃铛图标），订阅你在 `touken_config.json` 里配的频道
-- 频道名就是密码，别外传；以后给别人用就一人开一个频道
-- 日课跑完自动推成绩单：全绿 🎉，有翻车 ⚠️ 高优先级
-
-## 看板（Kimi Work 里）
-
-「本丸托管所」Canvas 两块面板，每 30 分钟自刷：
-- **日课成绩单** — 读 `status/latest_report.json`
-- **资源库存 · 本丸家底** — 读 `status/inventory.json` + 远征/内番倒计时
+- 频道名就是密码，别外传
+- 日课跑完自动推成绩单；限锻命中目标时长也会推喜报
 
 ## 文件地图
 
 ```
-maamaru-engine/              ← pip install maamaru-engine
-├── touken/                  代码本体
+maamaru-engine/
+├── touken/                  引擎本体（pip 包）
 │   ├── __init__.py          公开 API：ToukenAgent, MAAAdapter
-│   ├── maa_adapter.py       底层：截图/点击/OCR/模板匹配
-│   ├── navigator.py         中层：导航 + 弹窗处理（含全屏界面救援）
 │   ├── agent.py             ToukenAgent 主类（多继承组装）
-│   ├── sword_db.py          刀剑名册（认人用的）
+│   ├── maa_adapter.py       底层：截图/点击/OCR/模板匹配 + 模拟器自启动
+│   ├── navigator.py         中层：导航 + 弹窗处理
+│   ├── emulator.py          MuMu 模拟器自启动/关闭/休眠
+│   ├── sword_db.py          刀剑名册
 │   ├── notify.py            ntfy 推送
 │   ├── data/                静态数据（刀剑名册、远征收益表）
 │   └── flows/               上层：每个玩法一个文件
-├── resource/base/           资源包（OCR 模型 + 121 张模板图）
+├── panel/                   近侍面板（独立于 pip 包）
+│   ├── server.py            FastAPI 服务 + 所有 API
+│   ├── log_store.py         SQLite 日志持久化
+│   ├── script_runner.py     后台线程脚本执行器
+│   ├── chat_ai.py           狐之助角色 AI 聊天
+│   ├── scheduler.py         远征时刻表调度
+│   ├── panel_config.json    面板配置（AI Key 等）
+│   └── static/              HTML/CSS/JS 前端
+├── package.json             npm run dev 启动面板
 ├── touken_config.json       总配置
+├── resource/base/           资源包（OCR 模型 + 模板图，单独下载）
 ├── test_*.py                使用示例 / 手动入口
-├── status/                  运行时数据（成绩单/库存/远征记录）
-├── debug/                   运行时日志
-└── 玩法说明书.docx          游戏机制笔记
+├── status/                  运行时数据（成绩单/库存/日志DB/面板设置）
+└── debug/                   运行时截图日志
 ```
 
-## 关键配置（touken_config.json）
+## pip 包 vs 完整项目
 
-- `daily.sortie` — 日课出阵：`{"mode":"raid","rounds":3}` 刷联队战；改 `"none"` 不打
-- `daily.expedition_redispatch` — 远征收菜后自动派回原图（`"same"`）
-- `raid.team_no` — 联队战用哪队（现在部队三）
-- `notify` — ntfy 频道
-- 刀解/合成白名单在 `touken/flows/smith.py` 顶部
-
-## 作为 pip 包使用
-
-```python
-from touken import ToukenAgent, MAAAdapter
-
-# 1. 连接模拟器
-maa = MAAAdapter(
-    adb_path="你的ADB路径",
-    adb_address="模拟器地址",
-    resource_dir="resource/base",
-)
-if not maa.init():
-    exit(1)
-
-# 2. 创建 Agent
-agent = ToukenAgent("touken_config.json", maa)
-
-# 3. 调用任意业务
-for msg in agent.daily_stream():    # 一键日课
-    print(msg)
-
-for msg in agent.sakura_stream(team_no=1, slot=1):  # 刷花
-    print(msg)
-
-for msg in agent.status_snapshot_stream():  # 库存快照
-    print(msg)
-```
-
-所有 `stream()` 方法都是 Python 生成器，逐条 yield 执行消息，
-方便集成到任何前端（CLI / Web / QQ Bot / Telegram）。
+| | pip 包 `maamaru-engine` | 完整项目（本仓库） |
+|---|---|---|
+| 内容 | `touken/` 引擎 + `resource/` | 引擎 + 面板 + 测试脚本 + 配置文件 |
+| 适合谁 | 想自己写前端的开发者 | 直接用面板的普通用户 |
+| 安装 | `pip install maamaru-engine` | `git clone` + `pip install -r requirements.txt` |
+| 面板 | 无（可自己接） | 开箱即用 |
 
 ## 安全规矩（写死在代码里的）
 
@@ -161,12 +221,12 @@ for msg in agent.status_snapshot_stream():  # 库存快照
 - 演练只打软柿子，极短队/丙子队绕着走
 - 手入黑名单里的刀不修
 
-## 翻车自救
+## 后续计划 `🦊`  （画个饼）
 
-1. 看 `status/latest_report.json` 哪步 ✗
-2. 模拟器是不是关了：脚本不会自己开模拟器，只会开游戏
-3. 界面卡住了：手动点回本丸再跑一遍（幂等）
-4. 模板/OCR 突然认不出：检查模拟器分辨率是不是 1280x720、缩放 100%
+- **手机遥控** — 出门在外也能远程启动日课、看本丸状态，不用开电脑
+- **近侍聊天完善** — AI 狐之助正式上线测试
+- **更多自动化** — 活动图自动适配、限锻自动盯着出刀就停手
+- **一键包** — 面向小白的免配置发行版
 
 ## ⚠️ 免责声明
 
