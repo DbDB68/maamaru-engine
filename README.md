@@ -13,6 +13,9 @@
 
 ## 近侍面板（网页 GUI）— 推荐
 
+![日志视图](docs/screenshot-logs.png)
+![控制台](docs/screenshot-control.png)
+
 ### 小白版（一键包）
 
 下载 [GitHub Release](https://github.com/DbDB68/maamaru-engine/releases) 最新版 zip → 解压 → **双击 `启动面板.bat`** → 浏览器自动打开面板。
@@ -235,6 +238,23 @@ maamaru-engine/
 - **近侍聊天完善** — AI 狐之助正式上线测试
 - **更多自动化** — 活动图自动适配、限锻自动盯着出刀就停手
 - **一键包** — 面向小白的免配置发行版（已完成！下载 Release → 双击 `启动面板.bat`）
+
+## 致谢 `💕`
+
+本项目的核心图像识别 + 自动化执行能力完全依托以下开源项目：
+
+| 项目 | 角色 | 许可证 |
+|------|------|--------|
+| [**MaaFramework**](https://github.com/MaaXYZ/MaaFramework) | 图像识别 + 模拟器控制 + OCR，本项目直接调用其 Python 接口 | LGPL-3.0 |
+| [DirectML](https://github.com/microsoft/DirectML) | GPU 加速（由 MaaFramework 间接引入） | MIT（微软） |
+| [FastAPI](https://github.com/tiangolo/fastapi) | 面板后端 HTTP/SSE 服务 | MIT |
+| [Uvicorn](https://github.com/encode/uvicorn) | ASGI 服务器 | BSD-3 |
+| [httpx](https://github.com/encode/httpx) | OpenAI API 客户端 | BSD-3 |
+| [Python](https://www.python.org/) | 解释器 | PSF |
+
+详细许可证文本见 `NOTICE` 文件。
+
+> 特别感谢 MaaFramework 团队——没有他们的辛苦工作，就没有这个项目。本项目仅魔改调用其 Python 接口。
 
 ## ⚠️ 免责声明
 
