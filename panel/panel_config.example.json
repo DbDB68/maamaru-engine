@@ -1,7 +1,7 @@
 {
   "ai": {
     "provider": "openai",
-    "api_key": "YOUR_OPENAI_API_KEY",
+    "api_key": "在这里填你的 OpenAI 兼容 API Key",
     "base_url": "https://api.openai.com/v1",
     "model": "gpt-4o-mini"
   },

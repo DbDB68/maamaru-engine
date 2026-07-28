@@ -32,3 +32,6 @@ resource/
 # OS
 .DS_Store
 Thumbs.db
+
+# 面板配置（含 AI Key，绝不入库！模板见 panel_config.example.json）
+panel/panel_config.json
