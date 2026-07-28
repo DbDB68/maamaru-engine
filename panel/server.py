@@ -283,6 +283,16 @@ async def startup():
 
     start_scheduler(str(_CONFIG_PATH), _sched_emit)
 
+    # Bot 启动（配了 panel_config.json bot.enabled=true 才会启）
+    from .agent import AgentGateway
+    from .bot_telegram import start_bot as _start_bot
+    _agent = AgentGateway(str(_PANEL_CONFIG))
+    _bot_instance = _start_bot(_agent)
+
+    # 暴露给 API 路由用：机器人控制
+    import __main__ as _bm
+    _bm._bot_instance = _bot_instance
+
 
 # ── 静态文件 ──
 
