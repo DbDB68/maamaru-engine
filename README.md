@@ -223,7 +223,7 @@ maamaru-engine/
 | 内容 | `touken/` 引擎 + `resource/` | 引擎 + 面板 + 测试脚本 + 配置文件 |
 | 适合谁 | 想自己写前端的开发者 | 直接用面板的普通用户 |
 | 安装 | `pip install maamaru-engine` | `git clone` + `pip install -r requirements.txt` |
-| 面板 | 无（可自己接） | 开箱即用 |
+| 面板 | 无（可自己接Agent） | 开箱即用 |
 
 ## 安全规矩（写死在代码里的）
 
@@ -234,10 +234,21 @@ maamaru-engine/
 
 ## 后续计划 `🦊`  （画个饼）
 
-- **手机遥控** — 出门在外也能远程启动日课、看本丸状态，不用开电脑
-- **近侍聊天完善** — AI 狐之助正式上线测试
+- **手机遥控** — 出门在外也能远程启动日课、看本丸状态，不用坐在电脑面前
+- **角色扮演聊天** — 预计加入LLM与记忆库，打造长期陪伴感
 - **更多自动化** — 活动图自动适配、限锻自动盯着出刀就停手
 - **一键包** — 面向小白的免配置发行版（已完成！下载 Release → 双击 `启动面板.bat`）
+
+## 一起搞？ `🤝`
+
+如果有兴趣一起做（或者单纯想找组织），联系我：
+
+| 方式 | 地址 |
+|------|------|
+| GitHub | [DbDB68](https://github.com/DbDB68) |
+| 🐧 | 3094891505 |
+
+PR、Issues、闲聊都欢迎。
 
 ## 致谢 `💕`
 
@@ -251,6 +262,13 @@ maamaru-engine/
 | [Uvicorn](https://github.com/encode/uvicorn) | ASGI 服务器 | BSD-3 |
 | [httpx](https://github.com/encode/httpx) | OpenAI API 客户端 | BSD-3 |
 | [Python](https://www.python.org/) | 解释器 | PSF |
+| [WorkBuddy / DeepSeek](https://www.codebuddy.cn/) | AI 代码生成 + 架构建议（vibe coding） | — |
+
+### 人力致谢
+
+- **企业名单**（[DbDB68](https://github.com/DbDB68)）— 项目发起人、刀剑乱舞知识库、测试调度
+- **kimiwork / k3** — 核心玩法逻辑编写、日志"狐之助"风格文案
+- **WorkBuddy / DeepSeek-v4** — AI 代码生成、面板架构、Git 灾难救援 🦊
 
 详细许可证文本见 `NOTICE` 文件。
 
@@ -258,6 +276,6 @@ maamaru-engine/
 
 ## ⚠️ 免责声明
 
-- 本脚本仅面向 **国服**（游族/渠道服），日服未测试
+- 本脚本仅面向 **国服**（游族/渠道服），日服未测试，其他模拟器也未测试
 - 使用脚本导致的账号封禁等后果由用户自行承担
 - 仅供学习交流，请在下载后 24 小时内删除
