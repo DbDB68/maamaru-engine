@@ -386,6 +386,37 @@ async def api_chat(request: Request):
     return {"reply": reply}
 
 
+# ── API：Agent 网关（跨渠道 LLM 入口）──
+
+_agent_gateway = None
+
+
+@app.post("/api/agent")
+async def api_agent(request: Request):
+    """
+    Agent 网关入口：接收任意渠道的消息，LLM 理解意图，调用工具。
+
+    Body: {"message": "...", "channel": "qq"}
+    Returns: {"reply": "...", "tool_called": true/false}
+    """
+    from .agent import AgentGateway
+    global _agent_gateway
+    if _agent_gateway is None:
+        _agent_gateway = AgentGateway(str(_PANEL_CONFIG))
+
+    body = await request.json()
+    message = body.get("message", "").strip()
+    channel = body.get("channel", "qq")
+    if not message:
+        return {"reply": "（狐之助歪了歪头：你说什么？）", "tool_called": False}
+
+    try:
+        reply = _agent_gateway.process(message, channel=channel)
+        return {"reply": reply, "tool_called": True}
+    except Exception as exc:
+        return {"reply": f"（狐之助耳朵耷拉下来：脑子冒烟了 — {exc}）", "tool_called": False}
+
+
 # ── API：远征时刻表 ──
 
 @app.get("/api/expedition-schedule")
