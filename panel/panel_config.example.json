@@ -8,5 +8,15 @@
   "panel": {
     "host": "127.0.0.1",
     "port": 8080
+  },
+  "bot": {
+    "enabled": false,
+    "platform": "telegram",
+    "token": "在这里填 Telegram Bot Token（找 @BotFather 要）",
+    "allowed_users": [],
+    "qq": {
+      "snowluma_http": "http://127.0.0.1:5500",
+      "admin_qq": []
+    }
   }
 }

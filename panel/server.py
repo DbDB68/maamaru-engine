@@ -110,7 +110,8 @@ def _team_field(default="3"):
 # ── 各脚本 builder（签名统一：(config_path, params) -> generator）──
 
 def _build_daily(config_path, params):
-    steps = params.get("steps") or None   # 空列表=全跑
+    # 面板传 steps，Agent 网关传 only，都认
+    steps = params.get("steps") or params.get("only") or None   # 空列表=全跑
     after = params.get("after") or "none"
     # 出阵安排：面板选的覆盖配置文件里的默认
     mode = params.get("sortie_mode") or "none"
@@ -153,7 +154,12 @@ def _build_sakura(config_path, params):
 
 def _build_forge(config_path, params):
     watch_raw = params.get("watch") or ""
-    watch = [w.strip() for w in re.split(r"[，,、;；\s]+", watch_raw) if w.strip()]
+    if isinstance(watch_raw, list):
+        # Agent 网关传的是数组 ["03:20:00", ...]
+        watch = [str(w).strip() for w in watch_raw if str(w).strip()]
+    else:
+        # 面板传的是字符串 "03:20:00, 04:00:00"
+        watch = [w.strip() for w in re.split(r"[，,、;；\s]+", str(watch_raw)) if w.strip()]
     yield from _make_agent(config_path).forge_stream(
         times=_i(params, "times", 3), watch=watch)
 

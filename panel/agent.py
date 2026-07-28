@@ -221,8 +221,6 @@ class AgentGateway:
         from .server import _CONFIG_PATH as cfg_path
 
         runner = get_runner()
-        if runner.is_running:
-            return "⚠️ 有脚本正在运行，等跑完再试，或者先停止"
 
         # 工具名 → 脚本名
         TOOL_MAP = {
@@ -234,6 +232,7 @@ class AgentGateway:
             "run_snapshot": "snapshot",
         }
 
+        # 查询/急停类工具任何时候都得能用——脚本跑着更要能查能停！
         if name == "get_status":
             from .server import _PROJECT
             status_dir = _PROJECT / "status"
@@ -251,8 +250,14 @@ class AgentGateway:
             return "\n".join(l["message"] for l in logs) if logs else "暂无日志"
 
         if name == "stop_all":
+            if not runner.is_running:
+                return "现在没有在跑的脚本"
             runner.stop()
             return "已发送停止信号"
+
+        # 只有"启动脚本"才检查占用
+        if runner.is_running:
+            return "⚠️ 有脚本正在运行，等跑完再试，或者先停止"
 
         script_name = TOOL_MAP.get(name)
         if not script_name:
