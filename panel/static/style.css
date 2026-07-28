@@ -28,6 +28,7 @@ html, body {
   color: var(--fg);
   font-size: 14px;
   line-height: 1.5;
+  overflow-x: hidden;
 }
 
 #app {
@@ -454,10 +455,79 @@ html, body {
 
 /* ── 响应式 ── */
 @media (max-width: 600px) {
-  #topbar { padding: 8px 12px; }
-  #tabs { padding: 8px 12px 0; }
-  #main { padding: 0 12px 12px; }
-  .tab { padding: 6px 14px; font-size: 13px; }
-  #script-grid { grid-template-columns: 1fr 1fr; }
-  .msg-bubble { max-width: 85%; }
+  /* ── 顶栏：砍掉 subtitle，留 logo + 状态点 ── */
+  .logo-sub { display: none; }
+  .logo-text { font-size: 16px; }
+  .status-label { font-size: 11px; }
+  #topbar { padding: 6px 10px; flex-wrap: wrap; gap: 4px; }
+  .top-right { gap: 6px; }
+  .icon-btn { font-size: 16px; }
+
+  /* ── 选项卡：文字缩短，emoji-only 模式 ── */
+  #tabs { padding: 6px 10px 0; gap: 1px; }
+  .tab {
+    flex: 1; padding: 7px 4px; font-size: 11px;
+    text-align: center; overflow: hidden; white-space: nowrap;
+    min-width: 0;
+  }
+
+  /* ── 面板主体 ── */
+  #main { padding: 0 10px 10px; }
+  .panel-header h2 { font-size: 13px; }
+  .panel-header { flex-wrap: wrap; gap: 6px; }
+  .panel-actions { flex-wrap: wrap; gap: 4px; }
+  .small-btn { font-size: 11px; padding: 2px 8px; }
+
+  /* ── 日志条目：tiny 模式 ── */
+  #log-container { padding: 6px; }
+  .log-entry { font-size: 10px; padding: 2px 5px; line-height: 1.5; }
+  .log-entry .ts { display: none; }
+  .log-entry .tag { font-size: 9px; padding: 0 4px; }
+  .view-toggle .vt-btn { font-size: 10px; padding: 2px 6px; }
+
+  /* ── 脚本卡片：单列 + 紧凑参数 ── */
+  #script-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .script-card { padding: 10px; }
+  .script-card .s-label { font-size: 13px; }
+  .script-card .s-desc { font-size: 11px; }
+  .pf { margin-bottom: 6px; }
+  .pf-label { font-size: 11px; }
+  .pf select, .pf input[type="number"] { font-size: 12px; padding: 5px 8px; }
+  .pf-select, .pf-number { max-width: 100%; }
+  .pill { font-size: 11px; padding: 4px 10px; }
+  .pf-checks { gap: 4px; }
+  .pf-checks-tools { font-size: 10px; }
+  .s-run { font-size: 12px; padding: 8px 0; }
+
+  /* ── 状态条 ── */
+  #honmaru-status { font-size: 10px; gap: 6px; padding: 6px 8px; }
+  .st-item { display: block; }
+
+  /* ── 远征时刻表 ── */
+  .sched-card { padding: 8px 10px; }
+  .sched-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .sched-row select { max-width: 100%; }
+  .sr-on { justify-content: flex-end; }
+  .sr-del { margin-left: 0; align-self: flex-end; }
+
+  /* ── 聊天 ── */
+  .msg-bubble { max-width: 90%; font-size: 12px; padding: 6px 10px; }
+  .msg-avatar { width: 26px; height: 26px; font-size: 14px; }
+  .chat-input-area input { font-size: 13px; padding: 8px 10px; }
+  .chat-input-area button { font-size: 12px; padding: 8px 14px; }
+
+  /* ── 弹窗 ── */
+  .modal { width: 95vw; }
+  .modal-body input { font-size: 12px; padding: 6px 8px; }
+}
+
+/* 极窄屏（< 400px）额外处理 */
+@media (max-width: 400px) {
+  #app { max-width: 100vw; overflow-x: hidden; }
+  .tab { font-size: 10px; }
+  .log-entry .tag { max-width: 50px; overflow: hidden; text-overflow: ellipsis; }
+  #script-grid { gap: 6px; }
 }
