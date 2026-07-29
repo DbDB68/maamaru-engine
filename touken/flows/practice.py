@@ -40,18 +40,23 @@ _ICON_TEMPLATES = ["短_银", "打_银", "太_金"]
 class PracticeMixin:
     """演练。依赖宿主类的 navigate_to_stream、maa、config。"""
 
-    def practice_stream(self, dry_run: bool = True, max_wins: int = None):
+    def practice_stream(self, dry_run: bool = True, max_wins: int = None,
+                        team_no: int = None):
         """
         流式演练：扫描 5 个对手，逐个认人，挑软柿子打
 
         Args:
             dry_run: True=只认人报决策，不动手（认人考试模式）
             max_wins: 赢够几场收工，默认读配置 practice.max_wins（3）
+            team_no: 用部队几打，默认读配置 practice.team_no（2）
 
         Yields:
             str: 执行状态消息
         """
         cfg = self.config.get("practice", {})
+        if team_no is not None:
+            cfg = dict(cfg)
+            cfg["team_no"] = team_no
         if max_wins is None:
             max_wins = cfg.get("max_wins", 3)
 

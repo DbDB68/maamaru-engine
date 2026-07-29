@@ -118,7 +118,8 @@ def _build_daily(config_path, params):
     if mode == "raid":
         sortie_plan = {"mode": "raid",
                        "rounds": _i(params, "raid_rounds", 3),
-                       "team_no": _i(params, "team_no", 3)}
+                       "team_no": _i(params, "team_no", 3),
+                       "max_buys": _i(params, "raid_buys", 30)}
     elif mode == "sortie":
         sortie_plan = {"mode": "sortie",
                        "chapter": _i(params, "chapter", 1),
@@ -128,13 +129,15 @@ def _build_daily(config_path, params):
     else:
         sortie_plan = {"mode": "none"}
     yield from _make_agent(config_path).daily_stream(
-        only=steps, after=after, sortie_override=sortie_plan)
+        only=steps, after=after, sortie_override=sortie_plan,
+        practice_team=_i(params, "practice_team", 2))
 
 
 def _build_raid(config_path, params):
     yield from _make_agent(config_path).raid_stream(
         max_rounds=_i(params, "rounds", 3),
-        team_no=_i(params, "team_no", 3))
+        team_no=_i(params, "team_no", 3),
+        max_buys=_i(params, "max_buys", 30))
 
 
 def _build_sortie(config_path, params):
@@ -202,6 +205,10 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                         {"key": "raid_rounds", "type": "number", "label": "联队战圈数",
                          "default": 3, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "raid"}},
+                        {"key": "raid_buys", "type": "number",
+                         "label": "手形最多买几次",
+                         "default": 30, "min": 0, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "raid"}},
                         {"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)],
                          "default": "1",
@@ -213,6 +220,8 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
+                        {"key": "practice_team", "type": "select", "label": "演练用部队",
+                         "options": _TEAM_OPTIONS, "default": "2"},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
                                      ["logout", "退出游戏"],
@@ -223,7 +232,10 @@ register_script("raid", "联队战", "活动图刷票，默认部队三",
                 _build_raid,
                 params=[_team_field("3"),
                         {"key": "rounds", "type": "number", "label": "圈数",
-                         "default": 3, "min": 1, "max": 99}])
+                         "default": 3, "min": 1, "max": 99},
+                        {"key": "max_buys", "type": "number",
+                         "label": "手形最多买几次（加班烧小判用）",
+                         "default": 30, "min": 0, "max": 99}])
 register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
                 _build_sortie,
                 params=[_team_field("3"),
@@ -239,8 +251,15 @@ register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了�
                         {"key": "slot", "type": "select", "label": "位置",
                          "options": [[str(i), f"{i}号位" + ("（队长）" if i == 1 else "")]
                                      for i in range(1, 7)], "default": "1"}])
+def _build_practice(config_path, params):
+    # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
+    return _make_agent(config_path).practice_stream(
+        dry_run=False, team_no=_i(params, "team_no", 2))
+
+
 register_script("practice", "演练", "只认人打软柿子，赢 3 场收工",
-                _build_simple("practice_stream"))
+                _build_practice,
+                params=[_team_field("2")])
 register_script("expedition", "远征", "收菜 + 自动再派",
                 _build_simple("collect_expedition_stream"))
 
@@ -473,6 +492,187 @@ async def api_status():
     return data
 
 
+# ── API：仪表盘（总览首页聚合数据）──
+
+# 运行中横幅文案：优先按「进度步骤」细分，其次按脚本名兜底
+_STEP_FLAVOR = {
+    "raid:lulian": "正在和时间溯行军搏斗中⚔️",
+    "raid:hailian": "正在拿水枪喷死对面🔫",
+    "daily:内番": "正在安排苦力干活💦",
+    "daily:远征": "正在流放刀剑男士⛺",
+    "daily:出阵": "正在和时间溯行军搏斗中⚔️",
+    "daily:演练": "正在演练场挑软柿子捏🥊",
+    "daily:锻刀": "正在盯炉火🔥",
+    "daily:刀解": "正在拆快递🗡",
+    "daily:合成": "正在喂刀🍡",
+    "daily:签到": "正在打卡签到📅",
+    "daily:万屋": "正在万屋蹭免费鸡蛋🥚",
+    "daily:任务奖励": "正在收日课工资💰",
+    "daily:库存快照": "正在盘点家底📦",
+}
+
+_SCRIPT_FLAVOR = {
+    "daily": "正在爆肝日课📋",
+    "raid": "正在和时间溯行军搏斗中⚔️",
+    "sortie": "正在出阵打图🗡",
+    "sakura": "正在给刀剑男士刷樱花🌸",
+    "practice": "正在演练场挑软柿子捏🥊",
+    "expedition": "正在流放刀剑男士⛺",
+    "dispatch": "正在流放刀剑男士⛺",
+    "forge": "正在盯炉火🔥",
+    "sugar": "正在炼糖🍬",
+    "snapshot": "正在盘点家底📦",
+}
+
+
+def _flavor_text(script: str | None, step: str) -> str:
+    if step in _STEP_FLAVOR:
+        return _STEP_FLAVOR[step]
+    return _SCRIPT_FLAVOR.get(script or "", "正在本丸干活🔧")
+
+
+@app.get("/api/dashboard")
+async def api_dashboard():
+    """首页仪表盘：家底 + 远征倒计时 + 日课成绩单 + 内番，一次拿全"""
+    status_dir = _PROJECT / "status"
+
+    def _read(fn):
+        fp = status_dir / fn
+        if fp.exists():
+            try:
+                return json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        return None
+
+    data = {
+        "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "inventory": _read("inventory.json"),
+        "latest_report": _read("latest_report.json"),
+        "naihanka": _read("naihanka.json"),
+    }
+
+    # 远征：给每条算好剩余秒数，前端只管倒计时
+    expeditions = []
+    raw_exp = _read("expeditions.json") or {}
+    now = time.time()
+    for team_no, e in raw_exp.items():
+        item = dict(e)
+        item["team_no"] = team_no
+        try:
+            dispatched = time.mktime(time.strptime(e["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
+            remain = dispatched + float(e.get("duration_min", 0)) * 60 - now
+            item["remain_sec"] = max(0, int(remain))
+            item["done"] = remain <= 0
+        except Exception:
+            item["remain_sec"] = None
+            item["done"] = False
+        expeditions.append(item)
+    data["expeditions"] = sorted(expeditions, key=lambda x: x.get("remain_sec") or 0)
+
+    # 远征时刻表：今天还没派的安排（前端显示用）
+    try:
+        from .scheduler import load_entries
+        today = time.strftime("%Y-%m-%d")
+        data["schedule"] = [
+            e for e in load_entries()
+            if e.get("enabled") and e.get("last_fired") != today
+        ]
+    except Exception:
+        data["schedule"] = []
+
+    # 运行中横幅：当前脚本 + 最新进度步骤 → 狐之助文案
+    runner = get_runner()
+    active = runner.is_running
+    script = runner.current_script if active else None
+    started = runner.current_started
+    progress = _read("progress.json") or {}
+    step = progress.get("step", "")
+
+    # 面板起跑的新任务：进度文件的时间戳比任务启动还早 = 上一轮留下的陈年老步，
+    # 作废（不然联队战刚点开还没上报，会顶着上次日课的「远征」文案到处跑）
+    if active and script != "external" and started and progress.get("at"):
+        try:
+            if time.mktime(time.strptime(progress["at"], "%Y-%m-%d %H:%M:%S")) < started:
+                step = ""
+        except Exception:
+            pass
+
+    # 定时任务/命令行跑引擎时不走面板 runner，但会写 progress.json：
+    # 3 分钟内更新过就算「在跑」，横幅照样营业
+    if not active and step and progress.get("at"):
+        try:
+            age = time.time() - time.mktime(time.strptime(progress["at"], "%Y-%m-%d %H:%M:%S"))
+            if 0 <= age <= 180:
+                active = True
+                script = "external"
+                started = time.time() - age
+        except Exception:
+            pass
+    if not active:
+        step = ""
+
+    label = ""
+    if script == "external":
+        label = "定时/命令行任务"
+    elif script:
+        label = list_scripts().get(script, {}).get("label", script)
+    data["running"] = {
+        "active": active,
+        "script": script,
+        "label": label,
+        "started": started,
+        "step": step,
+        "flavor": _flavor_text(script, step),
+    }
+
+    return data
+
+
+# ── API：聊天 AI 配置（设置弹窗真正落盘 + 热重载，不用重启）──
+
+@app.get("/api/chat-config")
+async def api_get_chat_config():
+    cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+    ai = cfg.get("ai", {})
+    key = ai.get("api_key", "")
+    masked = (key[:6] + "…" + key[-4:]) if len(key) > 12 else ""
+    from .chat_ai import KITSUNE_SYSTEM_PROMPT
+    return {
+        "has_key": bool(key) and key != "YOUR_OPENAI_API_KEY",
+        "api_key_masked": masked,
+        "base_url": ai.get("base_url", ""),
+        "model": ai.get("model", ""),
+        "system_prompt": ai.get("system_prompt", ""),
+        "default_prompt": KITSUNE_SYSTEM_PROMPT,
+    }
+
+
+@app.post("/api/chat-config")
+async def api_save_chat_config(request: Request):
+    body = await request.json()
+    cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+    ai = cfg.setdefault("ai", {})
+    # key 留空 = 不改（防止掩码被当成真 key 写回去）
+    if body.get("api_key"):
+        ai["api_key"] = str(body["api_key"]).strip()
+    if body.get("base_url"):
+        ai["base_url"] = str(body["base_url"]).strip()
+    if body.get("model"):
+        ai["model"] = str(body["model"]).strip()
+    # 角色 prompt：空字符串 = 恢复默认狐之助（显式清空也合法，所以用 in 判断）
+    if "system_prompt" in body:
+        sp = str(body["system_prompt"]).strip()
+        if sp:
+            ai["system_prompt"] = sp
+        else:
+            ai.pop("system_prompt", None)
+    _PANEL_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    from .chat_ai import reload_ai
+    reload_ai(str(_PANEL_CONFIG))  # 热重载，不用重启面板
+    return {"ok": True}
+
+
 # ── API：保存/加载面板设置 ──
 
 _SETTINGS_FILE = _PROJECT / "status" / "panel_settings.json"
@@ -501,14 +701,19 @@ async def api_get_saved_settings():
 
 @app.post("/api/saved-settings")
 async def api_save_settings(request: Request):
-    """保存面板上所有脚本的当前参数到服务器端"""
+    """保存面板设置到服务器端（合并式：脚本参数、主题各存各的，互不覆盖）"""
     body = await request.json()
-    # body 格式: {"params": {"daily": {...}, "raid": {...}, ...}}
-    params = body.get("params", {})
-    # 只保留有内容的条目，空 dict 也保留（表示全默认）
-    clean = {k: v for k, v in params.items() if isinstance(v, dict)}
-    _save_panel_settings({"params": clean})
-    return {"ok": True, "scripts": len(clean)}
+    existing = _load_panel_settings()
+    existing.pop("_saved_at", None)
+    # body 格式: {"params": {"daily": {...}, ...}, "theme": "pixel"}
+    params = body.get("params")
+    if isinstance(params, dict):
+        clean = {k: v for k, v in params.items() if isinstance(v, dict)}
+        existing["params"] = clean
+    if body.get("theme") in ("washi", "pixel"):
+        existing["theme"] = body["theme"]
+    _save_panel_settings(existing)
+    return {"ok": True}
 
 
 # ── 入口 ──

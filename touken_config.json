@@ -939,7 +939,7 @@
       }
     },
     "auto_buy_ticket": true,
-    "max_buys_per_run": 10
+    "max_buys_per_run": 30
   },
   "naihanka": {
     "start_button": {

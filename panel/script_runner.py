@@ -50,6 +50,7 @@ class ScriptRunner:
         self._stop_event = threading.Event()
         self._current_run_id: str | None = None
         self._current_script: str | None = None
+        self._current_started: float | None = None  # 启动时间戳，仪表盘算已跑多久
         self._lock = threading.Lock()
         self._on_message = None  # callback(message_dict)
 
@@ -65,6 +66,11 @@ class ScriptRunner:
     def current_script(self) -> str | None:
         return self._current_script
 
+    @property
+    def current_started(self) -> float | None:
+        """本轮启动时间戳（没在跑就是 None）"""
+        return self._current_started if self.is_running else None
+
     def start(self, script_name: str, config_path: str, params: dict | None = None) -> str | None:
         """启动脚本。返回 run_id 或 None（不支持/已在跑）"""
         if self.is_running:
@@ -75,6 +81,7 @@ class ScriptRunner:
         run_id = uuid.uuid4().hex[:12]
         self._current_run_id = run_id
         self._current_script = script_name
+        self._current_started = time.time()
         self._stop_event.clear()
 
         self._thread = threading.Thread(

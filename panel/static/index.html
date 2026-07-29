@@ -18,13 +18,15 @@
     <div class="top-right">
       <span id="status-dot" class="dot dot-green"></span>
       <span id="status-text" class="status-label">待命中</span>
+      <button id="btn-theme" class="icon-btn" title="切换像素主题">👾</button>
       <button id="btn-settings" class="icon-btn" title="设置">⚙</button>
     </div>
   </header>
 
   <!-- ====== 选项卡 ====== -->
   <nav id="tabs">
-    <button class="tab active" data-tab="logs">📋 日志</button>
+    <button class="tab active" data-tab="home">🏠 总览</button>
+    <button class="tab" data-tab="logs">📋 日志</button>
     <button class="tab" data-tab="control">🎮 控制</button>
     <button class="tab" data-tab="chat">💬 近侍</button>
   </nav>
@@ -32,8 +34,61 @@
   <!-- ====== 面板内容 ====== -->
   <main id="main">
 
+    <!-- ── 总览（仪表盘）── -->
+    <section id="panel-home" class="tab-panel active">
+      <div class="panel-header">
+        <h2>🏠 本丸总览</h2>
+        <div class="panel-actions">
+          <span id="dash-updated" class="dash-updated"></span>
+          <button id="btn-dash-refresh" class="small-btn" title="刷新">↻ 刷新</button>
+        </div>
+      </div>
+
+      <!-- 运行中横幅：占位动画是 emoji 狐狸，等像素狐之助跑步图来了换皮 -->
+      <div id="dash-running" class="run-banner" style="display:none">
+        <div class="run-track">
+          <span class="run-fox"></span>
+        </div>
+        <div class="run-info">
+          <div class="run-flavor" id="run-flavor"></div>
+          <div class="run-sub" id="run-sub"></div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+
+        <!-- 家底 -->
+        <div class="dash-card dash-wide">
+          <div class="dash-card-head">💰 家底 <span id="dash-snapshot-at" class="dash-dim"></span></div>
+          <div class="res-tiles" id="dash-resources"></div>
+          <div class="res-sub" id="dash-res-sub"></div>
+          <div class="dash-furnaces" id="dash-furnaces"></div>
+        </div>
+
+        <!-- 远征 -->
+        <div class="dash-card">
+          <div class="dash-card-head">🏕 远征</div>
+          <div id="dash-expeditions"></div>
+          <div id="dash-schedule" class="dash-sched"></div>
+        </div>
+
+        <!-- 日课 -->
+        <div class="dash-card">
+          <div class="dash-card-head">📋 日课</div>
+          <div id="dash-daily"></div>
+        </div>
+
+        <!-- 内番 -->
+        <div class="dash-card">
+          <div class="dash-card-head">🌱 内番</div>
+          <div id="dash-naihanka"></div>
+        </div>
+
+      </div>
+    </section>
+
     <!-- ── 日志 ── -->
-    <section id="panel-logs" class="tab-panel active">
+    <section id="panel-logs" class="tab-panel">
       <div class="panel-header">
         <h2>📋 日志流</h2>
         <div class="panel-actions">
@@ -126,7 +181,9 @@
       <input type="text" id="cfg-api-url" placeholder="https://api.openai.com/v1">
       <label>模型</label>
       <input type="text" id="cfg-model" placeholder="gpt-4o-mini">
-      <p class="hint">修改后重启面板生效。API Key 存在 panel/panel_config.json 里。</p>
+      <label>角色设定（System Prompt）</label>
+      <textarea id="cfg-prompt" rows="6" placeholder="留空 = 默认狐之助"></textarea>
+      <p class="hint">保存后立刻生效，不用重启。角色设定想换谁换谁；清空保存即恢复狐之助。</p>
     </div>
     <div class="modal-footer">
       <button id="cfg-save" class="btn-primary">保存</button>

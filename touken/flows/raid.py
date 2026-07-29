@@ -24,7 +24,8 @@ from ..maa_adapter import roi_4to4
 class RaidMixin:
     """联队战流程。依赖宿主类的 navigate_to_stream、_click_point。"""
 
-    def raid_stream(self, max_rounds: int = 1, team_no: int = None, use_triple: bool = True):
+    def raid_stream(self, max_rounds: int = 1, team_no: int = None,
+                    use_triple: bool = True, max_buys: int = None):
         """
         流式跑联队战
 
@@ -32,6 +33,8 @@ class RaidMixin:
             max_rounds: 跑几圈（一圈 = 选难度到回到联队战界面）
             team_no: 部队编号，默认读配置 raid.team_no
             use_triple: 是否在确认弹窗勾三倍枡（已勾选会跳过，游戏有记忆）
+            max_buys: 本次最多小判买几次手形（加班模式用），
+                      不给就读配置 raid.max_buys_per_run
 
         Yields:
             str: 执行状态消息
@@ -40,6 +43,9 @@ class RaidMixin:
         if not cfg:
             yield "[RAID] 未配置联队战"
             return
+        if max_buys is not None:
+            cfg = dict(cfg)
+            cfg["max_buys_per_run"] = max_buys
 
         team_no = team_no or cfg.get("team_no", 3)
         teams = self.config.get("team_select", {}).get("teams", {})
@@ -75,6 +81,9 @@ class RaidMixin:
             yield "[RAID] 进不去联队战界面（活动结束了？）"
             return
         yield "[RAID] 到达联队战界面"
+        # 上报仪表盘：陆联还是海联。现在只截了 ui陆联，所以必为陆联；
+        # 以后有海联标题模板后，在这里加分支写 "raid:hailian" 即可
+        self.set_progress("raid:lulian")
 
         # ========== 3. 逐圈跑 ==========
         for round_no in range(1, max_rounds + 1):

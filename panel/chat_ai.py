@@ -34,6 +34,8 @@ class ChatAI:
         self.api_key = ai_cfg.get("api_key", "")
         self.base_url = ai_cfg.get("base_url", "https://api.openai.com/v1")
         self.model = ai_cfg.get("model", "gpt-4o-mini")
+        # 角色设定：面板设置里可改，换成任何角色；没配就是狐之助
+        self.system_prompt = ai_cfg.get("system_prompt") or KITSUNE_SYSTEM_PROMPT
 
         import httpx
         self._client = httpx.Client(
@@ -52,7 +54,7 @@ class ChatAI:
 
         # 拼消息历史
         history = store.get_chat_history(limit=50)
-        messages = [{"role": "system", "content": KITSUNE_SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         for h in history:
             messages.append({"role": h["role"], "content": h["content"]})
 

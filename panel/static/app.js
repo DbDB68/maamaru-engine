@@ -33,10 +33,25 @@
     viewToggle: $('#log-view-toggle'),
     clearChat:  $('#btn-clear-chat'),
     settingsBtn: $('#btn-settings'),
+    themeBtn:   $('#btn-theme'),
     settingsModal: $('#settings-modal'),
     modalClose: $$('.modal-close'),
     cfgSave:    $('#cfg-save'),
     cfgClose:   $('#cfg-close'),
+    // 仪表盘
+    dashUpdated: $('#dash-updated'),
+    dashRefresh: $('#btn-dash-refresh'),
+    dashSnapshotAt: $('#dash-snapshot-at'),
+    dashResources: $('#dash-resources'),
+    dashResSub: $('#dash-res-sub'),
+    dashFurnaces: $('#dash-furnaces'),
+    dashExpeditions: $('#dash-expeditions'),
+    dashSchedule: $('#dash-schedule'),
+    dashDaily: $('#dash-daily'),
+    dashNaihanka: $('#dash-naihanka'),
+    dashRunning: $('#dash-running'),
+    runFlavor: $('#run-flavor'),
+    runSub: $('#run-sub'),
   };
 
   // ── State ──
@@ -50,6 +65,24 @@
   let currentScript = null;
   let chatBusy = false;
   let scriptMeta = {};   // name -> {label, desc, params}
+
+  // ── 主题切换：和纸（默认）⇄ 像素（👾）──
+  function applyTheme(theme) {
+    document.body.classList.toggle('theme-pixel', theme === 'pixel');
+    els.themeBtn.textContent = theme === 'pixel' ? '🍂' : '👾';
+    els.themeBtn.title = theme === 'pixel' ? '切回和纸主题' : '切换像素主题';
+    localStorage.setItem('maamaru_theme', theme);
+    // 同步到服务器（合并式存储，不会冲掉脚本参数记忆）
+    fetch('/api/saved-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme }),
+    }).catch(() => {});
+  }
+  els.themeBtn.addEventListener('click', () => {
+    applyTheme(document.body.classList.contains('theme-pixel') ? 'washi' : 'pixel');
+  });
+  applyTheme(localStorage.getItem('maamaru_theme') || 'washi');
 
   // ── Tab switching ──
   els.tabs.forEach(tab => {
@@ -197,6 +230,170 @@
       els.honmaruStatus.textContent = '状态读取失败（面板后端没连上？）';
     }
   }
+
+  // ── 仪表盘（总览首页）──
+  // 倒计时状态：fetch 时记下剩余秒数，之后本地每秒递减，不一直烦后端
+  let dashExpState = [];      // [{el, remain, doneEl}]
+  let dashTickTimer = null;
+
+  function fmtDuration(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}小时${String(m).padStart(2, '0')}分`;
+    if (m > 0) return `${m}分${String(s).padStart(2, '0')}秒`;
+    return `${s}秒`;
+  }
+
+  async function loadDashboard() {
+    try {
+      const r = await fetch('/api/dashboard');
+      const data = await r.json();
+      renderDashboard(data);
+      els.dashUpdated.textContent = '更新于 ' + (data.server_time || '').slice(11, 19);
+    } catch(e) {
+      els.dashUpdated.textContent = '读取失败（后端没连上？）';
+    }
+  }
+
+  function renderDashboard(data) {
+    // ── 运行中横幅 ──
+    const run = data.running || {};
+    if (run.active) {
+      els.dashRunning.style.display = '';
+      els.runFlavor.textContent = run.flavor || '正在本丸干活🔧';
+      dashRunningSince = run.started || null;
+      updateRunSub(run.label);
+    } else {
+      els.dashRunning.style.display = 'none';
+      dashRunningSince = null;
+    }
+
+    // ── 家底 ──
+    const inv = data.inventory;
+    if (inv && inv.resources) {
+      const r9 = inv.resources;
+      const tiles = [
+        ['小判', r9['小判'], '🪙'],
+        ['甲州金', r9['甲州金'], '💎'],
+        ['委托符', r9['委托符'], '📜'],
+        ['加速符', r9['加速符'], '⏩'],
+      ];
+      els.dashResources.innerHTML = tiles.map(([name, val, icon]) =>
+        `<div class="res-tile"><span class="res-icon">${icon}</span>`
+        + `<span class="res-num">${val == null ? '?' : Number(val).toLocaleString()}</span>`
+        + `<span class="res-name">${name}</span></div>`).join('');
+      const sub = ['木炭', '玉钢', '冷却材', '砥石']
+        .map(k => `<span class="res-sub-item">${k} ${r9[k] == null ? '?' : Number(r9[k]).toLocaleString()}</span>`)
+        .join('');
+      els.dashResSub.innerHTML = sub
+        + (inv.doko ? `<span class="res-sub-item">🗡 刀位 ${escHtml(inv.doko)}</span>` : '');
+      els.dashSnapshotAt.textContent = inv.captured_at ? '快照 ' + inv.captured_at.slice(5, 16) : '';
+      // 锻刀炉
+      if (inv.furnaces && inv.furnaces.length) {
+        els.dashFurnaces.innerHTML = inv.furnaces.map(f => {
+          const busy = f.state === '锻造中';
+          const cls = busy ? 'fn-busy' : 'fn-idle';
+          const tail = busy && f.remain ? ` 剩 ${escHtml(f.remain)}` : (busy ? ' 快好了' : '');
+          return `<span class="fn-chip ${cls}">炉${f.slot} ${escHtml(f.state)}${tail}</span>`;
+        }).join('');
+      } else {
+        els.dashFurnaces.innerHTML = '';
+      }
+    } else {
+      els.dashResources.innerHTML = '<div class="dash-empty">还没有库存快照<br><small>跑一次日课或库存快照就有了</small></div>';
+      els.dashResSub.innerHTML = '';
+      els.dashFurnaces.innerHTML = '';
+    }
+
+    // ── 远征（带倒计时）──
+    if (dashTickTimer) { clearInterval(dashTickTimer); dashTickTimer = null; }
+    dashExpState = [];
+    const exps = data.expeditions || [];
+    if (exps.length) {
+      els.dashExpeditions.innerHTML = '';
+      exps.forEach(e => {
+        const row = document.createElement('div');
+        row.className = 'exp-row' + (e.done ? ' exp-done' : '');
+        row.innerHTML = `<span class="exp-team">部队${escHtml(String(e.team_no))}</span>`
+          + `<span class="exp-map">${escHtml(e.map_code || '')} ${escHtml(e.map_name || '')}</span>`
+          + `<span class="exp-count"></span>`;
+        els.dashExpeditions.appendChild(row);
+        if (e.remain_sec != null) {
+          dashExpState.push({ el: row.querySelector('.exp-count'), remain: e.remain_sec });
+        } else {
+          row.querySelector('.exp-count').textContent = '时间不明';
+        }
+      });
+      const tick = () => {
+        dashExpState.forEach(st => {
+          st.remain = Math.max(0, st.remain - 1);
+          if (st.remain <= 0) {
+            st.el.textContent = '🎉 该回来了';
+            st.el.closest('.exp-row').classList.add('exp-done');
+          } else {
+            st.el.textContent = '剩 ' + fmtDuration(st.remain);
+          }
+        });
+      };
+      tick();
+      dashTickTimer = setInterval(tick, 1000);
+    } else {
+      els.dashExpeditions.innerHTML = '<div class="dash-empty">没有部队在外面跑</div>';
+    }
+    // 今日待派
+    const sched = data.schedule || [];
+    els.dashSchedule.innerHTML = sched.length
+      ? '<div class="sched-line">📅 今天待派：' + sched.map(s =>
+          `${escHtml(s.time)} 部队${s.team_no}→${escHtml(s.map_code)}`).join(' · ') + '</div>'
+      : '';
+
+    // ── 日课 ──
+    const rep = data.latest_report;
+    if (rep && rep.steps && rep.steps.length) {
+      const fails = rep.steps.filter(s => !String(s.status).startsWith('✓'));
+      const head = `<div class="daily-banner ${rep.all_green ? 'daily-ok' : 'daily-bad'}">`
+        + (rep.all_green ? '🌸 全绿收工' : `🍂 ${fails.length} 项翻车`)
+        + `<small>${escHtml(rep.finished_at || '')}</small></div>`;
+      const chips = rep.steps.map(s => {
+        const ok = String(s.status).startsWith('✓');
+        const skip = String(s.status).includes('⏭') || String(s.status).includes('跳');
+        const cls = ok ? 'step-ok' : (skip ? 'step-skip' : 'step-bad');
+        return `<span class="step-chip ${cls}">${escHtml(s.name)}</span>`;
+      }).join('');
+      els.dashDaily.innerHTML = head + `<div class="step-list">${chips}</div>`;
+    } else {
+      els.dashDaily.innerHTML = '<div class="dash-empty">今天还没跑过日课</div>';
+    }
+
+    // ── 内番 ──
+    const nh = data.naihanka;
+    els.dashNaihanka.innerHTML = (nh && nh.started_at)
+      ? `<div class="nh-line">🌱 内番中<small>${escHtml(nh.started_at)} 开始</small></div>`
+      : '<div class="dash-empty">内番闲着呢</div>';
+  }
+
+  els.dashRefresh.addEventListener('click', loadDashboard);
+  // 横幅「已跑多久」每秒本地走；启动时间从最近一次 dashboard 数据来
+  let dashRunningSince = null;
+  let dashRunningLabel = '';
+  function updateRunSub(label) {
+    if (label) dashRunningLabel = label;
+    if (!dashRunningSince) return;
+    const elapsed = fmtDuration(Math.max(0, Date.now() / 1000 - dashRunningSince));
+    els.runSub.textContent = (dashRunningLabel ? dashRunningLabel + ' · ' : '') + '已跑 ' + elapsed;
+  }
+  setInterval(() => updateRunSub(''), 1000);
+  // 每 30 秒自动刷新一次（倒计时本身每秒本地走）；有活在跑时加快到 5 秒，步骤文案跟得上
+  setInterval(() => {
+    if (document.querySelector('.tab.active').dataset.tab === 'home') loadDashboard();
+  }, 30000);
+  setInterval(() => {
+    if (dashRunningSince && document.querySelector('.tab.active').dataset.tab === 'home') loadDashboard();
+  }, 5000);
+  // 切回总览时立刻刷新
+  document.querySelector('[data-tab="home"]').addEventListener('click', loadDashboard);
 
   // ── Scripts: load list ──
   async function loadScripts() {
@@ -351,9 +548,31 @@
       desc.textContent = info.desc;
       card.appendChild(desc);
 
-      (info.params || []).forEach(field => {
-        card.appendChild(renderParamField(key, field));
-      });
+      // 参数区可折叠：有参数的卡才给折叠钮，状态记 localStorage
+      const paramFields = info.params || [];
+      let paramsWrap = null;
+      if (paramFields.length) {
+        const foldKey = 'maamaru_fold_' + key;
+        const folded = localStorage.getItem(foldKey) === '1';
+        card.classList.toggle('card-folded', folded);
+
+        const foldBtn = document.createElement('button');
+        foldBtn.className = 's-fold';
+        foldBtn.type = 'button';
+        foldBtn.title = '展开/收起参数';
+        foldBtn.addEventListener('click', () => {
+          const nowFolded = card.classList.toggle('card-folded');
+          localStorage.setItem(foldKey, nowFolded ? '1' : '0');
+        });
+        head.appendChild(foldBtn);
+
+        paramsWrap = document.createElement('div');
+        paramsWrap.className = 's-params';
+        paramFields.forEach(field => {
+          paramsWrap.appendChild(renderParamField(key, field));
+        });
+        card.appendChild(paramsWrap);
+      }
 
       const runBtn = document.createElement('button');
       runBtn.className = 's-run';
@@ -545,8 +764,18 @@
   });
 
   // ── Settings modal ──
-  els.settingsBtn.addEventListener('click', () => {
+  els.settingsBtn.addEventListener('click', async () => {
     els.settingsModal.style.display = 'flex';
+    // 读当前配置：key 只回显掩码，地址和模型原样填
+    try {
+      const r = await fetch('/api/chat-config');
+      const c = await r.json();
+      $('#cfg-api-key').placeholder = c.has_key ? `已配置（${c.api_key_masked}），留空不改` : 'sk-...';
+      $('#cfg-api-url').value = c.base_url || '';
+      $('#cfg-model').value = c.model || '';
+      // 角色设定：自定义的原样显示；没自定义就显示默认狐之助方便参考着改
+      $('#cfg-prompt').value = c.system_prompt || c.default_prompt || '';
+    } catch(e) {}
   });
   els.modalClose.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -559,8 +788,29 @@
   els.settingsModal.addEventListener('click', (e) => {
     if (e.target === els.settingsModal) els.settingsModal.style.display = 'none';
   });
-  els.cfgSave.addEventListener('click', () => {
-    alert('配置保存在 panel/panel_config.json 中，修改后重启面板生效。');
+  els.cfgSave.addEventListener('click', async () => {
+    const body = {
+      api_key: $('#cfg-api-key').value.trim(),   // 留空 = 不改
+      base_url: $('#cfg-api-url').value.trim(),
+      model: $('#cfg-model').value.trim(),
+      system_prompt: $('#cfg-prompt').value.trim(),
+    };
+    try {
+      const r = await fetch('/api/chat-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        alert('保存成功，立刻生效（不用重启）！去「近侍」tab 找狐之助聊一句试试。');
+        $('#cfg-api-key').value = '';
+      } else {
+        alert('保存失败：' + JSON.stringify(d));
+      }
+    } catch(e) {
+      alert('保存失败：' + e.message);
+    }
     els.settingsModal.style.display = 'none';
   });
 
@@ -665,6 +915,10 @@
           localStorage.setItem('maamaru_params_' + name, JSON.stringify(vals));
         }
       });
+      // 主题也是服务器说了算（客户端/手机/浏览器 localStorage 各玩各的，统一拉齐）
+      if (data.theme === 'pixel' || data.theme === 'washi') {
+        applyTheme(data.theme);
+      }
     } catch(e) {
       // 首加载失败无所谓，至少 localStorage 里的还在
     }
@@ -714,6 +968,7 @@
     await loadChatHistory();
     loadHonmaruStatus();
     loadSchedule();
+    loadDashboard();
     connectSSE();
     setInterval(pollStatus, 3000);
     setInterval(loadHonmaruStatus, 60000);  // 状态条每分钟刷

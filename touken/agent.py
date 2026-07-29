@@ -8,6 +8,8 @@ ToukenAgent 主引擎 = 各层能力的组装
 """
 
 import json
+import time
+from pathlib import Path
 
 from .maa_adapter import MAAAdapter
 from .navigator import NavigationMixin
@@ -25,3 +27,18 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
             self.config = json.load(f)
         self.maa = maa
         self.current_location = None
+        self._progress_file = Path(config_path).resolve().parent / "status" / "progress.json"
+
+    def set_progress(self, step: str):
+        """上报当前进度给面板仪表盘横幅（如 'raid:lulian'、'daily:内番'）。
+
+        写失败绝不许影响干活，所以全部异常吞掉。
+        """
+        try:
+            self._progress_file.parent.mkdir(parents=True, exist_ok=True)
+            self._progress_file.write_text(json.dumps({
+                "step": step,
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
