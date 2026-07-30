@@ -1037,3 +1037,126 @@ body.theme-pixel .s-gear:hover { color: var(--accent2); border-color: var(--acce
 body.theme-pixel .hero-gear { color: var(--fg-dim); }
 body.theme-pixel .hero-gear:hover { color: var(--accent2); }
 body.theme-pixel .hero-run { border-radius: 0; }
+
+
+/* ============================================================
+   2026-07-30 布局重构（按鹿目圆草图）
+   概览 = 左常用功能 / 中选中区+日志 / 右统计表
+   配置 = 双栏卡片，参数内嵌，运行按钮小小的
+   本段全部后置覆盖，上面的旧规则一行不动
+   ============================================================ */
+
+/* ── 概览三栏骨架 ── */
+#panel-home { padding: 12px 16px 16px; }
+#panel-home .run-banner { margin: 0 0 12px; }
+
+.home-grid {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 300px;
+  gap: 12px;
+}
+.home-left, .home-right { display: flex; flex-direction: column; min-height: 0; }
+.home-box-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 13px; font-weight: 700; color: var(--fg-dim);
+  margin-bottom: 8px;
+}
+.hr-tools { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+
+/* ── 左：常用功能列表（参考像素 GitHub 的仓库列表行）── */
+#func-list {
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto; padding-right: 2px;
+}
+.func-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-card); color: var(--fg);
+  font-family: var(--font); font-size: 13px; text-align: left;
+  cursor: pointer; transition: all 0.15s;
+}
+.func-item:hover { border-color: var(--accent); }
+.func-item.sel {
+  background: var(--accent3); border-color: var(--accent);
+  color: var(--accent2); font-weight: 700;
+}
+.func-item.running .fi-name::after { content: ' ⏳'; }
+.fi-icon { font-size: 16px; }
+
+/* ── 中：选中功能区 + 日志 ── */
+.home-center { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+
+.func-detail {
+  background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px;
+}
+.fd-head { display: flex; align-items: center; gap: 8px; }
+.fd-icon { font-size: 20px; }
+.fd-label { flex: 1; font-size: 16px; font-weight: 700; }
+.fd-desc { font-size: 12px; color: var(--fg-dim); margin: 4px 0 8px; }
+.fd-params { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.fd-chip {
+  font-size: 11px; padding: 2px 9px; border-radius: 999px;
+  background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg-dim);
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fd-chip b { color: var(--fg); font-weight: 600; }
+.fd-actions { display: flex; align-items: center; gap: 10px; }
+.fd-btn { padding: 6px 22px; font-size: 13px; border-radius: 7px; }
+.fd-hint { font-size: 11px; color: var(--fg-dim); }
+.fd-empty { text-align: center; color: var(--fg-dim); padding: 18px 0; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.home-log-head { display: flex; align-items: center; justify-content: space-between; }
+.hl-title { font-size: 13px; font-weight: 700; color: var(--fg-dim); }
+#panel-home #log-container { flex: 1; min-height: 0; }
+#panel-home .log-bar { margin-top: 0; }
+
+/* ── 右：统计表 ── */
+.home-right-scroll {
+  display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto; padding-right: 2px;
+}
+.home-right .res-tiles { grid-template-columns: repeat(2, 1fr); }
+.home-right .dash-updated { font-size: 11px; }
+
+/* ── 配置页：双栏大气卡片 ── */
+.config-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 14px; align-items: start;
+}
+.config-card.wide { grid-column: 1 / -1; }
+.config-card .param-form {
+  margin-top: 8px; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.config-actions { justify-content: flex-end; margin-top: 10px; }
+.s-run-sm { width: auto; padding: 4px 16px; font-size: 12px; border-radius: 6px; }
+
+/* ── 像素主题适配新零件 ── */
+body.theme-pixel .func-item,
+body.theme-pixel .func-detail {
+  border-radius: 0;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.15);
+}
+body.theme-pixel .func-item.sel { box-shadow: 3px 3px 0 rgba(196,145,26,0.5); }
+
+/* ── 响应式：平板两栏，手机单列 ── */
+@media (max-width: 900px) {
+  .home-grid { grid-template-columns: 150px minmax(0, 1fr); }
+  .home-right { grid-column: 1 / -1; }
+  .home-right-scroll { max-height: 42vh; }
+}
+@media (max-width: 600px) {
+  #panel-home { padding: 10px 12px 12px; }
+  .home-grid { display: flex; flex-direction: column; overflow-y: auto; }
+  #func-list { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .func-item { white-space: nowrap; padding: 7px 12px; }
+  .home-center { min-height: 55vh; }
+  .home-right-scroll { max-height: none; overflow: visible; }
+  .config-grid { grid-template-columns: 1fr; }
+  .config-card.wide { grid-column: auto; }
+}

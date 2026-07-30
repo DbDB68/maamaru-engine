@@ -25,26 +25,17 @@
 
   <!-- ====== 选项卡 ====== -->
   <nav id="tabs">
-    <button class="tab active" data-tab="home">🏠 总览</button>
-    <button class="tab" data-tab="logs">📋 日志</button>
-    <button class="tab" data-tab="control">🎮 控制</button>
+    <button class="tab active" data-tab="home">🏠 概览</button>
+    <button class="tab" data-tab="control">⚙ 配置</button>
     <button class="tab" data-tab="chat">💬 近侍</button>
   </nav>
 
   <!-- ====== 面板内容 ====== -->
   <main id="main">
 
-    <!-- ── 总览（仪表盘）── -->
+    <!-- ── 概览：左常用功能 / 中选中功能+日志 / 右统计表（按鹿目圆草图）── -->
     <section id="panel-home" class="tab-panel active">
-      <div class="panel-header">
-        <h2>🏠 本丸总览</h2>
-        <div class="panel-actions">
-          <span id="dash-updated" class="dash-updated"></span>
-          <button id="btn-dash-refresh" class="small-btn" title="刷新">↻ 刷新</button>
-        </div>
-      </div>
-
-      <!-- 运行中横幅：占位动画是 emoji 狐狸，等像素狐之助跑步图来了换皮 -->
+      <!-- 小狐狸跑步区（谁 都 不 许 动） -->
       <div id="dash-running" class="run-banner" style="display:none">
         <div class="run-track">
           <span class="run-fox"></span>
@@ -55,72 +46,79 @@
         </div>
       </div>
 
-      <div class="dash-grid">
+      <div class="home-grid">
+        <!-- 左：常用功能列表，点一下选中 -->
+        <aside class="home-left">
+          <div class="home-box-head">⚔ 常用功能</div>
+          <div id="func-list"></div>
+        </aside>
 
-        <!-- 家底 -->
-        <div class="dash-card dash-wide">
-          <div class="dash-card-head">💰 家底 <span id="dash-snapshot-at" class="dash-dim"></span></div>
-          <div class="res-tiles" id="dash-resources"></div>
-          <div class="res-sub" id="dash-res-sub"></div>
-          <div class="dash-furnaces" id="dash-furnaces"></div>
-        </div>
-
-        <!-- 远征 -->
-        <div class="dash-card">
-          <div class="dash-card-head">🏕 远征</div>
-          <div id="dash-expeditions"></div>
-          <div id="dash-schedule" class="dash-sched"></div>
-        </div>
-
-        <!-- 日课 -->
-        <div class="dash-card">
-          <div class="dash-card-head">📋 日课</div>
-          <div id="dash-daily"></div>
-        </div>
-
-        <!-- 内番 -->
-        <div class="dash-card">
-          <div class="dash-card-head">🌱 内番</div>
-          <div id="dash-naihanka"></div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ── 日志 ── -->
-    <section id="panel-logs" class="tab-panel">
-      <div class="panel-header">
-        <h2>📋 日志流</h2>
-        <div class="panel-actions">
-          <div class="view-toggle" id="log-view-toggle" title="日志显示模式">
-            <button class="vt-btn active" data-view="visual">📊 可视化</button>
-            <button class="vt-btn" data-view="raw">💻 源代码</button>
+        <!-- 中：选中功能区 + 日志 -->
+        <div class="home-center">
+          <div id="func-detail" class="func-detail"></div>
+          <div class="home-log-head">
+            <span class="hl-title">📋 日志</span>
+            <div class="panel-actions">
+              <div class="view-toggle" id="log-view-toggle" title="日志显示模式">
+                <button class="vt-btn active" data-view="visual">📊 可视化</button>
+                <button class="vt-btn" data-view="raw">💻 源代码</button>
+              </div>
+              <button id="btn-noise" class="small-btn" title="可视化模式下显示/隐藏导航流水账">🦊 细节</button>
+              <button id="btn-clear-logs" class="small-btn" title="清屏">清屏</button>
+              <button id="btn-auto-scroll" class="small-btn active" title="自动滚动">自动滚动</button>
+            </div>
           </div>
-          <button id="btn-noise" class="small-btn" title="可视化模式下显示/隐藏导航流水账">🦊 细节</button>
-          <button id="btn-clear-logs" class="small-btn" title="清屏">清屏</button>
-          <button id="btn-auto-scroll" class="small-btn active" title="自动滚动">自动滚动</button>
+          <div id="log-container">
+            <div id="log-list"></div>
+          </div>
+          <div class="log-bar">
+            <span id="log-count">0 条日志</span>
+            <span id="log-status" class="bar-status">● 空闲</span>
+          </div>
         </div>
-      </div>
-      <div id="log-container">
-        <div id="log-list"></div>
-      </div>
-      <div class="log-bar">
-        <span id="log-count">0 条日志</span>
-        <span id="log-status" class="bar-status">● 空闲</span>
+
+        <!-- 右：统计表（日志 OCR 数据） -->
+        <aside class="home-right">
+          <div class="home-box-head">📊 本丸统计
+            <span class="hr-tools">
+              <span id="dash-updated" class="dash-updated"></span>
+              <button id="btn-dash-refresh" class="small-btn" title="刷新">↻</button>
+            </span>
+          </div>
+          <div class="home-right-scroll">
+            <div class="dash-card">
+              <div class="dash-card-head">💰 家底 <span id="dash-snapshot-at" class="dash-dim"></span></div>
+              <div class="res-tiles" id="dash-resources"></div>
+              <div class="res-sub" id="dash-res-sub"></div>
+              <div class="dash-furnaces" id="dash-furnaces"></div>
+            </div>
+            <div class="dash-card">
+              <div class="dash-card-head">🏕 远征</div>
+              <div id="dash-expeditions"></div>
+              <div id="dash-schedule" class="dash-sched"></div>
+            </div>
+            <div class="dash-card">
+              <div class="dash-card-head">📋 日课</div>
+              <div id="dash-daily"></div>
+            </div>
+            <div class="dash-card">
+              <div class="dash-card-head">🌱 内番</div>
+              <div id="dash-naihanka"></div>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
 
-    <!-- ── 控制 ── -->
+    <!-- ── 配置：双栏大气调参，运行按钮小小的 ── -->
     <section id="panel-control" class="tab-panel">
       <div class="panel-header">
-        <h2>🎮 本丸控制台</h2>
+        <h2>⚙ 配置 — 参数都在卡片上直接调，调好去概览点开始</h2>
         <div class="panel-actions">
           <span id="task-indicator" class="badge badge-idle">空闲</span>
           <button id="btn-save-settings" class="small-btn" title="保存当前参数到服务器，重启面板后自动恢复">💾 保存</button>
         </div>
       </div>
-      <div id="honmaru-status" class="status-strip">正在读取本丸状态…</div>
-      <div id="daily-hero"></div>
       <div id="script-grid"></div>
 
       <!-- 远征时刻表：自己排 几时几分 部队x 去 x-x -->
@@ -192,20 +190,6 @@
     </div>
   </div>
 </div>
-
-<!-- ====== 参数弹窗：脚本参数统一在这里改，卡片只留运行按钮 ====== -->
-<div id="param-modal" class="modal-overlay" style="display:none">
-  <div class="modal param-modal">
-    <div class="modal-header">
-      <h3 id="param-modal-title">参数</h3>
-      <button class="modal-close" id="param-modal-close">&times;</button>
-    </div>
-    <div class="modal-body" id="param-modal-body"></div>
-  </div>
-</div>
-
-<!-- 参数表单常驻仓库：所有脚本的表单渲染一次挂这里，弹窗打开时临时移过去 -->
-<div id="param-store" hidden></div>
 
 <script src="/static/app.js"></script>
 </body>

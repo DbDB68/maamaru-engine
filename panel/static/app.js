@@ -1,5 +1,8 @@
 /**
  * まあ丸 近侍面板 — 前端逻辑
+ * 2026-07-30 布局重构（按鹿目圆草图）：
+ *   概览 = 左常用功能列表 + 中选中功能区/日志 + 右统计表
+ *   配置 = 双栏卡片，参数内嵌卡片直接调，运行按钮小小的
  */
 
 (function() {
@@ -17,18 +20,13 @@
     logStatus:  $('#log-status'),
     logContainer: $('#log-container'),
     scriptGrid: $('#script-grid'),
-    dailyHero:  $('#daily-hero'),
-    paramModal: $('#param-modal'),
-    paramModalTitle: $('#param-modal-title'),
-    paramModalBody: $('#param-modal-body'),
-    paramModalClose: $('#param-modal-close'),
-    paramStore: $('#param-store'),
+    funcList:   $('#func-list'),
+    funcDetail: $('#func-detail'),
     taskIndicator: $('#task-indicator'),
     stopAll:    $('#btn-stop-all'),
     statusDot:  $('#status-dot'),
     statusText: $('#status-text'),
     btnSave:    $('#btn-save-settings'),
-    honmaruStatus: $('#honmaru-status'),
     chatMessages: $('#chat-messages'),
     chatInput:  $('#chat-input'),
     chatSend:   $('#chat-send'),
@@ -44,7 +42,7 @@
     modalClose: $$('.modal-close'),
     cfgSave:    $('#cfg-save'),
     cfgClose:   $('#cfg-close'),
-    // 仪表盘
+    // 统计表
     dashUpdated: $('#dash-updated'),
     dashRefresh: $('#btn-dash-refresh'),
     dashSnapshotAt: $('#dash-snapshot-at'),
@@ -71,6 +69,10 @@
   let currentScript = null;
   let chatBusy = false;
   let scriptMeta = {};   // name -> {label, desc, params}
+  // 概览左侧选中的功能（默认日课，记住上次选择）
+  let selectedScript = localStorage.getItem('maamaru_selected') || 'daily';
+  // 参数表单：创建一次常驻内存，配置页渲染时挂进卡片（DOM 搬家，状态不丢）
+  const paramForms = {};
 
   // ── 主题切换：和纸（默认）⇄ 像素（👾）──
   function applyTheme(theme) {
@@ -211,33 +213,7 @@
     };
   }
 
-  // ── 本丸状态条 ──
-  async function loadHonmaruStatus() {
-    try {
-      const r = await fetch('/api/status');
-      const data = await r.json();
-      const parts = [];
-      const rep = data.latest_report;
-      if (rep) {
-        const fails = (rep.steps || []).filter(s => !String(s.status).startsWith('✓'));
-        parts.push(`<span class="st-item ${rep.all_green ? 'st-ok' : 'st-bad'}">`
-          + `📋 日课 ${rep.all_green ? '全绿' : fails.length + ' 项翻车'}`
-          + `<small>${escHtml(rep.finished_at || '')}</small></span>`);
-      }
-      const inv = data.inventory;
-      if (inv && inv.resources) {
-        const r9 = inv.resources;
-        parts.push(`<span class="st-item">💰 小判 ${r9['小判'] ?? '?'}<small>甲州金 ${r9['甲州金'] ?? '?'} · 委托符 ${r9['委托符'] ?? '?'} · 加速符 ${r9['加速符'] ?? '?'}</small></span>`);
-        if (inv.doko) parts.push(`<span class="st-item">🗡 刀位 ${escHtml(inv.doko)}</span>`);
-        if (inv.captured_at) parts.push(`<span class="st-item st-dim">快照 ${escHtml(inv.captured_at.slice(5, 16))}</span>`);
-      }
-      els.honmaruStatus.innerHTML = parts.join('') || '暂无状态数据';
-    } catch(e) {
-      els.honmaruStatus.textContent = '状态读取失败（面板后端没连上？）';
-    }
-  }
-
-  // ── 仪表盘（总览首页）──
+  // ── 统计表（概览右栏）──
   // 倒计时状态：fetch 时记下剩余秒数，之后本地每秒递减，不一直烦后端
   let dashExpState = [];      // [{el, remain, doneEl}]
   let dashTickTimer = null;
@@ -259,12 +235,12 @@
       renderDashboard(data);
       els.dashUpdated.textContent = '更新于 ' + (data.server_time || '').slice(11, 19);
     } catch(e) {
-      els.dashUpdated.textContent = '读取失败（后端没连上？）';
+      els.dashUpdated.textContent = '读取失败';
     }
   }
 
   function renderDashboard(data) {
-    // ── 运行中横幅 ──
+    // ── 运行中横幅（小狐狸跑步区）──
     const run = data.running || {};
     if (run.active) {
       els.dashRunning.style.display = '';
@@ -398,7 +374,7 @@
   setInterval(() => {
     if (dashRunningSince && document.querySelector('.tab.active').dataset.tab === 'home') loadDashboard();
   }, 5000);
-  // 切回总览时立刻刷新
+  // 切回概览时立刻刷新
   document.querySelector('[data-tab="home"]').addEventListener('click', loadDashboard);
 
   // ── Scripts: load list ──
@@ -409,6 +385,7 @@
       isRunning = data.running;
       currentScript = data.current;
       scriptMeta = data.scripts;
+      if (!scriptMeta[selectedScript]) selectedScript = 'daily';
       renderScripts();
       updateStatus(data.running, data.current);
     } catch(e) {
@@ -523,6 +500,7 @@
 
   function collectParams(card) {
     const params = {};
+    if (!card) return params;
     card.querySelectorAll('[data-param-key]').forEach(el => {
       const key = el.dataset.paramKey;
       if (el.classList.contains('pf-checks')) {
@@ -534,16 +512,10 @@
     return params;
   }
 
-  // ── 参数表单：渲染一次常驻 #param-store，弹窗打开时临时搬过去 ──
-  // 表单一直挂在 DOM 里，所以临时改动、条件显隐、参数记忆全都活着
-  function getForm(key) {
-    return els.paramStore.querySelector(`.param-form[data-script="${key}"]`)
-        || els.paramModalBody.querySelector(`.param-form[data-script="${key}"]`);
-  }
-
+  // ── 参数表单：创建一次常驻 paramForms，渲染配置卡片时挂进去 ──
   function ensureParamForms() {
     Object.entries(scriptMeta).forEach(([key, info]) => {
-      if (getForm(key)) return;
+      if (paramForms[key]) return;
       const fields = info.params || [];
       if (!fields.length) return;
       const form = document.createElement('div');
@@ -554,102 +526,107 @@
       form.querySelectorAll('select[data-param-key]').forEach(sel =>
         sel.addEventListener('change', () => updateCardVisibility(form)));
       updateCardVisibility(form);
-      // 日课的勾选变了，Hero 卡上的步骤预览跟着变
-      if (key === 'daily') {
-        form.addEventListener('click', (e) => {
-          if (e.target.closest('.pill') || e.target.closest('[data-act]')) {
-            renderHeroSteps();
-          }
-        });
-      }
-      els.paramStore.appendChild(form);
+      // 概览选中区的参数摘要跟着表单一起变
+      form.addEventListener('change', () => {
+        if (key === selectedScript) renderFuncDetail();
+      });
+      form.addEventListener('click', (e) => {
+        if ((e.target.closest('.pill') || e.target.closest('[data-act]'))
+            && key === selectedScript) renderFuncDetail();
+      });
+      paramForms[key] = form;
     });
   }
 
-  // ── 参数弹窗 ──
-  let paramModalScript = null;
-
-  function openParamModal(key) {
-    const form = getForm(key);
-    if (!form) return;
-    paramModalScript = key;
-    const label = scriptMeta[key] ? scriptMeta[key].label : key;
-    els.paramModalTitle.textContent = `⚙ ${label} — 参数`;
-    els.paramModalBody.appendChild(form);   // 从仓库搬进弹窗（DOM 节点搬家，状态不丢）
-    els.paramModal.style.display = 'flex';
+  function paramsOf(key) {
+    return collectParams(paramForms[key]);
   }
 
-  function closeParamModal() {
-    const form = els.paramModalBody.querySelector('.param-form');
-    if (form) els.paramStore.appendChild(form);   // 搬回仓库
-    paramModalScript = null;
-    els.paramModal.style.display = 'none';
+  // ── 概览左栏：常用功能列表 ──
+  const FUNC_ICONS = {
+    daily: '🌅', raid: '⚔️', pumpkin: '🎃', sortie: '🗡', sakura: '🌸',
+    practice: '🥊', expedition: '🏕', dispatch: '⛺', forge: '🔥',
+    sugar: '🍬', repair: '🛠', snapshot: '📦',
+  };
+
+  function scriptOrder() {
+    return ['daily', ...Object.keys(scriptMeta).filter(k => k !== 'daily')]
+      .filter(k => scriptMeta[k]);
   }
 
-  els.paramModalClose.addEventListener('click', closeParamModal);
-  els.paramModal.addEventListener('click', (e) => {
-    if (e.target === els.paramModal) closeParamModal();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && els.paramModal.style.display !== 'none') closeParamModal();
-  });
-
-  // ── 一键日课 Hero 卡：每天的 main quest，C 位待遇 ──
-  function renderHeroSteps() {
-    const form = getForm('daily');
-    const box = form && form.querySelector('.pf-checks[data-param-key="steps"]');
-    const el = document.getElementById('hero-steps');
-    if (!box || !el) return;
-    el.innerHTML = [...box.querySelectorAll('.pill')].map(p =>
-      `<span class="hero-chip${p.classList.contains('on') ? '' : ' off'}">${escHtml(p.dataset.value)}</span>`
-    ).join('');
+  function renderFuncList() {
+    els.funcList.innerHTML = '';
+    scriptOrder().forEach(k => {
+      const info = scriptMeta[k];
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'func-item' + (k === selectedScript ? ' sel' : '')
+                     + ((isRunning && currentScript === k) ? ' running' : '');
+      item.innerHTML = `<span class="fi-icon">${FUNC_ICONS[k] || '🧰'}</span>`
+        + `<span class="fi-name">${escHtml(info.label)}</span>`;
+      item.addEventListener('click', () => {
+        selectedScript = k;
+        localStorage.setItem('maamaru_selected', k);
+        renderFuncList();
+        renderFuncDetail();
+      });
+      els.funcList.appendChild(item);
+    });
   }
 
-  function renderHero() {
-    const info = scriptMeta['daily'];
-    if (!info) { els.dailyHero.innerHTML = ''; return; }
-    const running = isRunning && currentScript === 'daily';
-    const card = document.createElement('div');
-    card.className = 'hero-card' + (running ? ' running' : '');
-    card.dataset.script = 'daily';
-    card.innerHTML = `
-      <div class="hero-main">
-        <div class="s-head">
-          <span class="s-label">🌅 ${escHtml(info.label)}</span>
-          <span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>
-        </div>
-        <div class="s-desc">${escHtml(info.desc)}</div>
-        <div class="hero-steps" id="hero-steps"></div>
+  // ── 概览中间：选中功能区（开始任务 / 强制关闭）──
+  function renderFuncDetail() {
+    const info = scriptMeta[selectedScript];
+    if (!info) {
+      els.funcDetail.innerHTML = '<div class="fd-empty">👈 左边点一个功能</div>';
+      return;
+    }
+    const running = isRunning && currentScript === selectedScript;
+    const busy = isRunning && !running;
+
+    // 当前参数摘要（只读，调参去配置页）
+    const params = paramsOf(selectedScript);
+    const chips = Object.entries(params).map(([k, v]) => {
+      const field = (info.params || []).find(f => f.key === k);
+      const label = field ? field.label : k;
+      const val = Array.isArray(v) ? (v.length ? v.join('、') : '（都不干）') : String(v);
+      return `<span class="fd-chip" title="${escHtml(label)}：${escHtml(val)}">`
+        + `<b>${escHtml(label)}</b> ${escHtml(val)}</span>`;
+    }).join('');
+
+    els.funcDetail.innerHTML = `
+      <div class="fd-head">
+        <span class="fd-icon">${FUNC_ICONS[selectedScript] || '🧰'}</span>
+        <span class="fd-label">${escHtml(info.label)}</span>
+        <span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>
       </div>
-      <div class="hero-actions">
-        <button class="s-run hero-run">${running ? '⏳ 日课进行中…' : '▶ 开始日课'}</button>
-        <button class="hero-gear" type="button">⚙ 参数</button>
+      <div class="fd-desc">${escHtml(info.desc)}</div>
+      <div class="fd-params">${chips || '<span class="fd-chip">没有参数，直接跑</span>'}</div>
+      <div class="fd-actions">
+        ${running
+          ? '<button id="fd-stop" class="btn-danger fd-btn">■ 强制关闭</button>'
+          : `<button id="fd-run" class="btn-primary fd-btn" ${busy ? 'disabled' : ''}>`
+            + `${busy ? '⏳ 有别的任务在跑…' : '▶ 开始任务'}</button>`}
+        <span class="fd-hint">参数在「配置」页改</span>
       </div>`;
-    const runBtn = card.querySelector('.hero-run');
-    runBtn.disabled = isRunning;
-    runBtn.addEventListener('click', () =>
-      runScript('daily', collectParams(getForm('daily') || card)));
-    card.querySelector('.hero-gear').addEventListener('click', () => openParamModal('daily'));
-    els.dailyHero.innerHTML = '';
-    els.dailyHero.appendChild(card);
-    renderHeroSteps();
+
+    const runBtn = document.getElementById('fd-run');
+    if (runBtn) runBtn.addEventListener('click', () => runScript(selectedScript, paramsOf(selectedScript)));
+    const stopBtn = document.getElementById('fd-stop');
+    if (stopBtn) stopBtn.addEventListener('click', stopScript);
   }
 
-  // ── 磁贴分组：战斗的归战斗，后勤的归后勤 ──
-  const TILE_GROUPS = [
-    { label: '⚔ 出阵', keys: ['raid', 'sortie', 'sakura', 'practice'] },
-    { label: '🏕 后勤', keys: ['expedition', 'dispatch', 'forge', 'sugar', 'snapshot'] },
-  ];
-
-  function renderTile(key, info) {
+  // ── 配置页卡片：参数内嵌，运行按钮小小的 ──
+  function renderConfigCard(key, info) {
     const running = isRunning && currentScript === key;
     const card = document.createElement('div');
-    card.className = 'script-card' + (running ? ' running' : '');
+    card.className = 'script-card config-card' + (key === 'daily' ? ' wide' : '')
+                   + (running ? ' running' : '');
     card.dataset.script = key;
 
     const head = document.createElement('div');
     head.className = 's-head';
-    head.innerHTML = `<span class="s-label">${escHtml(info.label)}</span>`
+    head.innerHTML = `<span class="s-label">${FUNC_ICONS[key] || '🧰'} ${escHtml(info.label)}</span>`
       + `<span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>`;
     card.appendChild(head);
 
@@ -658,52 +635,34 @@
     desc.textContent = info.desc;
     card.appendChild(desc);
 
+    // 参数表单直接嵌卡里（DOM 搬家，已填的内容和条件显隐都活着）
+    const form = paramForms[key];
+    if (form) card.appendChild(form);
+
     const actions = document.createElement('div');
-    actions.className = 's-actions';
-    if ((info.params || []).length) {
-      const gear = document.createElement('button');
-      gear.className = 's-gear';
-      gear.type = 'button';
-      gear.title = '参数';
-      gear.textContent = '⚙';
-      gear.addEventListener('click', () => openParamModal(key));
-      actions.appendChild(gear);
-    }
+    actions.className = 's-actions config-actions';
     const runBtn = document.createElement('button');
-    runBtn.className = 's-run';
+    runBtn.className = 's-run s-run-sm';
     runBtn.textContent = running ? '⏳ 正在跑…' : '▶ 运行';
     runBtn.disabled = isRunning;
-    runBtn.addEventListener('click', () => runScript(key, collectParams(getForm(key) || card)));
+    runBtn.addEventListener('click', () => runScript(key, paramsOf(key)));
     actions.appendChild(runBtn);
     card.appendChild(actions);
     return card;
   }
 
-  // ── 脚本卡片渲染 ──
+  // ── 渲染：配置卡片 + 概览功能列表 + 选中区 ──
   function renderScripts() {
     ensureParamForms();
-    renderHero();
 
     els.scriptGrid.innerHTML = '';
-    const placed = new Set(TILE_GROUPS.flatMap(g => g.keys));
-    // 注册表里有但分组里没写的新脚本，兜底进「其他」，不会丢
-    const others = Object.keys(scriptMeta).filter(k => k !== 'daily' && !placed.has(k));
-    const groups = others.length
-      ? [...TILE_GROUPS, { label: '🧰 其他', keys: others }]
-      : TILE_GROUPS;
+    const grid = document.createElement('div');
+    grid.className = 'config-grid';
+    scriptOrder().forEach(k => grid.appendChild(renderConfigCard(k, scriptMeta[k])));
+    els.scriptGrid.appendChild(grid);
 
-    groups.forEach(g => {
-      const keys = g.keys.filter(k => scriptMeta[k]);
-      if (!keys.length) return;
-      const section = document.createElement('div');
-      section.className = 'tile-group';
-      section.innerHTML = `<div class="group-label">${escHtml(g.label)}</div>`;
-      const grid = document.createElement('div');
-      grid.className = 'group-grid';
-      keys.forEach(k => grid.appendChild(renderTile(k, scriptMeta[k])));
-      section.appendChild(grid);
-      els.scriptGrid.appendChild(section);
-    });
+    renderFuncList();
+    renderFuncDetail();
   }
 
   async function runScript(name, params) {
@@ -746,7 +705,7 @@
         currentScript = data.current;
         updateStatus(data.running, data.current);
         renderScripts();
-        if (!data.running) loadHonmaruStatus();  // 跑完刷新状态条
+        if (!data.running) loadDashboard();  // 跑完刷新统计表
       }
     } catch(e) {}
   }
@@ -1041,15 +1000,13 @@
   }
 
   async function saveSettings() {
-    // 从常驻表单仓库收集当前参数（弹窗开着的那个也算上）
+    // 从常驻参数表单收集当前参数
     const allParams = {};
-    document.querySelectorAll('#param-store .param-form, #param-modal-body .param-form')
-      .forEach(form => {
-        const name = form.dataset.script;
-        if (!name) return;
-        allParams[name] = collectParams(form);
-      });
-    // 保存当前日志显示模式也算上（前端偏好）
+    Object.values(paramForms).forEach(form => {
+      const name = form.dataset.script;
+      if (!name) return;
+      allParams[name] = collectParams(form);
+    });
     const payload = {params: allParams};
     try {
       const r = await fetch('/api/saved-settings', {
@@ -1083,12 +1040,10 @@
     await loadLogs();
     await loadScripts();
     await loadChatHistory();
-    loadHonmaruStatus();
     loadSchedule();
     loadDashboard();
     connectSSE();
     setInterval(pollStatus, 3000);
-    setInterval(loadHonmaruStatus, 60000);  // 状态条每分钟刷
     document.querySelector('[data-tab="chat"]').addEventListener('click', () => {
       setTimeout(() => els.chatInput.focus(), 100);
     });
