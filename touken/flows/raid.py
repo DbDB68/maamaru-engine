@@ -211,21 +211,35 @@ class RaidMixin:
 
     _battle_loop_result: tuple = (False, 0)
 
-    def battle_loop_stream(self):
+    def battle_loop_stream(self, cfg_key: str = "raid", tag: str = "[RAID]",
+                           need_battle: bool = True, debug_dir: str = None):
         """
-        战斗循环：OCR"战斗"连点下一场，安全区跳动画，回到联队战界面算一圈完。
+        战斗循环：OCR"战斗"连点下一场，安全区跳动画，回到活动界面算一圈完。
         结果放在 self._battle_loop_result = (是否完成, 打了几场)。
 
-        出发后有短暂的过场，联队战标题还留在屏幕上，
-        此时一圈结束判定会误命中——冷静期内不判结束，且至少要打过 1 场才算真结束。
+        出发后有短暂的过场，活动标题还留在屏幕上，
+        此时一圈结束判定会误命中——冷静期内不判结束。
+
+        cfg_key: 读哪段配置（raid / pumpkin 共用本循环）
+        tag: 日志前缀
+        need_battle: True=至少打过1场才算结束（联队战，防过场误命中）；
+                     False=全自动战斗的活动（南瓜），靠冷静期就够
+        debug_dir: 调试截图目录，给了就把每帧存下来（抓获得动画用）
         """
-        cfg = self.config.get("raid", {})
+        cfg = self.config.get(cfg_key, {})
         battles = 0
         round_done = False
         end_cfg = cfg["round_end"]
-        end_roi = roi_4to4(*end_cfg["roi"])
+        # roi 可留空：有的模板（RGBA 的 ui南瓜）在 MAA 的 roi 匹配下会神秘不中，
+        # 全屏 + 高阈值一样稳，标题本身够独特
+        end_roi = roi_4to4(*end_cfg["roi"]) if end_cfg.get("roi") else None
         battle_cfg = cfg["battle_ocr"]
         battle_roi = roi_4to4(*battle_cfg["roi"])
+
+        if debug_dir:
+            from pathlib import Path as _P
+            _P(debug_dir).mkdir(parents=True, exist_ok=True)
+        debug_idx = 0
 
         battle_loop_start = time.time()
         END_CHECK_GRACE_SEC = 20
@@ -233,17 +247,21 @@ class RaidMixin:
         for _ in range(300):  # 安全上限，防死循环
             self.maa.screenshot(force=True)
 
+            if debug_dir:
+                debug_idx += 1
+                self.maa.save_screenshot(f"{debug_dir}/f{debug_idx:03d}.png", force=False)
+
             # 继续下一场？（右下角"战斗"按钮）
             battle_btn = self.maa.ocr(expected=battle_cfg["expected"], roi=battle_roi)
             if battle_btn:
                 battles += 1
-                yield f"[RAID] 第 {battles} 场"
+                yield f"{tag} 第 {battles} 场"
                 self.maa.click(battle_btn)
                 time.sleep(3.0)
                 continue
 
-            # 一圈结束？（左上角联队战标题，高阈值防战斗中误认）
-            if battles >= 1 and time.time() - battle_loop_start > END_CHECK_GRACE_SEC:
+            # 一圈结束？（活动标题回到屏幕上，高阈值防战斗中误认）
+            if (battles >= 1 or not need_battle) and time.time() - battle_loop_start > END_CHECK_GRACE_SEC:
                 if self.maa.template_match(end_cfg["template"], end_roi, end_cfg["threshold"]):
                     round_done = True
                     break

@@ -20,7 +20,6 @@ from fastapi.staticfiles import StaticFiles
 
 from .log_store import get_store
 from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
-from .chat_ai import get_ai
 
 # ── 路径 ──
 _HERE = Path(__file__).resolve().parent
@@ -61,6 +60,15 @@ def _on_script_message(payload: dict):
                 loop.run_until_complete(_broadcast_queue.put(payload))
         except RuntimeError:
             pass  # 没有事件循环时静默丢弃
+
+    # 事件播报器：狐之助主动开口（QQ/ntfy）。播报挂了不许拖累日志管道
+    try:
+        from .broadcaster import get_broadcaster
+        bc = get_broadcaster()
+        if bc is not None:
+            bc.feed(payload)
+    except Exception:
+        pass
 
 
 # ── 注册脚本 ──
@@ -138,6 +146,21 @@ def _build_raid(config_path, params):
         max_rounds=_i(params, "rounds", 3),
         team_no=_i(params, "team_no", 3),
         max_buys=_i(params, "max_buys", 30))
+
+
+def _build_pumpkin(config_path, params):
+    difficulty = _i(params, "difficulty", 0)
+    watch_raw = params.get("watch") or ""
+    if isinstance(watch_raw, list):
+        watch = [str(w).strip() for w in watch_raw if str(w).strip()]
+    else:
+        watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
+    yield from _make_agent(config_path).pumpkin_stream(
+        max_rounds=_i(params, "rounds", 1),
+        team_no=_i(params, "team_no", 3),
+        difficulty=difficulty or None,
+        watch_names=watch or None,
+        max_skips=_i(params, "max_skips", 10))
 
 
 def _build_sortie(config_path, params):
@@ -236,6 +259,22 @@ register_script("raid", "联队战", "活动图刷票，默认部队三",
                         {"key": "max_buys", "type": "number",
                          "label": "手形最多买几次（加班烧小判用）",
                          "default": 30, "min": 0, "max": 99}])
+register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
+                _build_pumpkin,
+                params=[_team_field("3"),
+                        {"key": "rounds", "type": "number",
+                         "label": "刷几局（一局=九宫格全翻完）",
+                         "default": 1, "min": 1, "max": 99},
+                        {"key": "difficulty", "type": "select", "label": "难度",
+                         "options": [["0", "不点（用当前tab）"],
+                                     ["1", "初级"], ["2", "中级"], ["3", "上级"]],
+                         "default": "0"},
+                        {"key": "watch", "type": "text",
+                         "label": "只刷这些刀（逗号分隔，留空=全刷不认人）",
+                         "default": "", "placeholder": "例：小竜景光,浦島虎徹"},
+                        {"key": "max_skips", "type": "number",
+                         "label": "更新令牌最多烧几枚（认出不想要的才烧）",
+                         "default": 10, "min": 0, "max": 99}])
 register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
                 _build_sortie,
                 params=[_team_field("3"),
@@ -308,11 +347,16 @@ async def startup():
 
     start_scheduler(str(_CONFIG_PATH), _sched_emit)
 
-    # Bot 启动（配了 panel_config.json bot.enabled=true 才会启）
-    from .agent import AgentGateway
+    # Bot 启动（配了 panel_config.json 才启；QQ/TG 各自独立开关）
+    from .bot_qq import init_qq
+    _qq_sender = init_qq(app, _get_gateway)
+
     from .bot_telegram import start_bot as _start_bot
-    _agent = AgentGateway(str(_PANEL_CONFIG))
-    _bot_instance = _start_bot(_agent)
+    _bot_instance = _start_bot(_get_gateway())
+
+    # 事件播报器：挂上 QQ 出口（没配 QQ 也能跑，只发 ntfy）
+    from .broadcaster import init_broadcaster
+    init_broadcaster(qq_sender=_qq_sender)
 
     # 暴露给 API 路由用：机器人控制
     import __main__ as _bm
@@ -398,7 +442,19 @@ async def api_stop_script():
     return {"ok": True}
 
 
-# ── API：聊天 ──
+# ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
+
+_agent_gateway = None
+
+
+def _get_gateway():
+    """Agent 网关单例。chat-config 保存后置 None 重建，新配置即生效"""
+    global _agent_gateway
+    if _agent_gateway is None:
+        from .agent import AgentGateway
+        _agent_gateway = AgentGateway(str(_PANEL_CONFIG))
+    return _agent_gateway
+
 
 @app.get("/api/chat/history")
 async def api_chat_history():
@@ -406,25 +462,29 @@ async def api_chat_history():
     return {"history": store.get_chat_history()}
 
 
+# sync 的 LLM 调用走线程池，别卡事件循环（SSE 心跳全靠它）
+from starlette.concurrency import run_in_threadpool as _run_io
+
+
 @app.post("/api/chat")
 async def api_chat(request: Request):
+    """面板「近侍」tab：已并轨 Agent 网关——聊天归聊天，说干活就真去干活"""
     body = await request.json()
     message = body.get("message", "").strip()
     if not message:
         return JSONResponse({"reply": "（狐之助歪了歪头：主君，你说什么？）"})
 
-    ai = get_ai(str(_PANEL_CONFIG))
+    store = get_store()
+    store.add_chat("user", message)
     try:
-        reply = ai.chat(message)
+        reply = await _run_io(_get_gateway().process, message, "web")
     except Exception as exc:
         reply = f"（狐之助耳朵耷拉下来：主君…我脑子冒烟了 — {exc}）"
+    store.add_chat("assistant", reply)   # 历史展示照旧走 log_store
     return {"reply": reply}
 
 
 # ── API：Agent 网关（跨渠道 LLM 入口）──
-
-_agent_gateway = None
-
 
 @app.post("/api/agent")
 async def api_agent(request: Request):
@@ -434,11 +494,6 @@ async def api_agent(request: Request):
     Body: {"message": "...", "channel": "qq"}
     Returns: {"reply": "...", "tool_called": true/false}
     """
-    from .agent import AgentGateway
-    global _agent_gateway
-    if _agent_gateway is None:
-        _agent_gateway = AgentGateway(str(_PANEL_CONFIG))
-
     body = await request.json()
     message = body.get("message", "").strip()
     channel = body.get("channel", "qq")
@@ -446,7 +501,7 @@ async def api_agent(request: Request):
         return {"reply": "（狐之助歪了歪头：你说什么？）", "tool_called": False}
 
     try:
-        reply = _agent_gateway.process(message, channel=channel)
+        reply = await _run_io(_get_gateway().process, message, channel)
         return {"reply": reply, "tool_called": True}
     except Exception as exc:
         return {"reply": f"（狐之助耳朵耷拉下来：脑子冒烟了 — {exc}）", "tool_called": False}
@@ -514,6 +569,7 @@ _STEP_FLAVOR = {
 _SCRIPT_FLAVOR = {
     "daily": "正在爆肝日课📋",
     "raid": "正在和时间溯行军搏斗中⚔️",
+    "pumpkin": "正在南瓜田里刨剪影🎃",
     "sortie": "正在出阵打图🗡",
     "sakura": "正在给刀剑男士刷樱花🌸",
     "practice": "正在演练场挑软柿子捏🥊",
@@ -670,6 +726,8 @@ async def api_save_chat_config(request: Request):
     _PANEL_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     from .chat_ai import reload_ai
     reload_ai(str(_PANEL_CONFIG))  # 热重载，不用重启面板
+    global _agent_gateway
+    _agent_gateway = None            # Agent 网关也重建，新 key/模型/人设即生效
     return {"ok": True}
 
 

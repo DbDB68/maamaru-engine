@@ -941,6 +941,61 @@
     "auto_buy_ticket": true,
     "max_buys_per_run": 30
   },
+  "pumpkin": {
+    "team_no": 3,
+    "silhouette_lib": "silhouette_lib",
+    "identify_min_battles": 4,
+    "activity_entry": {
+      "template": "活动.png"
+    },
+    "ui_title": {
+      "template": "刮刮乐/ui南瓜.png"
+    },
+    "difficulty_tabs": {
+      "1": [137, 163],
+      "2": [297, 163],
+      "3": [437, 163]
+    },
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [506, 1, 774, 77]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "confirm_ui": {
+      "template": "team/ui出阵确认.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png",
+      "roi": [536, 565, 742, 637]
+    },
+    "refresh_button": {
+      "template": "刮刮乐/剪影更新.png"
+    },
+    "board_full_ocr": {
+      "expected": "已解锁",
+      "roi": [230, 300, 600, 390]
+    },
+    "refresh_confirm": {
+      "template": "通用_确定.png"
+    },
+    "battle_ocr": {
+      "expected": "战斗",
+      "roi": [1034, 586, 1154, 646]
+    },
+    "round_end": {
+      "template": "刮刮乐/ui南瓜.png",
+      "threshold": 0.9
+    },
+    "skip_tap": [775, 695]
+  },
   "naihanka": {
     "start_button": {
       "template": "内番开始.png"
@@ -1276,8 +1331,8 @@
     }
   },
   "notify": {
-    "enabled": false,
+    "enabled": true,
     "server": "https://ntfy.sh",
-    "topic": "YOUR_NTFY_TOPIC_HERE"
+    "topic": "maamaru-99e61832"
   }
 }

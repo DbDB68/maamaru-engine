@@ -139,8 +139,9 @@ class SmithMixin:
                         yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
                         try:
                             from ..notify import notify
+                            # 标题必须 ASCII（http.client 按 latin-1 编码头，中文/emoji 会静默发不出去）
                             notify(f"锻刀命中目标时长 {hit}！快去看炉子",
-                                   title="🎉 限锻喜报", tags="tada,sword")
+                                   title="Forge Hit!", tags="tada,sword")
                         except Exception:
                             pass
                 else:

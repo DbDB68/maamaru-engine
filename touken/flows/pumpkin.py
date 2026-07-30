@@ -1,0 +1,434 @@
+# -*- coding: utf-8 -*-
+"""
+上层业务：南瓜大作战（刮刮乐/九宫格活动）
+
+玩法（用户口述 + 实屏确认）：
+  活动界面点"部队选择" → 选部队 → 即刻出阵 → 确认弹窗确定
+  → 战斗循环（OCR"战斗"连点 + 安全区跳动画）→ 回到活动界面
+  → 重复，直到九宫格 9 格全翻完 → 获得刀剑男士（动画要点掉）
+  → 点"剪影更新"（二次弹窗确定）开新一局 → 继续刷
+
+两种模式：
+  死板版（默认）：不认剪影是谁，翻到谁是谁，全翻完才更新
+  智能版（给 watch_names）：每场回来后认剪影——
+    认出是目标刀 → 继续刷完这块板子；
+    认出不是目标 → 点剪影更新提前换板子（烧 1 枚更新令牌）；
+    认不准 → 不管，接着打，下一场回来再认
+  "九宫格满了"的判定：左侧面板「已解锁所有面板」OCR，不靠猜——
+  猜错的代价是误点剪影更新白烧一枚更新令牌（血泪教训）
+  活动图不存在刀剑破坏；刀装警告仍按老规矩停下上报
+"""
+
+import time
+from pathlib import Path
+
+from ..maa_adapter import roi_4to4
+from ..silhouette import load_library, extract_observed, identify, is_confident, MIN_BLACK_PIXELS
+
+
+class PumpkinMixin:
+    """南瓜大作战流程。依赖宿主类的 navigate_to_stream、_click_point、battle_loop_stream。"""
+
+    _battle_started: bool = False
+    _refresh_ok: bool = False
+    _abort: str = ""  # 非空 = 必须立刻停的原因
+    _silhouette_lib = None      # 剪影素材库缓存；False = 加载失败别再试
+    _identify_decision = None   # None=认不准 / "keep"=目标刀 / "skip"=烧令牌换板子
+    _identify_name = None       # 本次认出的名字（仅 decision 非 None 时有值）
+
+    def pumpkin_stream(self, max_rounds: int = 1, team_no: int = None,
+                       difficulty: int = None, debug_dir: str = None,
+                       watch_names: list = None, max_skips: int = None):
+        """
+        流式刷南瓜大作战
+
+        Args:
+            max_rounds: 刷几局（一局 = 九宫格全翻完并更新出新板子）
+            team_no: 部队编号，默认读配置 pumpkin.team_no
+            difficulty: 难度 1初级/2中级/3上级，None=不点（用游戏当前 tab）
+            debug_dir: 剪影识别数据采集目录（给了就存每帧战斗画面+每次回板子截图）
+            watch_names: 智能版目标刀名单（如 ["小竜景光"]），None/空=死板版全刷
+            max_skips: 智能版最多烧几枚更新令牌，默认读配置，再默认 10
+        """
+        cfg = self.config.get("pumpkin", {})
+        if not cfg:
+            yield "[南瓜] 未配置南瓜大作战"
+            return
+
+        team_no = team_no or cfg.get("team_no", 3)
+        if max_skips is None:
+            max_skips = cfg.get("max_skips", 10)
+        min_battles = cfg.get("identify_min_battles", 4)  # 第几场起开始认（翻太少认了也不准）
+        watch_names = [n.strip() for n in (watch_names or []) if n and n.strip()]
+        smart = bool(watch_names)
+
+        teams = self.config.get("team_select", {}).get("teams", {})
+        if str(team_no) not in teams:
+            yield f"[南瓜] 配置里没有部队{team_no}的坐标"
+            return
+
+        self._abort = ""
+        if smart:
+            yield f"[南瓜] 智能模式：只刷 {watch_names}，认出别的刀就烧令牌换板子（上限 {max_skips} 枚）"
+
+        # ========== 1. 导航到出阵 ==========
+        yield "[南瓜] 正在导航到出阵..."
+        for nav_msg in self.navigate_to_stream("出阵"):
+            yield nav_msg
+        if self.current_location != "出阵":
+            yield "[南瓜] 到达出阵失败"
+            return
+
+        # ========== 2. 进入活动界面 ==========
+        entered = False
+        for _ in range(6):
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["ui_title"]["template"]):
+                entered = True
+                break
+            entry = self.maa.template_match(cfg["activity_entry"]["template"])
+            if entry:
+                self.maa.click(entry)
+                time.sleep(2.0)
+            else:
+                time.sleep(1.0)
+        if not entered:
+            yield "[南瓜] 进不去活动界面（南瓜过季了？）"
+            return
+        yield "[南瓜] 到达南瓜大作战界面"
+        self.set_progress("pumpkin")
+
+        # 选难度（None=保持游戏当前 tab）
+        if difficulty:
+            tab = cfg.get("difficulty_tabs", {}).get(str(difficulty))
+            if tab:
+                self._click_point(tab)
+                time.sleep(0.8)
+                yield f"[南瓜] 已切难度 tab（{difficulty}）"
+
+        # ========== 3. 主循环：打 → 翻格 → 满了更新 → 下一局 ==========
+        # 板子满没满看左侧面板的「已解锁所有面板」官方提示，不靠猜——
+        # 猜错的代价是误点剪影更新白烧一枚更新令牌（血泪教训）
+        boards_done = 0
+        battles_total = 0
+        misses = 0  # 连续开不出战斗的次数，防死循环
+        board_battles = 0       # 当前这块板子打了几场（认剪影用，换板子清零）
+        keep_confirmed = False  # 当前板子已确认是目标刀，不用再认
+        pending_name = None     # 上一次认出的名字，连续两次一致才动手（防一次误读烧令牌）
+        skips = 0               # 智能版烧掉的更新令牌数
+
+        while boards_done < max_rounds:
+            if self._abort:
+                yield self._abort
+                return
+
+            # 3.1 确保在活动界面（获得动画/弹窗可能盖着，点安全区扒拉掉）
+            if not self._ensure_on_board(cfg):
+                yield "[南瓜] 回不到活动界面，卡在未知画面，停"
+                return
+
+            # 3.2 板子真满了？→ 剪影更新开新局
+            full_cfg = cfg["board_full_ocr"]
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
+                yield "[南瓜] 面板全解锁，点剪影更新开新局..."
+                for msg in self._refresh_board_stream(cfg):
+                    yield msg
+                if not self._refresh_ok:
+                    yield "[南瓜] 剪影更新没生效（没令牌了？），收工"
+                    return
+                boards_done += 1
+                misses = 0
+                board_battles = 0
+                keep_confirmed = False
+                pending_name = None
+                if boards_done < max_rounds:
+                    yield f"[南瓜] ===== 第 {boards_done + 1}/{max_rounds} 局，新板子开刷 ====="
+                else:
+                    yield f"[南瓜] 第 {boards_done} 局刷完"
+                continue
+
+            # 3.25 智能认人：打够场数后每场回来认一次剪影，
+            # 连续两次认出同一个名字才动手——是目标就刷完，不是就烧令牌换板子
+            if smart and not keep_confirmed and board_battles >= min_battles:
+                for msg in self._identify_board_stream(cfg, watch_names):
+                    yield msg
+                decision = self._identify_decision
+                if decision in ("keep", "skip"):
+                    if self._identify_name != pending_name:
+                        pending_name = self._identify_name
+                        yield f"[南瓜] 先记住【{pending_name}】，再打一场复核，免得误烧令牌"
+                    elif decision == "keep":
+                        keep_confirmed = True
+                        yield f"[南瓜] 复核一致，就是【{pending_name}】，安心刷完"
+                    else:
+                        skips += 1
+                        if skips > max_skips:
+                            yield f"[南瓜] 已烧 {max_skips} 枚更新令牌到上限，这块板子不换了，收工"
+                            return
+                        yield f"[南瓜] 复核一致，是【{pending_name}】，确认不要，烧令牌"
+                        for msg in self._refresh_board_stream(cfg):
+                            yield msg
+                        if not self._refresh_ok:
+                            yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
+                            return
+                        board_battles = 0
+                        keep_confirmed = False
+                        pending_name = None
+                        misses = 0
+                        yield f"[南瓜] ===== 换新板子（令牌 {skips}/{max_skips}），接着认 ====="
+                        continue
+
+            # 3.3 尝试开一场战斗
+            for msg in self._start_battle_stream(cfg, teams, team_no):
+                yield msg
+            if self._abort:
+                yield self._abort
+                return
+
+            if self._battle_started:
+                misses = 0
+                # 南瓜是全自动战斗（没有"战斗"按钮可点），靠冷静期+标题回归判结束
+                battle_debug = None
+                if debug_dir:
+                    battle_debug = f"{debug_dir}/b{battles_total + 1:02d}"
+                for battle_msg in self.battle_loop_stream(cfg_key="pumpkin", tag="[南瓜]",
+                                                          need_battle=False,
+                                                          debug_dir=battle_debug):
+                    yield battle_msg
+                round_done, _ = self._battle_loop_result
+                battles_total += 1  # 南瓜一次出阵=一场，按出阵次数计
+                board_battles += 1
+                if not round_done:
+                    yield f"[南瓜] ⚠️ 战斗循环超过安全上限，强制停（共出阵 {battles_total} 次），你去看看卡哪了"
+                    return
+                yield f"[南瓜] 第 {battles_total} 次出阵回来，格子 +1"
+                # 回来后可能有"获得刀剑男士"动画，点几下安全区
+                for _ in range(3):
+                    self._click_point(cfg["skip_tap"])
+                    time.sleep(0.8)
+                if debug_dir:
+                    self._ensure_on_board(cfg)
+                    self.maa.save_screenshot(f"{debug_dir}/board_after_b{battles_total:02d}.png")
+                continue
+
+            # 3.4 板子没满但开不了战斗 → 狐狸奖励弹窗之类的挡路，驱散再试
+            misses += 1
+            if misses >= 3:
+                yield "[南瓜] 板子没满但战斗开不起来，弹窗驱散了也没用，你去看看卡哪了，停"
+                return
+            yield "[南瓜] 战斗没开起来，点点安全区驱散弹窗再试..."
+            for _ in range(3):
+                self._click_point(cfg["skip_tap"])
+                time.sleep(0.8)
+
+        if smart and skips:
+            yield f"[南瓜] 收工，刷了 {boards_done} 局，共出阵 {battles_total} 次，烧令牌 {skips} 枚"
+        else:
+            yield f"[南瓜] 收工，刷了 {boards_done} 局，共出阵 {battles_total} 次"
+
+    # ---------- 内部：智能认人 ----------
+
+    def _get_silhouette_lib(self, cfg: dict):
+        """加载剪影素材库（只加载一次；失败置 False 不再重试）"""
+        if self._silhouette_lib is not None and self._silhouette_lib is not False:
+            return self._silhouette_lib
+        if self._silhouette_lib is False:
+            return None
+        lib_dir = self._root / cfg.get("silhouette_lib", "silhouette_lib")
+        try:
+            lib = load_library(lib_dir)
+            if not lib:
+                raise ValueError("库里一个模板都没有")
+            self._silhouette_lib = lib
+            return lib
+        except Exception as exc:
+            print(f"[南瓜] 剪影素材库加载失败: {exc}（{lib_dir}）")
+            self._silhouette_lib = False
+            return None
+
+    def _identify_board_stream(self, cfg: dict, watch_names: list):
+        """
+        认当前板子的剪影。结果放在 self._identify_decision + self._identify_name：
+          None  = 认不准/素材太少，继续打下一场回来再认
+          "keep" = 是目标刀，刷完它
+          "skip" = 不是目标刀，烧令牌换板子
+        """
+        self._identify_decision = None
+        self._identify_name = None
+
+        lib = self._get_silhouette_lib(cfg)
+        if lib is None:
+            yield "[南瓜] ⚠️ 剪影素材库加载失败，这局当死板版刷"
+            self._identify_decision = "keep"  # 别误烧令牌，也别再认了
+            return
+
+        img = self.maa.screenshot(force=True)
+        if img is None:
+            return
+        obs = extract_observed(img)
+        black = int(obs.sum())
+        if black < MIN_BLACK_PIXELS:
+            yield f"[南瓜] 剪影才翻出 {black} 个黑像素，认不出，继续打"
+            return
+
+        t0 = time.time()
+        results = identify(obs, lib)
+        if not results:
+            return
+        top_str = " / ".join(f"{name}({view}) {score:.2f}" for score, name, view in results[:3])
+        yield f"[南瓜] 剪影识别（{time.time() - t0:.0f}s）：{top_str}"
+
+        if not is_confident(results):
+            yield "[南瓜] 分差不够，认不准，再打一场回来看"
+            return
+
+        name = results[0][1]
+        self._identify_name = name
+        if name in watch_names:
+            yield f"[南瓜] 认出来了，是【{name}】——目标刀！刷完这块板子"
+            self._identify_decision = "keep"
+        else:
+            yield f"[南瓜] 认出来了，是【{name}】，不是目标，烧令牌换板子"
+            self._identify_decision = "skip"
+
+    # ---------- 内部：确保在活动界面 ----------
+
+    def _ensure_on_board(self, cfg: dict) -> bool:
+        """在活动界面返回 True；被动画/弹窗盖着就点安全区扒拉，扒拉不回来返回 False。"""
+        for _ in range(8):
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["ui_title"]["template"]):
+                return True
+            self._click_point(cfg["skip_tap"])
+            time.sleep(1.0)
+        return False
+
+    # ---------- 内部：开一场战斗 ----------
+
+    def _start_battle_stream(self, cfg: dict, teams: dict, team_no: int):
+        """
+        点部队选择 → 选部队 → 即刻出阵 → 确定。
+        结果放在 self._battle_started；九宫格满了开不起来时置 False（不算错误）。
+        遇上必须人来看的情况置 self._abort。
+        """
+        self._battle_started = False
+
+        deploy = self.maa.template_match(cfg["deploy_button"]["template"])
+        if not deploy:
+            yield "[南瓜] 没找到部队选择按钮"
+            return
+        self.maa.click(deploy)
+        time.sleep(1.5)
+
+        ocr_cfg = cfg["team_ui_ocr"]
+        roi = roi_4to4(*ocr_cfg["roi"])
+        team_ui_ok = False
+        for _ in range(8):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
+                team_ui_ok = True
+                break
+            time.sleep(0.5)
+        if not team_ui_ok:
+            # 部队界面没开：可能是弹窗挡路，不代表板子满了（满没满看「已解锁」OCR）
+            yield "[南瓜] 部队选择界面没打开"
+            # 把拦路弹窗点掉再退出去，免得挡后面的剪影更新
+            self.maa.screenshot(force=True)
+            ok = self.maa.template_match(cfg["confirm_button"]["template"])
+            if ok:
+                self.maa.click(ok)
+                time.sleep(1.0)
+            else:
+                self._click_point(cfg["skip_tap"])
+                time.sleep(0.8)
+            return
+
+        # 选部队（固定坐标，点两下确认）
+        self._click_point(teams[str(team_no)])
+        time.sleep(0.3)
+        self._click_point(teams[str(team_no)])
+        time.sleep(0.5)
+
+        # 即刻出阵
+        depart = self.maa.template_match(cfg["depart_button"]["template"])
+        if not depart:
+            yield "[南瓜] 找不到即刻出阵按钮"
+            return
+        self.maa.click(depart)
+        time.sleep(1.5)
+
+        self.maa.screenshot(force=True)
+
+        # 刀装未满警告 → 老规矩：停下上报
+        if self.maa.template_match(cfg["equip_warning_button"]["template"]):
+            self._abort = "[南瓜] ⚠️ 刀装未满警告！按规矩停下来了，你去游戏里看一眼要不要补刀装"
+            return
+
+        # 确认弹窗（可能有也可能直接进图）
+        if self.maa.template_match(cfg["confirm_ui"]["template"]):
+            confirm_cfg = cfg["confirm_button"]
+            confirm_roi = roi_4to4(*confirm_cfg["roi"]) if "roi" in confirm_cfg else None
+            confirm = self.maa.template_match(confirm_cfg["template"], confirm_roi)
+            if confirm:
+                self.maa.click(confirm)
+                time.sleep(2.0)
+
+        # 验证真出去了：格子有编队任务，条件不满足会被游戏拒回部队选择
+        # （拒的时候弹个提示窗，先点掉再看标题）
+        time.sleep(2.0)
+        self.maa.screenshot(force=True)
+        reject_ok = self.maa.template_match(cfg["confirm_button"]["template"])
+        if reject_ok:
+            self.maa.click(reject_ok)
+            time.sleep(1.0)
+            self.maa.screenshot(force=True)
+        if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
+            self._abort = ("[南瓜] ⚠️ 即刻出阵被游戏拒了，还停在部队选择界面"
+                           "——编队不满足这个格子的任务条件（左侧任务栏写着要啥），你去改下编队再来")
+            return
+
+        self._battle_started = True
+        yield "[南瓜] 出发，进入战斗循环"
+
+    # ---------- 内部：剪影更新 ----------
+
+    def _refresh_board_stream(self, cfg: dict):
+        """
+        剪影更新 → 二次弹窗确定。结果放在 self._refresh_ok。
+        更新完会校验：能不能重新点开部队选择界面（能 = 新板子出来了）。
+        """
+        self._refresh_ok = False
+
+        self.maa.screenshot(force=True)
+        refresh = self.maa.template_match(cfg["refresh_button"]["template"])
+        if not refresh:
+            yield "[南瓜] 找不到剪影更新按钮"
+            return
+        self.maa.click(refresh)
+        time.sleep(1.5)
+
+        # 二次确认弹窗
+        self.maa.screenshot(force=True)
+        confirm = self.maa.template_match(cfg["refresh_confirm"]["template"])
+        if not confirm:
+            yield "[南瓜] 剪影更新的确认弹窗没弹出来"
+            return
+        self.maa.click(confirm)
+        time.sleep(2.0)
+
+        # 可能有"新剪影出现了"之类的动画，点掉
+        for _ in range(3):
+            self._click_point(cfg["skip_tap"])
+            time.sleep(0.8)
+
+        # 校验：回活动界面 + 部队选择按钮回来了 = 更新成功
+        if not self._ensure_on_board(cfg):
+            yield "[南瓜] 更新完回不到活动界面"
+            return
+        self.maa.screenshot(force=True)
+        if self.maa.template_match(cfg["deploy_button"]["template"]):
+            self._refresh_ok = True
+            yield "[南瓜] 剪影更新完成，新板子就位"
+        else:
+            yield "[南瓜] 更新完部队选择按钮没回来"

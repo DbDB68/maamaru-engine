@@ -157,7 +157,7 @@ class AgentGateway:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=30,
+            timeout=60,   # GLM 带工具+长 system 偶尔 30s+，别把它掐死在半路
         )
 
     def process(self, message: str, channel: str = "qq") -> str:

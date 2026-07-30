@@ -39,3 +39,23 @@ panel/panel_config.json
 # PyInstaller 构建中间产物（spec 保留用于复现打包）
 build/
 .tmp/
+
+# 刮刮乐开发调试（本地标定数据 + 调试截图，不入库）
+silhouette_lab/
+Silhouette1.0.2*/
+*.log
+calib_*.png
+mask_debug.png
+foot_sheet.png
+silhouette_observed.png
+board_full.png
+board_revealed.png
+board_swiped.png
+panel_debug.png
+pumpkin_now.png
+final_state.png
+stuck*.png
+
+# 剪影素材库（群友 Silhouette 工具的产物，本地用，不在公开仓二次分发；
+# 跟 resource/ 一样按需单独发）
+silhouette_lib/

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""剪影识别数据采集：跑一局南瓜，存每帧战斗画面 + 每次回板子截图到 silhouette_lab/"""
+"""南瓜大作战实测入口：部队三，1 局（九宫格翻完并更新出新板子）"""
 from pathlib import Path
 import sys
 
@@ -20,9 +20,8 @@ if not maa.init():
 
 agent = ToukenAgent(str(Path(__file__).parent / "touken_config.json"), maa)
 
-lab = str(Path(__file__).parent / "silhouette_lab" / "board01")
-print(f"=== 数据采集：1 局，存到 {lab} ===")
-for msg in agent.pumpkin_stream(max_rounds=1, team_no=3, difficulty=None, debug_dir=lab):
+print("=== 南瓜大作战试跑：部队三 × 1 局（不切难度，用当前 tab） ===")
+for msg in agent.pumpkin_stream(max_rounds=1, team_no=3, difficulty=None):
     print(msg)
 
 print("=== 结束 ===")

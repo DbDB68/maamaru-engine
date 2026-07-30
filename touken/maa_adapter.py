@@ -204,6 +204,20 @@ class MAAAdapter:
             print(f"[MAA 错误] 截图异常: {exc}")
             return None
 
+    def save_screenshot(self, path: str, force: bool = True) -> bool:
+        """截图存盘（调试用）。BGR numpy → RGB → PNG"""
+        image = self.screenshot(force=force)
+        if image is None:
+            return False
+        try:
+            from PIL import Image as _PILImage
+            _PILImage.fromarray(image[:, :, ::-1]).save(path)
+            print(f"[MAA] 截图已存: {path}")
+            return True
+        except Exception as exc:
+            print(f"[MAA 错误] 截图存盘异常: {exc}")
+            return False
+
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 400) -> bool:
         """滑动（用于列表翻页）"""
         if not self._initialized:

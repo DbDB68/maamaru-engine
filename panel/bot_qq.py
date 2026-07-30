@@ -1,34 +1,45 @@
+# -*- coding: utf-8 -*-
 """
-QQ Bot —— 通过 SnowLuma (OneBot API) 收消息 → Agent 网关 → 回复
+QQ 协议端 —— SnowLuma / NapCat（OneBot v11）HTTP 模式
 
-两种用法：
-  1. NoneBot 插件：直接把本文件丢进 maibot 的 plugins/ 目录
-  2. 独立运行：python -m panel.bot_qq（依赖 SnowLuma HTTP API）
+收消息：OneBot 的 HTTP POST 上报 → 面板的 /onebot/webhook（init_qq 挂到 FastAPI 上）
+发消息：OneBot HTTP API /send_private_msg（私聊回复 + 事件播报）
+
+SnowLuma / NapCat 那边要配两条（以面板跑在 8080 为例）：
+  HTTP 上报地址：http://127.0.0.1:8080/onebot/webhook
+  HTTP API 监听：http://127.0.0.1:5500（本机默认）
+
+设计要点：
+- webhook 必须秒回（OneBot 超时会重推），LLM 慢，所以收到消息立刻 200，
+  Agent 处理丢后台线程，回话走 send_private_msg 主动发。
+- message_id 去重小本本，防止协议端重推导致一句话回两遍。
+- 只接私聊（message_type=private）；群消息直接无视，省得被围观群众玩坏。
+
+配置（panel_config.json）：
+  "bot": {
+    "qq": {
+      "enabled": true,
+      "snowluma_http": "http://127.0.0.1:5500",
+      "admin_qq": [123456789]        // 白名单 + 播报对象；空数组 = 谁都能聊但播报没人收
+    }
+  }
+
+顺带：maibot（NoneBot）用户也可以在插件里 POST /api/agent，那个入口一直开着。
 """
 
-import asyncio
 import json
 import threading
-import time
+from collections import deque
 from pathlib import Path
 
 import httpx
-
-from .agent import AgentGateway
+from fastapi import FastAPI, Request
 
 _HERE = Path(__file__).resolve().parent
 _PANEL_CONFIG = _HERE / "panel_config.json"
 
-BOT_CONFIG = {
-    "snowluma_http": "http://127.0.0.1:5500",       # SnowLuma HTTP API（本地跑，默认 5500）
-    "admin_qq": [],                                   # 管理员 QQ 号（空=谁都能用）
-    "agent_url": "http://127.0.0.1:8080/api/agent",  # 面板 Agent 网关（本地）
-    "poll_interval": 1.5,                             # 轮询间隔（秒）
-}
 
-
-def _read_config() -> dict:
-    """从 panel_config.json 读覆盖设置"""
+def _qq_cfg() -> dict:
     try:
         d = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
         return d.get("bot", {}).get("qq", {})
@@ -36,141 +47,131 @@ def _read_config() -> dict:
         return {}
 
 
-class QQBot:
-    """SnowLuma OneBot 适配 Bot"""
+class QQSender:
+    """OneBot HTTP API 发送端（回复 + 主动播报都用它）"""
 
-    def __init__(self, agent: AgentGateway, config: dict = None):
-        # 默认配置 + panel_config.json 覆盖 + 手动传参覆盖
-        overrides = {**_read_config(), **(config or {})}
-        self._cfg = {**BOT_CONFIG, **overrides}
-        self._running = False
-        self._thread = None
-        self._last_msg_id = 0
-        self._client = httpx.Client(base_url=self._cfg["snowluma_http"], timeout=10)
-        self._admins = set(self._cfg.get("admin_qq", []))
+    def __init__(self, base_url: str):
+        self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=10)
 
-    def start(self):
-        # 测试连接
+    def send_private(self, user_id: int, text: str) -> bool:
         try:
-            r = self._client.get("/get_status", timeout=5)
-            if r.status_code != 200:
-                print(f"[QQ Bot] ⚠️ SnowLuma 连接测试失败（{r.status_code}），试试启动")
-        except Exception:
-            print(f"[QQ Bot] ⚠️ SnowLuma 连不上（{self._cfg['snowluma_http']}），确认地址对不对")
-
-        self._running = True
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._thread.start()
-        print(f"[QQ Bot] 🚀 启动，轮询 {self._cfg['snowluma_http']}")
-
-    def stop(self):
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=3)
-        print("[QQ Bot] 已停止")
-
-    def _poll_loop(self):
-        while self._running:
-            try:
-                self._poll_once()
-            except Exception as exc:
-                print(f"[QQ Bot] 轮询异常: {exc}")
-            time.sleep(self._cfg["poll_interval"])
-
-    def _poll_once(self):
-        """拉一条消息 -> 走 Agent -> 回复"""
-        r = self._client.get("/get_messages", params={"limit": 1}, timeout=5)
-        if r.status_code != 200:
-            return
-        data = r.json()
-        msgs = data.get("data", data.get("messages", [])) if isinstance(data, dict) else []
-        if not msgs:
-            return
-
-        msg = msgs[0]
-        msg_id = msg.get("message_id", 0)
-        if msg_id <= self._last_msg_id:
-            return
-        self._last_msg_id = msg_id
-
-        # 只处理文本消息
-        text = msg.get("message", "")
-        if not text:
-            return
-
-        user_id = msg.get("user_id", 0)
-
-        # 管理员白名单
-        if self._admins and user_id not in self._admins:
-            self._send_reply(user_id, "(狐之助歪了歪头：唔…我不认识你呀)")
-            return
-
-        print(f"[QQ Bot] ← {user_id}: {text[:50]}")
-
-        # 走 Agent
-        try:
-            reply = self._agent.process(text, channel="qq")
-        except Exception as exc:
-            reply = f"(狐之助耳朵耷拉下来：脑子冒烟了 — {exc})"
-
-        self._send_reply(user_id, reply)
-
-    def _send_reply(self, user_id: int, text: str):
-        """通过 SnowLuma API 发私聊"""
-        try:
-            self._client.post("/send_private_msg", json={
-                "user_id": user_id,
+            r = self._client.post("/send_private_msg", json={
+                "user_id": int(user_id),
                 "message": text,
-            }, timeout=5)
-            print(f"[QQ Bot] → {user_id}: {text[:50]}")
+            })
+            ok = r.status_code == 200
+            if ok:
+                print(f"[QQ] → {user_id}: {text[:40]}", flush=True)
+            else:
+                print(f"[QQ] 发送失败（{user_id}）: HTTP {r.status_code}", flush=True)
+            return ok
         except Exception as exc:
-            print(f"[QQ Bot] 发送失败: {exc}")
+            print(f"[QQ] 发送异常（{user_id}）: {exc}", flush=True)
+            return False
 
-
-# ── NoneBot 插件模式 ──
-# 如果你的 maibot 用 NoneBot，在 bot.py 里加这几行：
-
-"""
-from nonebot import on_message
-from nonebot.adapters.onebot.v11 import MessageEvent
-import httpx
-
-maamaru = on_message()
-
-@maamaru.handle()
-async def _(event: MessageEvent):
-    if not event.get_plaintext():
-        return
-    text = event.get_plaintext().strip()
-    async with httpx.AsyncClient() as client:
+    def alive(self) -> bool:
         try:
-            resp = await client.post(
-                "http://127.0.0.1:8080/api/agent",
-                json={"message": text, "channel": "qq"},
-                timeout=30,
-            )
-            reply = resp.json().get("reply", "")
+            return self._client.get("/get_status", timeout=5).status_code == 200
         except Exception:
-            reply = "(狐之助信号不好，主君稍等)"
-    await maamaru.finish(reply)
-"""
+            return False
 
-# ── 独立启动 ──
 
-def start_bot(agent_gateway: AgentGateway, config: dict = None):
-    bot = QQBot(agent_gateway, config)
-    bot.start()
-    return bot
+def _plain_text(event: dict) -> str:
+    """从 OneBot 消息事件里抠纯文本（兼容 string 和 segment 数组两种格式）"""
+    raw = event.get("raw_message")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    msg = event.get("message")
+    if isinstance(msg, str):
+        return msg.strip()
+    if isinstance(msg, list):
+        parts = [seg.get("data", {}).get("text", "")
+                 for seg in msg if isinstance(seg, dict) and seg.get("type") == "text"]
+        return "".join(parts).strip()
+    return ""
 
+
+def init_qq(app: FastAPI, get_agent) -> QQSender | None:
+    """
+    把 /onebot/webhook 挂到 FastAPI app 上。
+
+    Args:
+        app:       面板的 FastAPI 实例
+        get_agent: 无参 callable，返回 AgentGateway（延迟拿，配置热重载后能用新的）
+
+    Returns:
+        QQSender（给播报器当出口）；bot.qq.enabled 没开就返回 None
+    """
+    cfg = _qq_cfg()
+    if not cfg.get("enabled"):
+        print("[QQ] bot.qq.enabled 未开，跳过（panel_config.json）", flush=True)
+        return None
+
+    sender = QQSender(cfg.get("snowluma_http", "http://127.0.0.1:5500"))
+    admins = {int(q) for q in cfg.get("admin_qq", [])}
+    if not admins:
+        print("[QQ] ⚠️ admin_qq 是空的：谁都能聊，但事件播报没人收", flush=True)
+
+    if sender.alive():
+        print("[QQ] 🚀 OneBot 协议端已连接，webhook 挂在 /onebot/webhook", flush=True)
+    else:
+        print("[QQ] ⚠️ 协议端暂时连不上（SnowLuma 没跑？），webhook 照样挂，后面来了就能收", flush=True)
+
+    seen_ids = deque(maxlen=200)   # 消息去重小本本
+
+    @app.post("/onebot/webhook")
+    async def onebot_webhook(request: Request):
+        try:
+            event = await request.json()
+        except Exception:
+            return {"status": "ignored"}
+
+        # 只要私聊消息；心跳/生命周期/群消息一律无视
+        if event.get("post_type") != "message" or event.get("message_type") != "private":
+            return {"status": "ignored"}
+
+        msg_id = event.get("message_id")
+        if msg_id is not None and msg_id in seen_ids:
+            return {"status": "dup"}
+        if msg_id is not None:
+            seen_ids.append(msg_id)
+
+        user_id = event.get("user_id")
+        if not user_id or user_id == event.get("self_id"):
+            return {"status": "ignored"}
+
+        text = _plain_text(event)
+        if not text:
+            return {"status": "ignored"}
+
+        print(f"[QQ] ← {user_id}: {text[:40]}", flush=True)
+
+        # 白名单：配了 admin_qq 就只认自己人
+        if admins and int(user_id) not in admins:
+            sender.send_private(user_id, "（狐之助歪了歪头：唔…我不认识你呀）")
+            return {"status": "ok"}
+
+        # LLM 慢，丢后台线程慢慢想；webhook 先秒回，协议端别等
+        def _reply():
+            try:
+                reply = get_agent().process(text, channel="qq")
+            except Exception as exc:
+                reply = f"（狐之助耳朵耷拉下来：脑子冒烟了 — {exc}）"
+            sender.send_private(user_id, reply)
+
+        threading.Thread(target=_reply, daemon=True).start()
+        return {"status": "ok"}
+
+    return sender
+
+
+# ── 独立测试：python -m panel.bot_qq（起个迷你 FastAPI 只挂 webhook）──
 
 if __name__ == "__main__":
-    # 独立运行测试：python -m panel.bot_qq
-    print("🦊 QQ Bot 独立模式（测试用）")
-    agent = AgentGateway(str(_PANEL_CONFIG))
-    bot = start_bot(agent)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        bot.stop()
-        print("已停止")
+    import uvicorn
+    from .agent import AgentGateway
+
+    _app = FastAPI(title="まあ丸 QQ 协议端（独立测试）")
+    _gw = AgentGateway(str(_PANEL_CONFIG))
+    init_qq(_app, lambda: _gw)
+    uvicorn.run(_app, host="127.0.0.1", port=8081)

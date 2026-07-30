@@ -13,10 +13,10 @@ from pathlib import Path
 
 from .maa_adapter import MAAAdapter
 from .navigator import NavigationMixin
-from .flows import LoginMixin, BattleMixin, RewardsMixin, RaidMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin
+from .flows import LoginMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin
 
 
-class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin):
+class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin):
     """
     刀剑乱舞 Agent 主引擎
     所有操作基于配置文件，不硬编码任何游戏特定内容
@@ -27,7 +27,8 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
             self.config = json.load(f)
         self.maa = maa
         self.current_location = None
-        self._progress_file = Path(config_path).resolve().parent / "status" / "progress.json"
+        self._root = Path(config_path).resolve().parent
+        self._progress_file = self._root / "status" / "progress.json"
 
     def set_progress(self, step: str):
         """上报当前进度给面板仪表盘横幅（如 'raid:lulian'、'daily:内番'）。

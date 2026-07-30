@@ -17,6 +17,12 @@
     logStatus:  $('#log-status'),
     logContainer: $('#log-container'),
     scriptGrid: $('#script-grid'),
+    dailyHero:  $('#daily-hero'),
+    paramModal: $('#param-modal'),
+    paramModalTitle: $('#param-modal-title'),
+    paramModalBody: $('#param-modal-body'),
+    paramModalClose: $('#param-modal-close'),
+    paramStore: $('#param-store'),
     taskIndicator: $('#task-indicator'),
     stopAll:    $('#btn-stop-all'),
     statusDot:  $('#status-dot'),
@@ -420,7 +426,8 @@
   // ── 参数表单渲染 ──
   function renderParamField(scriptName, field) {
     const wrap = document.createElement('div');
-    wrap.className = 'pf pf-' + field.type;
+    // checks 的外层叫 pf-checks-wrap，别和内层 pills 容器 .pf-checks 撞类名
+    wrap.className = 'pf pf-' + (field.type === 'checks' ? 'checks-wrap' : field.type);
     wrap._field = field;   // 条件显隐要用
     const saved = savedParams(scriptName)[field.key];
     const label = document.createElement('label');
@@ -527,66 +534,175 @@
     return params;
   }
 
+  // ── 参数表单：渲染一次常驻 #param-store，弹窗打开时临时搬过去 ──
+  // 表单一直挂在 DOM 里，所以临时改动、条件显隐、参数记忆全都活着
+  function getForm(key) {
+    return els.paramStore.querySelector(`.param-form[data-script="${key}"]`)
+        || els.paramModalBody.querySelector(`.param-form[data-script="${key}"]`);
+  }
+
+  function ensureParamForms() {
+    Object.entries(scriptMeta).forEach(([key, info]) => {
+      if (getForm(key)) return;
+      const fields = info.params || [];
+      if (!fields.length) return;
+      const form = document.createElement('div');
+      form.className = 'param-form';
+      form.dataset.script = key;
+      fields.forEach(f => form.appendChild(renderParamField(key, f)));
+      // 条件显隐：控制器变了就重算，先算一遍初始状态
+      form.querySelectorAll('select[data-param-key]').forEach(sel =>
+        sel.addEventListener('change', () => updateCardVisibility(form)));
+      updateCardVisibility(form);
+      // 日课的勾选变了，Hero 卡上的步骤预览跟着变
+      if (key === 'daily') {
+        form.addEventListener('click', (e) => {
+          if (e.target.closest('.pill') || e.target.closest('[data-act]')) {
+            renderHeroSteps();
+          }
+        });
+      }
+      els.paramStore.appendChild(form);
+    });
+  }
+
+  // ── 参数弹窗 ──
+  let paramModalScript = null;
+
+  function openParamModal(key) {
+    const form = getForm(key);
+    if (!form) return;
+    paramModalScript = key;
+    const label = scriptMeta[key] ? scriptMeta[key].label : key;
+    els.paramModalTitle.textContent = `⚙ ${label} — 参数`;
+    els.paramModalBody.appendChild(form);   // 从仓库搬进弹窗（DOM 节点搬家，状态不丢）
+    els.paramModal.style.display = 'flex';
+  }
+
+  function closeParamModal() {
+    const form = els.paramModalBody.querySelector('.param-form');
+    if (form) els.paramStore.appendChild(form);   // 搬回仓库
+    paramModalScript = null;
+    els.paramModal.style.display = 'none';
+  }
+
+  els.paramModalClose.addEventListener('click', closeParamModal);
+  els.paramModal.addEventListener('click', (e) => {
+    if (e.target === els.paramModal) closeParamModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && els.paramModal.style.display !== 'none') closeParamModal();
+  });
+
+  // ── 一键日课 Hero 卡：每天的 main quest，C 位待遇 ──
+  function renderHeroSteps() {
+    const form = getForm('daily');
+    const box = form && form.querySelector('.pf-checks[data-param-key="steps"]');
+    const el = document.getElementById('hero-steps');
+    if (!box || !el) return;
+    el.innerHTML = [...box.querySelectorAll('.pill')].map(p =>
+      `<span class="hero-chip${p.classList.contains('on') ? '' : ' off'}">${escHtml(p.dataset.value)}</span>`
+    ).join('');
+  }
+
+  function renderHero() {
+    const info = scriptMeta['daily'];
+    if (!info) { els.dailyHero.innerHTML = ''; return; }
+    const running = isRunning && currentScript === 'daily';
+    const card = document.createElement('div');
+    card.className = 'hero-card' + (running ? ' running' : '');
+    card.dataset.script = 'daily';
+    card.innerHTML = `
+      <div class="hero-main">
+        <div class="s-head">
+          <span class="s-label">🌅 ${escHtml(info.label)}</span>
+          <span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>
+        </div>
+        <div class="s-desc">${escHtml(info.desc)}</div>
+        <div class="hero-steps" id="hero-steps"></div>
+      </div>
+      <div class="hero-actions">
+        <button class="s-run hero-run">${running ? '⏳ 日课进行中…' : '▶ 开始日课'}</button>
+        <button class="hero-gear" type="button">⚙ 参数</button>
+      </div>`;
+    const runBtn = card.querySelector('.hero-run');
+    runBtn.disabled = isRunning;
+    runBtn.addEventListener('click', () =>
+      runScript('daily', collectParams(getForm('daily') || card)));
+    card.querySelector('.hero-gear').addEventListener('click', () => openParamModal('daily'));
+    els.dailyHero.innerHTML = '';
+    els.dailyHero.appendChild(card);
+    renderHeroSteps();
+  }
+
+  // ── 磁贴分组：战斗的归战斗，后勤的归后勤 ──
+  const TILE_GROUPS = [
+    { label: '⚔ 出阵', keys: ['raid', 'sortie', 'sakura', 'practice'] },
+    { label: '🏕 后勤', keys: ['expedition', 'dispatch', 'forge', 'sugar', 'snapshot'] },
+  ];
+
+  function renderTile(key, info) {
+    const running = isRunning && currentScript === key;
+    const card = document.createElement('div');
+    card.className = 'script-card' + (running ? ' running' : '');
+    card.dataset.script = key;
+
+    const head = document.createElement('div');
+    head.className = 's-head';
+    head.innerHTML = `<span class="s-label">${escHtml(info.label)}</span>`
+      + `<span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>`;
+    card.appendChild(head);
+
+    const desc = document.createElement('div');
+    desc.className = 's-desc';
+    desc.textContent = info.desc;
+    card.appendChild(desc);
+
+    const actions = document.createElement('div');
+    actions.className = 's-actions';
+    if ((info.params || []).length) {
+      const gear = document.createElement('button');
+      gear.className = 's-gear';
+      gear.type = 'button';
+      gear.title = '参数';
+      gear.textContent = '⚙';
+      gear.addEventListener('click', () => openParamModal(key));
+      actions.appendChild(gear);
+    }
+    const runBtn = document.createElement('button');
+    runBtn.className = 's-run';
+    runBtn.textContent = running ? '⏳ 正在跑…' : '▶ 运行';
+    runBtn.disabled = isRunning;
+    runBtn.addEventListener('click', () => runScript(key, collectParams(getForm(key) || card)));
+    actions.appendChild(runBtn);
+    card.appendChild(actions);
+    return card;
+  }
+
   // ── 脚本卡片渲染 ──
   function renderScripts() {
+    ensureParamForms();
+    renderHero();
+
     els.scriptGrid.innerHTML = '';
-    Object.entries(scriptMeta).forEach(([key, info]) => {
-      const running = isRunning && currentScript === key;
-      const card = document.createElement('div');
-      card.className = 'script-card' + (running ? ' running' : '')
-                     + (key === 'daily' ? ' card-wide' : '');
-      card.dataset.script = key;
+    const placed = new Set(TILE_GROUPS.flatMap(g => g.keys));
+    // 注册表里有但分组里没写的新脚本，兜底进「其他」，不会丢
+    const others = Object.keys(scriptMeta).filter(k => k !== 'daily' && !placed.has(k));
+    const groups = others.length
+      ? [...TILE_GROUPS, { label: '🧰 其他', keys: others }]
+      : TILE_GROUPS;
 
-      const head = document.createElement('div');
-      head.className = 's-head';
-      head.innerHTML = `<span class="s-label">${escHtml(info.label)}</span>`
-        + `<span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>`;
-      card.appendChild(head);
-
-      const desc = document.createElement('div');
-      desc.className = 's-desc';
-      desc.textContent = info.desc;
-      card.appendChild(desc);
-
-      // 参数区可折叠：有参数的卡才给折叠钮，状态记 localStorage
-      const paramFields = info.params || [];
-      let paramsWrap = null;
-      if (paramFields.length) {
-        const foldKey = 'maamaru_fold_' + key;
-        const folded = localStorage.getItem(foldKey) === '1';
-        card.classList.toggle('card-folded', folded);
-
-        const foldBtn = document.createElement('button');
-        foldBtn.className = 's-fold';
-        foldBtn.type = 'button';
-        foldBtn.title = '展开/收起参数';
-        foldBtn.addEventListener('click', () => {
-          const nowFolded = card.classList.toggle('card-folded');
-          localStorage.setItem(foldKey, nowFolded ? '1' : '0');
-        });
-        head.appendChild(foldBtn);
-
-        paramsWrap = document.createElement('div');
-        paramsWrap.className = 's-params';
-        paramFields.forEach(field => {
-          paramsWrap.appendChild(renderParamField(key, field));
-        });
-        card.appendChild(paramsWrap);
-      }
-
-      const runBtn = document.createElement('button');
-      runBtn.className = 's-run';
-      runBtn.textContent = running ? '⏳ 正在跑…' : '▶ 运行';
-      runBtn.disabled = isRunning;
-      runBtn.addEventListener('click', () => runScript(key, collectParams(card)));
-      card.appendChild(runBtn);
-
-      // 条件显隐：控制器变了就重算，先算一遍初始状态
-      card.querySelectorAll('select[data-param-key]').forEach(sel =>
-        sel.addEventListener('change', () => updateCardVisibility(card)));
-      updateCardVisibility(card);
-
-      els.scriptGrid.appendChild(card);
+    groups.forEach(g => {
+      const keys = g.keys.filter(k => scriptMeta[k]);
+      if (!keys.length) return;
+      const section = document.createElement('div');
+      section.className = 'tile-group';
+      section.innerHTML = `<div class="group-label">${escHtml(g.label)}</div>`;
+      const grid = document.createElement('div');
+      grid.className = 'group-grid';
+      keys.forEach(k => grid.appendChild(renderTile(k, scriptMeta[k])));
+      section.appendChild(grid);
+      els.scriptGrid.appendChild(section);
     });
   }
 
@@ -925,13 +1041,14 @@
   }
 
   async function saveSettings() {
-    // 从所有脚本卡片收集当前参数
+    // 从常驻表单仓库收集当前参数（弹窗开着的那个也算上）
     const allParams = {};
-    document.querySelectorAll('.script-card').forEach(card => {
-      const name = card.dataset.script;
-      if (!name) return;
-      allParams[name] = collectParams(card);
-    });
+    document.querySelectorAll('#param-store .param-form, #param-modal-body .param-form')
+      .forEach(form => {
+        const name = form.dataset.script;
+        if (!name) return;
+        allParams[name] = collectParams(form);
+      });
     // 保存当前日志显示模式也算上（前端偏好）
     const payload = {params: allParams};
     try {
