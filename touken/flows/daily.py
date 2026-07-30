@@ -265,6 +265,18 @@ class DailyMixin:
                     if _is_fail(msg):
                         ok = False
                 report.append(("出阵(推图)", "✓" if ok else "✗"))
+            elif mode == "pumpkin":
+                ok = True
+                watch = sortie_plan.get("watch_names") or []
+                for msg in self.pumpkin_stream(
+                        max_rounds=sortie_plan.get("rounds", 1),
+                        team_no=sortie_plan.get("team_no", 3),
+                        watch_names=watch or None,
+                        max_skips=sortie_plan.get("max_skips", 10)):
+                    yield msg
+                    if _is_fail(msg):
+                        ok = False
+                report.append(("出阵(南瓜)", "✓" if ok else "✗"))
             else:
                 yield "[日课] 配置为不打，跳过"
         except Exception as exc:

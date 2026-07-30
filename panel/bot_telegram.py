@@ -16,9 +16,15 @@ _PANEL_CONFIG = _HERE / "panel_config.json"
 
 
 def _read_config() -> dict:
+    """读 panel_config.json，兼容老的扁平结构（bot.token）和新嵌套结构（bot.telegram.token）"""
     try:
         d = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
-        return d.get("bot", {})
+        bot = d.get("bot", {})
+        # 兼容：旧的 token/allowed_users 在 bot 顶层，新的挪到 bot.telegram
+        if "token" in bot and "telegram" not in bot:
+            bot["telegram"] = {"token": bot.pop("token", ""),
+                               "allowed_users": bot.pop("allowed_users", [])}
+        return bot
     except Exception:
         return {}
 
@@ -34,8 +40,9 @@ class TelegramBot:
 
     def start(self):
         cfg = _read_config()
-        token = cfg.get("token", "")
-        allowed = cfg.get("allowed_users", [])
+        tg = cfg.get("telegram", {})
+        token = tg.get("token", "")
+        allowed = tg.get("allowed_users", [])
 
         if not token:
             print("[TG Bot] 没配 token，不启动")
@@ -120,10 +127,15 @@ def start_bot(agent_gateway: AgentGateway):
         print(f"[Bot] 未启用（panel_config.json → bot.enabled = false），跳过")
         return None
 
+    # 平台为 telegram 时启 TG bot；为 qq 时 QQ webhook 已在 server.startup 里挂好
     if platform == "telegram":
         bot = TelegramBot(agent_gateway)
         bot.start()
         return bot
+    elif platform == "qq":
+        # QQ 用 HTTP webhook，配置改了需要重启面板才能重挂载（webhook 路由不能动态卸）
+        print(f"[Bot] QQ 模式：webhook 在 server.startup 挂载，改了 panel_config.json 需重启面板")
+        return None
     else:
         print(f"[Bot] 不支持的平台: {platform}")
         return None

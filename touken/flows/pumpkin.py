@@ -25,6 +25,30 @@ from pathlib import Path
 from ..maa_adapter import roi_4to4
 from ..silhouette import load_library, extract_observed, identify, is_confident, MIN_BLACK_PIXELS
 
+# ── 中日刀名别名映射 ──
+# swings.json 有 name（日文）和 name_zh（中文），用这个表让用户写中文也能匹配剪影库的日文名
+_NAME_ALIAS_CACHE = None
+
+
+def _name_to_jp(name: str) -> str:
+    """把中日文统一洗成日文标准名（用于剪影识别对比）"""
+    global _NAME_ALIAS_CACHE
+    if _NAME_ALIAS_CACHE is None:
+        try:
+            from ..sword_db import all_swords
+            swords = all_swords()
+            alias = {}
+            for sid, info in swords.items():
+                jp = info["name"]
+                alias[jp] = jp
+                zh = info.get("name_zh", "")
+                if zh:
+                    alias[zh] = jp
+            _NAME_ALIAS_CACHE = alias
+        except Exception:
+            _NAME_ALIAS_CACHE = {}  # 加载失败就当没别名
+    return _NAME_ALIAS_CACHE.get(name, name)  # 不在名册里的原样返回
+
 
 class PumpkinMixin:
     """南瓜大作战流程。依赖宿主类的 navigate_to_stream、_click_point、battle_loop_stream。"""
@@ -69,6 +93,17 @@ class PumpkinMixin:
 
         self._abort = ""
         if smart:
+            # 通过 swords.json 把中文名转成日文标准名再匹配（不然"大般若长光"对不上"大般若長光"）
+            canon = []
+            unknown = []
+            for n in watch_names:
+                jp = _name_to_jp(n)
+                if jp == n and n not in _NAME_ALIAS_CACHE:  # 没命中任何别名
+                    unknown.append(n)
+                canon.append(jp)
+            watch_names = canon
+            if unknown:
+                yield f"[南瓜] ⚠️ 以下名字名册没找到（会原样匹配）：{unknown}"
             yield f"[南瓜] 智能模式：只刷 {watch_names}，认出别的刀就烧令牌换板子（上限 {max_skips} 枚）"
 
         # ========== 1. 导航到出阵 ==========

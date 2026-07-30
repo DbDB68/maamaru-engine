@@ -134,6 +134,18 @@ def _build_daily(config_path, params):
                        "map_no": _i(params, "map_no", 1),
                        "loops": _i(params, "loops", 1),
                        "team_no": _i(params, "team_no", 3)}
+    elif mode == "pumpkin":
+        # 出阵走南瓜大作战：面板传的 watch 沿用 pumpkin 的解析逻辑
+        watch_raw = params.get("pumpkin_watch") or ""
+        if isinstance(watch_raw, list):
+            watch = [str(w).strip() for w in watch_raw if str(w).strip()]
+        else:
+            watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
+        sortie_plan = {"mode": "pumpkin",
+                       "rounds": _i(params, "pumpkin_rounds", 1),
+                       "team_no": _i(params, "team_no", 3),
+                       "watch_names": watch,
+                       "max_skips": _i(params, "pumpkin_max_skips", 10)}
     else:
         sortie_plan = {"mode": "none"}
     yield from _make_agent(config_path).daily_stream(
@@ -220,7 +232,8 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                         {"key": "sortie_mode", "type": "select", "label": "出阵安排",
                          "options": [["none", "不出阵"],
                                      ["raid", "联队战（活动）"],
-                                     ["sortie", "合战场推图"]],
+                                     ["sortie", "合战场推图"],
+                                     ["pumpkin", "南瓜大作战（活动）"]],
                          "default": "raid"},
                         {"key": "team_no", "type": "select", "label": "出阵部队",
                          "options": _TEAM_OPTIONS, "default": "3",
@@ -243,6 +256,19 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
+                        {"key": "pumpkin_rounds", "type": "number",
+                         "label": "南瓜局数（一局=九宫格全翻完）",
+                         "default": 1, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
+                        {"key": "pumpkin_max_skips", "type": "number",
+                         "label": "更新令牌最多烧几枚",
+                         "default": 10, "min": 0, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
+                        {"key": "pumpkin_watch", "type": "text",
+                         "label": "只刷这些刀（留空=全刷不认人）",
+                         "default": "",
+                         "placeholder": "用库里的名字，逗号分隔，如：実休光忠,大般若長光",
+                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "practice_team", "type": "select", "label": "演练用部队",
                          "options": _TEAM_OPTIONS, "default": "2"},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
@@ -683,6 +709,169 @@ async def api_dashboard():
     }
 
     return data
+
+
+# ── API：聊天 AI 配置（设置弹窗真正落盘 + 热重载，不用重启）──
+
+def _mask(value: str) -> str:
+    """敏感字符串脱敏：头 4 位 + … + 尾 4 位。空值/短值原样返回"""
+    if not value:
+        return ""
+    if len(value) <= 10:
+        return "***"
+    return value[:4] + "…" + value[-4:]
+
+
+def _bool(v) -> bool:
+    return v in (True, "true", "on", "yes", 1, "1")
+
+
+def _int_list(v) -> list:
+    if not v:
+        return []
+    if isinstance(v, list):
+        return [int(x) for x in v if str(x).strip().lstrip("-").isdigit()]
+    return [int(x.strip()) for x in str(v).replace("，", ",").split(",") if x.strip().lstrip("-").isdigit()]
+
+
+@app.get("/api/bot-config")
+async def api_get_bot_config():
+    """读取 bot 配置，token 全程脱敏。"""
+    cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+    bot = cfg.get("bot", {})
+    tg = bot.get("telegram", {})
+    qq = bot.get("qq", {})
+    bc = bot.get("broadcast", {})
+    return {
+        "enabled": bool(bot.get("enabled", False)),
+        "platform": bot.get("platform", "telegram"),
+        "telegram": {
+            "token_masked": _mask(tg.get("token", "")),
+            "has_token": bool(tg.get("token", "")),
+            "allowed_users": list(tg.get("allowed_users", []) or []),
+        },
+        "qq": {
+            "enabled": bool(qq.get("enabled", False)),
+            "snowluma_http": qq.get("snowluma_http", "http://127.0.0.1:5500"),
+            "admin_qq": list(qq.get("admin_qq", []) or []),
+        },
+        "broadcast": {
+            "qq": bool(bc.get("qq", True)),
+            "ntfy": bool(bc.get("ntfy", True)),
+        },
+        # 哪些改了能热生效，哪些得重启
+        "hot_reloadable": {
+            "telegram": True,
+            "qq": False,   # QQ webhook 在启动时挂载，运行时不能安全卸载
+        },
+    }
+
+
+@app.post("/api/bot-config")
+async def api_save_bot_config(request: Request):
+    """保存 bot 配置。
+    - token 留空 = 不改（防止掩码被当新 key 写回去）
+    - TG token 改了尝试热重启；QQ 改了下次面板启动才生效
+    """
+    body = await request.json()
+    cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+    bot = cfg.setdefault("bot", {})
+
+    if "enabled" in body:
+        bot["enabled"] = _bool(body["enabled"])
+    if body.get("platform") in ("telegram", "qq"):
+        bot["platform"] = body["platform"]
+
+    # Telegram
+    tg = bot.setdefault("telegram", {})
+    if "telegram" in body and isinstance(body["telegram"], dict):
+        t = body["telegram"]
+        # token 留空不动；非空就改
+        if t.get("token"):
+            tg["token"] = str(t["token"]).strip()
+        tg["allowed_users"] = _int_list(t.get("allowed_users", tg.get("allowed_users", [])))
+
+    # QQ
+    qq_block = bot.setdefault("qq", {})
+    if "qq" in body and isinstance(body["qq"], dict):
+        q = body["qq"]
+        qq_block["enabled"] = _bool(q.get("enabled"))
+        if q.get("snowluma_http"):
+            qq_block["snowluma_http"] = str(q["snowluma_http"]).strip()
+        qq_block["admin_qq"] = _int_list(q.get("admin_qq", qq_block.get("admin_qq", [])))
+
+    # Broadcast
+    bc = bot.setdefault("broadcast", {})
+    if "broadcast" in body and isinstance(body["broadcast"], dict):
+        b = body["broadcast"]
+        bc["qq"] = _bool(b.get("qq", bc.get("qq", True)))
+        bc["ntfy"] = _bool(b.get("ntfy", bc.get("ntfy", True)))
+
+    _PANEL_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 热重试 Telegram（QQ 提示用户重启面板）
+    tg_reload_msg = ""
+    if bot.get("platform") == "telegram" and bot.get("enabled"):
+        try:
+            import __main__ as _bm
+            from .bot_telegram import stop_bot, start_bot
+            stop_bot(getattr(_bm, "_bot_instance", None))
+            _bm._bot_instance = start_bot(_get_gateway())
+            tg_reload_msg = "Telegram 已热重启，新 token 立即生效。"
+        except Exception as exc:
+            tg_reload_msg = f"Telegram 热重启失败：{exc}"
+
+    return {"ok": True, "tg_reload_msg": tg_reload_msg,
+            "qq_restart_required": qq_block.get("enabled", False)}
+
+
+# ── API：OCR 数据统计（日志流里扒拉出来的）──
+
+import sqlite3
+
+_OCR_SWORD_PATTERN = re.compile(r"【([^】]+)】")
+
+
+@app.get("/api/stats/ocr")
+async def api_ocr_stats():
+    """从日志库里统计 OCR 数据：认刀排行、操作次数等"""
+    db_path = _PROJECT / "status" / "maamaru_logs.db"
+    if not db_path.exists():
+        return {"sword_ranks": [], "script_counts": {}, "total_logs": 0, "ok": True}
+    try:
+        conn = sqlite3.connect(str(db_path))
+        total = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
+
+        # 刀剑识别排行：从消息里扒 【刀名】
+        rows = conn.execute(
+            "SELECT message FROM logs WHERE message LIKE '%【%】%'"
+        ).fetchall()
+        sword_counts = {}
+        for (msg,) in rows:
+            for m in _OCR_SWORD_PATTERN.findall(msg):
+                if m:
+                    sword_counts[m] = sword_counts.get(m, 0) + 1
+        sword_ranks = sorted(sword_counts.items(), key=lambda x: -x[1])[:20]
+
+        # 最近 7 天各脚本执行条数
+        week_ago = time.time() - 86400 * 7
+        rows = conn.execute(
+            "SELECT script, COUNT(*) as cnt FROM logs "
+            "WHERE ts > ? GROUP BY script ORDER BY cnt DESC",
+            (week_ago,),
+        ).fetchall()
+        script_counts = {r[0]: r[1] for r in rows}
+
+        conn.close()
+        return {
+            "sword_ranks": [{"name": n, "count": c} for n, c in sword_ranks],
+            "script_counts": script_counts,
+            "total_logs": total,
+            "ok": True,
+        }
+    except Exception as exc:
+        return {"sword_ranks": [], "script_counts": {}, "total_logs": 0,
+                "ok": False, "error": str(exc)}
 
 
 # ── API：聊天 AI 配置（设置弹窗真正落盘 + 热重载，不用重启）──
