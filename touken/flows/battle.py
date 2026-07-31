@@ -6,7 +6,7 @@
 
 import time
 
-from ..maa_adapter import roi_4to4
+from ..maa_adapter import roi_4to4, Point
 
 
 class BattleMixin:
@@ -207,6 +207,40 @@ class BattleMixin:
 
     # ==================== 阵形选择 ====================
 
+    @staticmethod
+    def _formation_name(name: str) -> str:
+        """同时兼容旧配置中的“逆行”和标准名称“逆行阵”."""
+        value = str(name or "逆行阵")
+        return value if value.endswith("阵") else value + "阵"
+
+    def choose_formation(self, strategy: str = "fixed",
+                         formation_name: str = "逆行阵",
+                         enable_auto: bool = False) -> str:
+        """按策略选阵；自动模式下，无有利标记时使用固定阵形兜底。"""
+        cfg = self.config.get("formation", {})
+        mode = cfg.get("auto_mode", {})
+        if mode:
+            roi_raw = mode.get("roi", [840, 0, 980, 68])
+            self.maa.screenshot(force=True)
+            current_opposite = "手动" if enable_auto else "自动"
+            if self.maa.ocr(current_opposite, roi_4to4(*roi_raw)):
+                self._click_point(mode.get("toggle", [910, 32]))
+                time.sleep(0.6)
+
+        if strategy == "advantage":
+            point = self.maa.template_match(
+                cfg.get("advantage_template", "battle/ui有利.png"),
+                threshold=0.7,
+            )
+            if point:
+                self.maa.click(Point(point.x, point.y))
+                time.sleep(0.35)
+                self.maa.click(Point(point.x, point.y))
+                return "advantage"
+
+        return ("fixed" if self.select_formation(
+            self._formation_name(formation_name)) else "failed")
+
     def select_formation(self, formation_name: str) -> bool:
         """
         选择阵形
@@ -217,6 +251,7 @@ class BattleMixin:
         Returns:
             是否选择成功
         """
+        formation_name = self._formation_name(formation_name)
         formation_config = self.config.get("formation", {})
 
         # 验证是否在阵形选择界面

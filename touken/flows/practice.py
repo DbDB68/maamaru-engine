@@ -4,10 +4,8 @@
 
 规矩（用户亲授）：
   1. 对手列表显示的队长的极化状态不代表全队，必须点进去看配置
-  2. 躲避名单：
-     - 极化短刀：全游强度第一，打赢也难看，绕
-     - 丙子椒林剑：让第一个出手的人无效，配极短无解，绕
-  3. 优先打：没配满 6 人的"好心人"、全普刀队
+  2. 硬性躲避：丙子椒林剑和识别不清的成员
+  3. 先看完五队再排序：人数少优先；都有极短时比较机动、等级；最后看平均等级
   4. 每天只需赢 3 场，对手 3 点/15 点刷新，一次 5 队，挑软的捏
   5. 出战用部队二（极短队），阵形选逆行阵（抢机动先手）
 
@@ -21,6 +19,7 @@
   - 图标中心行距 94px，第一行 cy=152
 """
 
+import re
 import time
 
 from ..maa_adapter import roi_4to4, Point
@@ -41,7 +40,9 @@ class PracticeMixin:
     """演练。依赖宿主类的 navigate_to_stream、maa、config。"""
 
     def practice_stream(self, dry_run: bool = True, max_wins: int = None,
-                        team_no: int = None):
+                        team_no: int = None, formation_mode: str = None,
+                        formation_strategy: str = None,
+                        formation: str = None):
         """
         流式演练：扫描 5 个对手，逐个认人，挑软柿子打
 
@@ -57,6 +58,14 @@ class PracticeMixin:
         if team_no is not None:
             cfg = dict(cfg)
             cfg["team_no"] = team_no
+        if any(v is not None for v in (formation_mode, formation_strategy, formation)):
+            cfg = dict(cfg)
+            if formation_mode is not None:
+                cfg["formation_mode"] = formation_mode
+            if formation_strategy is not None:
+                cfg["formation_strategy"] = formation_strategy
+            if formation is not None:
+                cfg["formation"] = formation
         if max_wins is None:
             max_wins = cfg.get("max_wins", 3)
 
@@ -76,11 +85,9 @@ class PracticeMixin:
         order = self._scan_list_order()
         yield f"[演练] 扫描顺序（普刀队长优先）: {[i + 1 for i in order]}"
 
-        # ========== 3. 逐个进情报界面认人 ==========
-        wins = 0
+        # ========== 3. 先看完所有对手，再从弱到强挑选 ==========
+        candidates = []
         for row_idx in order:
-            if wins >= max_wins:
-                break
             opponent = self._inspect_opponent(row_idx)
             if opponent is None:
                 yield f"[演练] 对手{row_idx + 1}: 进情报界面失败，跳过"
@@ -89,22 +96,37 @@ class PracticeMixin:
             members = opponent["members"]
             verdict, reasons = self._judge(members)
             roster = "、".join(
-                f"{m['name']}({m['type']}{' 机动' + str(m['mobility']) if m.get('mobility') else ''})"
+                f"{m['name']}({m['type']} Lv.{m.get('level') or '?'}"
+                f"{' 机动' + str(m['mobility']) if m.get('mobility') else ''})"
                 for m in members
             ) or "（空）"
             yield f"[演练] 对手{row_idx + 1} [{opponent['title']}]: {verdict} —— {'；'.join(reasons)}"
             yield f"[演练]   阵容({len(members)}/6): {roster}"
 
-            if verdict != "打":
-                self._back_to_list()
-                continue
+            if verdict == "打":
+                score = self._strength_key(members)
+                candidates.append((score, row_idx, opponent))
+                yield f"[演练]   软弱评分：{self._score_text(score)}"
+            self._back_to_list()
 
-            if dry_run:
-                yield f"[演练]   （演习模式：不动手）"
-                self._back_to_list()
-                continue
+        candidates.sort(key=lambda item: item[0])
+        yield "[演练] 推荐挑战顺序：" + (", ".join(
+            f"对手{row + 1}({self._score_text(score)})"
+            for score, row, _ in candidates
+        ) or "没有可安全识别的对手")
 
-            # ===== 真打 =====
+        if dry_run:
+            yield f"[演练] 收工：候选 {len(candidates)} 队（演习模式，未真打）"
+            return
+
+        wins = 0
+        for _, row_idx, _ in candidates:
+            if wins >= max_wins:
+                break
+            # 扫描阶段已经退回列表；开战前重新进入该对手情报页。
+            if self._inspect_opponent(row_idx) is None:
+                yield f"[演练] 对手{row_idx + 1}: 再次进入失败，跳过"
+                continue
             result = yield from self._fight_one(cfg, row_idx)
             if result.startswith("win"):
                 wins += 1
@@ -204,6 +226,7 @@ class PracticeMixin:
         member = {
             "name": info.get("name_zh") or info["name"],
             "type": info.get("type", "未知"),
+            "level": self._read_level(cy),
             "mobility": None,
             "id": sid,
         }
@@ -211,6 +234,17 @@ class PracticeMixin:
         if member["type"] == "短刀":
             member["mobility"] = self._read_mobility(cy)
         return member
+
+    def _read_level(self, cy: int):
+        """读取成员头像右侧的“刀剑 xx 级”数字。"""
+        for _ in range(2):
+            tokens = self.maa.ocr_all(roi_4to4(455, cy - 28, 570, cy + 5))
+            for text, _ in tokens:
+                match = re.search(r"(\d{1,3})", text)
+                if match:
+                    return int(match.group(1))
+            self.maa.screenshot(force=True)
+        return None
 
     def _read_mobility(self, cy: int):
         """读机动格数字（第 4 格，x[754,806]——别动窗口）"""
@@ -241,7 +275,8 @@ class PracticeMixin:
                 if mob is None:
                     dodge.append(f"{m['name']}是短刀但机动读不出，当极短处理")
                 elif mob >= 100:
-                    dodge.append(f"极化短刀 {m['name']}（机动{mob}）")
+                    # 极短不再一票否决；五队都有极短时仍要比较出相对最弱者。
+                    pass
             if m["type"] == "未知":
                 dodge.append(f"{m['name']} 名册查无此人，认不清不敢打")
 
@@ -252,16 +287,37 @@ class PracticeMixin:
         if len(members) < 6:
             reasons.append(f"只配了{len(members)}人，好心人")
         else:
-            reasons.append("无极短无丙子，全是可以打的")
+            extreme_count = sum(
+                1 for m in members
+                if m.get("type") == "短刀" and (m.get("mobility") or 0) >= 100
+            )
+            reasons.append(
+                f"满编队，检测到{extreme_count}把极短，加入候选后统一比强度"
+                if extreme_count else "满编但无极短无丙子，可以打"
+            )
         return "打", reasons
+
+    def _strength_key(self, members: list):
+        """数值越小越值得打：人数 → 极短威胁 → 全队平均等级。"""
+        levels = [m["level"] for m in members if m.get("level") is not None]
+        average_level = (sum(levels) / len(levels)) if levels else 999.0
+        extreme = [m for m in members
+                   if m.get("type") == "短刀" and (m.get("mobility") or 0) >= 100]
+        strongest_mobility = max((m.get("mobility") or 999 for m in extreme), default=0)
+        strongest_level = max((m.get("level") or 999 for m in extreme), default=0)
+        return (len(members), len(extreme), strongest_mobility,
+                strongest_level, round(average_level, 1))
+
+    @staticmethod
+    def _score_text(score) -> str:
+        count, extreme_count, mobility, level, average = score
+        extreme = (f"极短{extreme_count}把/最高机动{mobility}/最高Lv.{level}"
+                   if extreme_count else "无极短")
+        average_text = "等级读取不足" if average >= 999 else f"平均Lv.{average:g}"
+        return f"{count}人，{extreme}，{average_text}"
 
     # ========== 战斗 ==========
 
-    # 阵形卡中心坐标（阵形选择界面，2行×3列固定布局）
-    _FORMATION_POS = {
-        "鱼鳞": (224, 220), "横队": (640, 220), "雁行": (1050, 220),
-        "鹤翼": (224, 425), "方阵": (640, 425), "逆行": (1050, 425),
-    }
     # 部队标签 x 中心（部队选择界面顶部）
     _TEAM_TAB_X = {1: 155, 2: 272, 3: 390, 4: 510, 5: 630}
 
@@ -278,8 +334,10 @@ class PracticeMixin:
             生成器，最后 return "win" / "lose" / "unknown"
         """
         team_no = cfg.get("team_no", 2)
-        formation = cfg.get("formation", "逆行")
-        yield f"[演练] 动手！（部队{_CN_NUM.get(team_no, team_no)}，{formation or '有利'}阵）"
+        formation = self._formation_name(cfg.get("formation", "逆行阵"))
+        formation_mode = cfg.get("formation_mode", "manual")
+        formation_strategy = cfg.get("formation_strategy", "fixed")
+        yield f"[演练] 动手！（部队{_CN_NUM.get(team_no, team_no)}，{formation}）"
 
         # ---- 部队选择 ----
         self.maa.click(Point(1200, 630))  # 进入演练
@@ -306,21 +364,17 @@ class PracticeMixin:
             time.sleep(2.0)
 
         if got_formation:
-            if formation and formation in self._FORMATION_POS:
-                cx, cy = self._FORMATION_POS[formation]
-                yield f"[演练] 选 {formation}阵"
+            result = self.choose_formation(
+                strategy=formation_strategy,
+                formation_name=formation,
+                enable_auto=formation_mode == "auto",
+            )
+            if result == "advantage":
+                yield "[演练] 选择有利阵形"
+            elif result == "fixed":
+                yield f"[演练] 选择固定/兜底阵形：{formation}"
             else:
-                # 没设固定阵形：点带"有利"标的卡
-                pt = self.maa.template_match("battle/ui有利.png", threshold=0.7)
-                if pt:
-                    cx, cy = pt.x, pt.y
-                    yield "[演练] 没设固定阵形，点有利阵"
-                else:
-                    cx, cy = self._FORMATION_POS["方阵"]
-                    yield "[演练] 有利标也没找到，盲点方阵"
-            self.maa.click(Point(cx, cy))       # 第1点：选中
-            time.sleep(1.2)
-            self.maa.click(Point(cx - 115, cy + 13))  # 第2点：确定
+                yield "[演练] 阵形选择失败，等待游戏状态变化"
             yield "[演练] 阵形已确认，战斗中..."
 
         # ---- 等战斗播完回列表（途中每3秒点一下屏幕中央，翻结算页/跳动画）----

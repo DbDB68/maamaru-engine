@@ -28,6 +28,15 @@ _PROJECT = _HERE.parent
 _CONFIG_PATH = _PROJECT / "touken_config.json"
 _PANEL_CONFIG = _HERE / "panel_config.json"
 
+# 预读游戏配置（用于面板默认值，不在这里写死游戏内容）
+try:
+    _CFG_DATA = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+except Exception:
+    _CFG_DATA = {}
+
+# 刀解默认白名单（兼容旧配置：配置里没有就用这个常量）
+from touken.flows.smith import DISMANTLE_WHITELIST as _DISMANTLE_WHITELIST
+
 # 默认 ADB 配置（从 test_daily.py 继承）
 _DEFAULT_ADB_PATH = r"D:\MUMU\MuMuPlayer\nx_device\12.0\shell\adb.exe"
 _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
@@ -180,8 +189,12 @@ def _build_sortie(config_path, params):
         chapter=_i(params, "chapter", 1),
         map_no=_i(params, "map_no", 1),
         team_no=_i(params, "team_no", 3),
-        auto_march=True,
-        max_loops=_i(params, "loops", 1))
+        auto_march=_bool(params.get("auto_march", True)),
+        max_loops=_i(params, "loops", 1),
+        formation_mode=params.get("formation_mode") or "manual",
+        formation_strategy=params.get("formation_strategy") or "fixed",
+        formation=params.get("formation") or "鱼鳞阵",
+        injury_action=params.get("repair_on_injury") or "continue")
 
 
 def _build_sakura(config_path, params):
@@ -202,17 +215,115 @@ def _build_forge(config_path, params):
         times=_i(params, "times", 3), watch=watch)
 
 
+def _build_repair(config_path, params):
+    yield from _make_agent(config_path).repair_stream(
+        dry_run=_bool(params.get("dry_run", False)))
+
+
 def _build_dispatch(config_path, params):
-    """手动派遣一支部队去远征（时刻表也走这个）"""
+    """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。"""
     from .scheduler import find_map
     code = params.get("map_code") or ""
+    team_no = _i(params, "team_no", 2)
     m = find_map(code)
     if not m:
         yield f"[远征] 不知道图 {code} 是哪张，没派"
         return
-    yield from _make_agent(config_path).expedition_stream(
+    records = _read_expedition_records()
+    remain = _expedition_remaining(records.get(str(team_no), {}))
+    if remain > 600:
+        yield f"[远征] 部队{team_no}还剩 {remain // 60} 分钟，超过十分钟，本次跳过"
+        return
+    while remain > 0:
+        yield f"[远征等待] 部队{team_no}还剩 {remain // 60:02d}:{remain % 60:02d}（紧急停止可取消）"
+        time.sleep(min(5, remain))
+        remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
+    agent = _make_agent(config_path)
+    yield from agent.collect_expedition_stream(redispatch=None)
+    yield from agent.expedition_stream(
         era=m["era"], map_slot=m["slot"],
-        team_no=_i(params, "team_no", 2))
+        team_no=team_no)
+
+
+def _expedition_remaining(record: dict) -> int:
+    """派遣记录剩余秒数；过期或读不懂按 0。"""
+    try:
+        started = time.mktime(time.strptime(
+            record["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
+        return max(0, int(started + int(record["duration_min"]) * 60 - time.time()))
+    except Exception:
+        return 0
+
+
+def _read_expedition_records() -> dict:
+    path = _PROJECT / "status" / "expeditions.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _build_expedition_manager(config_path, params):
+    """收取归来队伍，最多等十分钟，再按“常用安排”派遣。"""
+    from .scheduler import find_map, load_config
+
+    plan = [p for p in load_config().get("common_plan", [])
+            if p.get("enabled") and p.get("map_code")]
+    if not plan:
+        yield "[远征管理] 没有启用任何常用安排，先去配置页勾选部队"
+        return
+
+    agent = _make_agent(config_path)
+    yield "[远征管理] 先回本丸刷新归来状态并领取结算"
+    yield from agent.collect_expedition_stream(redispatch=None)
+
+    records = _read_expedition_records()
+    waitable = []
+    skipped = set()
+    for row in plan:
+        team = str(row["team_no"])
+        remain = _expedition_remaining(records.get(team, {})) if team in records else 0
+        if 0 < remain <= 600:
+            waitable.append((team, remain))
+            yield f"[远征管理] 部队{team}还剩 {remain // 60}分{remain % 60:02d}秒，进入等待"
+        elif remain > 600:
+            skipped.add(team)
+            yield (f"[远征管理] 部队{team}还剩 {remain // 60}分{remain % 60:02d}秒，"
+                   "超过十分钟，本次跳过")
+        else:
+            yield f"[远征管理] 部队{team}已归来或空闲，可以派遣"
+
+    if waitable:
+        deadline = time.time() + max(remain for _, remain in waitable)
+        while time.time() < deadline:
+            left_lines = []
+            for team, original in waitable:
+                left = max(0, int(deadline - time.time()
+                                 - (max(r for _, r in waitable) - original)))
+                left_lines.append(f"部队{team} {left // 60:02d}:{left % 60:02d}")
+            yield "[远征等待] " + " · ".join(left_lines) + "（紧急停止可取消）"
+            time.sleep(min(5, max(0.2, deadline - time.time())))
+        yield "[远征管理] 等待结束，再回本丸结算"
+        yield from agent.collect_expedition_stream(redispatch=None)
+        records = _read_expedition_records()
+
+    for row in plan:
+        team = str(row["team_no"])
+        if team in skipped:
+            continue
+        remain = _expedition_remaining(records.get(team, {})) if team in records else 0
+        if remain > 0:
+            yield f"[远征管理] 部队{team}仍显示远征中，本次不碰"
+            continue
+        m = find_map(row["map_code"])
+        if not m:
+            yield f"[远征管理] 部队{team}的地图 {row['map_code']} 不存在，跳过"
+            continue
+        yield f"[远征管理] 派部队{team}去 {m['code']}「{m['name']}」"
+        yield from agent.expedition_stream(
+            era=m["era"], map_slot=m["slot"], team_no=int(team))
+
+    yield "[远征管理] 常用安排处理完毕"
 
 
 def _build_simple(stream_method_name):
@@ -264,10 +375,11 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                          "label": "更新令牌最多烧几枚",
                          "default": 10, "min": 0, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
-                        {"key": "pumpkin_watch", "type": "text",
+                        {"key": "pumpkin_watch", "type": "text", "swords": True,
                          "label": "只刷这些刀（留空=全刷不认人）",
                          "default": "",
-                         "placeholder": "用库里的名字，逗号分隔，如：実休光忠,大般若長光",
+                         "placeholder": "点下方候选添加，或手动输入逗号分隔",
+                         "presets": [{"label": "清空", "value": []}],
                          "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "practice_team", "type": "select", "label": "演练用部队",
                          "options": _TEAM_OPTIONS, "default": "2"},
@@ -295,9 +407,10 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
                          "options": [["0", "不点（用当前tab）"],
                                      ["1", "初级"], ["2", "中级"], ["3", "上级"]],
                          "default": "0"},
-                        {"key": "watch", "type": "text",
+                        {"key": "watch", "type": "text", "swords": True,
                          "label": "只刷这些刀（逗号分隔，留空=全刷不认人）",
-                         "default": "", "placeholder": "例：小竜景光,浦島虎徹"},
+                         "default": "", "placeholder": "点下方候选添加，或手动输入逗号分隔",
+                         "presets": [{"label": "清空", "value": []}]},
                         {"key": "max_skips", "type": "number",
                          "label": "更新令牌最多烧几枚（认出不想要的才烧）",
                          "default": 10, "min": 0, "max": 99}])
@@ -309,7 +422,39 @@ register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
                         {"key": "map_no", "type": "select", "label": "小图",
                          "options": [[str(i), f"{i}图"] for i in range(1, 5)], "default": "1"},
                         {"key": "loops", "type": "number", "label": "连打几圈",
-                         "default": 1, "min": 1, "max": 99}])
+                         "default": 1, "min": 1, "max": 99},
+                        {"key": "auto_march", "type": "select",
+                         "label": "行军方式",
+                         "options": [["true", "使用游戏自动行军"],
+                                     ["false", "脚本手动行军"]],
+                         "default": "true",
+                         "help": "自动行军会由游戏处理路线与阵形；关闭后才使用下方阵形设置。"},
+                        {"key": "formation_mode", "type": "select",
+                         "label": "阵形选择方式",
+                         "options": [["manual", "游戏内手动阵形"],
+                                     ["auto", "游戏内自动阵形"]],
+                         "default": "manual",
+                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                        {"key": "formation_strategy", "type": "select",
+                         "label": "阵形策略",
+                         "options": [["fixed", "固定阵形"],
+                                     ["advantage", "优先选择有利阵形"]],
+                         "default": "fixed",
+                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                        {"key": "formation", "type": "select",
+                         "label": "固定或识别失败时的兜底阵形",
+                         "options": [[name, name] for name in
+                                     ["鱼鳞阵", "横队阵", "雁行阵",
+                                      "鹤翼阵", "方阵", "逆行阵"]],
+                         "default": "鱼鳞阵",
+                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                        {"key": "repair_on_injury", "type": "select",
+                         "label": "轻伤/中伤处理",
+                         "options": [["continue", "自动手入后继续"],
+                                     ["repair_stop", "立即收工，手入但不用加速符"],
+                                     ["stop", "立即收工，不手入"]],
+                         "default": "continue",
+                         "help": "重伤无论此项如何都会强制尝试手入；黑名单仍不修，无法恢复时任务停止。"}])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _build_sakura,
                 params=[_team_field("1"),
@@ -319,14 +464,37 @@ register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了�
 def _build_practice(config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
     return _make_agent(config_path).practice_stream(
-        dry_run=False, team_no=_i(params, "team_no", 2))
+        dry_run=False,
+        team_no=_i(params, "team_no", 2),
+        formation_mode=params.get("formation_mode") or "manual",
+        formation_strategy=params.get("formation_strategy") or "fixed",
+        formation=params.get("formation") or "逆行阵")
 
 
 register_script("practice", "演练", "只认人打软柿子，赢 3 场收工",
                 _build_practice,
-                params=[_team_field("2")])
-register_script("expedition", "远征", "收菜 + 自动再派",
-                _build_simple("collect_expedition_stream"))
+                params=[
+                    _team_field("2"),
+                    {"key": "formation_mode", "type": "select",
+                     "label": "阵形选择方式",
+                     "options": [["manual", "手动选择（每战按策略点阵形）"],
+                                 ["auto", "使用游戏自动阵形"]],
+                     "default": "manual",
+                     "help": "自动模式会先切换右上角开关并选择一次；敌方阵形不明时仍使用兜底阵形。"},
+                    {"key": "formation_strategy", "type": "select",
+                     "label": "手动/首次选择策略",
+                     "options": [["fixed", "固定阵形"],
+                                 ["advantage", "优先选择有利阵形"]],
+                     "default": "fixed"},
+                    {"key": "formation", "type": "select",
+                     "label": "固定或识别失败时的兜底阵形",
+                     "options": [[name, name] for name in
+                                 ["鱼鳞阵", "横队阵", "雁行阵",
+                                  "鹤翼阵", "方阵", "逆行阵"]],
+                     "default": "逆行阵"},
+                ])
+register_script("expedition", "远征", "收菜、等待临近归来，并按常用安排派遣",
+                _build_expedition_manager)
 
 
 def _map_select_field():
@@ -339,14 +507,23 @@ def _map_select_field():
 
 register_script("dispatch", "派遣远征", "立刻派一支部队去指定远征图",
                 _build_dispatch,
-                params=[_team_field("2"), _map_select_field()])
-register_script("forge", "锻刀", "选次数+盯目标时长，命中时长手机报喜",
+                params=[_team_field("2"), _map_select_field()], hidden=True)
+register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；不使用加速符",
                 _build_forge,
-                params=[{"key": "times", "type": "number", "label": "锻几炉",
-                         "default": 3, "min": 1, "max": 12},
-                        {"key": "watch", "type": "text",
-                         "label": "目标时长（逗号分隔，限锻刀的时间身份证，不填不盯）",
-                         "default": "", "placeholder": "如 03:20:00, 04:00:00"}])
+                params=[{"key": "times", "type": "number", "label": "最多锻几炉",
+                         "default": 3, "min": 1, "max": 12,
+                         "help": "日课目标是锻刀 3 次，但脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常本次只能锻 2 次；没必要为了返还委托符强行加速。"},
+                        {"key": "watch", "type": "duration-list",
+                         "label": "目标时长（命中时手机报喜，不添加则不盯）",
+                         "default": ""}])
+register_script("repair", "手入", "扫描受伤刀剑，跳过黑名单，其余送入手入室",
+                _build_repair,
+                params=[{"key": "dry_run", "type": "select",
+                         "label": "运行方式",
+                         "options": [["false", "实际手入"],
+                                     ["true", "只扫描并报告（不点击）"]],
+                         "default": "false",
+                         "help": "黑名单在“名单设置 → 手入黑名单”维护。配置为加速部队的成员会使用加速符。"}])
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
                 _build_simple("sugar_stream"))
 register_script("snapshot", "库存快照", "刷新看板库存数据",
@@ -468,6 +645,55 @@ async def api_stop_script():
     return {"ok": True}
 
 
+# ── API：刀剑名册（供前端名单选择器）──
+
+@app.get("/api/swords")
+async def api_swords():
+    """返回全部刀剑的名称与刀种，用于候选列表分类"""
+    from touken import sword_db
+    swords = sword_db.all_swords()
+    return {
+        "swords": [
+            {
+                "id": sid,
+                "name": info["name"],
+                "name_zh": info.get("name_zh", ""),
+                "type": info.get("type", "其他"),
+            }
+            for sid, info in swords.items()
+        ]
+    }
+
+
+# ── API：全局名单配置（手入黑名单 / 刀解白名单）──
+
+@app.get("/api/config-lists")
+async def api_get_config_lists():
+    """读取当前游戏配置里的名单"""
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    return {
+        "repair_blacklist": cfg.get("repair", {}).get("blacklist", []),
+        "dismantle_whitelist": cfg.get("dismantle", {}).get("whitelist", _DISMANTLE_WHITELIST),
+    }
+
+
+@app.post("/api/config-lists")
+async def api_save_config_lists(request: Request):
+    """把名单写回 touken_config.json（只改名单，不动别的）"""
+    body = await request.json()
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    if "repair_blacklist" in body:
+        cfg.setdefault("repair", {})["blacklist"] = [
+            str(x).strip() for x in body["repair_blacklist"] if str(x).strip()
+        ]
+    if "dismantle_whitelist" in body:
+        cfg.setdefault("dismantle", {})["whitelist"] = [
+            str(x).strip() for x in body["dismantle_whitelist"] if str(x).strip()
+        ]
+    _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
 # ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
 
 _agent_gateway = None
@@ -537,14 +763,16 @@ async def api_agent(request: Request):
 
 @app.get("/api/expedition-schedule")
 async def api_get_schedule():
-    from .scheduler import load_entries, map_options
-    return {"entries": load_entries(), "maps": map_options()}
+    from .scheduler import load_config, map_options, preset_payload
+    cfg = load_config()
+    return {**cfg, "maps": map_options(), "presets": preset_payload()}
 
 
 @app.post("/api/expedition-schedule")
 async def api_save_schedule(request: Request):
-    from .scheduler import save_entries
+    from .scheduler import load_config, save_config
     body = await request.json()
+    cfg = load_config()
     entries = body.get("entries", [])
     # 只留前端该给的字段，别什么都往里塞
     clean = [{
@@ -555,8 +783,51 @@ async def api_save_schedule(request: Request):
         "enabled": bool(e.get("enabled", True)),
         "last_fired": str(e.get("last_fired", "")),
     } for e in entries if e.get("time") and e.get("map_code")]
-    save_entries(clean)
+    common = []
+    for row in body.get("common_plan", []):
+        try:
+            team = int(row.get("team_no"))
+        except Exception:
+            continue
+        if team not in range(1, 6):
+            continue
+        common.append({
+            "team_no": team,
+            "map_code": str(row.get("map_code", "")),
+            "enabled": bool(row.get("enabled", False)),
+        })
+    auto_in = body.get("automation", {})
+    auto = cfg.get("automation", {})
+    auto.update({
+        "enabled": bool(auto_in.get("enabled", False)),
+        "mode": auto_in.get("mode") if auto_in.get("mode") in ("preset", "custom") else "preset",
+        "preset": str(auto_in.get("preset", "小判")),
+        "start_time": str(auto_in.get("start_time", "08:00"))[:5],
+        "teams": [int(x) for x in auto_in.get("teams", [2, 3, 4])][:3],
+        "capitalist": bool(auto_in.get("capitalist", False)),
+        "paused_until": str(auto_in.get("paused_until", auto.get("paused_until", ""))),
+    })
+    cfg.update({"entries": clean, "common_plan": common, "automation": auto})
+    save_config(cfg)
     return {"ok": True, "count": len(clean)}
+
+
+@app.post("/api/expedition-pause")
+async def api_pause_expedition(request: Request):
+    from .scheduler import load_config, save_config
+    body = await request.json()
+    minutes = int(body.get("minutes", 0))
+    cfg = load_config()
+    if minutes <= 0:
+        until = ""
+    elif minutes >= 999:
+        until = time.strftime("%Y-%m-%d") + " 23:59:59"
+    else:
+        until = time.strftime("%Y-%m-%d %H:%M:%S",
+                              time.localtime(time.time() + minutes * 60))
+    cfg["automation"]["paused_until"] = until
+    save_config(cfg)
+    return {"ok": True, "paused_until": until}
 
 
 # ── API：状态 ──
@@ -752,7 +1023,9 @@ async def api_get_bot_config():
         },
         "qq": {
             "enabled": bool(qq.get("enabled", False)),
-            "snowluma_http": qq.get("snowluma_http", "http://127.0.0.1:5500"),
+            "provider": qq.get("provider", "napcat"),
+            "snowluma_http": qq.get("snowluma_http", "http://127.0.0.1:3000"),
+            "snowluma_gui_http": qq.get("snowluma_gui_http", "http://127.0.0.1:5099"),
             "admin_qq": list(qq.get("admin_qq", []) or []),
         },
         "broadcast": {
@@ -764,6 +1037,46 @@ async def api_get_bot_config():
             "telegram": True,
             "qq": False,   # QQ webhook 在启动时挂载，运行时不能安全卸载
         },
+    }
+
+
+@app.get("/api/qq-status")
+async def api_qq_status():
+    """探测 OneBot API 与管理页；只检测，不启动或下载任何程序。"""
+    import httpx
+
+    cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
+    qq = cfg.get("bot", {}).get("qq", {})
+    api_url = str(qq.get("snowluma_http", "http://127.0.0.1:3000")).rstrip("/")
+    gui_url = str(qq.get("snowluma_gui_http", "http://127.0.0.1:5099")).rstrip("/")
+
+    async def probe(url, suffix=""):
+        if not url:
+            return False, "未配置地址"
+        try:
+            async with httpx.AsyncClient(timeout=3, follow_redirects=True) as client:
+                r = await client.get(url + suffix)
+            return r.status_code < 500, f"HTTP {r.status_code}"
+        except Exception as exc:
+            name = type(exc).__name__.replace("Error", "")
+            return False, name or "连接失败"
+
+    api_ok, api_detail = await probe(api_url, "/get_status")
+    gui_ok, gui_detail = await probe(gui_url)
+    webhook_ready = any(getattr(route, "path", "") == "/onebot/webhook"
+                        for route in app.routes)
+    return {
+        "enabled": bool(qq.get("enabled", False)),
+        "provider": qq.get("provider", "napcat"),
+        "api_url": api_url,
+        "gui_url": gui_url,
+        "api_online": api_ok,
+        "api_detail": api_detail,
+        "gui_online": gui_ok,
+        "gui_detail": gui_detail,
+        "webhook_ready": webhook_ready,
+        "webhook_url": "http://127.0.0.1:8080/onebot/webhook",
+        "state": "connected" if api_ok else "unavailable",
     }
 
 
@@ -796,8 +1109,13 @@ async def api_save_bot_config(request: Request):
     if "qq" in body and isinstance(body["qq"], dict):
         q = body["qq"]
         qq_block["enabled"] = _bool(q.get("enabled"))
+        if q.get("provider") in ("napcat", "snowluma", "custom"):
+            qq_block["provider"] = q["provider"]
         if q.get("snowluma_http"):
             qq_block["snowluma_http"] = str(q["snowluma_http"]).strip()
+        # SnowLuma 远程桌面 / GUI 端口：留空 = 不变，存了就更新
+        if "snowluma_gui_http" in q and q.get("snowluma_gui_http") is not None:
+            qq_block["snowluma_gui_http"] = str(q["snowluma_gui_http"]).strip()
         qq_block["admin_qq"] = _int_list(q.get("admin_qq", qq_block.get("admin_qq", [])))
 
     # Broadcast

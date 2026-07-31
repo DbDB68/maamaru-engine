@@ -27,7 +27,11 @@ class SortieMixin:
     """合战场出阵。依赖宿主类的 navigate_to_stream、_click_point、_enable_auto_march。"""
 
     def sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
-                      auto_march: bool = True, max_loops: int = 1):
+                      auto_march: bool = True, max_loops: int = 1,
+                      formation_mode: str = "manual",
+                      formation_strategy: str = "fixed",
+                      formation: str = "鱼鳞阵",
+                      injury_action: str = "continue"):
         """
         流式跑合战场
 
@@ -66,7 +70,15 @@ class SortieMixin:
             yield "[出阵] 到达出阵失败"
             return
 
-        for loop_no in range(1, max_loops + 1):
+        loop_no = 1
+        repair_attempts = 0
+        while loop_no <= max_loops:
+            if self.current_location != "出阵":
+                for nav_msg in self.navigate_to_stream("出阵"):
+                    yield nav_msg
+                if self.current_location != "出阵":
+                    yield "[出阵] 重新进入出阵失败，停止"
+                    return
             yield f"[出阵] ⚔️ 第 {loop_no}/{max_loops} 圈：{chapter}章-{map_no}图，部队{team_no}准备上场"
 
             # ========== 2. 选章节 → 决定 ==========
@@ -121,9 +133,35 @@ class SortieMixin:
 
             # ========== 5. 【保命】重伤检查（先于一切出阵准备） ==========
             self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["injury_stamp"]["template"]):
-                yield "[出阵] 🛑 检测到重伤标记！按规矩绝不出阵，停。去修刀吧"
-                return
+            injury = self._team_injury_status(cfg)
+            if injury:
+                must_repair = injury == "重伤"
+                action = str(injury_action or "continue")
+                if action in ("true", "1"):
+                    action = "continue"
+                elif action in ("false", "0"):
+                    action = "stop"
+                if not must_repair and action == "stop":
+                    yield f"[出阵] 检测到部队{team_no}{injury}；自动手入已关闭，本次收工"
+                    return
+                repair_and_stop = action == "repair_stop"
+                suffix = "，不用加速符，手入后收工" if repair_and_stop else "，转去手入后重试本圈"
+                yield f"[出阵] 检测到部队{team_no}{injury}{suffix}"
+                for repair_msg in self.repair_stream(
+                        dry_run=False,
+                        use_speedup=False if repair_and_stop else None):
+                    yield repair_msg
+                if repair_and_stop:
+                    yield "[出阵] 已安排手入（黑名单已跳过、未使用加速符），本次收工"
+                    return
+                repair_attempts += 1
+                if repair_attempts >= 2:
+                    yield "[出阵] 手入后仍检测到伤势（可能是黑名单或未加速成员），停止"
+                    return
+                if team_no not in self.config.get("repair", {}).get("speedup_teams", []):
+                    yield f"[出阵] 部队{team_no}未配置使用加速符，已送修但不能立刻续跑"
+                    return
+                continue
 
             # ========== 6. 可选：委托自动行军 ==========
             if auto_march:
@@ -165,9 +203,22 @@ class SortieMixin:
                 fcfg = self.config.get("formation", {})
                 fv = fcfg.get("verify", {})
                 if fv and self.maa.exists(fv["template"], roi_4to4(*fv["roi"])):
-                    yield f"[出阵] 🛡️ 阵形选择蹦出来了，选「{cfg.get('formation', '鱼鳞阵')}」继续"
-                    self.select_formation(cfg.get("formation", "鱼鳞阵"))
-                    time.sleep(1.0)
+                    if auto_march:
+                        yield "[出阵] ⚠️ 已选自动行军但仍出现阵形页，按兜底阵形继续"
+                    result = self.choose_formation(
+                        strategy=formation_strategy,
+                        formation_name=formation,
+                        enable_auto=formation_mode == "auto",
+                    )
+                    chosen = "有利阵形" if result == "advantage" else formation
+                    yield f"[出阵] 🛡️ 已选择「{chosen}」继续"
+                    # 阵形确认后的转场略慢；等页面真正消失，避免下一轮重复点阵。
+                    for _ in range(8):
+                        time.sleep(0.4)
+                        self.maa.screenshot(force=True)
+                        if not self.maa.exists(
+                                fv["template"], roi_4to4(*fv["roi"])):
+                            break
                     continue
 
                 # 手动行军决策屏（委托没挂上时每个节点都问）：点"行军"继续
@@ -215,12 +266,33 @@ class SortieMixin:
 
             if march_done:
                 yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
+                self.current_location = "本丸"
+                repair_attempts = 0
+                loop_no += 1
             elif interrupted:
-                yield "[出阵] ⚠️ 行军中断（可能有人中伤），已返回本丸。去看看伤势，本次停止"
-                return
+                yield "[出阵] ⚠️ 行军因伤势中断，已返回本丸；重新检查轻/中/重伤"
+                self.current_location = "本丸"
+                continue
             else:
                 yield "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了"
                 return
 
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
+
+    def _team_injury_status(self, cfg):
+        """在部队选择页识别最高伤势；重伤模板与文字 OCR 双保险。"""
+        stamps = cfg.get("injury_stamps", {})
+        for severity in ("重伤", "中伤", "轻伤"):
+            stamp = stamps.get(severity, {})
+            template = stamp.get("template")
+            if template and self.maa.template_match(template):
+                return severity
+        # 兼容尚未升级 injury_stamps 的旧配置。
+        if not stamps and self.maa.template_match(cfg["injury_stamp"]["template"]):
+            return "重伤"
+        roi = roi_4to4(*cfg.get("injury_status_roi", [0, 90, 1280, 560]))
+        for severity in ("重伤", "中伤", "轻伤"):
+            if self.maa.ocr(severity, roi):
+                return severity
+        return None

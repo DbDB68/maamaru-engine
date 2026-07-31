@@ -732,6 +732,19 @@
     }
   },
   "formation": {
+    "auto_mode": {
+      "roi": [
+        840,
+        0,
+        980,
+        68
+      ],
+      "toggle": [
+        910,
+        32
+      ]
+    },
+    "advantage_template": "battle/ui有利.png",
     "verify": {
       "template": "battle/ui阵形选择.png",
       "roi": [
@@ -952,16 +965,30 @@
       "template": "刮刮乐/ui南瓜.png"
     },
     "difficulty_tabs": {
-      "1": [137, 163],
-      "2": [297, 163],
-      "3": [437, 163]
+      "1": [
+        137,
+        163
+      ],
+      "2": [
+        297,
+        163
+      ],
+      "3": [
+        437,
+        163
+      ]
     },
     "deploy_button": {
       "template": "team/部队选择.png"
     },
     "team_ui_ocr": {
       "expected": "部队选择",
-      "roi": [506, 1, 774, 77]
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
     },
     "depart_button": {
       "template": "team/即刻出阵.png"
@@ -974,27 +1001,45 @@
     },
     "confirm_button": {
       "template": "通用_确定.png",
-      "roi": [536, 565, 742, 637]
+      "roi": [
+        536,
+        565,
+        742,
+        637
+      ]
     },
     "refresh_button": {
       "template": "刮刮乐/剪影更新.png"
     },
     "board_full_ocr": {
       "expected": "已解锁",
-      "roi": [230, 300, 600, 390]
+      "roi": [
+        230,
+        300,
+        600,
+        390
+      ]
     },
     "refresh_confirm": {
       "template": "通用_确定.png"
     },
     "battle_ocr": {
       "expected": "战斗",
-      "roi": [1034, 586, 1154, 646]
+      "roi": [
+        1034,
+        586,
+        1154,
+        646
+      ]
     },
     "round_end": {
       "template": "刮刮乐/ui南瓜.png",
       "threshold": 0.9
     },
-    "skip_tap": [775, 695]
+    "skip_tap": [
+      775,
+      695
+    ]
   },
   "naihanka": {
     "start_button": {
@@ -1048,6 +1093,23 @@
     "injury_stamp": {
       "template": "battle/ui重伤.png"
     },
+    "injury_stamps": {
+      "重伤": {
+        "template": "battle/ui重伤.png"
+      },
+      "中伤": {
+        "template": "battle/中伤.png"
+      },
+      "轻伤": {
+        "template": "battle/轻伤.png"
+      }
+    },
+    "injury_status_roi": [
+      0,
+      90,
+      1280,
+      560
+    ],
     "equip_warning_button": {
       "template": "team/继续出阵.png"
     },
@@ -1237,7 +1299,6 @@
       "小豆长光",
       "狮子王",
       "大典太光世",
-      "小龙景光",
       "数珠丸恒次",
       "大般若长光",
       "小狐丸",
@@ -1245,7 +1306,8 @@
       "膝丸",
       "髭切",
       "山伏国广",
-      "江雪左文字"
+      "江雪左文字",
+      "小龙景光"
     ],
     "speedup_teams": [
       3
@@ -1310,7 +1372,9 @@
   },
   "practice": {
     "team_no": 2,
-    "formation": "逆行",
+    "formation_mode": "manual",
+    "formation_strategy": "fixed",
+    "formation": "逆行阵",
     "max_wins": 3
   },
   "daily": {
@@ -1334,5 +1398,35 @@
     "enabled": true,
     "server": "https://ntfy.sh",
     "topic": "maamaru-99e61832"
+  },
+  "dismantle": {
+    "whitelist": [
+      "山姥切国广",
+      "陆奥守吉行",
+      "宗三左文字",
+      "加州清光",
+      "歌仙兼定",
+      "乱藤四郎",
+      "小夜左文字",
+      "五虎退",
+      "秋田藤四郎",
+      "药研藤四郎",
+      "大和守安定",
+      "鸣狐",
+      "蜂须贺虎彻",
+      "前田藤四郎",
+      "今剑",
+      "笑面青江",
+      "鲶尾藤四郎",
+      "骨喰藤四郎",
+      "山伏国广",
+      "狮子王",
+      "大俱利伽罗",
+      "烛台切光忠",
+      "同田贯正国",
+      "和泉守兼定",
+      "厚藤四郎",
+      "平野藤四郎"
+    ]
   }
 }

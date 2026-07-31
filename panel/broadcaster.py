@@ -209,6 +209,14 @@ class Broadcaster:
             self._send_qq(_pick(_DAILY_OK))
 
     def _on_schedule(self, msg: str):
+        if msg.startswith("⏳"):
+            self._send_qq(msg)
+            self._send_ntfy(msg, title="远征即将接管游戏", tags="warning,clock1")
+            return
+        if msg.startswith("🕐 开始派遣"):
+            self._send_qq(msg)
+            self._send_ntfy(msg, title="Maamaru Dispatch", tags="clock1")
+            return
         # 消息格式：🕐 到点啦！派部队5 去 E2「江户·鸟羽」（scheduler.py 拼的）
         m = re.search(r"派部队(\d+)\s*去\s*(\S+)「([^」]*)」", msg)
         team, map_code, map_name = (m.group(1), m.group(2), m.group(3)) if m else ("?", "?", "")

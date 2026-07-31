@@ -1,1 +1,46 @@
-{"entries": []}
+{
+  "version": 2,
+  "common_plan": [
+    {
+      "team_no": 1,
+      "map_code": "D1",
+      "enabled": false
+    },
+    {
+      "team_no": 2,
+      "map_code": "E2",
+      "enabled": false
+    },
+    {
+      "team_no": 3,
+      "map_code": "E2",
+      "enabled": false
+    },
+    {
+      "team_no": 4,
+      "map_code": "E2",
+      "enabled": false
+    },
+    {
+      "team_no": 5,
+      "map_code": "E2",
+      "enabled": false
+    }
+  ],
+  "automation": {
+    "enabled": false,
+    "mode": "preset",
+    "preset": "小判",
+    "start_time": "08:00",
+    "teams": [
+      2,
+      3,
+      4
+    ],
+    "capitalist": false,
+    "paused_until": "",
+    "last_runs": {},
+    "lane_shifts": {}
+  },
+  "entries": []
+}

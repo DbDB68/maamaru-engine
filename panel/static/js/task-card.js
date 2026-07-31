@@ -1,0 +1,116 @@
+/** 任务卡片：概览摘要与配置页卡片的统一展示。 */
+(function registerTaskCard(global) {
+  'use strict';
+  const app = global.Maamaru;
+  const esc = app.dom.escape;
+
+  function isVisible(field, params) {
+    const rule = field?.visibleWhen;
+    if (!rule) return true;
+    const current = String(params[rule.key] ?? '');
+    if (Object.prototype.hasOwnProperty.call(rule, 'is')) return current === String(rule.is);
+    if (Object.prototype.hasOwnProperty.call(rule, 'not')) return current !== String(rule.not);
+    return true;
+  }
+
+  function displayValue(field, value) {
+    if (Array.isArray(value)) return value.length ? value.join('、') : '都不跑';
+    if (field?.type === 'select' && Array.isArray(field.options)) {
+      const option = field.options.find(item =>
+        String(Array.isArray(item) ? item[0] : item) === String(value));
+      if (option) return String(Array.isArray(option) ? option[1] : option);
+    }
+    return value === '' || value == null ? '未设置' : String(value);
+  }
+
+  function summaryItems(info, params) {
+    return Object.entries(params).map(([key, value]) => {
+      const field = (info.params || []).find(item => item.key === key);
+      if (!isVisible(field, params)) return null;
+      if (field?.key === 'steps' && Array.isArray(value)) {
+        return {
+          label: '日课',
+          value: value.length ? `${value.length} 项` : '不执行',
+          title: value.length ? value.join('、') : '没有勾选任何日课',
+        };
+      }
+      return { label: field?.label || '', value: displayValue(field, value), title: '' };
+    }).filter(Boolean);
+  }
+
+  function renderOverview(target, options) {
+    const { info, icon = '🧰', running, busy, params, onRun, onStop, onConfig } = options;
+    const items = summaryItems(info, params);
+    const brief = items.slice(0, 3).map(item =>
+      `<span class="fd-summary-chip" title="${esc(item.title || `${item.label}：${item.value}`)}">`
+      + `<b>${esc(item.label)}</b><span>${esc(item.value)}</span></span>`).join('');
+    const details = items.map(item =>
+      `<span class="fd-chip" title="${esc(item.title || `${item.label}：${item.value}`)}">`
+      + `<b>${esc(item.label)}</b> ${esc(item.value)}</span>`).join('');
+    const extra = Math.max(0, items.length - 3);
+    const paramsBlock = items.length ? `
+      <div class="fd-summary">
+        <span class="fd-summary-label">这次会跑</span>
+        <div class="fd-summary-values">${brief}</div>
+        ${extra ? `<span class="fd-summary-more">另 ${extra} 项</span>` : ''}
+      </div>
+      <details class="fd-details">
+        <summary>查看全部设置</summary>
+        <div class="fd-params">${details}</div>
+      </details>` : '<div class="fd-summary fd-summary-empty">无需设置，直接运行</div>';
+
+    target.innerHTML = `
+      <div class="fd-head">
+        <span class="fd-icon">${icon}</span>
+        <span class="fd-label">${esc(info.label)}</span>
+        <span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>
+      </div>
+      <div class="fd-desc">${esc(info.desc)}</div>
+      ${paramsBlock}
+      <div class="fd-actions">
+        ${running
+          ? '<button data-task-action="stop" class="btn-danger fd-btn">■ 强制关闭</button>'
+          : `<button data-task-action="run" class="btn-primary fd-btn" ${busy ? 'disabled' : ''}>`
+            + `${busy ? '⏳ 有别的任务在跑…' : '▶ 开始任务'}</button>`}
+        <button data-task-action="config" class="fd-config-btn" type="button">⚙ 调整配置</button>
+      </div>`;
+
+    target.querySelector('[data-task-action="run"]')?.addEventListener('click', onRun);
+    target.querySelector('[data-task-action="stop"]')?.addEventListener('click', onStop);
+    target.querySelector('[data-task-action="config"]')?.addEventListener('click', onConfig);
+  }
+
+  function createConfig(options) {
+    const { key, label, info, icon = '🧰', running, busy, form, showSave = true, onSave, onRun } = options;
+    const card = document.createElement('div');
+    card.className = `config-detail-card${running ? ' running' : ''}`;
+    card.dataset.script = key;
+    card.innerHTML = `
+      <div class="cd-head">
+        <div class="cd-title"><span>${icon}</span> ${esc(label)}</div>
+        <span class="s-badge">${running ? '⏳ 运行中' : '待命'}</span>
+      </div>
+      <div class="cd-desc">${esc(info.desc)}</div>`;
+    if (form) card.appendChild(form);
+
+    const actions = document.createElement('div');
+    actions.className = 'cd-actions';
+    if (showSave) {
+      const save = document.createElement('button');
+      save.className = 's-save';
+      save.textContent = '💾 保存配置';
+      save.addEventListener('click', () => onSave(save));
+      actions.appendChild(save);
+    }
+    const run = document.createElement('button');
+    run.className = 's-run';
+    run.textContent = running ? '⏳ 正在跑…' : '▶ 运行';
+    run.disabled = busy;
+    run.addEventListener('click', onRun);
+    actions.appendChild(run);
+    card.appendChild(actions);
+    return card;
+  }
+
+  app.taskCard = Object.freeze({ renderOverview, createConfig, summaryItems });
+})(window);

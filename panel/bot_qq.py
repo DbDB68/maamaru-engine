@@ -7,7 +7,7 @@ QQ 协议端 —— SnowLuma / NapCat（OneBot v11）HTTP 模式
 
 SnowLuma / NapCat 那边要配两条（以面板跑在 8080 为例）：
   HTTP 上报地址：http://127.0.0.1:8080/onebot/webhook
-  HTTP API 监听：http://127.0.0.1:5500（本机默认）
+  HTTP API 监听：http://127.0.0.1:3000（本机默认）
 
 设计要点：
 - webhook 必须秒回（OneBot 超时会重推），LLM 慢，所以收到消息立刻 200，
@@ -19,7 +19,7 @@ SnowLuma / NapCat 那边要配两条（以面板跑在 8080 为例）：
   "bot": {
     "qq": {
       "enabled": true,
-      "snowluma_http": "http://127.0.0.1:5500",
+      "snowluma_http": "http://127.0.0.1:3000",
       "admin_qq": [123456789]        // 白名单 + 播报对象；空数组 = 谁都能聊但播报没人收
     }
   }
@@ -107,7 +107,7 @@ def init_qq(app: FastAPI, get_agent) -> QQSender | None:
         print("[QQ] bot.qq.enabled 未开，跳过（panel_config.json）", flush=True)
         return None
 
-    sender = QQSender(cfg.get("snowluma_http", "http://127.0.0.1:5500"))
+    sender = QQSender(cfg.get("snowluma_http", "http://127.0.0.1:3000"))
     admins = {int(q) for q in cfg.get("admin_qq", [])}
     if not admins:
         print("[QQ] ⚠️ admin_qq 是空的：谁都能聊，但事件播报没人收", flush=True)

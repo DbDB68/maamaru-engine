@@ -24,12 +24,14 @@ _TEAM_NUMERAL = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 class RepairMixin:
     """手入。依赖宿主类的 navigate_to_stream、_click_point。"""
 
-    def repair_stream(self, dry_run: bool = False):
+    def repair_stream(self, dry_run: bool = False, blacklist: list = None,
+                      use_speedup: bool = None):
         """
         流式手入：扫描修复列表，黑名单跳过，其余修掉
 
         Args:
             dry_run: True=只扫描报决策，一个按钮都不点（认人考试模式）
+            blacklist: 运行时覆盖黑名单，None 则读配置
 
         Yields:
             str: 执行状态消息
@@ -39,14 +41,16 @@ class RepairMixin:
             yield "[手入] 未配置手入"
             return
 
-        # 黑名单预解析：中文名 → 图鉴ID（匹配走 sword_db，OCR 错字有字典兜底）
-        blacklist = cfg.get("blacklist", [])
+        # 黑名单：运行时覆盖 > 配置
+        if blacklist is None:
+            blacklist = cfg.get("blacklist", [])
         bl_ids = set()
         for zh in blacklist:
             r = sword_db.find_by_name(zh)
             if r:
                 bl_ids.add(r[0])
-        speedup_marks = [_TEAM_NUMERAL[t] + "之" for t in cfg.get("speedup_teams", [])
+        speedup_teams = cfg.get("speedup_teams", []) if use_speedup is not False else []
+        speedup_marks = [_TEAM_NUMERAL[t] + "之" for t in speedup_teams
                          if t in _TEAM_NUMERAL]
 
         yield f"[手入] 黑名单 {len(blacklist)} 人（解析出 {len(bl_ids)} 个ID），" \

@@ -226,7 +226,7 @@ class SmithMixin:
     # ==================== 刀解 ====================
 
     def dismantle_stream(self, max_dismantle: int = 1, dry_run: bool = False,
-                         _from_forge: bool = False):
+                         _from_forge: bool = False, whitelist: list = None):
         """
         流式刀解：扫列表找白名单，解 max_dismantle 把
 
@@ -234,17 +234,21 @@ class SmithMixin:
             max_dismantle: 解几把（日课=1）
             dry_run: 只报决策不动手
             _from_forge: 从锻刀界面直接切标签（跳过导航）
+            whitelist: 运行时覆盖白名单，None 则读配置 / 默认常量
 
         Yields:
             str: 执行状态消息
         """
+        # 白名单：运行时覆盖 > 配置 > 默认常量
+        if whitelist is None:
+            whitelist = self.config.get("dismantle", {}).get("whitelist", DISMANTLE_WHITELIST)
         # 白名单预解析：过一遍名册校正（OCR 错字有字典兜底）
         whitelist_ids = set()
-        for zh in DISMANTLE_WHITELIST:
+        for zh in whitelist:
             r = sword_db.find_by_name(zh)
             if r:
                 whitelist_ids.add(r[0])
-        yield f"[刀解] 白名单 {len(DISMANTLE_WHITELIST)} 人（解析 {len(whitelist_ids)} 个ID）"
+        yield f"[刀解] 白名单 {len(whitelist)} 人（解析 {len(whitelist_ids)} 个ID）"
 
         if not _from_forge:
             yield "[刀解] 正在导航到锻刀..."

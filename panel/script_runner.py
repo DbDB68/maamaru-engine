@@ -30,14 +30,14 @@ _SCRIPTS: dict[str, dict] = {}
 
 def register_script(name: str, label: str, desc: str,
                     runner_fn: Callable[[str, dict], Generator[str, None, None]],
-                    params: list | None = None):
+                    params: list | None = None, hidden: bool = False):
     _SCRIPTS[name] = {"label": label, "desc": desc, "fn": runner_fn,
-                      "params": params or []}
+                      "params": params or [], "hidden": hidden}
 
 
 def list_scripts() -> dict:
     return {k: {"label": v["label"], "desc": v["desc"], "params": v["params"]}
-            for k, v in _SCRIPTS.items()}
+            for k, v in _SCRIPTS.items() if not v.get("hidden")}
 
 
 # —— 运行时状态 ——
