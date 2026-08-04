@@ -9,7 +9,9 @@
 
   const ui = () => ({
     panel: $('#sched-panel'), rows: $('#sched-rows'), add: $('#sched-add'), save: $('#sched-save'),
-    msg: $('#sched-msg'), common: $('#common-plan'), enabled: $('#auto-enabled'), mode: $('#auto-mode'),
+    msg: $('#sched-msg'), commonPanel: $('#exp-common-panel'), common: $('#common-plan'),
+    commonSave: $('#common-plan-save'), commonMsg: $('#common-plan-msg'),
+    enabled: $('#auto-enabled'), mode: $('#auto-mode'),
     start: $('#auto-start'), capitalist: $('#auto-capitalist'), preset: $('#preset-name'),
     total: $('#preset-total'), preview: $('#preset-preview'), presetBox: $('#preset-controls'),
     customBox: $('#custom-controls'), pause: $('#pause-state'),
@@ -67,8 +69,12 @@
     u.start.closest('label').style.display = isPreset ? '' : 'none';
   }
 
-  async function save() {
+  async function save(source = 'auto') {
     const u = ui();
+    const saveButton = source === 'manual' ? u.commonSave : u.save;
+    const originalText = saveButton.textContent;
+    saveButton.disabled = true;
+    saveButton.textContent = '正在保存…';
     const entries = [...u.rows.querySelectorAll('.sched-row')].map(row => {
       const time = row.querySelector('.sr-time').value;
       const team = Number(row.querySelector('.sr-team').value);
@@ -83,24 +89,40 @@
     }));
     const selectedTeams = [...document.querySelectorAll('.preset-team')].map(x => Number(x.value));
     if (new Set(selectedTeams).size !== selectedTeams.length) {
-      u.msg.textContent = '三条路线不能选择重复部队'; return;
+      const messageNode = source === 'manual' ? u.commonMsg : u.msg;
+      messageNode.textContent = '三条路线不能选择重复部队';
+      saveButton.textContent = '保存失败';
+      app.feedback?.show('自动排班的三条路线不能使用重复部队', 'error');
+      setTimeout(() => { saveButton.disabled = false; saveButton.textContent = originalText; }, 1800);
+      return;
     }
     try {
       const data = await app.api.post('/api/expedition-schedule', { entries, common_plan,
         automation: { enabled: u.enabled.checked, mode: u.mode.value, preset: u.preset.value,
           start_time: u.start.value || '08:00', teams: selectedTeams, capitalist: u.capitalist.checked,
           paused_until: config?.automation?.paused_until || '' } });
-      u.msg.textContent = data.ok ? `✓ 存好了（${data.count} 条）` : '保存失败';
-      app.feedback?.show(data.ok ? '远征设置已保存' : '远征设置保存失败', data.ok ? 'success' : 'error');
+      const messageNode = source === 'manual' ? u.commonMsg : u.msg;
+      messageNode.textContent = data.ok ? '✓ 已保存' : '保存失败';
+      saveButton.textContent = data.ok ? '✓ 已保存' : '保存失败';
+      app.feedback?.show(data.ok
+        ? (source === 'manual' ? '手动远征安排已保存' : '自动排班已保存')
+        : '远征设置保存失败', data.ok ? 'success' : 'error');
       if (data.ok) loaded = entries;
-    } catch (_) { u.msg.textContent = '保存失败'; app.feedback?.show('远征设置保存失败', 'error'); }
-    setTimeout(() => { u.msg.textContent = ''; }, 3000);
+    } catch (_) {
+      (source === 'manual' ? u.commonMsg : u.msg).textContent = '保存失败';
+      saveButton.textContent = '保存失败';
+      app.feedback?.show('远征设置保存失败', 'error');
+    }
+    setTimeout(() => { u.msg.textContent = ''; u.commonMsg.textContent = ''; }, 3000);
+    setTimeout(() => { saveButton.disabled = false; saveButton.textContent = originalText; }, 1800);
   }
 
   function bind() {
     if (bound) return; bound = true;
     const u = ui();
-    u.add.addEventListener('click', () => addRow()); u.save.addEventListener('click', save);
+    u.add.addEventListener('click', () => addRow());
+    u.save.addEventListener('click', () => save('auto'));
+    u.commonSave.addEventListener('click', () => save('manual'));
     u.mode.addEventListener('change', syncMode); u.start.addEventListener('change', preview);
     u.preset.addEventListener('change', preview);
     document.querySelectorAll('.preset-team').forEach(x => x.addEventListener('change', preview));
@@ -123,7 +145,9 @@
       u.preset.innerHTML = Object.keys(presets).map(name => `<option value="${esc(name)}" ${name === auto.preset ? 'selected' : ''}>${esc(name)}</option>`).join('');
       document.querySelectorAll('.preset-team').forEach((select, index) => select.innerHTML = teamOptions((auto.teams || [2,3,4])[index]));
       u.pause.textContent = auto.paused_until ? `暂停至 ${auto.paused_until}` : '';
-      syncMode(); preview(); app.components.enhanceSelects(u.panel);
+      syncMode(); preview();
+      app.components.enhanceSelects(u.panel);
+      app.components.enhanceSelects(u.commonPanel);
     } catch (_) { u.msg.textContent = '时刻表读取失败'; }
   }
   app.expeditionSchedule = Object.freeze({ load, addRow, save });

@@ -21,9 +21,11 @@ import threading
 import time
 from pathlib import Path
 
+from touken.runtime_paths import PANEL_CONFIG_PATH, STATUS_DIR
+
 _HERE = Path(__file__).resolve().parent
-_PANEL_CONFIG = _HERE / "panel_config.json"
-_STATUS_DIR = _HERE.parent / "status"
+_PANEL_CONFIG = PANEL_CONFIG_PATH
+_STATUS_DIR = STATUS_DIR
 
 # ── 狐之助语料池：{label} = 脚本显示名 ──
 

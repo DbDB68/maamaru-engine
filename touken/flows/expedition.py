@@ -24,10 +24,12 @@ import re
 import time
 from pathlib import Path
 
+from ..runtime_paths import STATUS_DIR
+
 from ..maa_adapter import roi_4to4
 
 _MAPS_TABLE = Path(__file__).parent.parent / "data" / "expedition_maps.json"
-_STATUS_DIR = Path(__file__).resolve().parent.parent.parent / "status"
+_STATUS_DIR = STATUS_DIR
 _EXP_RECORD = _STATUS_DIR / "expeditions.json"
 
 _NUMERALS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5}

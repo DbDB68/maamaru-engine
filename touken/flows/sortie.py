@@ -31,6 +31,7 @@ class SortieMixin:
                       formation_mode: str = "manual",
                       formation_strategy: str = "fixed",
                       formation: str = "鱼鳞阵",
+                      repair_threshold: str = "light",
                       injury_action: str = "continue"):
         """
         流式跑合战场
@@ -41,6 +42,7 @@ class SortieMixin:
             team_no: 部队编号
             auto_march: 是否委托自动行军（True=全自动打完一圈回本丸）
             max_loops: 连续打几圈
+            repair_threshold: 自动手入阈值（light / medium / heavy）
 
         Yields:
             str: 执行状态消息
@@ -135,6 +137,14 @@ class SortieMixin:
             self.maa.screenshot(force=True)
             injury = self._team_injury_status(cfg)
             if injury:
+                threshold = str(repair_threshold or "light")
+                severity_rank = {"轻伤": 1, "中伤": 2, "重伤": 3}
+                threshold_rank = {"light": 1, "medium": 2, "heavy": 3}.get(threshold, 1)
+                must_repair = injury == "重伤"
+                if not must_repair and severity_rank.get(injury, 3) < threshold_rank:
+                    yield f"[出阵] 部队{team_no}{injury}，尚未达到手入阈值，继续本圈"
+                    injury = None
+            if injury:
                 must_repair = injury == "重伤"
                 action = str(injury_action or "continue")
                 if action in ("true", "1"):
@@ -144,12 +154,16 @@ class SortieMixin:
                 if not must_repair and action == "stop":
                     yield f"[出阵] 检测到部队{team_no}{injury}；自动手入已关闭，本次收工"
                     return
-                repair_and_stop = action == "repair_stop"
+                # 重伤必须尝试手入；即便用户选择“不手入”，也改为普通手入后收工。
+                repair_and_stop = action == "repair_stop" or (must_repair and action == "stop")
                 suffix = "，不用加速符，手入后收工" if repair_and_stop else "，转去手入后重试本圈"
                 yield f"[出阵] 检测到部队{team_no}{injury}{suffix}"
                 for repair_msg in self.repair_stream(
                         dry_run=False,
-                        use_speedup=False if repair_and_stop else None):
+                        use_speedup=False if repair_and_stop else None,
+                        # 继续原定出阵时，本次出阵队必须即时修好；
+                        # 手入列表里的其他队仍会送修，但不会使用加速符。
+                        speedup_teams=None if repair_and_stop else [team_no]):
                     yield repair_msg
                 if repair_and_stop:
                     yield "[出阵] 已安排手入（黑名单已跳过、未使用加速符），本次收工"
@@ -157,9 +171,6 @@ class SortieMixin:
                 repair_attempts += 1
                 if repair_attempts >= 2:
                     yield "[出阵] 手入后仍检测到伤势（可能是黑名单或未加速成员），停止"
-                    return
-                if team_no not in self.config.get("repair", {}).get("speedup_teams", []):
-                    yield f"[出阵] 部队{team_no}未配置使用加速符，已送修但不能立刻续跑"
                     return
                 continue
 
@@ -224,6 +235,15 @@ class SortieMixin:
                 # 手动行军决策屏（委托没挂上时每个节点都问）：点"行军"继续
                 # ——刷花实测：_enable_auto_march 会静默失败，不能全指望委托
                 if self.maa.ocr("行军", roi_4to4(1080, 550, 1215, 680)):
+                    field_injury = self._team_injury_status(cfg)
+                    if field_injury and self._injury_reaches_threshold(
+                            field_injury, repair_threshold):
+                        yield f"[出阵] 🩹 局内检测到{field_injury}，已达到手入阈值，不再继续行军"
+                        if not self._return_home_from_march(cfg):
+                            yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                            return
+                        interrupted = True
+                        break
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
                     self._click_point([1146, 617])
                     time.sleep(1.0)
@@ -240,24 +260,10 @@ class SortieMixin:
                 stop_roi = roi_4to4(*stop_ocr["roi"])
                 if self.maa.ocr(expected=stop_ocr["expected"], roi=stop_roi):
                     yield "[出阵] ⚠️ 检测到自动行军停止横幅"
-                    self.maa.screenshot(force=True)
-                    stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
-                    if stop_btn:
-                        self.maa.click(stop_btn)
+                    if not self._return_home_from_march(cfg):
+                        yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                        return
                     interrupted = True
-                    time.sleep(1.5)
-                    # 点返回本丸后游戏会二次确认"确认返回本丸？"→ 点"是"
-                    self.maa.screenshot(force=True)
-                    yes = self.maa.template_match(cfg["return_home_confirm"]["template"])
-                    if yes:
-                        self.maa.click(yes)
-                    time.sleep(2.0)
-                    # 等回本丸
-                    for _ in range(15):
-                        self.maa.screenshot(force=True)
-                        if self.maa.template_match(cfg["home_ui"]["template"]):
-                            break
-                        time.sleep(0.8)
                     break
 
                 # 安全区跳动画
@@ -279,6 +285,38 @@ class SortieMixin:
 
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
+
+    @staticmethod
+    def _injury_reaches_threshold(injury: str, threshold: str) -> bool:
+        severity_rank = {"轻伤": 1, "中伤": 2, "重伤": 3}
+        threshold_rank = {"light": 1, "medium": 2, "heavy": 3}.get(
+            str(threshold or "light"), 1)
+        return severity_rank.get(injury, 3) >= threshold_rank
+
+    def _return_home_from_march(self, cfg) -> bool:
+        """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。"""
+        stop_btn = None
+        for _ in range(6):
+            self.maa.screenshot(force=True)
+            stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
+            if stop_btn:
+                break
+            time.sleep(0.5)
+        if not stop_btn:
+            return False
+        self.maa.click(stop_btn)
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        yes = self.maa.template_match(cfg["return_home_confirm"]["template"])
+        if yes:
+            self.maa.click(yes)
+        time.sleep(2.0)
+        for _ in range(15):
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["home_ui"]["template"]):
+                return True
+            time.sleep(0.8)
+        return False
 
     def _team_injury_status(self, cfg):
         """在部队选择页识别最高伤势；重伤模板与文字 OCR 双保险。"""

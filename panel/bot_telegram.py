@@ -9,10 +9,12 @@ import json
 import threading
 from pathlib import Path
 
+from touken.runtime_paths import PANEL_CONFIG_PATH
+
 from .agent import AgentGateway
 
 _HERE = Path(__file__).resolve().parent
-_PANEL_CONFIG = _HERE / "panel_config.json"
+_PANEL_CONFIG = PANEL_CONFIG_PATH
 
 
 def _read_config() -> dict:

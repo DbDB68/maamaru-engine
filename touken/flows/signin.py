@@ -79,3 +79,6 @@ class SigninMixin:
         """关弹窗 + 关公告回本丸"""
         self.maa.click(Point(1195, 30))  # 公告右上角 X
         time.sleep(1.5)
+        # 打开公告前目录是展开的，但关公告后已经回到本丸。
+        # 不清空会让下一步误以为目录仍开着，直接在本丸画面找菜单项。
+        self.current_location = None

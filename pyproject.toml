@@ -7,6 +7,12 @@ license = {text = "AGPL-3.0-or-later"}
 keywords = ["touken-ranbu", "maa", "automation", "game"]
 dependencies = [
     "maafw>=5.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "pywebview>=5.0",
+    "numpy>=2.0",
+    "pillow>=10.0",
 ]
 
 [tool.hatch.build.targets.wheel]

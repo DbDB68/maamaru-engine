@@ -7,7 +7,9 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-_SCHED_PATH = Path(__file__).resolve().parent / "expedition_schedule.json"
+from touken.runtime_paths import SCHEDULE_PATH
+
+_SCHED_PATH = SCHEDULE_PATH
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
               / "touken" / "data" / "expedition_maps.json")
 

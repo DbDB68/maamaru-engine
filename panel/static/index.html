@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>まあ丸 — 本丸近侍パネル</title>
-<link rel="stylesheet" href="/static/style.css?v=20260731-5">
+<link rel="stylesheet" href="/static/style.css?v=20260804-1">
 </head>
 <body>
 <div id="app">
@@ -124,20 +124,34 @@
         <div id="config-detail"></div>
       </div>
 
-      <!-- 远征安排：由 JS 在选中「远征」时挂进右侧配置区 -->
+      <!-- 远征设置：JS 分别挂到「远征」和「自动排班」配置页 -->
       <div id="sched-dock" style="display:none">
-        <div id="sched-panel" class="sched-card">
+        <div id="exp-common-panel" class="sched-card">
           <div class="sched-head">
-            <span class="s-label">🧭 远征安排</span>
-            <span class="sched-hint">不会主动启动模拟器 · 接管前预告 15 秒</span>
+            <span class="s-label">🧺 手动远征安排</span>
+            <span class="sched-hint">点击“远征”运行时：先收菜，再按这里派遣</span>
           </div>
           <section class="exp-section">
             <div class="exp-section-head">
-              <b>常用安排</b>
-              <span>手动点“远征”时使用；先结算，再按这里派遣</span>
+              <b>这次要派哪些部队</b>
+              <span>只影响手动运行，不会到点自动接管游戏</span>
             </div>
             <div id="common-plan" class="common-plan"></div>
           </section>
+          <div class="sched-tools">
+            <span id="common-plan-msg" class="sched-msg"></span>
+            <button id="common-plan-save" class="s-save">💾 保存手动安排</button>
+          </div>
+        </div>
+        <div id="sched-panel" class="sched-card">
+          <div class="sched-head">
+            <span class="s-label">⏰ 自动排班</span>
+            <span class="sched-hint">面板、模拟器和游戏必须保持开启</span>
+          </div>
+          <div class="schedule-explainer">
+            <b>它会怎么工作？</b>
+            <span>启用后，まあ丸在指定时间自动接管已经打开的游戏并派遣部队。不会主动启动模拟器或游戏，接管前会预告 15 秒。</span>
+          </div>
           <section class="exp-section">
             <div class="exp-section-head">
               <b>自动排班</b>
@@ -179,7 +193,7 @@
           </section>
           <div class="sched-tools">
             <span id="sched-msg" class="sched-msg"></span>
-            <button id="sched-save" class="s-save">💾 保存远征设置</button>
+            <button id="sched-save" class="s-save">💾 保存自动排班</button>
           </div>
         </div>
       </div>
@@ -232,11 +246,16 @@
 <script src="/static/js/core.js?v=20260731-3"></script>
 <script src="/static/js/ui-feedback.js?v=20260731-1"></script>
 <script src="/static/js/system-qq.js?v=20260731-1"></script>
-<script src="/static/js/expedition-schedule.js?v=20260731-1"></script>
+<script src="/static/js/system-settings.js?v=20260804-1"></script>
+<script src="/static/js/expedition-schedule.js?v=20260804-2"></script>
+<script src="/static/js/dashboard.js?v=20260804-1"></script>
+<script src="/static/js/log-viewer.js?v=20260804-1"></script>
+<script src="/static/js/chat.js?v=20260804-1"></script>
 <script src="/static/js/sword-picker.js?v=20260731-1"></script>
 <script src="/static/js/param-form.js?v=20260731-1"></script>
 <script src="/static/js/task-card.js?v=20260731-1"></script>
 <script src="/static/js/list-editor.js?v=20260731-2"></script>
-<script src="/static/app.js?v=20260731-12"></script>
+<script src="/static/js/task-runner.js?v=20260804-1"></script>
+<script src="/static/app.js?v=20260804-7"></script>
 </body>
 </html>

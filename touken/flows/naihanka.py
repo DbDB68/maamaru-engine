@@ -121,8 +121,8 @@ class NaihankaMixin:
                     # 落盘开工时间，看板显示"内番中·已跑X小时"（写砸不影响）
                     try:
                         import json as _json
-                        from pathlib import Path as _P
-                        d = _P(__file__).resolve().parent.parent.parent / "status"
+                        from ..runtime_paths import STATUS_DIR
+                        d = STATUS_DIR
                         d.mkdir(exist_ok=True)
                         (d / "naihanka.json").write_text(_json.dumps(
                             {"started_at": time.strftime("%Y-%m-%d %H:%M:%S")},

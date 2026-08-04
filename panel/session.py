@@ -18,7 +18,9 @@ import json
 import time
 from pathlib import Path
 
-_SESSION_PATH = Path(__file__).resolve().parent.parent / "status" / "session_state.json"
+from touken.runtime_paths import STATUS_DIR
+
+_SESSION_PATH = STATUS_DIR / "session_state.json"
 _MAX_MEMORY = 12  # 记住最近 12 轮对话（多了 token 烧钱）
 
 

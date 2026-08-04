@@ -28,6 +28,8 @@
 import re
 import time
 
+from ..runtime_paths import STATUS_DIR
+
 from ..maa_adapter import Point, roi_4to4
 
 # 判定步骤翻车的消息特征（别写太宽：'失败'会误伤"模板匹配失败，使用固定坐标"这种兜底）
@@ -42,7 +44,7 @@ class DailyMixin:
     """一键日课。依赖宿主类已注册的各流程 Mixin。"""
 
     def daily_stream(self, logout: bool = False, only=None, after: str = None,
-                     sortie_override: dict = None, practice_team: int = None):
+                     sortie_override: dict = None, practice_override: dict = None):
         """
         流式一键日课
 
@@ -68,9 +70,9 @@ class DailyMixin:
         if sortie_override is not None:
             plan = dict(plan)
             plan["sortie"] = sortie_override
-        if practice_team is not None:
+        if practice_override:
             plan = dict(plan)
-            plan["practice_team"] = practice_team
+            plan["practice"] = dict(practice_override)
         report = []
         wanted = set(only) if only else None
 
@@ -100,7 +102,11 @@ class DailyMixin:
             ("签到", lambda: self.signin_stream()),
             ("万屋", lambda: self.claim_free_gift_stream()),
             ("演练", lambda: self.practice_stream(
-                dry_run=False, team_no=plan.get("practice_team"))),
+                dry_run=False,
+                team_no=plan.get("practice", {}).get("team_no"),
+                formation_mode=plan.get("practice", {}).get("formation_mode"),
+                formation_strategy=plan.get("practice", {}).get("formation_strategy"),
+                formation=plan.get("practice", {}).get("formation"))),
             ("远征", lambda: self.collect_expedition_stream(
                 redispatch=plan.get("expedition_redispatch", "same"))),
             ("内番", lambda: self.naihanka_stream()),
@@ -215,7 +221,7 @@ class DailyMixin:
         try:
             import json as _json
             from pathlib import Path
-            status_dir = Path(__file__).resolve().parent.parent.parent / "status"
+            status_dir = STATUS_DIR
             status_dir.mkdir(exist_ok=True)
             fails = [n for n, s in report if s != "✓"]
             payload = {
@@ -260,7 +266,13 @@ class DailyMixin:
                         chapter=sortie_plan["chapter"],
                         map_no=sortie_plan["map_no"],
                         team_no=sortie_plan.get("team_no", 3),
-                        max_loops=sortie_plan.get("loops", 1)):
+                        max_loops=sortie_plan.get("loops", 1),
+                        auto_march=sortie_plan.get("auto_march", True),
+                        formation_mode=sortie_plan.get("formation_mode", "manual"),
+                        formation_strategy=sortie_plan.get("formation_strategy", "fixed"),
+                        formation=sortie_plan.get("formation", "鱼鳞阵"),
+                        repair_threshold=sortie_plan.get("repair_threshold", "light"),
+                        injury_action=sortie_plan.get("repair_on_injury", "continue")):
                     yield msg
                     if _is_fail(msg):
                         ok = False

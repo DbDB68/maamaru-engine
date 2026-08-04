@@ -23,9 +23,11 @@ import re
 import time
 from pathlib import Path
 
+from ..runtime_paths import STATUS_DIR
+
 from ..maa_adapter import roi_4to4
 
-_STATUS_DIR = Path(__file__).resolve().parent.parent.parent / "status"
+_STATUS_DIR = STATUS_DIR
 _SLOT_CY = [205, 345, 475]
 _RES_NAMES = ["木炭", "玉钢", "冷却材", "砥石", "甲州金"]
 

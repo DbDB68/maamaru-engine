@@ -25,6 +25,8 @@ import re
 import time
 from pathlib import Path
 
+from ..runtime_paths import STATUS_DIR
+
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
 
@@ -33,7 +35,7 @@ _ROW_TOP = 147
 _ROW_PITCH = 96
 _VISIBLE_ROWS = 6
 
-_STATUS_DIR = Path(__file__).resolve().parent.parent.parent / "status"
+_STATUS_DIR = STATUS_DIR
 _FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
 
 

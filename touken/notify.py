@@ -13,7 +13,9 @@ import json
 import urllib.request
 from pathlib import Path
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "touken_config.json"
+from .runtime_paths import CONFIG_PATH
+
+_CONFIG_PATH = CONFIG_PATH
 
 
 def _load_notify_conf() -> dict:

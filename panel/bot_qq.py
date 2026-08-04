@@ -32,11 +32,13 @@ import threading
 from collections import deque
 from pathlib import Path
 
+from touken.runtime_paths import PANEL_CONFIG_PATH
+
 import httpx
 from fastapi import FastAPI, Request
 
 _HERE = Path(__file__).resolve().parent
-_PANEL_CONFIG = _HERE / "panel_config.json"
+_PANEL_CONFIG = PANEL_CONFIG_PATH
 
 
 def _qq_cfg() -> dict:

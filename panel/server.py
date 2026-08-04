@@ -20,13 +20,18 @@ from fastapi.staticfiles import StaticFiles
 
 from .log_store import get_store
 from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
+from touken.runtime_paths import (
+    BUNDLE_ROOT, CONFIG_PATH, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
+    ensure_runtime_data,
+)
 
 # ── 路径 ──
+ensure_runtime_data()
 _HERE = Path(__file__).resolve().parent
 _STATIC = _HERE / "static"
-_PROJECT = _HERE.parent
-_CONFIG_PATH = _PROJECT / "touken_config.json"
-_PANEL_CONFIG = _HERE / "panel_config.json"
+_PROJECT = BUNDLE_ROOT
+_CONFIG_PATH = CONFIG_PATH
+_PANEL_CONFIG = PANEL_CONFIG_PATH
 
 # 预读游戏配置（用于面板默认值，不在这里写死游戏内容）
 try:
@@ -89,8 +94,8 @@ def _make_maa(config_path):
     return MAAAdapter(
         adb_path=cfg.get("adb_path", _DEFAULT_ADB_PATH),
         adb_address=cfg.get("adb_address", _DEFAULT_ADB_ADDR),
-        resource_dir=str(_PROJECT / "resource" / "base"),
-        project_root=str(_PROJECT),
+        resource_dir=str(RESOURCE_DIR),
+        project_root=str(STATUS_DIR.parent),
         manager_path=cfg.get("emulator_manager"),
         emulator_instance=int(cfg.get("emulator_instance", 0)),
     )
@@ -138,11 +143,19 @@ def _build_daily(config_path, params):
                        "team_no": _i(params, "team_no", 3),
                        "max_buys": _i(params, "raid_buys", 30)}
     elif mode == "sortie":
+        # 地图、队伍、圈数由一键日课决定；战斗行为统一沿用「出阵」配置页。
+        saved_sortie = (_load_panel_settings().get("params", {}).get("sortie", {}) or {})
         sortie_plan = {"mode": "sortie",
                        "chapter": _i(params, "chapter", 1),
                        "map_no": _i(params, "map_no", 1),
                        "loops": _i(params, "loops", 1),
-                       "team_no": _i(params, "team_no", 3)}
+                       "team_no": _i(params, "team_no", 3),
+                       "auto_march": _bool(saved_sortie.get("auto_march", True)),
+                       "formation_mode": saved_sortie.get("formation_mode") or "manual",
+                       "formation_strategy": saved_sortie.get("formation_strategy") or "fixed",
+                       "formation": saved_sortie.get("formation") or "鱼鳞阵",
+                       "repair_threshold": saved_sortie.get("repair_threshold") or "light",
+                       "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue"}
     elif mode == "pumpkin":
         # 出阵走南瓜大作战：面板传的 watch 沿用 pumpkin 的解析逻辑
         watch_raw = params.get("pumpkin_watch") or ""
@@ -157,9 +170,14 @@ def _build_daily(config_path, params):
                        "max_skips": _i(params, "pumpkin_max_skips", 10)}
     else:
         sortie_plan = {"mode": "none"}
+    # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
+    saved_practice = (_load_panel_settings().get("params", {}).get("practice", {}) or {})
+    practice_plan = dict(saved_practice)
+    if practice_plan.get("team_no") not in (None, ""):
+        practice_plan["team_no"] = int(practice_plan["team_no"])
     yield from _make_agent(config_path).daily_stream(
         only=steps, after=after, sortie_override=sortie_plan,
-        practice_team=_i(params, "practice_team", 2))
+        practice_override=practice_plan or None)
 
 
 def _build_raid(config_path, params):
@@ -194,6 +212,7 @@ def _build_sortie(config_path, params):
         formation_mode=params.get("formation_mode") or "manual",
         formation_strategy=params.get("formation_strategy") or "fixed",
         formation=params.get("formation") or "鱼鳞阵",
+        repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue")
 
 
@@ -216,8 +235,14 @@ def _build_forge(config_path, params):
 
 
 def _build_repair(config_path, params):
+    team_names = {f"部队{i}": i for i in range(1, 6)}
+    raw_teams = params.get("speedup_teams")
+    speedup_teams = None
+    if isinstance(raw_teams, list):
+        speedup_teams = [team_names[x] for x in raw_teams if x in team_names]
     yield from _make_agent(config_path).repair_stream(
-        dry_run=_bool(params.get("dry_run", False)))
+        dry_run=_bool(params.get("dry_run", False)),
+        speedup_teams=speedup_teams)
 
 
 def _build_dispatch(config_path, params):
@@ -336,10 +361,11 @@ def _build_simple(stream_method_name):
     return _fn
 
 
-register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
-                _build_daily,
-                params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
-                         "options": _DAILY_STEPS, "default": _DAILY_STEPS},
+register_script("daily", "一键日课", "勾选要干的活，一条龙跑完；演练和合战场行为沿用各自配置",
+                 _build_daily,
+                 params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
+                          "options": _DAILY_STEPS, "default": _DAILY_STEPS,
+                           "help": "演练沿用左侧「演练」配置；合战场的自动行军、阵形和伤势处理沿用「出阵」配置。地图、部队与圈数仍在本页设置。"},
                         {"key": "sortie_mode", "type": "select", "label": "出阵安排",
                          "options": [["none", "不出阵"],
                                      ["raid", "联队战（活动）"],
@@ -381,8 +407,6 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完",
                          "placeholder": "点下方候选添加，或手动输入逗号分隔",
                          "presets": [{"label": "清空", "value": []}],
                          "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
-                        {"key": "practice_team", "type": "select", "label": "演练用部队",
-                         "options": _TEAM_OPTIONS, "default": "2"},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
                                      ["logout", "退出游戏"],
@@ -448,13 +472,20 @@ register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
                                       "鹤翼阵", "方阵", "逆行阵"]],
                          "default": "鱼鳞阵",
                          "visibleWhen": {"key": "auto_march", "is": "false"}},
+                        {"key": "repair_threshold", "type": "select",
+                         "label": "什么时候开始手入",
+                         "options": [["light", "轻伤开始手入"],
+                                     ["medium", "轻伤继续，中伤开始手入"],
+                                     ["heavy", "轻伤和中伤继续，只在重伤时手入"]],
+                         "default": "light",
+                         "help": "出阵前和局内行军选择时都会检查；重伤永远不会继续出阵。"},
                         {"key": "repair_on_injury", "type": "select",
-                         "label": "轻伤/中伤处理",
+                         "label": "达到上述伤势后",
                          "options": [["continue", "自动手入后继续"],
                                      ["repair_stop", "立即收工，手入但不用加速符"],
                                      ["stop", "立即收工，不手入"]],
                          "default": "continue",
-                         "help": "重伤无论此项如何都会强制尝试手入；黑名单仍不修，无法恢复时任务停止。"}])
+                         "help": "选择继续时会加速修复当前出阵队，并接着完成剩余圈数。重伤即使选择“不手入”也会尝试普通手入后收工；黑名单仍不修。"}])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _build_sakura,
                 params=[_team_field("1"),
@@ -516,14 +547,19 @@ register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；�
                         {"key": "watch", "type": "duration-list",
                          "label": "目标时长（命中时手机报喜，不添加则不盯）",
                          "default": ""}])
-register_script("repair", "手入", "扫描受伤刀剑，跳过黑名单，其余送入手入室",
+register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过，其余按部队决定是否加速",
                 _build_repair,
                 params=[{"key": "dry_run", "type": "select",
                          "label": "运行方式",
                          "options": [["false", "实际手入"],
                                      ["true", "只扫描并报告（不点击）"]],
                          "default": "false",
-                         "help": "黑名单在“名单设置 → 手入黑名单”维护。配置为加速部队的成员会使用加速符。"}])
+                         "help": "只扫描会报告每把刀的处理方式，不会点击任何按钮。"},
+                        {"key": "speedup_teams", "type": "checks",
+                         "label": "单独手入时，使用加速符的部队",
+                         "options": ["部队一", "部队二", "部队三", "部队四", "部队五"],
+                         "default": ["部队三"],
+                         "help": "这里只影响单独运行“手入”：黑名单始终跳过，选中部队即时修好，其他队只安排普通手入。连续出阵选择“自动手入后继续”时，会自动加速当前出阵队，不读取这里。"}])
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
                 _build_simple("sugar_stream"))
 register_script("snapshot", "库存快照", "刷新看板库存数据",
@@ -835,7 +871,7 @@ async def api_pause_expedition(request: Request):
 @app.get("/api/status")
 async def api_status():
     """读取最新的日课成绩单和库存"""
-    status_dir = _PROJECT / "status"
+    status_dir = STATUS_DIR
     data = {}
     for fn in ("latest_report.json", "inventory.json"):
         fp = status_dir / fn
@@ -887,7 +923,7 @@ def _flavor_text(script: str | None, step: str) -> str:
 @app.get("/api/dashboard")
 async def api_dashboard():
     """首页仪表盘：家底 + 远征倒计时 + 日课成绩单 + 内番，一次拿全"""
-    status_dir = _PROJECT / "status"
+    status_dir = STATUS_DIR
 
     def _read(fn):
         fp = status_dir / fn
@@ -953,7 +989,9 @@ async def api_dashboard():
 
     # 定时任务/命令行跑引擎时不走面板 runner，但会写 progress.json：
     # 3 分钟内更新过就算「在跑」，横幅照样营业
-    if not active and step and progress.get("at"):
+    # runner.current_script 有值但线程已结束，说明这是刚跑完的面板任务；
+    # 此时 progress.json 仍然很新，不能反过来把它误判成外部任务继续展示。
+    if not active and runner.current_script is None and step and progress.get("at"):
         try:
             age = time.time() - time.mktime(time.strptime(progress["at"], "%Y-%m-%d %H:%M:%S"))
             if 0 <= age <= 180:
@@ -1240,7 +1278,7 @@ async def api_save_chat_config(request: Request):
 
 # ── API：保存/加载面板设置 ──
 
-_SETTINGS_FILE = _PROJECT / "status" / "panel_settings.json"
+_SETTINGS_FILE = STATUS_DIR / "panel_settings.json"
 
 
 def _load_panel_settings() -> dict:

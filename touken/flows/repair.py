@@ -25,13 +25,14 @@ class RepairMixin:
     """手入。依赖宿主类的 navigate_to_stream、_click_point。"""
 
     def repair_stream(self, dry_run: bool = False, blacklist: list = None,
-                      use_speedup: bool = None):
+                      use_speedup: bool = None, speedup_teams: list = None):
         """
         流式手入：扫描修复列表，黑名单跳过，其余修掉
 
         Args:
             dry_run: True=只扫描报决策，一个按钮都不点（认人考试模式）
             blacklist: 运行时覆盖黑名单，None 则读配置
+            speedup_teams: 运行时覆盖使用加速符的部队，None 则读配置
 
         Yields:
             str: 执行状态消息
@@ -49,7 +50,10 @@ class RepairMixin:
             r = sword_db.find_by_name(zh)
             if r:
                 bl_ids.add(r[0])
-        speedup_teams = cfg.get("speedup_teams", []) if use_speedup is not False else []
+        if use_speedup is False:
+            speedup_teams = []
+        elif speedup_teams is None:
+            speedup_teams = cfg.get("speedup_teams", [])
         speedup_marks = [_TEAM_NUMERAL[t] + "之" for t in speedup_teams
                          if t in _TEAM_NUMERAL]
 
@@ -116,6 +120,22 @@ class RepairMixin:
                         ok = True
                 if ok:
                     repaired += 1
+                    if need_speed:
+                        # 游戏的奇怪缓存：加速手入已经完成，但如果立刻去编队，
+                        # 伤势章仍可能残留。必须离开手入再重新进入一次，等价于
+                        # 把人从手入室“接出来”，编队状态才会刷新。
+                        yield f"[手入] {std_name} 已加速修好，重新进入手入刷新编队状态..."
+                        for nav_msg in self.navigate_to_stream("本丸"):
+                            yield nav_msg
+                        if self.current_location != "本丸":
+                            yield "[手入] 加速修复后没能返回本丸，无法确认伤势已刷新，停"
+                            return
+                        for nav_msg in self.navigate_to_stream("修复"):
+                            yield nav_msg
+                        if self.current_location != "修复":
+                            yield "[手入] 加速修复后没能重新进入手入，无法接回成员，停"
+                            return
+                        yield f"[手入] ✓ 已重新进入手入，{std_name} 的伤势状态应已刷新"
                     # 修完会退回修复状况页，重新点槽进选人界面；
                     # 列表也会重排，本页剩下的行作废重新扫
                     if not self._open_select_screen(cfg):

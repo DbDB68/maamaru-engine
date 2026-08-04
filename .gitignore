@@ -35,6 +35,9 @@ Thumbs.db
 
 # 面板配置（含 AI Key，绝不入库！模板见 panel_config.example.json）
 panel/panel_config.json
+# 单文件启动器把用户配置放在运行数据根目录；本地测试时也可能生成。
+/panel_config.json
+/expedition_schedule.json
 
 # PyInstaller 构建中间产物（spec 保留用于复现打包）
 build/

@@ -41,8 +41,9 @@ def _port_alive(host: str, port: int) -> bool:
 def _run_server():
     import uvicorn
     from panel.server import app
-    # 绑 0.0.0.0：本机窗口看 127.0.0.1，手机照旧走局域网 IP
-    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
+    # 单机启动器只服务自己的原生窗口。绑定本机地址可以避开防火墙、
+    # 公共网络策略以及部分新装 Windows 对全网监听的限制。
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
 
 
 def main():

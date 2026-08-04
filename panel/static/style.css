@@ -826,6 +826,14 @@ html, body {
   gap: 10px;
 }
 .sched-msg { font-size: 12px; color: var(--green); }
+.schedule-explainer {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid rgba(210, 154, 15, 0.35); border-radius: 8px;
+  background: rgba(255, 221, 111, 0.22); color: var(--fg);
+}
+.schedule-explainer b { font-size: 13px; }
+.schedule-explainer span { color: var(--fg-dim); font-size: 12px; line-height: 1.6; }
 .exp-section {
   margin-top: 10px; padding: 12px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;

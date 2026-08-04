@@ -9,6 +9,8 @@ Agent 网关 —— 接收任意渠道的消息，LLM 理解意图，调用面�
 import json
 from pathlib import Path
 
+from touken.runtime_paths import STATUS_DIR
+
 from . import session as _session
 
 # ── 工具定义（OpenAI function calling 格式）──
@@ -235,7 +237,7 @@ class AgentGateway:
         # 查询/急停类工具任何时候都得能用——脚本跑着更要能查能停！
         if name == "get_status":
             from .server import _PROJECT
-            status_dir = _PROJECT / "status"
+            status_dir = STATUS_DIR
             parts = []
             for fn in ("latest_report.json", "inventory.json"):
                 fp = status_dir / fn

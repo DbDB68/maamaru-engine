@@ -9,13 +9,15 @@ import threading
 import time
 from pathlib import Path
 
+from touken.runtime_paths import STATUS_DIR
+
 
 class LogStore:
     """线程安全的日志持久化存储"""
 
     def __init__(self, db_path: str | Path = None):
         if db_path is None:
-            db_path = Path(__file__).resolve().parent.parent / "status" / "maamaru_logs.db"
+            db_path = STATUS_DIR / "maamaru_logs.db"
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
