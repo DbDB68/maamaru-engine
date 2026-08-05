@@ -23,6 +23,7 @@ hiddenimports = [
     'uvicorn.protocols.http.auto',
     'uvicorn.protocols.websockets.auto',
     'uvicorn.lifespan.on',
+    'panel.worker',
 ] + collect_submodules('uvicorn') + maa_hidden + webview_hidden
 
 a = Analysis(
