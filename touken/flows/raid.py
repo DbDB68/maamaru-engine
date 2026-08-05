@@ -266,6 +266,31 @@ class RaidMixin:
                     round_done = True
                     break
 
+            # 战斗结果/结算页：没有"战斗"按钮、标题还没回来，
+            # 说明卡在结算。结算页能点屏幕跳过，也能按 Z/X 跳过。
+            # 双保险：多点几个候选位置 + 按 Z 键，直到标题回屏
+            if (battles >= 1 or not need_battle) and time.time() - battle_loop_start > END_CHECK_GRACE_SEC:
+                if not self.maa.template_match(end_cfg["template"], end_roi, end_cfg["threshold"]):
+                    # 先点屏幕候选位置（结算页「继续」常见区域）
+                    for _px, _py in ((640, 650), (640, 580), (640, 500), (640, 700), (640, 360)):
+                        self._click_point((_px, _py))
+                        time.sleep(0.4)
+                        self.maa.screenshot(force=True)
+                        if self.maa.template_match(end_cfg["template"], end_roi, end_cfg["threshold"]):
+                            round_done = True
+                            break
+                    if round_done:
+                        break
+                    # 点屏幕没用 → 按 Z 键（结算页跳过键）
+                    self.maa.press_key(0x5A)
+                    time.sleep(0.6)
+                    self.maa.screenshot(force=True)
+                    if self.maa.template_match(end_cfg["template"], end_roi, end_cfg["threshold"]):
+                        round_done = True
+                        break
+                    time.sleep(0.5)
+                    continue
+
             # 都不是 → 点安全区跳对话/动画
             self._click_point(cfg["skip_tap"])
             time.sleep(0.8)

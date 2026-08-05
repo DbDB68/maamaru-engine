@@ -256,6 +256,30 @@ class MAAAdapter:
             print(f"[MAA 错误] 点击异常: {exc}")
             return False
 
+    def press_key(self, keycode: int) -> bool:
+        """
+        模拟按键（战斗结算页按 Z/X 跳过等场景）。
+
+        Args:
+            keycode: 按键码（Z=0x5A, X=0x58, Tab=0x09, Enter=0x0D）
+
+        Returns:
+            是否成功
+        """
+        if not self._initialized:
+            print("[MAA 错误] 未初始化")
+            return False
+        try:
+            result = self.controller.post_click_key(keycode).wait().succeeded
+            if result:
+                print(f"[MAA] 按键 0x{keycode:02X}")
+            else:
+                print(f"[MAA 错误] 按键 0x{keycode:02X} 失败")
+            return result
+        except Exception as exc:
+            print(f"[MAA 错误] 按键异常: {exc}")
+            return False
+
     def ocr(self, expected: str, roi: Region,
             match_mode: str = "contains") -> Optional[Point]:
         """
