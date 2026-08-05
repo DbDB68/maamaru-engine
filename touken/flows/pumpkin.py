@@ -204,7 +204,7 @@ class PumpkinMixin:
                 for msg in self._refresh_board_stream(cfg):
                     yield msg
                 if not self._refresh_ok:
-                    yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
+                    yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
                     return
                 skips += 1
                 misses = 0
@@ -236,7 +236,7 @@ class PumpkinMixin:
                         for msg in self._refresh_board_stream(cfg):
                             yield msg
                         if not self._refresh_ok:
-                            yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
+                            yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
                             return
                         skips += 1
                         board_battles = 0
@@ -489,23 +489,49 @@ class PumpkinMixin:
         """
         剪影更新 → 二次弹窗确定。结果放在 self._refresh_ok。
         更新完会校验：能不能重新点开部队选择界面（能 = 新板子出来了）。
+
+        注意：南瓜 Pt 里程碑的狐狸对话（"已解锁所有面板…"那个看板娘弹窗）
+        是模态的，会挡住剪影更新的确认弹窗。它没有关闭按钮，
+        靠点 skip_tap 翻页（一页一句，一般 2 页），翻完自己消失。
+        所以确认弹窗没出来就先驱散几轮再重试，别急着收工。
         """
         self._refresh_ok = False
 
-        self.maa.screenshot(force=True)
-        refresh = self.maa.template_match(cfg["refresh_button"]["template"])
-        if not refresh:
-            yield "[南瓜] 找不到剪影更新按钮"
-            return
-        self.maa.click(refresh)
-        time.sleep(1.5)
+        confirm = None
+        for attempt in range(3):
+            if attempt:
+                yield f"[南瓜] 剪影更新第 {attempt + 1} 次尝试..."
+            # 先驱散可能挡路的狐狸对话（每点一下翻一页，没弹窗时点的是安全区，无害）
+            for _ in range(2):
+                self._click_point(cfg["skip_tap"])
+                time.sleep(0.8)
 
-        # 二次确认弹窗
-        self.maa.screenshot(force=True)
-        confirm = self.maa.template_match(cfg["refresh_confirm"]["template"])
-        if not confirm:
-            yield "[南瓜] 剪影更新的确认弹窗没弹出来"
+            self.maa.screenshot(force=True)
+            refresh = self.maa.template_match(cfg["refresh_button"]["template"])
+            if not refresh:
+                yield "[南瓜] 找不到剪影更新按钮"
+                return
+            self.maa.click(refresh)
+            time.sleep(1.5)
+
+            # 二次确认弹窗（可能被狐狸对话挡着，多等几拍）
+            for _ in range(4):
+                self.maa.screenshot(force=True)
+                confirm = self.maa.template_match(cfg["refresh_confirm"]["template"])
+                if confirm:
+                    break
+                time.sleep(0.8)
+            if confirm:
+                break
+            # 确认没出来 → 狐狸对话之类挡路，翻页驱散后重试
+            yield "[南瓜] 确认弹窗没出来，可能有狐狸里程碑对话挡路，翻页驱散后重试..."
+            for _ in range(3):
+                self._click_point(cfg["skip_tap"])
+                time.sleep(0.8)
+        else:
+            yield "[南瓜] 剪影更新的确认弹窗一直没出来（令牌烧完了，或者弹窗没驱散掉）"
             return
+
         self.maa.click(confirm)
         time.sleep(2.0)
 
