@@ -956,7 +956,7 @@
   },
   "pumpkin": {
     "team_no": 3,
-    "silhouette_lib": "silhouette_lib",
+    "profiles": "profiles",
     "identify_min_battles": 4,
     "activity_entry": {
       "template": "活动.png"

@@ -56,7 +56,7 @@ class PumpkinMixin:
     _battle_started: bool = False
     _refresh_ok: bool = False
     _abort: str = ""  # 非空 = 必须立刻停的原因
-    _silhouette_lib = None      # 剪影素材库缓存；False = 加载失败别再试
+    _profile_lib = None      # 剪影素材库缓存；False = 加载失败别再试
     _identify_decision = None   # None=认不准 / "keep"=目标刀 / "skip"=烧令牌换板子
     _identify_name = None       # 本次认出的名字（仅 decision 非 None 时有值）
 
@@ -264,22 +264,22 @@ class PumpkinMixin:
 
     # ---------- 内部：智能认人 ----------
 
-    def _get_silhouette_lib(self, cfg: dict):
+    def _get_profile_lib(self, cfg: dict):
         """加载剪影素材库（只加载一次；失败置 False 不再重试）"""
-        if self._silhouette_lib is not None and self._silhouette_lib is not False:
-            return self._silhouette_lib
-        if self._silhouette_lib is False:
+        if self._profile_lib is not None and self._profile_lib is not False:
+            return self._profile_lib
+        if self._profile_lib is False:
             return None
-        lib_dir = self._root / cfg.get("silhouette_lib", "silhouette_lib")
+        lib_dir = self._root / cfg.get("profiles", "profiles")
         try:
             lib = load_library(lib_dir)
             if not lib:
                 raise ValueError("库里一个模板都没有")
-            self._silhouette_lib = lib
+            self._profile_lib = lib
             return lib
         except Exception as exc:
             print(f"[南瓜] 剪影素材库加载失败: {exc}（{lib_dir}）")
-            self._silhouette_lib = False
+            self._profile_lib = False
             return None
 
     def _identify_board_stream(self, cfg: dict, watch_names: list):
@@ -292,7 +292,7 @@ class PumpkinMixin:
         self._identify_decision = None
         self._identify_name = None
 
-        lib = self._get_silhouette_lib(cfg)
+        lib = self._get_profile_lib(cfg)
         if lib is None:
             yield "[南瓜] ⚠️ 剪影素材库加载失败，这局当死板版刷"
             self._identify_decision = "keep"  # 别误烧令牌，也别再认了

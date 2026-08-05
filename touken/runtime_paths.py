@@ -12,6 +12,7 @@ STATUS_DIR = DATA_ROOT / "status"
 CONFIG_PATH = DATA_ROOT / "touken_config.json"
 PANEL_CONFIG_PATH = DATA_ROOT / "panel_config.json"
 SCHEDULE_PATH = DATA_ROOT / "expedition_schedule.json"
+PROFILES_DIR = DATA_ROOT / "profiles"
 RESOURCE_DIR = BUNDLE_ROOT / "resource" / "base"
 
 
@@ -31,3 +32,8 @@ def ensure_runtime_data() -> None:
             continue
         shutil.copy2(source, target)
         claimed.add(target)
+    # profiles/：首次运行时把内置素材库展开到数据目录
+    # 不覆盖用户已有的（如果用户在群里拿到了更新版，删掉数据目录的再让程序自动展开）
+    src_profiles = BUNDLE_ROOT / "profiles"
+    if src_profiles.is_dir() and not PROFILES_DIR.exists():
+        shutil.copytree(src_profiles, PROFILES_DIR)

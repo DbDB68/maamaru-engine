@@ -12,6 +12,7 @@ datas = [
     ('touken_config.json', '.'),
     ('touken/data', 'touken/data'),
     ('resource', 'resource'),
+    ('profiles', 'profiles'),
 ] + maa_datas + webview_datas
 
 binaries = maa_binaries + webview_binaries
