@@ -197,7 +197,7 @@ def _build_pumpkin(config_path, params):
         team_no=_i(params, "team_no", 3),
         difficulty=difficulty or None,
         watch_names=watch or None,
-        max_skips=_i(params, "pumpkin_max_skips", 4))
+        max_skips=_i(params, "max_skips", 4))
 
 
 def _build_sortie(config_path, params):
