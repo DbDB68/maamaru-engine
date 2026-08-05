@@ -1,12 +1,21 @@
+# -*- coding: utf-8 -*-
 """
-脚本执行器 —— 在后台线程跑 stream generator，消息同时三路走：
-  1. 持久化到 SQLite
-  2. 推 SSE 广播队列
-  3. 打印 stdout（终端也能看）
+脚本执行器 —— 子进程版（2026-08-05 重写，恶性卡死修复）
 
-支持中途停止（调 stop() 设置标志位，generator 的下一次 iteration 会捕获）。
+旧版在本进程线程里跑 generator：MAA 的 wait() 硬阻塞一旦卡死，
+线程永久死锁，面板除了整体重启没救，日志戛然而止还找不到凶手。
+
+现在每个脚本都是独立子进程（panel/worker.py）：
+  - 消息流：子进程 stdout 每行一条 → 落 SQLite + SSE 广播 + 终端打印
+  - 沉默看门狗：子进程 300 秒一行输出都没有 = 判定卡死，直接 kill，
+    面板/调度器/机器人毫发无损（战斗循环心跳 ~10-20s 一条，300s 很宽）
+  - 紧急停止 = 真杀进程，立刻停，不用等 generator 下次 yield
+  - 看门狗线程只数秒数、只杀进程，绝不碰 MAA（§14.1 血泪红线）
 """
 
+import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -20,12 +29,15 @@ from .log_store import get_store
 # —— 可注册的脚本清单 ——
 # 每个条目：(名字, 显示名, 描述, 调用函数, 参数表单schema)
 # 调用函数签名：(config_path, params: dict) -> Generator[str, None, None]
-# 参数表单schema：字段列表，前端照着渲染：
-#   {"key":"team_no","type":"select","label":"部队","options":[["1","部队一"],...],"default":"3"}
-#   {"key":"rounds","type":"number","label":"圈数","default":3,"min":1,"max":99}
-#   {"key":"steps","type":"checks","label":"要干的活","options":["签到",...],"default":[...]}
+# 注意：注册表在 panel/server.py 里填充，工人子进程 import server 也能拿到同一份。
 
 _SCRIPTS: dict[str, dict] = {}
+
+# 子进程多久一行输出都没有 = 判定卡死
+SILENCE_TIMEOUT_SEC = 300
+
+# 工人进程约定退出码：MAA 连续识别超时后自我了断
+EXIT_MAA_DEAD = 43
 
 
 def register_script(name: str, label: str, desc: str,
@@ -43,16 +55,17 @@ def list_scripts() -> dict:
 # —— 运行时状态 ——
 
 class ScriptRunner:
-    """在后台线程跑一个 stream generator"""
+    """在子进程里跑一个脚本，stdout 逐行回收"""
 
     def __init__(self):
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
         self._current_run_id: str | None = None
         self._current_script: str | None = None
         self._current_started: float | None = None  # 启动时间戳，仪表盘算已跑多久
-        self._lock = threading.Lock()
         self._on_message = None  # callback(message_dict)
+        self._last_output: float = 0.0   # 最后一次收到子进程输出的时间
+        self._stop_reason: str = ""      # "user" / "watchdog" / ""
 
     # noinspection PyAttributeOutsideInit
     def set_message_callback(self, cb):
@@ -60,7 +73,7 @@ class ScriptRunner:
 
     @property
     def is_running(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return self._proc is not None and self._proc.poll() is None
 
     @property
     def current_script(self) -> str | None:
@@ -72,60 +85,131 @@ class ScriptRunner:
         return self._current_started if self.is_running else None
 
     def start(self, script_name: str, config_path: str, params: dict | None = None) -> str | None:
-        """启动脚本。返回 run_id 或 None（不支持/已在跑）"""
-        if self.is_running:
-            return None
-        if script_name not in _SCRIPTS:
-            return None
+        """启动脚本。返回 run_id 或 None（不支持/已在跑/子进程没起来）"""
+        with self._lock:
+            if self.is_running:
+                return None
+            if script_name not in _SCRIPTS:
+                return None
 
-        run_id = uuid.uuid4().hex[:12]
-        self._current_run_id = run_id
-        self._current_script = script_name
-        self._current_started = time.time()
-        self._stop_event.clear()
+            run_id = uuid.uuid4().hex[:12]
+            self._current_run_id = run_id
+            self._current_script = script_name
+            self._current_started = time.time()
+            self._last_output = time.time()
+            self._stop_reason = ""
 
-        self._thread = threading.Thread(
-            target=self._run,
-            args=(script_name, config_path, run_id, params or {}),
-            daemon=True,
+            try:
+                self._proc = self._spawn(script_name, config_path, params or {})
+            except Exception as exc:
+                self._proc = None
+                msg = f"[面板] 工人子进程启动失败: {exc}"
+                print(msg, file=sys.stderr)
+                self._emit(run_id, script_name, msg)
+                return None
+
+            threading.Thread(target=self._pump,
+                             args=(self._proc, run_id, script_name),
+                             daemon=True, name=f"worker-pump-{run_id}").start()
+            threading.Thread(target=self._watchdog,
+                             args=(self._proc, run_id, script_name),
+                             daemon=True, name=f"worker-dog-{run_id}").start()
+            return run_id
+
+    def _spawn(self, script_name: str, config_path: str, params: dict) -> subprocess.Popen:
+        """起工人子进程。源码模式走 python -m，exe 模式走 --worker 自分发。"""
+        project_root = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"        # 输出不缓冲，看门狗才数得准
+        env["PYTHONIOENCODING"] = "utf-8"    # 日文/emoji 不许被 GBK 掐死
+        env["MAAMARU_WORKER"] = "1"          # 告诉 maa_adapter：可以自我了断
+        env["MAAMARU_WORKER_PARAMS"] = json.dumps(params, ensure_ascii=False)
+
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--worker", script_name, config_path]
+        else:
+            cmd = [sys.executable, "-m", "panel.worker", script_name, config_path]
+
+        # vbs / windowed exe 下起子进程不许蹦黑窗
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        return subprocess.Popen(
+            cmd, cwd=str(project_root), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+            creationflags=flags,
         )
-        self._thread.start()
-        return run_id
 
     def stop(self):
-        """请求停止（设置标志位，下次 yield 时捕获）"""
-        self._stop_event.set()
+        """紧急停止 = 直接杀子进程（真停，不用等它下次开口）"""
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            self._stop_reason = "user"
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
-    def _run(self, script_name: str, config_path: str, run_id: str, params: dict):
-        info = _SCRIPTS.get(script_name)
-        if not info:
-            return
-        try:
-            gen = info["fn"](config_path, params)
-            self._stream(gen, run_id, script_name)
-        except Exception as exc:
-            msg = f"[面板] 脚本崩溃: {exc}"
-            self._emit(run_id, script_name, msg)
-            print(msg, file=sys.stderr)
+    # ---------- 内部：收输出 ----------
 
-    def _stream(self, gen: Generator, run_id: str, script_name: str):
+    def _pump(self, proc: subprocess.Popen, run_id: str, script_name: str):
         store = get_store()
-        for msg in gen:
-            if self._stop_event.is_set():
-                final = f"[脚本] 用户请求停止 — run {run_id}"
-                store.append(run_id, script_name, final)
-                self._emit(run_id, script_name, final)
-                print(final)
-                break
-            store.append(run_id, script_name, msg)
-            self._emit(run_id, script_name, msg)
-            print(msg, flush=True)
+        try:
+            for line in proc.stdout:
+                msg = line.rstrip()
+                if not msg:
+                    continue
+                self._last_output = time.time()
+                store.append(run_id, script_name, msg)
+                self._emit(run_id, script_name, msg)
+                print(msg, flush=True)
+        except Exception as exc:
+            err = f"[面板] 收子进程输出时出错: {exc}"
+            store.append(run_id, script_name, err)
+            self._emit(run_id, script_name, err)
+            print(err, file=sys.stderr)
 
-        # generator 自然结束
-        final = f"[脚本] 完成 — run {run_id}"
+        rc = proc.wait()
+        if self._stop_reason == "user":
+            final = f"[脚本] 已手动停止（工人进程已杀）— run {run_id}"
+        elif self._stop_reason == "watchdog":
+            final = f"[脚本] 看门狗已处决卡死的工人进程 — run {run_id}"
+        elif rc == 0:
+            final = f"[脚本] 完成 — run {run_id}"
+        elif rc == EXIT_MAA_DEAD:
+            final = (f"[脚本] MAA 连续超时，工人进程自我了断 — run {run_id}。"
+                     "建议重启模拟器后再跑")
+        else:
+            final = f"[脚本] 工人进程异常退出（代码 {rc}）— run {run_id}"
         store.append(run_id, script_name, final)
         self._emit(run_id, script_name, final)
         print(final)
+
+        with self._lock:
+            if self._proc is proc:
+                self._proc = None
+
+    # ---------- 内部：沉默看门狗 ----------
+
+    def _watchdog(self, proc: subprocess.Popen, run_id: str, script_name: str):
+        """只数秒数 + 杀进程，绝不碰 MAA（碰 MAA 的线程看门狗已经咬死过人）"""
+        while True:
+            time.sleep(5)
+            if proc.poll() is not None:
+                return  # 正常/异常退出都归 _pump 收尾
+            silent = time.time() - self._last_output
+            if silent <= SILENCE_TIMEOUT_SEC:
+                continue
+            self._stop_reason = "watchdog"
+            msg = (f"[看门狗] ⚠️ 工人进程 {int(silent)} 秒一行输出都没有，判定卡死，已强杀。"
+                   "日志最后一行就是它咽气前在干的事；建议重启模拟器再跑")
+            get_store().append(run_id, script_name, msg)
+            self._emit(run_id, script_name, msg)
+            print(msg)
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return
 
     def _emit(self, run_id: str, script: str, message: str):
         payload = {

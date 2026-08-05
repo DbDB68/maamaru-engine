@@ -7,8 +7,14 @@
 截图/点击/滑动走裸 adb 子进程（subprocess 真超时可杀，MAA 的 ADB 通道
 一旦卡住 wait() 会永久死锁——2026-08-05 南瓜 battle_loop 两次卡死根因）。
 OCR/模板匹配走 MAA 本地推理（不碰 ADB，天然安全）。
+
+2026-08-05 二次加固：MAA 的所有 post_* 不再裸 .wait()（硬阻塞无超时），
+改同线程轮询 job.done 限时等待（_wait_job）。不开新线程、不包 MAA 调用，
+守 §14.1 血泪红线。连续多次识别超时 = MAA 已死，工人进程里直接自我了断
+（退出码 43），面板看门狗/退出码会给出明确死因，不再无声卡死。
 """
 
+import os
 import time  # noqa: F401  # 保留原文件的模块级导入，防止外部有人 from 这里拿
 from pathlib import Path
 from typing import Optional, Any
@@ -93,6 +99,13 @@ class MAAAdapter:
     封装所有对 maa 模块的调用
     """
 
+    # MAA 任务限时（秒）：本地识别正常只要零点几秒到几秒，30s 已经非常宽
+    RECOGNIZE_TIMEOUT = 30.0
+    CONNECT_TIMEOUT = 30.0
+    BUNDLE_TIMEOUT = 120.0
+    # 连续识别超时几次就认定 MAA 死了
+    MAX_CONSECUTIVE_TIMEOUTS = 3
+
     def __init__(self, adb_path: str, adb_address: str, resource_dir: str,
                  project_root: Optional[str] = None,
                  manager_path: Optional[str] = None,
@@ -122,8 +135,44 @@ class MAAAdapter:
         self.controller: Optional[AdbController] = None
         self.tasker: Optional[Tasker] = None
         self._last_image: Optional[Any] = None  # 缓存上次截图
+        self._maa_timeouts = 0  # 连续识别超时计数
 
         self._initialized = False
+
+    # ---------- MAA 任务限时等待（同线程轮询，不开新线程） ----------
+
+    def _wait_job(self, job, timeout: float, label: str):
+        """
+        同线程轮询等 MAA 任务完成，超时返回 None。
+
+        为什么不用 job.wait()：wait() 是无超时硬阻塞，MAA 内部一旦卡住
+        线程永久死锁（8/5 卡死根因）。轮询不开新线程、不并发碰 MAA，
+        不踩「线程包 MAA 调用」的血泪红线。
+        """
+        deadline = time.time() + timeout
+        while True:
+            try:
+                if job.done:
+                    return job
+            except Exception as exc:
+                print(f"[MAA 错误] {label} 状态查询失败: {exc}")
+                return None
+            if time.time() >= deadline:
+                print(f"[MAA 超时] {label} 超过 {timeout:.0f}s 没完成，按失败处理（MAA 疑似卡死）",
+                      flush=True)
+                return None
+            time.sleep(0.05)
+
+    def _note_recognize_timeout(self):
+        """连续识别超时 = MAA 大概率已经死了，再跑下去也是空转。
+        工人子进程里直接自我了断（退出码 43），让面板报出明确死因；
+        非工人环境（test_*.py 手动调试）只计数不自杀。"""
+        self._maa_timeouts += 1
+        if (self._maa_timeouts >= self.MAX_CONSECUTIVE_TIMEOUTS
+                and os.environ.get("MAAMARU_WORKER")):
+            print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，MAA 已死，"
+                  "工人进程自我了断（退出码 43）", flush=True)
+            os._exit(43)
 
     def init(self) -> bool:
         """初始化资源、连接 ADB、绑定 Tasker"""
@@ -138,9 +187,10 @@ class MAAAdapter:
         # 2. 加载资源
         print(f"[MAA] 加载资源: {self.resource_dir}")
         self.resource = Resource()
-        job = self.resource.post_bundle(self.resource_dir).wait()
-        if not job.succeeded:
-            print("[MAA 错误] 资源加载失败，请检查资源目录是否完整")
+        job = self._wait_job(self.resource.post_bundle(self.resource_dir),
+                             timeout=self.BUNDLE_TIMEOUT, label="资源加载")
+        if job is None or not job.succeeded:
+            print("[MAA 错误] 资源加载失败/超时，请检查资源目录是否完整")
             return False
         print("[MAA] 资源加载成功")
 
@@ -151,7 +201,9 @@ class MAAAdapter:
             return False
 
         self.controller = AdbController(adb_path=self.adb_path, address=self.adb_address)
-        if not self.controller.post_connection().wait().succeeded:
+        conn = self._wait_job(self.controller.post_connection(),
+                              timeout=self.CONNECT_TIMEOUT, label="ADB 连接")
+        if conn is None or not conn.succeeded:
             # 连不上就试试把模拟器拉起来再连一次（配了 MuMuManager 才会）
             if self.manager_path:
                 from .emulator import ensure_emulator
@@ -160,10 +212,13 @@ class MAAAdapter:
                                    instance=self.emulator_instance):
                     self.controller = AdbController(
                         adb_path=self.adb_path, address=self.adb_address)
-                    if self.controller.post_connection().wait().succeeded:
+                    conn = self._wait_job(self.controller.post_connection(),
+                                          timeout=self.CONNECT_TIMEOUT,
+                                          label="ADB 重连")
+                    if conn is not None and conn.succeeded:
                         print("[MAA] ADB 连接成功（模拟器自启动）")
                         return self._bind_tasker()
-            print("[MAA 错误] ADB 连接失败，请确认模拟器已启动")
+            print("[MAA 错误] ADB 连接失败/超时，请确认模拟器已启动")
             return False
         print("[MAA] ADB 连接成功")
 
@@ -315,11 +370,17 @@ class MAAAdapter:
             return None
 
         try:
-            ocr_job = self.tasker.post_recognition(
-                JRecognitionType.OCR,
-                JOCR(roi=roi.to_tuple()),
-                image,
-            ).wait()
+            ocr_job = self._wait_job(
+                self.tasker.post_recognition(
+                    JRecognitionType.OCR,
+                    JOCR(roi=roi.to_tuple()),
+                    image,
+                ),
+                timeout=self.RECOGNIZE_TIMEOUT, label=f'OCR "{expected}"')
+            if ocr_job is None:
+                self._note_recognize_timeout()
+                return None
+            self._maa_timeouts = 0
             ocr_detail = ocr_job.get()
             ocr_reco = ocr_detail.nodes[0].recognition if ocr_detail and ocr_detail.nodes else None
 
@@ -382,11 +443,17 @@ class MAAAdapter:
             return []
 
         try:
-            ocr_job = self.tasker.post_recognition(
-                JRecognitionType.OCR,
-                JOCR(roi=roi.to_tuple()),
-                image,
-            ).wait()
+            ocr_job = self._wait_job(
+                self.tasker.post_recognition(
+                    JRecognitionType.OCR,
+                    JOCR(roi=roi.to_tuple()),
+                    image,
+                ),
+                timeout=self.RECOGNIZE_TIMEOUT, label="OCR 全量识别")
+            if ocr_job is None:
+                self._note_recognize_timeout()
+                return []
+            self._maa_timeouts = 0
             ocr_detail = ocr_job.get()
             ocr_reco = ocr_detail.nodes[0].recognition if ocr_detail and ocr_detail.nodes else None
 
@@ -436,15 +503,21 @@ class MAAAdapter:
         roi_tuple = roi.to_tuple() if roi else (0, 0, 0, 0)
 
         try:
-            tm_job = self.tasker.post_recognition(
-                JRecognitionType.TemplateMatch,
-                JTemplateMatch(
-                    template=[template],
-                    roi=roi_tuple,
-                    threshold=[threshold]
+            tm_job = self._wait_job(
+                self.tasker.post_recognition(
+                    JRecognitionType.TemplateMatch,
+                    JTemplateMatch(
+                        template=[template],
+                        roi=roi_tuple,
+                        threshold=[threshold]
+                    ),
+                    image,
                 ),
-                image,
-            ).wait()
+                timeout=self.RECOGNIZE_TIMEOUT, label=f"模板匹配 {template}")
+            if tm_job is None:
+                self._note_recognize_timeout()
+                return None
+            self._maa_timeouts = 0
             tm_detail = tm_job.get()
             tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
 

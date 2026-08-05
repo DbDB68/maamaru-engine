@@ -5,8 +5,15 @@ import sys
 from pathlib import Path
 
 
+_WORKER_MODE = "--worker" in sys.argv
+
+
 def _make_stdio_safe():
     """后台提示中的 emoji 不应因 Windows GBK 控制台而终止程序。"""
+    if _WORKER_MODE:
+        # 工人进程的 stdout 是父进程架着的管道，是它唯一的汇报通道，
+        # 不能往 devnull 扔（worker.py 的 _rescue_stdout 会自己接 fd 1/2）
+        return
     # PyInstaller 的 windowed 模式会把二者设为 None；第三方模块仍可能 print。
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w", encoding="utf-8")
@@ -34,7 +41,11 @@ if getattr(sys, "frozen", False):
 
 
 def main():
-    if "--panel" in sys.argv:
+    if "--worker" in sys.argv:
+        # 工人子进程：跑脚本、把 yield 逐行 print 给父进程（面板）收
+        from panel.worker import main as worker_main
+        worker_main()
+    elif "--panel" in sys.argv:
         from maamaru_app import main as panel_main
         panel_main()
     else:
