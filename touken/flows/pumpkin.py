@@ -60,19 +60,19 @@ class PumpkinMixin:
     _identify_decision = None   # None=认不准 / "keep"=目标刀 / "skip"=烧令牌换板子
     _identify_name = None       # 本次认出的名字（仅 decision 非 None 时有值）
 
-    def pumpkin_stream(self, max_rounds: int = 1, team_no: int = None,
+    def pumpkin_stream(self, max_skips: int = None, team_no: int = None,
                        difficulty: int = None, debug_dir: str = None,
-                       watch_names: list = None, max_skips: int = None):
+                       watch_names: list = None, **kwargs):
         """
         流式刷南瓜大作战
 
         Args:
-            max_rounds: 刷几局（一局 = 九宫格全翻完并更新出新板子）
+            max_skips: 最多烧几枚更新令牌（令牌 = 一切，烧完就收工）。
+                       默认读配置，再默认 4。
             team_no: 部队编号，默认读配置 pumpkin.team_no
             difficulty: 难度 1初级/2中级/3上级，None=不点（用游戏当前 tab）
             debug_dir: 剪影识别数据采集目录（给了就存每帧战斗画面+每次回板子截图）
             watch_names: 智能版目标刀名单（如 ["小竜景光"]），None/空=死板版全刷
-            max_skips: 智能版最多烧几枚更新令牌，默认读配置，再默认 10
         """
         cfg = self.config.get("pumpkin", {})
         if not cfg:
@@ -81,7 +81,7 @@ class PumpkinMixin:
 
         team_no = team_no or cfg.get("team_no", 3)
         if max_skips is None:
-            max_skips = cfg.get("max_skips", 10)
+            max_skips = cfg.get("max_skips", 4)
         min_battles = cfg.get("identify_min_battles", 4)  # 第几场起开始认（翻太少认了也不准）
         watch_names = [n.strip() for n in (watch_names or []) if n and n.strip()]
         smart = bool(watch_names)
@@ -150,37 +150,60 @@ class PumpkinMixin:
         board_battles = 0       # 当前这块板子打了几场（认剪影用，换板子清零）
         keep_confirmed = False  # 当前板子已确认是目标刀，不用再认
         pending_name = None     # 上一次认出的名字，连续两次一致才动手（防一次误读烧令牌）
-        skips = 0               # 智能版烧掉的更新令牌数
+        skips = 0               # 烧掉的更新令牌数（令牌 = 一切，烧完就收工）
+        got_names = []          # 打满九宫格拿到的刀，记个日志
 
-        while boards_done < max_rounds:
+        def _budge():
+            """令牌预算还剩几枚（烧完就收工，不白刷）"""
+            return max_skips - skips
+
+        while True:
             if self._abort:
                 yield self._abort
                 return
+
+            # 令牌烧完了？→ 收工，绝不主动点剪影更新
+            if _budge() <= 0:
+                break
 
             # 3.1 确保在活动界面（获得动画/弹窗可能盖着，点安全区扒拉掉）
             if not self._ensure_on_board(cfg):
                 yield "[南瓜] 回不到活动界面，卡在未知画面，停"
                 return
 
-            # 3.2 板子真满了？→ 剪影更新开新局
+            # 3.2 板子真满了？→ 这块拿到了刀，记下是谁；令牌还够就更新开新局
             full_cfg = cfg["board_full_ocr"]
             self.maa.screenshot(force=True)
             if self.maa.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
-                yield "[南瓜] 面板全解锁，点剪影更新开新局..."
+                yield "[南瓜] 面板全解锁，这块拿到了刀"
+                # 获得动画里 OCR 认一下是谁（记日志，不截图占内存）
+                got = self._read_obtained_sword(cfg)
+                if got:
+                    got_names.append(got)
+                    yield f"[南瓜] 🎉 获得【{got}��（累计 {len(got_names)} 把）"
+                else:
+                    yield "[南瓜] 获得动画没 OCR 出名字（继续）"
+                # 点掉获得动画
+                for _ in range(3):
+                    self._click_point(cfg["skip_tap"])
+                    time.sleep(0.8)
+                # 令牌还够 → 剪影更新开新局；不够 → 直接收工
+                if _budge() <= 0:
+                    yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），收工"
+                    break
+                yield "[南瓜] 点剪影更新开新局..."
                 for msg in self._refresh_board_stream(cfg):
                     yield msg
                 if not self._refresh_ok:
-                    yield "[南瓜] 剪影更新没生效（没令牌了？），收工"
+                    yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
                     return
+                skips += 1
                 boards_done += 1
                 misses = 0
                 board_battles = 0
                 keep_confirmed = False
                 pending_name = None
-                if boards_done < max_rounds:
-                    yield f"[南瓜] ===== 第 {boards_done + 1}/{max_rounds} 局，新板子开刷 ====="
-                else:
-                    yield f"[南瓜] 第 {boards_done} 局刷完"
+                yield f"[南瓜] ===== 第 {boards_done} 块板子刷完，新板子开刷（令牌 {skips}/{max_skips}）====="
                 continue
 
             # 3.25 智能认人：打够场数后每场回来认一次剪影，
@@ -197,9 +220,9 @@ class PumpkinMixin:
                         keep_confirmed = True
                         yield f"[南瓜] 复核一致，就是【{pending_name}】，安心刷完"
                     else:
-                        skips += 1
-                        if skips > max_skips:
-                            yield f"[南瓜] 已烧 {max_skips} 枚更新令牌到上限，这块板子不换了，收工"
+                        # 烧令牌前先看预算，不够就直接收工（不白烧）
+                        if _budge() <= 0:
+                            yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），收工"
                             return
                         yield f"[南瓜] 复核一致，是【{pending_name}】，确认不要，烧令牌"
                         for msg in self._refresh_board_stream(cfg):
@@ -207,6 +230,7 @@ class PumpkinMixin:
                         if not self._refresh_ok:
                             yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
                             return
+                        skips += 1
                         board_battles = 0
                         keep_confirmed = False
                         pending_name = None
@@ -257,10 +281,32 @@ class PumpkinMixin:
                 self._click_point(cfg["skip_tap"])
                 time.sleep(0.8)
 
-        if smart and skips:
-            yield f"[南瓜] 收工，刷了 {boards_done} 局，共出阵 {battles_total} 次，烧令牌 {skips} 枚"
-        else:
-            yield f"[南瓜] 收工，刷了 {boards_done} 局，共出阵 {battles_total} 次"
+        got = f"，拿到 {len(got_names)} 把刀：{'、'.join(got_names)}" if got_names else ""
+        yield f"[南瓜] 收工，刷了 {boards_done} 块板子，共出阵 {battles_total} 次，烧令牌 {skips}/{max_skips} 枚{got}"
+
+    # ---------- 内部：获得动画 OCR ----------
+
+    def _read_obtained_sword(self, cfg: dict) -> str:
+        """
+        打完九宫格的获得动画里 OCR 刀名（记日志用，不截图）。
+        区域可配：cfg["obtain_ocr"] = {"roi": [...], "exclude": ["刀剑乱舞", "獲得"]}
+        认不到返回 ""。
+        """
+        try:
+            ocr_cfg = cfg.get("obtain_ocr")
+            if not ocr_cfg:
+                return ""
+            roi = roi_4to4(*ocr_cfg["roi"])
+            exclude = ocr_cfg.get("exclude", [])
+            texts = self.maa.ocr_all(roi)
+            for text, _pt in texts:
+                t = text.strip()
+                if not t or any(x in t for x in exclude):
+                    continue
+                return t
+        except Exception:
+            pass
+        return ""
 
     # ---------- 内部：智能认人 ----------
 

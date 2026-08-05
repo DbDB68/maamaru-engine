@@ -164,10 +164,9 @@ def _build_daily(config_path, params):
         else:
             watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
         sortie_plan = {"mode": "pumpkin",
-                       "rounds": _i(params, "pumpkin_rounds", 1),
                        "team_no": _i(params, "team_no", 3),
                        "watch_names": watch,
-                       "max_skips": _i(params, "pumpkin_max_skips", 10)}
+                       "max_skips": _i(params, "pumpkin_max_skips", 4)}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -195,11 +194,10 @@ def _build_pumpkin(config_path, params):
     else:
         watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
     yield from _make_agent(config_path).pumpkin_stream(
-        max_rounds=_i(params, "rounds", 1),
         team_no=_i(params, "team_no", 3),
         difficulty=difficulty or None,
         watch_names=watch or None,
-        max_skips=_i(params, "max_skips", 10))
+        max_skips=_i(params, "pumpkin_max_skips", 4))
 
 
 def _build_sortie(config_path, params):
@@ -393,13 +391,10 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完�
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
-                        {"key": "pumpkin_rounds", "type": "number",
-                         "label": "南瓜局数（一局=九宫格全翻完）",
-                         "default": 1, "min": 1, "max": 99,
-                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "pumpkin_max_skips", "type": "number",
-                         "label": "更新令牌最多烧几枚",
-                         "default": 10, "min": 0, "max": 99,
+                         "label": "更新令牌烧几枚（烧完收工）",
+                         "hint": "令牌 = 一切：打满拿刀后的刷新、认出非目标的刷新都算。默认 4，想全刷就把数字填大",
+                         "default": 4, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "pumpkin_watch", "type": "text", "swords": True,
                          "label": "只刷这些刀（留空=全刷不认人）",

@@ -281,10 +281,9 @@ class DailyMixin:
                 ok = True
                 watch = sortie_plan.get("watch_names") or []
                 for msg in self.pumpkin_stream(
-                        max_rounds=sortie_plan.get("rounds", 1),
                         team_no=sortie_plan.get("team_no", 3),
                         watch_names=watch or None,
-                        max_skips=sortie_plan.get("max_skips", 10)):
+                        max_skips=sortie_plan.get("max_skips", 4)):
                     yield msg
                     if _is_fail(msg):
                         ok = False
