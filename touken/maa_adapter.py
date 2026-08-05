@@ -1,50 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-底层：MAA 适配器
+底层：模拟器适配器
 只管跟模拟器/maa 模块打交道：截图、点击、OCR、模板匹配。
 不知道什么是刀剑乱舞，不知道什么是联队战。
-（从 touken_agent_engine_v2.py 原样搬家，逻辑未改）
+
+截图/点击/滑动走裸 adb 子进程（subprocess 真超时可杀，MAA 的 ADB 通道
+一旦卡住 wait() 会永久死锁——2026-08-05 南瓜 battle_loop 两次卡死根因）。
+OCR/模板匹配走 MAA 本地推理（不碰 ADB，天然安全）。
 """
 
 import time  # noqa: F401  # 保留原文件的模块级导入，防止外部有人 from 这里拿
-import threading
-import queue
 from pathlib import Path
-from typing import Optional, Any, Callable, TypeVar
+from typing import Optional, Any
 from dataclasses import dataclass
 from enum import Enum
-
-T = TypeVar("T")
-
-
-def _with_timeout(fn: Callable[[], T], timeout: float = 15.0, default: T = None,
-                  what: str = "MAA 调用") -> T:
-    """
-    看门狗：在独立线程里跑 fn，超时未返回就用 default。
-    MAA 的 wait() 是硬阻塞（无 timeout 参数），一旦任务卡死线程就死锁——
-    这是 2026-08-05 南瓜 battle_loop 卡死的根因。包一层线程超时，
-    超时返回 default（当作"没识别到"），调用方继续走，不死锁。
-    """
-    box: dict = {"result": None, "done": False, "error": None}
-
-    def runner():
-        try:
-            box["result"] = fn()
-            box["done"] = True
-        except Exception as exc:
-            box["error"] = exc
-            box["done"] = True
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join(timeout)
-    if not box["done"]:
-        print(f"[MAA 超时] {what} 超过 {timeout}s 未返回，已放弃（当 None 处理）")
-        return default
-    if box["error"] is not None:
-        print(f"[MAA 错误] {what} 异常: {box['error']}")
-        return default
-    return box["result"]
 
 
 # MaaFramework 导入
@@ -211,6 +180,35 @@ class MAAAdapter:
         print("[MAA] 初始化完成")
         return True
 
+    # ---------- 裸 ADB 通道（截图/点击/滑动） ----------
+    #
+    # MAA 的 post_*().wait() 是硬阻塞（无 timeout），ADB socket 一旦卡住
+    # 线程就永久死锁——2026-08-05 南瓜 battle_loop 两次卡死的根因。
+    # 截图/点击/滑动改走裸 adb 子进程：subprocess 真超时，挂了直接 kill，
+    # 不传染、不堵 MAA。OCR/模板匹配仍走 MAA（本地推理，不碰 ADB）。
+
+    def _adb_run(self, args: list, timeout: float = 15.0, binary: bool = False) -> Optional[bytes]:
+        """
+        执行裸 adb 命令（子进程 + 真超时 + 可杀）。
+        binary=True 时返回原始输出（截图 PNG bytes），否则只返回 stdout。
+        """
+        import subprocess
+        cmd = [self.adb_path, "-s", self.adb_address] + args
+        try:
+            proc = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                                  check=False, shell=False)
+            if proc.returncode != 0:
+                print(f"[ADB] 命令失败 ({proc.returncode}): {' '.join(cmd[-3:])} | {proc.stderr.decode('utf-8', 'ignore')[:100]}")
+                return None
+            out = proc.stdout
+            return out if binary else (out or b"")
+        except subprocess.TimeoutExpired:
+            print(f"[ADB 超时] {' '.join(cmd[-3:])} 超过 {timeout}s，已终止")
+            return None
+        except Exception as exc:
+            print(f"[ADB 错误] {' '.join(cmd[-3:])}: {exc}")
+            return None
+
     def screenshot(self, force: bool = False) -> Optional[Any]:
         """
         截图并返回图像对象
@@ -228,21 +226,22 @@ class MAAAdapter:
         if not force and self._last_image is not None:
             return self._last_image
 
-        def _cap():
-            return self.controller.post_screencap().wait().get()
-
-        image = _with_timeout(_cap, timeout=15.0, default=None, what="截图")
-        if image is None:
-            print("[MAA 错误] 截图失败/超时")
+        # 裸 adb 截图：exec-out screencap -p → PNG bytes → numpy BGR
+        png = self._adb_run(["exec-out", "screencap", "-p"], timeout=15.0, binary=True)
+        if not png:
+            print("[ADB] 截图失败/超时")
             return None
         try:
-            if image.size == 0:
-                print("[MAA 错误] 截图内容为空")
-                return None
-            self._last_image = image
-            return image
+            import numpy as np
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(png)).convert("RGB")
+            # PIL 是 RGB，MAA 的 post_recognition 要 BGR → 反转通道
+            arr = np.array(img)[:, :, ::-1].copy()
+            self._last_image = arr
+            return arr
         except Exception as exc:
-            print(f"[MAA 错误] 截图异常: {exc}")
+            print(f"[ADB] 截图解析失败: {exc}")
             return None
 
     def save_screenshot(self, path: str, force: bool = True) -> bool:
@@ -260,17 +259,18 @@ class MAAAdapter:
             return False
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 400) -> bool:
-        """滑动（用于列表翻页）"""
+        """滑动（用于列表翻页）。裸 adb 子进程，真超时可杀。"""
         if not self._initialized:
             print("[MAA 错误] 未初始化")
             return False
-        try:
-            result = self.controller.post_swipe(x1, y1, x2, y2, duration_ms).wait().succeeded
-            print(f"[MAA] 滑动 ({x1},{y1}) → ({x2},{y2})")
-            return result
-        except Exception as exc:
-            print(f"[MAA 错误] 滑动异常: {exc}")
+        ok = self._adb_run(
+            ["shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration_ms)],
+            timeout=10.0)
+        if ok is None:
+            print(f"[ADB] 滑动 ({x1},{y1}) → ({x2},{y2}) 失败/超时")
             return False
+        print(f"[ADB] 滑动 ({x1},{y1}) → ({x2},{y2})")
+        return True
 
     def click(self, target: Point) -> bool:
         """
@@ -286,15 +286,14 @@ class MAAAdapter:
             print("[MAA 错误] 未初始化")
             return False
 
-        def _click():
-            return self.controller.post_click(target.x, target.y).wait().succeeded
-
-        result = _with_timeout(_click, timeout=10.0, default=False, what=f"点击({target.x},{target.y})")
-        if result:
-            print(f"[MAA] 点击 ({target.x}, {target.y})")
-        else:
-            print(f"[MAA 错误] 点击 ({target.x}, {target.y}) 失败/超时")
-        return result
+        ok = self._adb_run(
+            ["shell", "input", "tap", str(target.x), str(target.y)],
+            timeout=10.0)
+        if ok is None:
+            print(f"[ADB] 点击 ({target.x}, {target.y}) 失败/超时")
+            return False
+        print(f"[ADB] 点击 ({target.x}, {target.y})")
+        return True
 
     def ocr(self, expected: str, roi: Region,
             match_mode: str = "contains") -> Optional[Point]:
@@ -315,18 +314,12 @@ class MAAAdapter:
         if image is None:
             return None
 
-        def _ocr():
-            return self.tasker.post_recognition(
+        try:
+            ocr_job = self.tasker.post_recognition(
                 JRecognitionType.OCR,
                 JOCR(roi=roi.to_tuple()),
                 image,
             ).wait()
-
-        ocr_job = _with_timeout(_ocr, timeout=15.0, default=None, what=f"OCR({expected})")
-        if ocr_job is None:
-            print(f"[MAA 错误] OCR 超时: expected=\"{expected}\"")
-            return None
-        try:
             ocr_detail = ocr_job.get()
             ocr_reco = ocr_detail.nodes[0].recognition if ocr_detail and ocr_detail.nodes else None
 
@@ -442,8 +435,8 @@ class MAAAdapter:
 
         roi_tuple = roi.to_tuple() if roi else (0, 0, 0, 0)
 
-        def _tm():
-            return self.tasker.post_recognition(
+        try:
+            tm_job = self.tasker.post_recognition(
                 JRecognitionType.TemplateMatch,
                 JTemplateMatch(
                     template=[template],
@@ -452,12 +445,6 @@ class MAAAdapter:
                 ),
                 image,
             ).wait()
-
-        tm_job = _with_timeout(_tm, timeout=15.0, default=None, what=f"模板匹配({template})")
-        if tm_job is None:
-            print(f"[MAA 错误] 模板匹配超时: {template}")
-            return None
-        try:
             tm_detail = tm_job.get()
             tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
 
