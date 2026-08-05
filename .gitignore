@@ -62,3 +62,6 @@ stuck*.png
 # 剪影素材库（群友 Silhouette 工具的产物，本地用，不在公开仓二次分发；
 # 跟 resource/ 一样按需单独发）
 silhouette_lib/
+
+# 待清理归档（确认后可删）
+_trash/
