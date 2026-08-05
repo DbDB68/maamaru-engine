@@ -154,7 +154,7 @@ class PumpkinMixin:
         got_names = []          # 打满九宫格拿到的刀，记个日志
 
         def _budge():
-            """令牌预算还剩几枚（烧完就收工，不白刷）"""
+            """令牌预算还剩几枚（只有剪影更新/刷新才消耗；打板子不耗令牌）"""
             return max_skips - skips
 
         while True:
@@ -162,16 +162,12 @@ class PumpkinMixin:
                 yield self._abort
                 return
 
-            # 令牌烧完了？→ 收工，绝不主动点剪影更新
-            if _budge() <= 0:
-                break
-
             # 3.1 确保在活动界面（获得动画/弹窗可能盖着，点安全区扒拉掉）
             if not self._ensure_on_board(cfg):
                 yield "[南瓜] 回不到活动界面，卡在未知画面，停"
                 return
 
-            # 3.2 板子真满了？→ 这块拿到了刀，记下是谁；令牌还够就更新开新局
+            # 3.2 板子真满了？→ 这块拿到了刀，记下是谁；预算够就更新开新局
             full_cfg = cfg["board_full_ocr"]
             self.maa.screenshot(force=True)
             if self.maa.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
@@ -180,16 +176,17 @@ class PumpkinMixin:
                 got = self._read_obtained_sword(cfg)
                 if got:
                     got_names.append(got)
-                    yield f"[南瓜] 🎉 获得【{got}��（累计 {len(got_names)} 把）"
+                    yield f"[南瓜] 🎉 获得【{got}】（累计 {len(got_names)} 把）"
                 else:
                     yield "[南瓜] 获得动画没 OCR 出名字（继续）"
                 # 点掉获得动画
                 for _ in range(3):
                     self._click_point(cfg["skip_tap"])
                     time.sleep(0.8)
-                # 令牌还够 → 剪影更新开新局；不够 → 直接收工
+                boards_done += 1
+                # 预算还够 → 剪影更新开新局；不够 → 打满收工（不再白烧）
                 if _budge() <= 0:
-                    yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），收工"
+                    yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），最后这块已打完，收工"
                     break
                 yield "[南瓜] 点剪影更新开新局..."
                 for msg in self._refresh_board_stream(cfg):
@@ -198,7 +195,6 @@ class PumpkinMixin:
                     yield "[南瓜] 剪影更新没生效（令牌烧完了？），收工"
                     return
                 skips += 1
-                boards_done += 1
                 misses = 0
                 board_battles = 0
                 keep_confirmed = False
