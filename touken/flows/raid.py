@@ -244,7 +244,10 @@ class RaidMixin:
         battle_loop_start = time.time()
         END_CHECK_GRACE_SEC = 20
 
-        for _ in range(300):  # 安全上限，防死循环
+        for _i in range(300):  # 安全上限，防死循环
+            # 心跳日志：每 5 次报一次进度，卡死时能看到日志停在哪
+            if _i % 5 == 0:
+                yield f"{tag} 战斗循环心跳 {_i}/300（已打 {battles} 场）"
             self.maa.screenshot(force=True)
 
             if debug_dir:

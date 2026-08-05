@@ -152,14 +152,25 @@ class PumpkinMixin:
         pending_name = None     # 上一次认出的名字，连续两次一致才动手（防一次误读烧令牌）
         skips = 0               # 烧掉的更新令牌数（令牌 = 一切，烧完就收工）
         got_names = []          # 打满九宫格拿到的刀，记个日志
+        last_progress = time.time()  # 无进展超时看门狗：格子+1/令牌+1/拿刀 都会刷新
 
         def _budge():
             """令牌预算还剩几枚（只有剪影更新/刷新才消耗；打板子不耗令牌）"""
             return max_skips - skips
 
+        def _bump_progress():
+            """记录一次有效进展（出阵/换板/拿刀），喂给无进展看门狗"""
+            nonlocal last_progress
+            last_progress = time.time()
+
         while True:
             if self._abort:
                 yield self._abort
+                return
+
+            # 无进展看门狗：180 秒没有任何进展 → 疑似 MAA 卡死，强制停
+            if time.time() - last_progress > 180:
+                yield f"[南瓜] ⚠️ 已 {int(time.time() - last_progress)} 秒无进展（出阵/换板/拿刀都没有），疑似卡死，强制停。你去看下模拟器画面"
                 return
 
             # 3.1 确保在活动界面（获得动画/弹窗可能盖着，点安全区扒拉掉）
@@ -172,6 +183,7 @@ class PumpkinMixin:
             self.maa.screenshot(force=True)
             if self.maa.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
                 yield "[南瓜] 面板全解锁，这块拿到了刀"
+                _bump_progress()
                 # 获得动画里 OCR 认一下是谁（记日志，不截图占内存）
                 got = self._read_obtained_sword(cfg)
                 if got:
@@ -231,6 +243,7 @@ class PumpkinMixin:
                         keep_confirmed = False
                         pending_name = None
                         misses = 0
+                        _bump_progress()
                         yield f"[南瓜] ===== 换新板子（令牌 {skips}/{max_skips}），接着认 ====="
                         continue
 
@@ -258,6 +271,7 @@ class PumpkinMixin:
                     yield f"[南瓜] ⚠️ 战斗循环超过安全上限，强制停（共出阵 {battles_total} 次），你去看看卡哪了"
                     return
                 yield f"[南瓜] 第 {battles_total} 次出阵回来，格子 +1"
+                _bump_progress()
                 # 回来后可能有"获得刀剑男士"动画，点几下安全区
                 for _ in range(3):
                     self._click_point(cfg["skip_tap"])

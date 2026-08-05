@@ -7,10 +7,45 @@
 """
 
 import time  # noqa: F401  # 保留原文件的模块级导入，防止外部有人 from 这里拿
+import threading
+import queue
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Callable, TypeVar
 from dataclasses import dataclass
 from enum import Enum
+
+T = TypeVar("T")
+
+
+def _with_timeout(fn: Callable[[], T], timeout: float = 15.0, default: T = None,
+                  what: str = "MAA 调用") -> T:
+    """
+    看门狗：在独立线程里跑 fn，超时未返回就用 default。
+    MAA 的 wait() 是硬阻塞（无 timeout 参数），一旦任务卡死线程就死锁——
+    这是 2026-08-05 南瓜 battle_loop 卡死的根因。包一层线程超时，
+    超时返回 default（当作"没识别到"），调用方继续走，不死锁。
+    """
+    box: dict = {"result": None, "done": False, "error": None}
+
+    def runner():
+        try:
+            box["result"] = fn()
+            box["done"] = True
+        except Exception as exc:
+            box["error"] = exc
+            box["done"] = True
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout)
+    if not box["done"]:
+        print(f"[MAA 超时] {what} 超过 {timeout}s 未返回，已放弃（当 None 处理）")
+        return default
+    if box["error"] is not None:
+        print(f"[MAA 错误] {what} 异常: {box['error']}")
+        return default
+    return box["result"]
+
 
 # MaaFramework 导入
 try:
@@ -193,10 +228,16 @@ class MAAAdapter:
         if not force and self._last_image is not None:
             return self._last_image
 
+        def _cap():
+            return self.controller.post_screencap().wait().get()
+
+        image = _with_timeout(_cap, timeout=15.0, default=None, what="截图")
+        if image is None:
+            print("[MAA 错误] 截图失败/超时")
+            return None
         try:
-            image = self.controller.post_screencap().wait().get()
-            if image is None or image.size == 0:
-                print("[MAA 错误] 截图失败")
+            if image.size == 0:
+                print("[MAA 错误] 截图内容为空")
                 return None
             self._last_image = image
             return image
@@ -245,16 +286,15 @@ class MAAAdapter:
             print("[MAA 错误] 未初始化")
             return False
 
-        try:
-            result = self.controller.post_click(target.x, target.y).wait().succeeded
-            if result:
-                print(f"[MAA] 点击 ({target.x}, {target.y})")
-            else:
-                print(f"[MAA 错误] 点击 ({target.x}, {target.y}) 失败")
-            return result
-        except Exception as exc:
-            print(f"[MAA 错误] 点击异常: {exc}")
-            return False
+        def _click():
+            return self.controller.post_click(target.x, target.y).wait().succeeded
+
+        result = _with_timeout(_click, timeout=10.0, default=False, what=f"点击({target.x},{target.y})")
+        if result:
+            print(f"[MAA] 点击 ({target.x}, {target.y})")
+        else:
+            print(f"[MAA 错误] 点击 ({target.x}, {target.y}) 失败/超时")
+        return result
 
     def ocr(self, expected: str, roi: Region,
             match_mode: str = "contains") -> Optional[Point]:
@@ -275,12 +315,18 @@ class MAAAdapter:
         if image is None:
             return None
 
-        try:
-            ocr_job = self.tasker.post_recognition(
+        def _ocr():
+            return self.tasker.post_recognition(
                 JRecognitionType.OCR,
                 JOCR(roi=roi.to_tuple()),
                 image,
             ).wait()
+
+        ocr_job = _with_timeout(_ocr, timeout=15.0, default=None, what=f"OCR({expected})")
+        if ocr_job is None:
+            print(f"[MAA 错误] OCR 超时: expected=\"{expected}\"")
+            return None
+        try:
             ocr_detail = ocr_job.get()
             ocr_reco = ocr_detail.nodes[0].recognition if ocr_detail and ocr_detail.nodes else None
 
@@ -396,8 +442,8 @@ class MAAAdapter:
 
         roi_tuple = roi.to_tuple() if roi else (0, 0, 0, 0)
 
-        try:
-            tm_job = self.tasker.post_recognition(
+        def _tm():
+            return self.tasker.post_recognition(
                 JRecognitionType.TemplateMatch,
                 JTemplateMatch(
                     template=[template],
@@ -406,6 +452,12 @@ class MAAAdapter:
                 ),
                 image,
             ).wait()
+
+        tm_job = _with_timeout(_tm, timeout=15.0, default=None, what=f"模板匹配({template})")
+        if tm_job is None:
+            print(f"[MAA 错误] 模板匹配超时: {template}")
+            return None
+        try:
             tm_detail = tm_job.get()
             tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
 
