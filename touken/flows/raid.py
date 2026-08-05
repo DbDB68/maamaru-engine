@@ -212,7 +212,8 @@ class RaidMixin:
     _battle_loop_result: tuple = (False, 0)
 
     def battle_loop_stream(self, cfg_key: str = "raid", tag: str = "[RAID]",
-                           need_battle: bool = True, debug_dir: str = None):
+                           need_battle: bool = True, debug_dir: str = None,
+                           fought: int = None):
         """
         战斗循环：OCR"战斗"连点下一场，安全区跳动画，回到活动界面算一圈完。
         结果放在 self._battle_loop_result = (是否完成, 打了几场)。
@@ -225,6 +226,9 @@ class RaidMixin:
         need_battle: True=至少打过1场才算结束（联队战，防过场误命中）；
                      False=全自动战斗的活动（南瓜），靠冷静期就够
         debug_dir: 调试截图目录，给了就把每帧存下来（抓获得动画用）
+        fought: 心跳里显示的场数。内部 battles 数的是"点过几次战斗按钮"，
+                全自动战斗（南瓜）永远点不到按钮、恒为 0，会吓人，
+                所以全自动模式由外层把已出阵次数传进来显示。
         """
         cfg = self.config.get(cfg_key, {})
         battles = 0
@@ -246,8 +250,10 @@ class RaidMixin:
 
         for _i in range(300):  # 安全上限，防死循环
             # 心跳日志：每 5 次报一次进度，卡死时能看到日志停在哪
+            # 场数显示：全自动战斗（南瓜）内部 battles 恒 0，用外层传的 fought
             if _i % 5 == 0:
-                yield f"{tag} 战斗循环心跳 {_i}/300（已打 {battles} 场）"
+                shown = fought if fought is not None else battles
+                yield f"{tag} 战斗循环心跳 {_i}/300（已打 {shown} 场）"
             self.maa.screenshot(force=True)
 
             if debug_dir:

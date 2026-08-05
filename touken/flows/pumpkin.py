@@ -262,7 +262,8 @@ class PumpkinMixin:
                     battle_debug = f"{debug_dir}/b{battles_total + 1:02d}"
                 for battle_msg in self.battle_loop_stream(cfg_key="pumpkin", tag="[南瓜]",
                                                           need_battle=False,
-                                                          debug_dir=battle_debug):
+                                                          debug_dir=battle_debug,
+                                                          fought=battles_total):
                     yield battle_msg
                 round_done, _ = self._battle_loop_result
                 battles_total += 1  # 南瓜一次出阵=一场，按出阵次数计
