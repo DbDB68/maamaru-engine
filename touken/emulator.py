@@ -17,8 +17,11 @@ import time
 
 
 def _run(cmd, timeout=30):
+    # CREATE_NO_WINDOW：无控制台父进程（worker/打包exe）里裸起
+    # adb.exe/MuMuManager.exe（控制台程序）会弹窗抢焦点，必须隐藏
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return subprocess.run(cmd, capture_output=True, timeout=timeout,
-                          encoding="utf-8", errors="replace")
+                          encoding="utf-8", errors="replace", creationflags=flags)
 
 
 def adb_alive(adb_path: str, address: str) -> bool:
@@ -100,7 +103,9 @@ def shutdown_emulator(manager_path: str, instance: int = 0, emit=print) -> bool:
 def sleep_computer(emit=print) -> bool:
     """电脑休眠（可选项！用户被 MAA 黑过屏，这功能必须手动勾才会触发）"""
     try:
-        subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+                         creationflags=flags)
         return True
     except Exception as exc:
         emit(f"[日课] 休眠命令失败: {exc}")

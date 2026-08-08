@@ -249,9 +249,12 @@ class MAAAdapter:
         """
         import subprocess
         cmd = [self.adb_path, "-s", self.adb_address] + args
+        # CREATE_NO_WINDOW：worker 子进程没控制台，裸起 adb.exe（控制台程序）
+        # 会让 Windows 新建控制台窗口弹窗抢焦点——必须隐藏（8/8 血泪教训）
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             proc = subprocess.run(cmd, capture_output=True, timeout=timeout,
-                                  check=False, shell=False)
+                                  check=False, shell=False, creationflags=flags)
             if proc.returncode != 0:
                 print(f"[ADB] 命令失败 ({proc.returncode}): {' '.join(cmd[-3:])} | {proc.stderr.decode('utf-8', 'ignore')[:100]}")
                 return None

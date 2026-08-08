@@ -13,6 +13,9 @@
 import subprocess
 import time
 
+# 无控制台父进程（worker/打包exe）里裸起控制台程序会弹窗抢焦点，一律隐藏
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 class LogoutMixin:
     """下线。依赖宿主类的 maa。"""
@@ -32,7 +35,7 @@ class LogoutMixin:
                 subprocess.run(
                     [self.maa.adb_path, "-s", self.maa.adb_address,
                      "shell", "am", "force-stop", pkg],
-                    timeout=15, capture_output=True)
+                    timeout=15, capture_output=True, creationflags=_NO_WINDOW)
                 yield f"[下线] 游戏进程已杀（{pkg}）"
             except Exception as exc:
                 yield f"[下线] 杀游戏失败: {exc}"
@@ -42,7 +45,8 @@ class LogoutMixin:
             for proc in cfg.get("emulator_processes", ["MuMuPlayer.exe"]):
                 try:
                     subprocess.run(["taskkill", "/F", "/IM", proc],
-                                   timeout=15, capture_output=True)
+                                   timeout=15, capture_output=True,
+                                   creationflags=_NO_WINDOW)
                     yield f"[下线] 模拟器进程已关（{proc}）"
                 except Exception as exc:
                     yield f"[下线] 关模拟器（{proc}）失败: {exc}"
@@ -54,7 +58,7 @@ class LogoutMixin:
             try:
                 subprocess.run(
                     ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
-                    timeout=15, capture_output=True)
+                    timeout=15, capture_output=True, creationflags=_NO_WINDOW)
             except Exception as exc:
                 yield f"[下线] 休眠失败: {exc}"
 
