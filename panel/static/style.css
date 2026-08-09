@@ -1872,6 +1872,20 @@ body.theme-pixel .hero-run { border-radius: 0; }
   overflow-y: auto;
   padding: 0 4px 4px 0;
 }
+.func-select {
+  display: none;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 36px 8px 12px;
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-input);
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  box-shadow: var(--control-shadow);
+}
+.func-select:focus { border-color: var(--accent); outline: none; }
 .func-item {
   display: flex; align-items: center; gap: 8px;
   padding: 9px 12px;
@@ -1985,18 +1999,28 @@ body.theme-pixel .func-item.sel { box-shadow: 3px 3px 0 #b33e4a; }
 
 /* ── 响应式：平板两栏，手机单列 ── */
 @media (max-width: 900px) {
-  .home-grid { grid-template-columns: 150px minmax(0, 1fr); }
-  .home-right { grid-column: 1 / -1; }
-  .home-right-scroll { max-height: 42vh; }
+  .home-grid {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    gap: 14px;
+    padding-right: 4px;
+  }
+  .home-left,
+  .home-center,
+  .home-right { flex: none; min-height: 0; }
+  #func-list { display: none; }
+  .func-select { display: block; }
+  #panel-home #log-container { flex: none; height: clamp(320px, 44vh, 520px); }
+  .home-right-scroll { max-height: none; overflow: visible; }
   #config-layout { grid-template-columns: 180px minmax(0, 1fr); gap: 12px; }
 }
 @media (max-width: 600px) {
   #panel-home { padding: 10px 12px 12px; }
-  .home-grid { display: flex; flex-direction: column; overflow-y: auto; }
-  #func-list { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
-  .func-item { white-space: nowrap; padding: 7px 12px; }
-  .home-center { min-height: 55vh; }
-  .home-right-scroll { max-height: none; overflow: visible; }
+  .home-log-head { display: block; }
+  .hl-title { display: block; white-space: nowrap; margin-bottom: 6px; }
+  .home-log-head .panel-actions { flex-wrap: wrap; justify-content: flex-start; }
+  #panel-home #log-container { height: clamp(300px, 48vh, 460px); }
   #config-layout {
     display: flex;
     flex-direction: column;

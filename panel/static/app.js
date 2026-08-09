@@ -23,6 +23,7 @@
     schedPanel: $('#sched-panel'),
     schedDock:  $('#sched-dock'),
     funcList:   $('#func-list'),
+    funcSelect: $('#func-select'),
     funcDetail: $('#func-detail'),
     taskIndicator: $('#task-indicator'),
     stopAll:    $('#btn-stop-all'),
@@ -222,26 +223,38 @@
       .filter(k => scriptMeta[k]);
   }
 
+  function selectOverviewScript(key) {
+    selectedScript = key;
+    localStorage.setItem('maamaru_selected', key);
+    renderFuncList();
+    renderFuncDetail();
+  }
+
   function renderFuncList() {
     const selReal = resolveAlias(selectedScript);
     els.funcList.innerHTML = '';
+    els.funcSelect.replaceChildren();
     scriptOrder().forEach(k => {
       const info = scriptMeta[k];
+      const running = isRunning && currentScript === k;
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'func-item' + (k === selReal ? ' sel' : '')
-                     + ((isRunning && currentScript === k) ? ' running' : '');
+                     + (running ? ' running' : '');
       item.innerHTML = `<span class="fi-icon">${FUNC_ICONS[k] || '🧰'}</span>`
         + `<span class="fi-name">${escHtml(info.label)}</span>`;
-      item.addEventListener('click', () => {
-        selectedScript = k;
-        localStorage.setItem('maamaru_selected', k);
-        renderFuncList();
-        renderFuncDetail();
-      });
+      item.addEventListener('click', () => selectOverviewScript(k));
       els.funcList.appendChild(item);
+
+      const option = document.createElement('option');
+      option.value = k;
+      option.textContent = `${FUNC_ICONS[k] || '🧰'} ${info.label}${running ? ' · 运行中' : ''}`;
+      option.selected = k === selReal;
+      els.funcSelect.appendChild(option);
     });
   }
+
+  els.funcSelect.addEventListener('change', event => selectOverviewScript(event.target.value));
 
   // ── 概览中间：选中功能区（开始任务 / 强制关闭）──
   function renderFuncDetail() {

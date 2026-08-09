@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>まあ丸 — 本丸近侍パネル</title>
-<link rel="stylesheet" href="/static/style.css?v=20260809-4">
+<link rel="stylesheet" href="/static/style.css?v=20260809-6">
 </head>
 <body>
 <div id="app">
@@ -49,7 +49,8 @@
       <div class="home-grid">
         <!-- 左：常用功能列表，点一下选中 -->
         <aside class="home-left">
-          <div class="home-box-head">⚔ 常用功能</div>
+          <label class="home-box-head" for="func-select">⚔ 常用功能</label>
+          <select id="func-select" class="func-select" aria-label="选择常用功能"></select>
           <div id="func-list"></div>
         </aside>
 
@@ -257,6 +258,6 @@
 <script src="/static/js/task-card.js?v=20260731-1"></script>
 <script src="/static/js/list-editor.js?v=20260731-2"></script>
 <script src="/static/js/task-runner.js?v=20260804-1"></script>
-<script src="/static/app.js?v=20260809-1"></script>
+<script src="/static/app.js?v=20260809-2"></script>
 </body>
 </html>
