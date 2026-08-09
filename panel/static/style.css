@@ -202,10 +202,17 @@ html, body {
 .vt-btn + .vt-btn { border-left: 1px solid var(--border); }
 .vt-btn.active { background: var(--accent3); color: var(--accent2); font-weight: 600; }
 
-/* 可视化模式：分级上色，导航流水账默认藏 */
-#log-container.view-visual .lv-noise { display: none; }
-#log-container.view-visual.show-noise .lv-noise { display: block; opacity: 0.45; }
+/* 可视化模式：技术原文始终留在源码页，导航过程可按需展开 */
+#log-container.view-visual .lv-technical,
+#log-container.view-visual .lv-detail { display: none; }
+#log-container.view-visual.show-noise .lv-detail { display: block; opacity: 0.58; }
 #log-container.view-visual .log-entry { border-left: 3px solid transparent; }
+#log-container.view-visual .log-entry .tag {
+  min-width: 58px;
+  text-align: center;
+  font-family: var(--font);
+}
+#log-container.view-visual .log-entry .msg { font-family: var(--font); }
 #log-container.view-visual .lv-ok {
   background: #eef6ee; border-left-color: #5a8f6a;
 }

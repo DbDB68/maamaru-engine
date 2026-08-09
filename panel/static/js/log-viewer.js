@@ -19,25 +19,66 @@
     clear: $('#btn-clear-logs'), noise: $('#btn-noise'), toggle: $('#log-view-toggle'),
   });
 
-  function classify(message) {
+  const sectionNames = Object.freeze({
+    SHOP: '万屋', TASK: '任务奖励', NAV: '界面导航',
+    '出阵': '出阵', '快照': '库存快照', '日课': '日课', '脚本': '系统',
+    '面板': '系统', '合成': '合成', '锻刀': '锻刀', '刀解': '刀解',
+    '演练': '演练', '远征': '远征', '内番': '内番', '登录': '登录',
+  });
+
+  function analyze(message) {
     const text = String(message || '');
-    if (text.startsWith('[NAV]') || text.startsWith('[MAA]')) return 'lv-noise';
-    if (text.includes('🛑') || text.includes('✗') || text.includes('翻车')) return 'lv-bad';
-    if (text.includes('⚠️')) return 'lv-warn';
-    if (text.includes('=====')) return 'lv-banner';
-    if (text.includes('✓') || text.includes('✅')) return 'lv-ok';
-    return 'lv-normal';
+    const technical = /^\[(?:ADB|MAA)\]/.test(text)
+      || /^(?:Traceback \(most recent call last\):|\s+File ")/.test(text);
+    const detail = text.startsWith('[NAV]');
+    const prefix = text.match(/^\[([^\]]+)\]\s*/);
+    const banner = text.match(/^=+\s*(.*?)\s*=+$/);
+    const reportLine = /^\s{2,}\S.+:\s*[✓⚠✗]/.test(text);
+    let level = 'normal';
+
+    if (text.includes('🛑') || text.includes('✗') || text.includes('翻车') || text.includes('异常退出')) level = 'bad';
+    else if (text.includes('⚠')) level = 'warn';
+    else if (banner) level = 'banner';
+    else if (text.includes('✓') || text.includes('✅') || /完成|完毕|成功|已领/.test(text)) level = 'ok';
+
+    return {
+      visibility: technical ? 'technical' : detail ? 'detail' : 'progress',
+      level,
+      label: banner ? '日课' : reportLine ? '成绩' : (sectionNames[prefix?.[1]] || prefix?.[1] || '进度'),
+      visualMessage: banner ? banner[1] : prefix ? text.slice(prefix[0].length) : text.trim(),
+    };
+  }
+
+  function classify(message) {
+    const info = analyze(message);
+    return `lv-${info.level} lv-${info.visibility}`;
   }
 
   function createEntry(entry) {
+    const info = analyze(entry.message);
     const row = document.createElement('div');
     row.className = `log-entry ${classify(entry.message)}${view === 'raw' ? ' raw' : ''}`;
     const timestamp = entry.ts ? new Date(entry.ts * 1000).toLocaleTimeString() : '';
+    const label = view === 'visual' ? info.label : entry.script;
+    const message = view === 'visual' ? info.visualMessage : entry.message;
     row.innerHTML = `
       <span class="ts">${timestamp}</span>
-      <span class="tag tag-${esc(entry.script)}">${esc(entry.script)}</span>
-      <span class="msg">${esc(entry.message)}</span>`;
+      <span class="tag tag-${esc(entry.script)}">${esc(label)}</span>
+      <span class="msg">${esc(message)}</span>`;
     return row;
+  }
+
+  function updateCount() {
+    const total = entries.length;
+    if (view === 'raw') {
+      ui().count.textContent = `${total} 条原始日志`;
+      return;
+    }
+    const technical = entries.filter(entry => analyze(entry.message).visibility === 'technical').length;
+    const details = entries.filter(entry => analyze(entry.message).visibility === 'detail').length;
+    const visible = total - technical - (showNoise ? 0 : details);
+    const hidden = technical + (showNoise ? 0 : details);
+    ui().count.textContent = hidden ? `${visible} 条进度 · 已收起 ${hidden} 条过程日志` : `${visible} 条进度`;
   }
 
   function scrollToLatest() {
@@ -56,12 +97,13 @@
     u.noise.classList.toggle('active', showNoise);
     u.toggle.querySelectorAll('.vt-btn').forEach(button =>
       button.classList.toggle('active', button.dataset.view === view));
+    updateCount();
   }
 
   function render() {
     const u = ui();
     u.list.replaceChildren(...entries.map(createEntry));
-    u.count.textContent = `${entries.length} 条日志`;
+    updateCount();
     scrollToLatest();
   }
 
@@ -73,7 +115,7 @@
       u.list.firstChild?.remove();
     }
     u.list.appendChild(createEntry(entry));
-    u.count.textContent = `${u.list.children.length} 条日志`;
+    updateCount();
     scrollToLatest();
     global.dispatchEvent(new CustomEvent('maamaru:log', { detail: entry }));
   }
@@ -145,5 +187,5 @@
     connect();
   }
 
-  app.logViewer = Object.freeze({ init, load, append, render, classify, setRunning });
+  app.logViewer = Object.freeze({ init, load, append, render, classify, analyze, setRunning });
 })(window);
