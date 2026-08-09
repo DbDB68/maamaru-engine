@@ -17,6 +17,30 @@
   --radius:   10px;
   --font:     "Hiragino Sans", "Noto Sans SC", system-ui, sans-serif;
   --mono:     "Cascadia Code", "Consolas", "SF Mono", monospace;
+
+  /* Theme contract: skins override tokens; components keep their structure. */
+  --surface-input: #fff;
+  --surface-success: #e8f5ec;
+  --surface-warning: #fdf4e0;
+  --surface-danger: #fbeae7;
+  --text-success: #33643f;
+  --text-warning: #8a6414;
+  --text-danger: #96322f;
+  --border-success: #bfe0cb;
+  --border-warning: #c9962e;
+  --border-danger: #ecc4bd;
+  --topbar-bg: linear-gradient(135deg, var(--accent2), var(--accent));
+  --hero-bg: linear-gradient(135deg, #fdf6e0, var(--bg-card) 55%);
+  --running-bg: #eafaf1;
+  --run-banner-bg: linear-gradient(135deg, var(--accent3), #fdf3d8);
+  --card-border-width: 1px;
+  --control-border-width: 1px;
+  --control-radius: 6px;
+  --chip-radius: 999px;
+  --card-shadow: 0 2px 10px var(--shadow);
+  --control-shadow: none;
+  --pressed-shadow: none;
+  --image-rendering: auto;
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -80,7 +104,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 20px;
-  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  background: var(--topbar-bg);
   color: #fff;
   border-radius: 0 0 var(--radius) var(--radius);
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -214,17 +238,17 @@ html, body {
 }
 #log-container.view-visual .log-entry .msg { font-family: var(--font); }
 #log-container.view-visual .lv-ok {
-  background: #eef6ee; border-left-color: #5a8f6a;
+  background: var(--surface-success); border-left-color: var(--border-success);
 }
-#log-container.view-visual .lv-ok .msg { color: #33643f; font-weight: 600; }
+#log-container.view-visual .lv-ok .msg { color: var(--text-success); font-weight: 600; }
 #log-container.view-visual .lv-warn {
-  background: #fdf4e0; border-left-color: #c9962e;
+  background: var(--surface-warning); border-left-color: var(--border-warning);
 }
-#log-container.view-visual .lv-warn .msg { color: #8a6414; }
+#log-container.view-visual .lv-warn .msg { color: var(--text-warning); }
 #log-container.view-visual .lv-bad {
-  background: #fbeaea; border-left-color: #c0504d;
+  background: var(--surface-danger); border-left-color: var(--border-danger);
 }
-#log-container.view-visual .lv-bad .msg { color: #96322f; font-weight: 600; }
+#log-container.view-visual .lv-bad .msg { color: var(--text-danger); font-weight: 600; }
 #log-container.view-visual .lv-banner {
   background: linear-gradient(90deg, var(--accent3), transparent);
   border-left-color: var(--accent);
@@ -264,15 +288,15 @@ html, body {
 /* 一键日课 Hero 卡：金边 C 位，和一堆小瓷砖拉开层级 */
 .hero-card {
   display: flex; align-items: stretch; gap: 18px;
-  background: linear-gradient(135deg, #fdf6e0, var(--bg-card) 55%);
+  background: var(--hero-bg);
   border: 1px solid var(--accent);
   border-radius: 12px;
   padding: 14px 18px;
-  box-shadow: 0 2px 10px var(--shadow);
+  box-shadow: var(--card-shadow);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .hero-card:hover { box-shadow: 0 3px 14px rgba(212,160,23,0.18); }
-.hero-card.running { border-color: var(--green); background: #eafaf1; }
+.hero-card.running { border-color: var(--green); background: var(--running-bg); }
 .hero-card.running .s-badge { background: var(--green); color: #fff; border-color: var(--green); }
 .hero-main { flex: 1; min-width: 0; }
 .hero-card .s-desc { font-size: 12px; color: var(--fg-dim); margin: 4px 0 8px; }
@@ -390,7 +414,7 @@ html, body {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-input);
   color: var(--fg);
   font-size: 13px;
   outline: none;
@@ -617,7 +641,7 @@ html, body {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-input);
   color: var(--fg);
   font-family: var(--font);
   font-size: 13px;
@@ -640,7 +664,7 @@ html, body {
   margin-bottom: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface-input);
   color: var(--fg);
   font-size: 13px;
   outline: none;
@@ -672,7 +696,7 @@ html, body {
   font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface-input);
   color: var(--fg-dim);
   cursor: pointer;
   transition: all 0.15s;
@@ -714,7 +738,7 @@ html, body {
 }
 .script-card.running {
   border-color: var(--green);
-  background: #eafaf1;
+  background: var(--running-bg);
 }
 .script-card.running .s-badge { background: var(--green); color: #fff; border-color: var(--green); }
 
@@ -731,7 +755,7 @@ html, body {
 .pf select, .pf input[type="number"] {
   width: 100%; padding: 7px 10px;
   border: 1px solid var(--border); border-radius: 6px;
-  background: #fff; font-size: 13px; color: var(--fg);
+  background: var(--surface-input); font-size: 13px; color: var(--fg);
   outline: none;
 }
 .pf select:focus, .pf input[type="number"]:focus { border-color: var(--accent); }
@@ -742,7 +766,7 @@ html, body {
 .pill {
   padding: 5px 12px; font-size: 12px;
   border: 1px solid var(--border); border-radius: 999px;
-  background: #fff; color: var(--fg-dim);
+  background: var(--surface-input); color: var(--fg-dim);
   cursor: pointer; transition: all 0.15s;
 }
 .pill:hover { border-color: var(--accent); color: var(--accent2); }
@@ -1005,12 +1029,12 @@ html, body {
   background: var(--accent3);
   flex-shrink: 0;
 }
-.msg-user .msg-avatar { background: #e0dcd4; }
+.msg-user .msg-avatar { background: var(--bg-panel); }
 .msg-bubble {
   max-width: 75%;
   padding: 8px 14px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface-input);
   border: 1px solid var(--border);
 }
 .msg-user .msg-bubble {
@@ -1036,7 +1060,7 @@ html, body {
 .chat-input-area input {
   flex: 1; padding: 10px 14px;
   border: 1px solid var(--border); border-radius: 8px;
-  font-size: 14px; outline: none; background: #fff;
+  font-size: 14px; outline: none; background: var(--surface-input);
 }
 .chat-input-area input:focus { border-color: var(--accent); }
 .chat-input-area button {
@@ -1297,7 +1321,7 @@ html, body {
   border-radius: 999px;
   border: 1px solid var(--border);
 }
-.fn-busy { background: #fdf0d5; color: var(--accent2); border-color: var(--accent); }
+.fn-busy { background: var(--surface-warning); color: var(--accent2); border-color: var(--accent); }
 .fn-idle { background: var(--bg-panel); color: var(--fg-dim); }
 
 /* 远征 */
@@ -1337,8 +1361,8 @@ html, body {
   margin-bottom: 10px;
 }
 .daily-banner small { font-weight: 400; font-size: 11px; color: var(--fg-dim); }
-.daily-ok { background: #e8f5ec; color: var(--green); }
-.daily-bad { background: #fbeae7; color: var(--red); }
+.daily-ok { background: var(--surface-success); color: var(--green); }
+.daily-bad { background: var(--surface-danger); color: var(--red); }
 
 .step-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .step-chip {
@@ -1347,8 +1371,8 @@ html, body {
   border-radius: 999px;
   border: 1px solid var(--border);
 }
-.step-ok { background: #e8f5ec; color: var(--green); border-color: #bfe0cb; }
-.step-bad { background: #fbeae7; color: var(--red); border-color: #ecc4bd; }
+.step-ok { background: var(--surface-success); color: var(--green); border-color: var(--border-success); }
+.step-bad { background: var(--surface-danger); color: var(--red); border-color: var(--border-danger); }
 .step-skip { background: var(--bg-panel); color: var(--fg-dim); }
 
 /* 内番 */
@@ -1367,7 +1391,7 @@ html, body {
    轨道和横幅布局不用动 */
 .run-banner {
   margin: 12px 20px 0;
-  background: linear-gradient(135deg, var(--accent3), #fdf3d8);
+  background: var(--run-banner-bg);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   padding: 10px 16px 6px;
@@ -1425,6 +1449,72 @@ html, body {
   .run-flavor { font-size: 14px; }
 }
 
+/* ===== 主题组件合约 =====
+   皮肤只要覆盖 :root 中的令牌，就能接管主要界面表面与交互状态。 */
+.dash-card,
+.sched-card,
+.script-card,
+.config-detail-card,
+.sys-card,
+.func-detail,
+.modal,
+#chat-container,
+#log-container {
+  border-width: var(--card-border-width);
+  box-shadow: var(--card-shadow);
+}
+
+button,
+input,
+select,
+textarea { font-family: var(--font); }
+
+.small-btn,
+.btn-primary,
+.btn-secondary,
+.s-gear,
+.fd-btn,
+#chat-send {
+  border-width: var(--control-border-width);
+  border-radius: var(--control-radius);
+  box-shadow: var(--control-shadow);
+}
+
+.small-btn:active,
+.btn-primary:active,
+.btn-secondary:active,
+.s-gear:active,
+.fd-btn:active,
+#chat-send:active { box-shadow: var(--pressed-shadow); }
+
+.pf select,
+.pf input[type="number"],
+.pf-sword-list .sl-input,
+.sl-search,
+.chat-input-area input,
+.modal-body input,
+.modal-body textarea,
+.sched-row input[type="time"],
+.sched-row select,
+.sys-form input,
+.sys-form textarea {
+  background: var(--surface-input);
+  color: var(--fg);
+  border-width: var(--control-border-width);
+  border-radius: var(--control-radius);
+}
+
+.pill,
+.sl-chip,
+.step-chip,
+.fn-chip,
+.hero-chip,
+.fd-chip,
+.fd-summary-chip,
+.badge { border-radius: var(--chip-radius); }
+
+img { image-rendering: var(--image-rendering); }
+
 /* ===== 像素主题（👾 JRPG 菜单风） ===== */
 /* 缝合像素字体 Fusion Pixel（OFL 协议）：简体 + 日文假名 */
 @font-face {
@@ -1455,6 +1545,31 @@ body.theme-pixel {
   --shadow:   rgba(0,0,0,0.45);
   --radius:   0;        /* 像素世界没有圆角 */
   --font:     'FusionPixel', 'Noto Sans SC', monospace;
+  --surface-input: #2c2318;
+  --surface-success: #24351f;
+  --surface-warning: #45371f;
+  --surface-danger: #3d241f;
+  --text-success: #8fd97a;
+  --text-warning: #f5cf5e;
+  --text-danger: #e8877a;
+  --border-success: #3f5c33;
+  --border-warning: #8a6b27;
+  --border-danger: #6b3a30;
+  --topbar-bg: #4a3a22;
+  --hero-bg: #33291d;
+  --running-bg: #24351f;
+  --run-banner-bg: #2c2318;
+  --card-border-width: 2px;
+  --control-border-width: 2px;
+  --control-radius: 0;
+  --chip-radius: 0;
+  --card-shadow: 4px 4px 0 rgba(0,0,0,0.45),
+                 inset -2px -2px 0 rgba(0,0,0,0.25),
+                 inset 2px 2px 0 rgba(255,255,255,0.06);
+  --control-shadow: inset -2px -2px 0 rgba(0,0,0,0.3),
+                    inset 2px 2px 0 rgba(255,255,255,0.12);
+  --pressed-shadow: inset 2px 2px 0 rgba(0,0,0,0.35);
+  --image-rendering: pixelated;
   font-size:  12px;     /* 像素字体只在 12 的倍数最锐利 */
 }
 
@@ -1673,7 +1788,7 @@ body.theme-pixel { --fg-dim: #b3a48c; }
   width: 100%; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: 6px;
   font-size: 12px; font-family: var(--font);
-  background: #fff; color: var(--fg);
+  background: var(--surface-input); color: var(--fg);
   resize: vertical; outline: none;
 }
 body.theme-pixel .modal-body textarea {

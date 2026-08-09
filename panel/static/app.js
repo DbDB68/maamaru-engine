@@ -109,21 +109,26 @@
     onFinished: () => frontend.dashboard?.load(),
   });
 
-  // ── 主题切换：和纸（默认）⇄ 像素（👾）──
-  function applyTheme(theme) {
-    document.body.classList.toggle('theme-pixel', theme === 'pixel');
-    els.themeBtn.textContent = theme === 'pixel' ? '🍂' : '👾';
-    els.themeBtn.title = theme === 'pixel' ? '切回和纸主题' : '切换像素主题';
-    localStorage.setItem('maamaru_theme', theme);
+  // ── 主题切换：由注册表驱动，新皮肤不需改页面逻辑 ──
+  function applyTheme(themeId) {
+    const theme = frontend.theme.apply(themeId);
+    const nextTheme = frontend.theme.themes[
+      (frontend.theme.themes.findIndex(item => item.id === theme.id) + 1) % frontend.theme.themes.length
+    ];
+    els.themeBtn.textContent = nextTheme.icon;
+    els.themeBtn.title = `切换到${nextTheme.label}主题`;
+    els.themeBtn.setAttribute('aria-label', els.themeBtn.title);
     // 同步到服务器（合并式存储，不会冲掉脚本参数记忆）
     fetch('/api/saved-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme }),
+      body: JSON.stringify({ theme: theme.id }),
     }).catch(() => {});
   }
   els.themeBtn.addEventListener('click', () => {
-    applyTheme(document.body.classList.contains('theme-pixel') ? 'washi' : 'pixel');
+    const themes = frontend.theme.themes;
+    const currentIndex = themes.findIndex(theme => theme.id === frontend.theme.current());
+    applyTheme(themes[(currentIndex + 1) % themes.length].id);
   });
   applyTheme(localStorage.getItem('maamaru_theme') || 'washi');
 
@@ -398,7 +403,7 @@
         }
       });
       // 主题也是服务器说了算（客户端/手机/浏览器 localStorage 各玩各的，统一拉齐）
-      if (data.theme === 'pixel' || data.theme === 'washi') {
+      if (frontend.theme.get(data.theme)) {
         applyTheme(data.theme);
       }
     } catch(e) {
