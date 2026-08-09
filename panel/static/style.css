@@ -1531,44 +1531,44 @@ img { image-rendering: var(--image-rendering); }
 
 /* 换皮核心：整套面板都走 CSS 变量，像素主题把变量整体换掉 */
 body.theme-pixel {
-  --bg:       #e7ece8;  /* 冷灰纸底 */
-  --bg-card:  #fffdf7;  /* 近白界面板 */
-  --bg-panel: #dbe3de;  /* 浅灰绿工作区 */
-  --fg:       #29312e;  /* 墨色字 */
-  --fg-dim:   #65716b;  /* 灰绿次要字 */
+  --bg:       #e9f1f4;  /* Kenney 式雾蓝底 */
+  --bg-card:  #fffefa;  /* 近白界面板 */
+  --bg-panel: #dce8ed;  /* 浅蓝灰工作区 */
+  --fg:       #202c35;  /* 深蓝墨字 */
+  --fg-dim:   #657985;  /* 蓝灰次要字 */
   --accent:   #d5a72d;  /* 狐金 */
   --accent2:  #7c5c09;  /* 可读的深金 */
   --accent3:  #f5dfa0;  /* 选中金底 */
-  --green:    #3e735c;  /* 松绿 */
+  --green:    #347e9b;  /* 成功状态用青蓝 */
   --red:      #b33e4a;  /* 朱红 */
-  --border:   #46534e;  /* 墨绿轮廓 */
-  --shadow:   rgba(41,49,46,0.18);
+  --border:   #3f505a;  /* 深蓝灰轮廓 */
+  --shadow:   rgba(32,44,53,0.18);
   --radius:   0;        /* 像素世界没有圆角 */
   --font:     'FusionPixel', 'Noto Sans SC', monospace;
-  --surface-input: #fffdf7;
-  --surface-success: #d8eadf;
+  --surface-input: #fffefa;
+  --surface-success: #d7ebf3;
   --surface-warning: #f8e7ad;
   --surface-danger: #f2d6d7;
-  --text-success: #285b45;
+  --text-success: #245f78;
   --text-warning: #765607;
   --text-danger: #8f2f39;
-  --border-success: #6b9a82;
+  --border-success: #72a9bd;
   --border-warning: #b58a21;
   --border-danger: #c4777e;
   --topbar-bg: #e0b83e;
-  --hero-bg: #fffdf7;
-  --running-bg: #d8eadf;
+  --hero-bg: #fffefa;
+  --running-bg: #d7ebf3;
   --run-banner-bg: #f5dfa0;
   --card-border-width: 2px;
   --control-border-width: 2px;
   --control-radius: 0;
   --chip-radius: 0;
-  --card-shadow: 3px 3px 0 #8b9892,
-                 inset -2px -2px 0 rgba(70,83,78,0.14),
+  --card-shadow: 3px 3px 0 #91a1a9,
+                 inset -2px -2px 0 rgba(63,80,90,0.14),
                  inset 2px 2px 0 rgba(255,255,255,0.8);
-  --control-shadow: inset -2px -2px 0 #a9b3ae,
+  --control-shadow: inset -2px -2px 0 #adbbc2,
                     inset 2px 2px 0 #fff;
-  --pressed-shadow: inset 2px 2px 0 #87948e;
+  --pressed-shadow: inset 2px 2px 0 #899ba4;
   --image-rendering: pixelated;
   font-size:  12px;     /* 像素字体只在 12 的倍数最锐利 */
 }
@@ -1579,7 +1579,7 @@ body.theme-pixel #topbar {
   color: var(--fg);
   border-bottom: 3px solid var(--border);
   border-radius: 0;
-  box-shadow: 0 3px 0 #8b9892;
+  box-shadow: 0 3px 0 #91a1a9;
 }
 body.theme-pixel #topbar .icon-btn { color: var(--fg); }
 body.theme-pixel .logo-icon,
@@ -1696,7 +1696,7 @@ body.theme-pixel .pill.on {
   box-shadow: var(--control-shadow);
 }
 
-/* 日课横幅 / 步骤片 / 锻刀炉：木版画式朱红与松绿 */
+/* 日课横幅 / 步骤片 / 锻刀炉：朱红错误与青蓝成功 */
 body.theme-pixel .daily-ok  { background: var(--surface-success); color: var(--text-success); }
 body.theme-pixel .daily-bad { background: var(--surface-danger); color: var(--text-danger); }
 body.theme-pixel .step-ok   { background: var(--surface-success); color: var(--text-success); border-color: var(--border-success); }
@@ -1993,7 +1993,7 @@ body.theme-pixel .hero-run { border-radius: 0; }
 body.theme-pixel .func-item,
 body.theme-pixel .func-detail {
   border-radius: 0;
-  box-shadow: 3px 3px 0 #a5afaa;
+  box-shadow: 3px 3px 0 #a2b1b8;
 }
 body.theme-pixel .func-item.sel { box-shadow: 3px 3px 0 #b33e4a; }
 
