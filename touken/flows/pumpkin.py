@@ -452,9 +452,13 @@ class PumpkinMixin:
 
         self.maa.screenshot(force=True)
 
-        # 刀装未满警告 → 老规矩：停下上报
-        if self.maa.template_match(cfg["equip_warning_button"]["template"]):
-            self._abort = "[南瓜] ⚠️ 刀装未满警告！按规矩停下来了，你去游戏里看一眼要不要补刀装"
+        # 刀装未满警告 → 安全取消整备，给后续日课让路
+        equip_cancelled = self._cancel_equip_warning(cfg)
+        if equip_cancelled is not None:
+            if equip_cancelled:
+                self._abort = "[南瓜] ⚠️ 刀装未满警告；已取消出阵并返回部队选择，本次跳过"
+            else:
+                self._abort = "[南瓜] ⚠️ 刀装未满警告；没能安全取消整备，本次出阵停止"
             return
 
         # 确认弹窗（可能有也可能直接进图）

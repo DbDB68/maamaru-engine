@@ -93,6 +93,19 @@ def roi_4to4(x1: int, y1: int, x2: int, y2: int) -> Region:
     return Region(x1, y1, x2 - x1, y2 - y1)
 
 
+def _ocr_text_matches(text: str, expected: str, match_mode: str) -> bool:
+    """匹配 OCR 文本；空结果不能借由 ``"" in expected`` 误报命中。"""
+    text = str(text or "").strip()
+    expected = str(expected or "").strip()
+    if not text or not expected:
+        return False
+    if match_mode == "exact":
+        return text == expected
+    if match_mode == "contains":
+        return expected in text or text in expected
+    return False
+
+
 class MAAAdapter:
     """
     MaaFramework 适配器
@@ -401,11 +414,7 @@ class MAAAdapter:
                 text = result.text if hasattr(result, 'text') else str(result)
                 score = result.score if hasattr(result, 'score') else 0.0
 
-                matched = False
-                if match_mode == "exact":
-                    matched = (text == expected)
-                elif match_mode == "contains":
-                    matched = (expected in text) or (text in expected)
+                matched = _ocr_text_matches(text, expected, match_mode)
 
                 if matched:
                     # 获取位置（兼容对象和列表两种格式）

@@ -12,6 +12,33 @@ from ..maa_adapter import roi_4to4, Point
 class BattleMixin:
     """地图/部队/阵形选择。依赖宿主类的 _click_point、_click_template_config。"""
 
+    def _cancel_equip_warning(self, cfg):
+        """安全退出“刀装未满”弹窗；返回 None 表示当前没有该弹窗。"""
+        warning_cfg = cfg.get("equip_warning_button", {})
+        warning_template = warning_cfg.get("template")
+        if not warning_template or not self.maa.template_match(warning_template):
+            return None
+
+        # 绝不点“继续出阵”。“整备刀装”会关闭警告并回到部队选择。
+        prepare_cfg = cfg.get("equip_warning_prepare", {})
+        prepare_template = prepare_cfg.get("template", "team/整备刀装.png")
+        prepare = self.maa.template_match(prepare_template)
+        if not prepare:
+            return False
+        self.maa.click(prepare)
+        time.sleep(0.8)
+
+        team_ui = cfg.get("team_ui_ocr", {})
+        team_roi_raw = team_ui.get("roi")
+        team_roi = roi_4to4(*team_roi_raw) if team_roi_raw else None
+        for _ in range(6):
+            self.maa.screenshot(force=True)
+            if (team_roi and team_ui.get("expected")
+                    and self.maa.ocr(team_ui["expected"], team_roi)):
+                return True
+            time.sleep(0.4)
+        return False
+
     # ==================== 地图选择 ====================
 
     def select_map(self, map_type: str, chapter: str = None,

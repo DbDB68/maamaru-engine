@@ -131,9 +131,13 @@ class RaidMixin:
             # 3.5 出阵后的分支：刀装警告 / 确认弹窗 / 手形不足
             self.maa.screenshot(force=True)
 
-            # 刀装未满警告 → 教材规矩：停下上报
-            if self.maa.template_match(cfg["equip_warning_button"]["template"]):
-                yield "[RAID] ⚠️ 刀装未满警告！按规矩停下来了，你去游戏里看一眼要不要补刀装"
+            # 刀装未满警告 → 安全取消整备，给后续日课让路
+            equip_cancelled = self._cancel_equip_warning(cfg)
+            if equip_cancelled is not None:
+                if equip_cancelled:
+                    yield "[RAID] ⚠️ 刀装未满警告；已取消出阵并返回部队选择，本次跳过"
+                else:
+                    yield "[RAID] ⚠️ 刀装未满警告；没能安全取消整备，本次出阵停止"
                 return
 
             # 手形不足弹窗 → 按配置决定买不买

@@ -189,9 +189,13 @@ class SortieMixin:
 
             self.maa.screenshot(force=True)
 
-            # 刀装未满警告 → 教材规矩：停
-            if self.maa.template_match(cfg["equip_warning_button"]["template"]):
-                yield "[出阵] ⚠️ 刀装未满警告！按规矩停下来了，你去看看要不要整备刀装"
+            # 刀装未满警告 → 安全取消整备，给后续日课让路
+            equip_cancelled = self._cancel_equip_warning(cfg)
+            if equip_cancelled is not None:
+                if equip_cancelled:
+                    yield "[出阵] ⚠️ 刀装未满警告；已取消出阵并返回部队选择，本次跳过"
+                else:
+                    yield "[出阵] ⚠️ 刀装未满警告；没能安全取消整备，本次出阵停止"
                 return
 
             # 队员重伤确认弹窗 → 教材规矩：永远点"否"

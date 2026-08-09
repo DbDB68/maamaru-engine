@@ -33,11 +33,36 @@ from ..runtime_paths import STATUS_DIR
 from ..maa_adapter import Point, roi_4to4
 
 # 判定步骤翻车的消息特征（别写太宽：'失败'会误伤"模板匹配失败，使用固定坐标"这种兜底）
-_FAIL_RE = re.compile(r"到达.{0,8}失败|没打开|放弃|超时|翻车|没能|没等到")
+_FAIL_RE = re.compile(
+    r"到达.{0,8}失败|没打开|放弃|超时|翻车|没能|没等到|刀装未满警告|"
+    r"未找到暖心礼包|未识别到领取按钮|未检测到0价格弹窗"
+)
 
 
 def _is_fail(msg: str) -> bool:
     return bool(_FAIL_RE.search(msg))
+
+
+def _equip_warning_status(msg: str, current=None):
+    if "刀装未满警告" not in msg:
+        return current
+    if "没能安全取消" in msg:
+        return "✗ 刀装未满，取消整备失败，出阵停止"
+    return "⚠ 刀装未满，已取消出阵并跳过"
+
+
+def _shop_report_status(msg: str, current=None):
+    if "今日暖心礼包已售罄" in msg:
+        return "✓ 此前已领取（售罄）"
+    if "领取成功" in msg:
+        return "✓ 本次领取成功"
+    if "未找到暖心礼包" in msg:
+        return "✗ 未找到暖心礼包"
+    if "未识别到领取按钮" in msg:
+        return "✗ 未识别到领取按钮，未点击"
+    if "未检测到0价格弹窗" in msg:
+        return "✗ 未确认0价，已取消"
+    return current
 
 
 class DailyMixin:
@@ -150,15 +175,18 @@ class DailyMixin:
             yield f"========== {titles[name]} =========="
             self.set_progress("daily:" + name)
             ok = True
+            detail_status = None
             try:
                 for msg in fn():
                     yield msg
                     if _is_fail(msg):
                         ok = False
+                    if name == "万屋":
+                        detail_status = _shop_report_status(msg, detail_status)
             except Exception as exc:
                 ok = False
                 yield f"[日课] {name}翻车: {exc}"
-            report.append((name, "✓" if ok else "✗"))
+            report.append((name, detail_status or ("✓" if ok else "✗")))
             self._flush_report(report, finished=False)
             time.sleep(1.0)
 
@@ -252,6 +280,7 @@ class DailyMixin:
         try:
             if mode == "raid":
                 ok = True
+                equip_status = None
                 for msg in self.raid_stream(
                         max_rounds=sortie_plan.get("rounds", 1),
                         team_no=sortie_plan.get("team_no"),
@@ -259,9 +288,12 @@ class DailyMixin:
                     yield msg
                     if _is_fail(msg):
                         ok = False
-                report.append(("出阵(活动)", "✓" if ok else "✗"))
+                    equip_status = _equip_warning_status(msg, equip_status)
+                status = equip_status or ("✓" if ok else "✗")
+                report.append(("出阵(活动)", status))
             elif mode == "sortie":
                 ok = True
+                equip_status = None
                 for msg in self.sortie_stream(
                         chapter=sortie_plan["chapter"],
                         map_no=sortie_plan["map_no"],
@@ -276,9 +308,12 @@ class DailyMixin:
                     yield msg
                     if _is_fail(msg):
                         ok = False
-                report.append(("出阵(推图)", "✓" if ok else "✗"))
+                    equip_status = _equip_warning_status(msg, equip_status)
+                status = equip_status or ("✓" if ok else "✗")
+                report.append(("出阵(推图)", status))
             elif mode == "pumpkin":
                 ok = True
+                equip_status = None
                 watch = sortie_plan.get("watch_names") or []
                 for msg in self.pumpkin_stream(
                         team_no=sortie_plan.get("team_no", 3),
@@ -287,7 +322,9 @@ class DailyMixin:
                     yield msg
                     if _is_fail(msg):
                         ok = False
-                report.append(("出阵(南瓜)", "✓" if ok else "✗"))
+                    equip_status = _equip_warning_status(msg, equip_status)
+                status = equip_status or ("✓" if ok else "✗")
+                report.append(("出阵(南瓜)", status))
             else:
                 yield "[日课] 配置为不打，跳过"
         except Exception as exc:

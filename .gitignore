@@ -22,9 +22,6 @@ _archive/
 # WorkBuddy
 .workbuddy/
 
-# 资源包（OCR 模型 + 模板图，README 让用户从 GitHub Releases 单独下载）
-resource/
-
 # 个人笔记（游戏机制、早期 prompt，不公开）
 *玩法说明书*.docx
 *.docx
@@ -59,8 +56,7 @@ pumpkin_now.png
 final_state.png
 stuck*.png
 
-# 剪影素材库（群友 Silhouette 工具的产物，本地用，不在公开仓二次分发；
-# 跟 resource/ 一样按需单独发）
+# 剪影素材库（群友 Silhouette 工具的产物，本地用，不在公开仓二次分发）
 profiles/
 
 # 待清理归档（确认后可删）

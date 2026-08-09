@@ -64,10 +64,16 @@ class RewardsMixin:
 
         # 3. 点击领取按钮
         claim_config = shop_config["claim_button"]
-
-        # 先尝试模板匹配领取按钮
         claim_roi_raw = claim_config.get("roi", [0, 0, 1280, 720])
         claim_roi = roi_4to4(claim_roi_raw[0], claim_roi_raw[1], claim_roi_raw[2], claim_roi_raw[3])
+
+        # 售罄是“今天已经领过”的明确成功状态，不要再去点旧兜底坐标。
+        sold_out_config = shop_config.get("sold_out", {})
+        sold_out_template = sold_out_config.get("template")
+        if sold_out_template and self.maa.template_match(
+                sold_out_template, roi=claim_roi, threshold=0.5):
+            yield "[SHOP] 今日暖心礼包已售罄，说明此前已经领取，跳过"
+            return
 
         claim_result = self.maa.template_match(
             template=claim_config["template"],
@@ -79,9 +85,13 @@ class RewardsMixin:
             yield f"[SHOP] 点击领取按钮 at ({claim_result.x}, {claim_result.y})"
             self.maa.click(claim_result)
         else:
-            # 模板匹配失败，尝试直接点用户给的固定坐标
-            yield "[SHOP] 模板匹配领取按钮失败，使用固定坐标"
-            self._click_point([551, 321])
+            # 模板更新不及时还可以用文字兜底；两者都失败就不盲点。
+            claim_result = self.maa.ocr("领取", claim_roi)
+            if not claim_result:
+                yield "[SHOP] 暖心礼包未售罄，但未识别到领取按钮，本次未点击"
+                return
+            yield f"[SHOP] 通过文字找到领取按钮 at ({claim_result.x}, {claim_result.y})"
+            self.maa.click(claim_result)
 
         yield "[SHOP] 等待弹窗出现..."
         time.sleep(1.5)

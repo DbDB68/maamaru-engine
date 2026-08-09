@@ -791,19 +791,22 @@
         "roi": [
           0,
           100,
-          1280,
-          400
+          700,
+          650
         ],
         "match_mode": "contains"
       },
       "claim_button": {
         "template": "领取.png",
         "roi": [
-          500,
-          280,
-          600,
-          360
+          350,
+          430,
+          700,
+          650
         ]
+      },
+      "sold_out": {
+        "template": "售罄.png"
       },
       "popup_verify": {
         "type": "OCR",

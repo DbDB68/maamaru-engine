@@ -17,11 +17,17 @@ jobs:
         run: |
           echo "tag=${GITHUB_REF_NAME#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: 检查识别资源
+        run: |
+          test -f resource/base/model/ocr/rec.onnx
+          test -f resource/base/model/ocr/det.onnx
+          test -f resource/base/image/登录.png
+
       - name: 打包代码
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           mkdir -p dist/maamaru-$TAG
-          rsync -a --exclude='.venv/' --exclude='resource/' --exclude='__pycache__/' \
+          rsync -a --exclude='.venv/' --exclude='__pycache__/' \
             --exclude='*.pyc' --exclude='.git/' --exclude='.workbuddy/' \
             --exclude='_archive/' --exclude='debug/' --exclude='status/' \
             --exclude='dist/' --exclude='.create-maa-project/' \
@@ -41,9 +47,10 @@ jobs:
 
             **使用方法：**
             1. 下载 `maamaru-${{ steps.version.outputs.tag }}.zip` 并解压
-            2. 下载 `resource.zip` 放到解压后的目录并解压（[手动下载](https://github.com/DbDB68/maamaru-engine/releases)）
-            3. 双击 `启动面板.bat`
-            4. 浏览器会自动打开 http://localhost:8080
+            2. 双击 `启动面板.bat`
+            3. 浏览器会自动打开 http://localhost:8080
+
+            识别模板与 OCR 模型已包含在压缩包中，不需要另外下载资源包。
 
             **需要：** Windows + Python 3.12+
           files: dist/maamaru-${{ steps.version.outputs.tag }}.zip

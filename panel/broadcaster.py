@@ -203,8 +203,13 @@ class Broadcaster:
         except Exception:
             self._send_qq(_pick(_FINISH).format(label="一键日课"))
             return
-        fails = [s["name"] for s in rep.get("steps", [])
-                 if not str(s.get("status", "")).startswith("✓")]
+        fails = []
+        for step in rep.get("steps", []):
+            status = str(step.get("status", ""))
+            if status.startswith("✓"):
+                continue
+            detail = status.lstrip("✗⚠ ")
+            fails.append(f"{step['name']}（{detail}）" if detail else step["name"])
         if fails:
             self._send_qq(_pick(_DAILY_FAIL).format(n=len(fails), fails="、".join(fails)))
         else:
