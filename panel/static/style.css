@@ -1869,7 +1869,8 @@ body.theme-pixel .hero-run { border-radius: 0; }
 /* ── 左：常用功能列表（参考像素 GitHub 的仓库列表行）── */
 #func-list {
   display: flex; flex-direction: column; gap: 6px;
-  overflow-y: auto; padding-right: 2px;
+  overflow-y: auto;
+  padding: 0 4px 4px 0;
 }
 .func-item {
   display: flex; align-items: center; gap: 8px;
