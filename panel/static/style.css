@@ -1531,62 +1531,64 @@ img { image-rendering: var(--image-rendering); }
 
 /* 换皮核心：整套面板都走 CSS 变量，像素主题把变量整体换掉 */
 body.theme-pixel {
-  --bg:       #241d15;  /* 深夜营地 */
-  --bg-card:  #33291d;  /* 菜单底板 */
-  --bg-panel: #2c2318;  /* 凹陷区域 */
-  --fg:       #f0e2c8;  /* 奶油字 */
-  --fg-dim:   #a89880;  /* 旧羊皮纸 */
-  --accent:   #e8b83a;  /* 狐金 */
-  --accent2:  #f5cf5e;  /* 亮狐金 */
-  --accent3:  #4a3a22;  /* 暗金底 */
-  --green:    #7ac74f;
-  --red:      #e0604f;
-  --border:   #6b5836;
-  --shadow:   rgba(0,0,0,0.45);
+  --bg:       #e7ece8;  /* 冷灰纸底 */
+  --bg-card:  #fffdf7;  /* 近白界面板 */
+  --bg-panel: #dbe3de;  /* 浅灰绿工作区 */
+  --fg:       #29312e;  /* 墨色字 */
+  --fg-dim:   #65716b;  /* 灰绿次要字 */
+  --accent:   #d5a72d;  /* 狐金 */
+  --accent2:  #7c5c09;  /* 可读的深金 */
+  --accent3:  #f5dfa0;  /* 选中金底 */
+  --green:    #3e735c;  /* 松绿 */
+  --red:      #b33e4a;  /* 朱红 */
+  --border:   #46534e;  /* 墨绿轮廓 */
+  --shadow:   rgba(41,49,46,0.18);
   --radius:   0;        /* 像素世界没有圆角 */
   --font:     'FusionPixel', 'Noto Sans SC', monospace;
-  --surface-input: #2c2318;
-  --surface-success: #24351f;
-  --surface-warning: #45371f;
-  --surface-danger: #3d241f;
-  --text-success: #8fd97a;
-  --text-warning: #f5cf5e;
-  --text-danger: #e8877a;
-  --border-success: #3f5c33;
-  --border-warning: #8a6b27;
-  --border-danger: #6b3a30;
-  --topbar-bg: #4a3a22;
-  --hero-bg: #33291d;
-  --running-bg: #24351f;
-  --run-banner-bg: #2c2318;
+  --surface-input: #fffdf7;
+  --surface-success: #d8eadf;
+  --surface-warning: #f8e7ad;
+  --surface-danger: #f2d6d7;
+  --text-success: #285b45;
+  --text-warning: #765607;
+  --text-danger: #8f2f39;
+  --border-success: #6b9a82;
+  --border-warning: #b58a21;
+  --border-danger: #c4777e;
+  --topbar-bg: #e0b83e;
+  --hero-bg: #fffdf7;
+  --running-bg: #d8eadf;
+  --run-banner-bg: #f5dfa0;
   --card-border-width: 2px;
   --control-border-width: 2px;
   --control-radius: 0;
   --chip-radius: 0;
-  --card-shadow: 4px 4px 0 rgba(0,0,0,0.45),
-                 inset -2px -2px 0 rgba(0,0,0,0.25),
-                 inset 2px 2px 0 rgba(255,255,255,0.06);
-  --control-shadow: inset -2px -2px 0 rgba(0,0,0,0.3),
-                    inset 2px 2px 0 rgba(255,255,255,0.12);
-  --pressed-shadow: inset 2px 2px 0 rgba(0,0,0,0.35);
+  --card-shadow: 3px 3px 0 #8b9892,
+                 inset -2px -2px 0 rgba(70,83,78,0.14),
+                 inset 2px 2px 0 rgba(255,255,255,0.8);
+  --control-shadow: inset -2px -2px 0 #a9b3ae,
+                    inset 2px 2px 0 #fff;
+  --pressed-shadow: inset 2px 2px 0 #87948e;
   --image-rendering: pixelated;
   font-size:  12px;     /* 像素字体只在 12 的倍数最锐利 */
 }
 
 /* 全局硬阴影：复古菜单的「凸起来」手感 */
 body.theme-pixel #topbar {
-  background: var(--accent3);
-  border-bottom: 3px solid var(--accent);
+  background: var(--topbar-bg);
+  color: var(--fg);
+  border-bottom: 3px solid var(--border);
   border-radius: 0;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.5);
+  box-shadow: 0 3px 0 #8b9892;
 }
+body.theme-pixel #topbar .icon-btn { color: var(--fg); }
 body.theme-pixel .logo-icon,
 body.theme-pixel img { image-rendering: pixelated; }
 
 body.theme-pixel .tab {
   border: 2px solid var(--border);
   border-bottom: none;
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), inset 2px 2px 0 rgba(255,255,255,0.08);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .tab.active {
   background: var(--bg-card);
@@ -1602,9 +1604,7 @@ body.theme-pixel .modal,
 body.theme-pixel #chat-container,
 body.theme-pixel #log-container {
   border: 2px solid var(--border);
-  box-shadow: 4px 4px 0 rgba(0,0,0,0.45),
-              inset -2px -2px 0 rgba(0,0,0,0.25),
-              inset 2px 2px 0 rgba(255,255,255,0.06);
+  box-shadow: var(--card-shadow);
 }
 
 body.theme-pixel button,
@@ -1618,23 +1618,24 @@ body.theme-pixel .btn-secondary,
 body.theme-pixel .icon-btn,
 body.theme-pixel #chat-send {
   border: 2px solid var(--border);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), inset 2px 2px 0 rgba(255,255,255,0.12);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .small-btn:active,
 body.theme-pixel .btn-primary:active {
-  box-shadow: inset 2px 2px 0 rgba(0,0,0,0.35);  /* 按下去就凹 */
+  box-shadow: var(--pressed-shadow);  /* 按下去就凹 */
 }
 
-/* 像素主题的瓷砖：暗金底+硬边 */
+/* 像素主题的资源砖：近白底+硬边 */
 body.theme-pixel .res-tile {
   border: 2px solid var(--border);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3);
+  background: var(--bg-card);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .res-num { color: var(--accent2); }
 
-/* 跑步横幅：像素夜里点篝火 */
+/* 跑步横幅：狐金色的掌机状态条 */
 body.theme-pixel .run-banner {
-  background: var(--bg-panel);
+  background: var(--run-banner-bg);
   border-color: var(--accent);
 }
 body.theme-pixel .run-track { border-bottom-style: solid; }
@@ -1656,9 +1657,9 @@ body.theme-pixel .lv-bad   { color: var(--red); }
 body.theme-pixel .lv-warn  { color: var(--accent2); }
 body.theme-pixel .lv-banner { color: var(--accent2); background: var(--accent3); }
 
-/* ===== 像素主题补丁：组件深色化（浅色主题遗留的白底组件） ===== */
+/* ===== 像素主题组件细节 ===== */
 
-/* 输入框 / 下拉框：不许白 */
+/* 输入框 / 下拉框：浅色凹槽 */
 body.theme-pixel .pf select,
 body.theme-pixel .pf input[type="number"],
 body.theme-pixel .chat-input-area input,
@@ -1667,21 +1668,21 @@ body.theme-pixel .sched-row input[type="time"],
 body.theme-pixel .sched-row select,
 body.theme-pixel .sys-form input,
 body.theme-pixel .sys-form textarea {
-  background: var(--bg-panel);
+  background: var(--surface-input);
   color: var(--fg);
   border: 2px solid var(--border);
   border-radius: 0;
-  box-shadow: inset 2px 2px 0 rgba(0,0,0,0.35);
+  box-shadow: var(--pressed-shadow);
 }
 body.theme-pixel .pf select:focus,
 body.theme-pixel .pf input[type="number"]:focus,
 body.theme-pixel .chat-input-area input:focus {
   border-color: var(--accent);
 }
-/* 下拉弹层（原生渲染也尽量染深色） */
-body.theme-pixel select option { background: #33291d; color: #f0e2c8; }
+/* 下拉弹层（原生渲染也保持同色） */
+body.theme-pixel select option { background: var(--surface-input); color: var(--fg); }
 
-/* 勾选 pills：深色药丸，选中是金子 */
+/* 勾选 pills：未选是灰纸，选中是狐金 */
 body.theme-pixel .pill {
   background: var(--bg-panel);
   color: var(--fg-dim);
@@ -1692,22 +1693,22 @@ body.theme-pixel .pill.on {
   background: var(--accent3);
   color: var(--accent2);
   border-color: var(--accent);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3);
+  box-shadow: var(--control-shadow);
 }
 
-/* 日课横幅 / 步骤片 / 锻刀炉：深色版红绿 */
-body.theme-pixel .daily-ok  { background: #24351f; color: #8fd97a; }
-body.theme-pixel .daily-bad { background: #3d241f; color: #e8877a; }
-body.theme-pixel .step-ok   { background: #24351f; color: #8fd97a; border-color: #3f5c33; }
-body.theme-pixel .step-bad  { background: #3d241f; color: #e8877a; border-color: #6b3a30; }
+/* 日课横幅 / 步骤片 / 锻刀炉：木版画式朱红与松绿 */
+body.theme-pixel .daily-ok  { background: var(--surface-success); color: var(--text-success); }
+body.theme-pixel .daily-bad { background: var(--surface-danger); color: var(--text-danger); }
+body.theme-pixel .step-ok   { background: var(--surface-success); color: var(--text-success); border-color: var(--border-success); }
+body.theme-pixel .step-bad  { background: var(--surface-danger); color: var(--text-danger); border-color: var(--border-danger); }
 body.theme-pixel .step-skip { background: var(--bg-panel); color: var(--fg-dim); }
 body.theme-pixel .fn-busy   { background: var(--accent3); color: var(--accent2); border-color: var(--accent); }
 body.theme-pixel .fn-idle   { background: var(--bg-panel); color: var(--fg-dim); }
 
 /* 徽章 / 运行按钮 / 危险按钮 */
 body.theme-pixel .badge-idle    { background: var(--bg-panel); color: var(--fg-dim); }
-body.theme-pixel .badge-running { background: #24351f; color: #8fd97a; }
-body.theme-pixel .s-run { border-radius: 0; box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), inset 2px 2px 0 rgba(255,255,255,0.15); }
+body.theme-pixel .badge-running { background: var(--surface-success); color: var(--text-success); }
+body.theme-pixel .s-run { border-radius: 0; box-shadow: var(--control-shadow); }
 body.theme-pixel .btn-danger { border-radius: 0; }
 
 /* 配置页双栏：像素硬边 */
@@ -1715,9 +1716,7 @@ body.theme-pixel .config-detail-card,
 body.theme-pixel .config-item {
   border: 2px solid var(--border);
   border-radius: 0;
-  box-shadow: 4px 4px 0 rgba(0,0,0,0.45),
-              inset -2px -2px 0 rgba(0,0,0,0.25),
-              inset 2px 2px 0 rgba(255,255,255,0.06);
+  box-shadow: var(--card-shadow);
 }
 body.theme-pixel .config-item {
   box-shadow: none;
@@ -1725,12 +1724,12 @@ body.theme-pixel .config-item {
 }
 body.theme-pixel .config-item:hover {
   border-color: var(--border);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), inset 2px 2px 0 rgba(255,255,255,0.08);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .config-item.sel {
   background: var(--accent3);
   border-color: var(--accent);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .config-detail-card.running { border-color: var(--green); }
 body.theme-pixel .cd-highlight { animation: cd-pulse-pixel 1.4s ease; }
@@ -1744,15 +1743,13 @@ body.theme-pixel .sys-card,
 body.theme-pixel .config-item {
   border: 2px solid var(--border);
   border-radius: 0;
-  box-shadow: 4px 4px 0 rgba(0,0,0,0.45),
-              inset -2px -2px 0 rgba(0,0,0,0.25),
-              inset 2px 2px 0 rgba(255,255,255,0.06);
+  box-shadow: var(--card-shadow);
 }
 /* 名单选择器：像素硬边 */
 body.theme-pixel .pf-sword-list .sl-input,
 body.theme-pixel .sl-search,
 body.theme-pixel .sl-pool {
-  background: var(--bg-panel);
+  background: var(--surface-input);
   color: var(--fg);
   border: 2px solid var(--border);
   border-radius: 0;
@@ -1769,19 +1766,16 @@ body.theme-pixel .sl-chip.on {
   background: var(--accent3);
   color: var(--accent2);
   border-color: var(--accent);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3);
+  box-shadow: var(--control-shadow);
 }
 
-/* 聊天气泡深色化 */
+/* 聊天气泡使用独立浅色表面 */
 body.theme-pixel .msg-bubble {
-  background: var(--bg-panel);
+  background: var(--surface-input);
   color: var(--fg);
   border: 2px solid var(--border);
   border-radius: 0;
 }
-
-/* 对比度微调：次要文字提亮一档 */
-body.theme-pixel { --fg-dim: #b3a48c; }
 
 /* 设置弹窗的角色设定输入框 */
 .modal-body textarea {
@@ -1792,9 +1786,9 @@ body.theme-pixel { --fg-dim: #b3a48c; }
   resize: vertical; outline: none;
 }
 body.theme-pixel .modal-body textarea {
-  background: var(--bg-panel); color: var(--fg);
+  background: var(--surface-input); color: var(--fg);
   border: 2px solid var(--border); border-radius: 0;
-  box-shadow: inset 2px 2px 0 rgba(0,0,0,0.35);
+  box-shadow: var(--pressed-shadow);
 }
 /* 设置标签页：像素硬边 */
 body.theme-pixel .st-tab {
@@ -1809,7 +1803,7 @@ body.theme-pixel .st-tab.active {
 }
 body.theme-pixel .modal-settings {
   border: 2px solid var(--border);
-  box-shadow: 4px 4px 0 rgba(0,0,0,0.45);
+  box-shadow: var(--card-shadow);
 }
 
 /* ===== 参数弹窗：表单双列排布，比塞卡片里宽敞多了 ===== */
@@ -1832,16 +1826,14 @@ body.theme-pixel .modal-settings {
 body.theme-pixel .hero-card {
   background: var(--bg-card);
   border: 2px solid var(--accent);
-  box-shadow: 4px 4px 0 rgba(0,0,0,0.45),
-              inset -2px -2px 0 rgba(0,0,0,0.25),
-              inset 2px 2px 0 rgba(255,255,255,0.06);
+  box-shadow: var(--card-shadow);
 }
-body.theme-pixel .hero-card.running { background: #24351f; }
+body.theme-pixel .hero-card.running { background: var(--running-bg); }
 body.theme-pixel .hero-chip { border-radius: 0; }
 body.theme-pixel .s-gear {
   border: 2px solid var(--border); border-radius: 0;
   background: var(--bg-panel); color: var(--fg-dim);
-  box-shadow: inset -2px -2px 0 rgba(0,0,0,0.3), inset 2px 2px 0 rgba(255,255,255,0.12);
+  box-shadow: var(--control-shadow);
 }
 body.theme-pixel .s-gear:hover { color: var(--accent2); border-color: var(--accent); transform: none; }
 body.theme-pixel .hero-gear { color: var(--fg-dim); }
@@ -1986,9 +1978,9 @@ body.theme-pixel .hero-run { border-radius: 0; }
 body.theme-pixel .func-item,
 body.theme-pixel .func-detail {
   border-radius: 0;
-  box-shadow: 3px 3px 0 rgba(0,0,0,0.15);
+  box-shadow: 3px 3px 0 #a5afaa;
 }
-body.theme-pixel .func-item.sel { box-shadow: 3px 3px 0 rgba(196,145,26,0.5); }
+body.theme-pixel .func-item.sel { box-shadow: 3px 3px 0 #b33e4a; }
 
 /* ── 响应式：平板两栏，手机单列 ── */
 @media (max-width: 900px) {
