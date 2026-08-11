@@ -211,11 +211,15 @@ class DailyMixin:
         if payload is None:
             yield "[日课] 成绩单落盘失败（不影响跑）"
         try:
-            from ..notify import notify_daily_report
+            from ..notify import notify_daily_report, notify_destination
+            destination = notify_destination()
             if payload and notify_daily_report(payload):
-                yield "[日课] 成绩单已推到手机"
+                yield (f"[日课] 成绩单已发送到 ntfy 频道「{destination}」；"
+                       "手机订阅该频道后才能收到")
+            elif not destination:
+                yield "[日课] 未配置 ntfy 频道，成绩单只保存在本机"
             else:
-                yield "[日课] 手机推送没发出去（没启用或网络问题），不影响"
+                yield "[日课] ntfy 频道发送失败（网络或服务问题），成绩单已保存在本机"
         except Exception as exc:
             yield f"[日课] 手机推送翻车（不影响跑）: {exc}"
 

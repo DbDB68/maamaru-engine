@@ -14,6 +14,7 @@
       getState,
       setState,
       render,
+      onStarted,
       onFinished,
     } = options;
 
@@ -58,6 +59,8 @@
         app.feedback?.show(`${label}已启动`, 'success');
         updateStatus(true, realName);
         render();
+        onStarted?.(realName);
+        app.dashboard?.load();
       } catch (error) {
         app.feedback?.show('任务启动失败，面板后端没有响应', 'error');
         console.error('run error:', error);
@@ -79,6 +82,7 @@
         setState(data.running, data.current);
         updateStatus(data.running, data.current);
         render();
+        app.dashboard?.load();
         if (!data.running) onFinished?.();
       } catch (_) {}
     }

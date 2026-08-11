@@ -38,26 +38,52 @@
     }).filter(Boolean);
   }
 
+  function dailyPlanParts(params) {
+    const steps = Array.isArray(params.steps) ? params.steps : [];
+    const parts = [steps.length ? `${steps.length} 项日课` : '未选择日课'];
+    if (!steps.includes('出阵')) return parts;
+
+    const team = { 1: '部队一', 2: '部队二', 3: '部队三', 4: '部队四', 5: '部队五' }[String(params.team_no)];
+    if (params.sortie_mode === 'raid') {
+      parts.push(`联队战 ${params.raid_rounds || 1} 圈`);
+    } else if (params.sortie_mode === 'sortie') {
+      parts.push(`${params.chapter || 1}-${params.map_no || 1} × ${params.loops || 1} 圈`);
+    } else if (params.sortie_mode === 'pumpkin') {
+      parts.push('南瓜每日四次');
+    } else {
+      parts.push('不出阵');
+    }
+    if (params.sortie_mode !== 'none' && team) parts.push(team);
+    return parts;
+  }
+
+  function compactPlanValue(item) {
+    const value = String(item.value);
+    if (!/^\d+(?:[章图])?$/.test(value) || !item.label) return value;
+    if (item.label === '圈数') return `${value} 圈`;
+    if (item.label.startsWith('手形最多买几次')) return `最多买手形 ${value} 次`;
+    return `${item.label.replace(/（.*）/, '')} ${value}`;
+  }
+
   function renderOverview(target, options) {
-    const { info, icon = '🧰', running, busy, params, onRun, onStop, onConfig } = options;
+    const { key, info, icon = '🧰', running, busy, params, onRun, onStop, onConfig } = options;
     const items = summaryItems(info, params);
-    const brief = items.slice(0, 3).map(item =>
-      `<span class="fd-summary-chip" title="${esc(item.title || `${item.label}：${item.value}`)}">`
-      + `<b>${esc(item.label)}</b><span>${esc(item.value)}</span></span>`).join('');
     const details = items.map(item =>
       `<span class="fd-chip" title="${esc(item.title || `${item.label}：${item.value}`)}">`
       + `<b>${esc(item.label)}</b> ${esc(item.value)}</span>`).join('');
     const extra = Math.max(0, items.length - 3);
-    const paramsBlock = items.length ? `
-      <div class="fd-summary">
-        <span class="fd-summary-label">这次会跑</span>
-        <div class="fd-summary-values">${brief}</div>
-        ${extra ? `<span class="fd-summary-more">另 ${extra} 项</span>` : ''}
+    const planParts = key === 'daily'
+      ? dailyPlanParts(params)
+      : items.slice(0, 3).map(compactPlanValue).concat(extra ? [`另 ${extra} 项`] : []);
+    const paramsBlock = `
+      <div class="fd-plan-line" aria-label="本次任务安排">
+        ${(planParts.length ? planParts : ['无需设置，直接运行'])
+          .map((part, index) => `${index ? '<i>·</i>' : ''}<span>${esc(part)}</span>`).join('')}
       </div>
-      <details class="fd-details">
+      ${items.length ? `<details class="fd-details">
         <summary>查看全部设置</summary>
         <div class="fd-params">${details}</div>
-      </details>` : '<div class="fd-summary fd-summary-empty">无需设置，直接运行</div>';
+      </details>` : ''}`;
 
     target.innerHTML = `
       <div class="fd-head">
@@ -69,10 +95,10 @@
       ${paramsBlock}
       <div class="fd-actions">
         ${running
-          ? '<button data-task-action="stop" class="btn-danger fd-btn">■ 强制关闭</button>'
-          : `<button data-task-action="run" class="btn-primary fd-btn" ${busy ? 'disabled' : ''}>`
-            + `${busy ? '⏳ 有别的任务在跑…' : '▶ 开始任务'}</button>`}
-        <button data-task-action="config" class="fd-config-btn" type="button">⚙ 调整配置</button>
+          ? '<button data-task-action="stop" class="btn-danger fd-btn with-ui-icon ui-stop">强制关闭</button>'
+          : `<button data-task-action="run" class="btn-primary fd-btn with-ui-icon ui-play" ${busy ? 'disabled' : ''}>`
+            + `${busy ? '有别的任务在跑…' : '开始任务'}</button>`}
+        <button data-task-action="config" class="fd-config-btn with-ui-icon ui-gear" type="button">调整配置</button>
       </div>`;
 
     target.querySelector('[data-task-action="run"]')?.addEventListener('click', onRun);
@@ -97,14 +123,14 @@
     actions.className = 'cd-actions';
     if (showSave) {
       const save = document.createElement('button');
-      save.className = 's-save';
-      save.textContent = '💾 保存配置';
+      save.className = 's-save with-ui-icon ui-check';
+      save.textContent = '保存配置';
       save.addEventListener('click', () => onSave(save));
       actions.appendChild(save);
     }
     const run = document.createElement('button');
-    run.className = 's-run';
-    run.textContent = running ? '⏳ 正在跑…' : '▶ 运行';
+    run.className = 's-run with-ui-icon ui-play';
+    run.textContent = running ? '正在跑…' : '运行';
     run.disabled = busy;
     run.addEventListener('click', onRun);
     actions.appendChild(run);

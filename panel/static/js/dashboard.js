@@ -7,17 +7,46 @@
   const esc = app.dom.escape;
   let expeditionState = [];
   let expeditionTimer = null;
+  let furnaceState = [];
+  let furnaceTimer = null;
   let runningSince = null;
   let runningLabel = '';
   let isRunning = () => false;
   let bound = false;
 
+  const SCENE_META = Object.freeze({
+    garden: { place: '本丸庭院' },
+    forge: { place: '锻冶工房' },
+    sortie: { place: '出阵之路' },
+  });
+
+  const FORGE_SCRIPTS = new Set(['forge', 'repair', 'sugar']);
+  const SORTIE_SCRIPTS = new Set([
+    'raid', 'pumpkin', 'sortie', 'sakura', 'practice', 'expedition', 'dispatch',
+  ]);
+
+  function sceneFor(script = '', step = '') {
+    const detail = String(step || '');
+    if (/(锻刀|手入|刀解|合成|炼糖|根兵糖)/.test(detail)) return 'forge';
+    if (/(出阵|合战|演练|远征|联队|南瓜|刷花|派遣)/.test(detail)) return 'sortie';
+    if (FORGE_SCRIPTS.has(script)) return 'forge';
+    if (SORTIE_SCRIPTS.has(script)) return 'sortie';
+    return 'garden';
+  }
+
   const ui = () => ({
     updated: $('#dash-updated'), refresh: $('#btn-dash-refresh'), snapshotAt: $('#dash-snapshot-at'),
     resources: $('#dash-resources'), resourceSub: $('#dash-res-sub'), furnaces: $('#dash-furnaces'),
     expeditions: $('#dash-expeditions'), schedule: $('#dash-schedule'), daily: $('#dash-daily'),
-    naihanka: $('#dash-naihanka'), running: $('#dash-running'), flavor: $('#run-flavor'), sub: $('#run-sub'),
+    naihanka: $('#dash-naihanka'), running: $('#dash-running'), place: $('#run-place'),
+    flavor: $('#run-flavor'), sub: $('#run-sub'),
   });
+
+  function applyScene(u, script = '', step = '') {
+    const scene = sceneFor(script, step);
+    u.running.dataset.scene = scene;
+    u.place.textContent = SCENE_META[scene].place;
+  }
 
   function duration(seconds) {
     const value = Math.max(0, Math.floor(seconds));
@@ -36,38 +65,74 @@
     ui().sub.textContent = (runningLabel ? `${runningLabel} · ` : '') + `已跑 ${elapsed}`;
   }
 
+  function renderFurnaceCounter(state) {
+    if (state.remain <= 0) {
+      state.element.textContent = `炉${state.slot} 应该完成了`;
+      state.element.classList.remove('fn-busy');
+      state.element.classList.add('fn-idle');
+    } else {
+      state.element.textContent = `炉${state.slot} 锻造中 剩 ${duration(state.remain)}`;
+    }
+  }
+
   function render(data) {
     const u = ui();
     const run = data.running || {};
     if (run.active) {
       u.running.style.display = '';
+      u.running.classList.remove('is-idle');
+      applyScene(u, run.script, run.step);
       u.flavor.textContent = run.flavor || '正在本丸干活🔧';
       runningSince = run.started || null;
       updateRunningSub(run.label);
     } else {
-      u.running.style.display = 'none';
+      u.running.style.display = '';
+      u.running.classList.add('is-idle');
+      applyScene(u);
+      u.flavor.textContent = '本丸待命';
+      u.sub.textContent = '庭院无事';
       runningSince = null;
+      runningLabel = '';
     }
 
     const inventory = data.inventory;
     if (inventory?.resources) {
       const resources = inventory.resources;
-      const tiles = [['小判', resources['小判'], '🪙'], ['甲州金', resources['甲州金'], '💎'],
-        ['委托符', resources['委托符'], '📜'], ['加速符', resources['加速符'], '⏩']];
+      const tiles = [['小判', resources['小判'], 'koban'], ['甲州金', resources['甲州金'], 'koushu-gold'],
+        ['委托符', resources['委托符'], 'request-token'], ['加速符', resources['加速符'], 'speed-token']];
       u.resources.innerHTML = tiles.map(([name, value, icon]) =>
-        `<div class="res-tile"><span class="res-icon">${icon}</span>`
+        `<div class="res-tile"><span class="res-icon"><img class="resource-pixel-icon" src="/static/img/ui/${icon}.png" alt=""></span>`
         + `<span class="res-num">${value == null ? '?' : Number(value).toLocaleString()}</span>`
         + `<span class="res-name">${name}</span></div>`).join('');
       u.resourceSub.innerHTML = ['木炭', '玉钢', '冷却材', '砥石']
         .map(name => `<span class="res-sub-item">${name} ${resources[name] == null ? '?' : Number(resources[name]).toLocaleString()}</span>`)
         .join('') + (inventory.doko ? `<span class="res-sub-item">🗡 刀位 ${esc(inventory.doko)}</span>` : '');
       u.snapshotAt.textContent = inventory.captured_at ? `快照 ${inventory.captured_at.slice(5, 16)}` : '';
-      u.furnaces.innerHTML = (inventory.furnaces || []).map(furnace => {
+      if (furnaceTimer) clearInterval(furnaceTimer);
+      furnaceTimer = null;
+      furnaceState = [];
+      u.furnaces.replaceChildren();
+      (inventory.furnaces || []).forEach(furnace => {
         const busy = furnace.state === '锻造中';
-        const tail = busy && furnace.remain ? ` 剩 ${esc(furnace.remain)}` : (busy ? ' 快好了' : '');
-        return `<span class="fn-chip ${busy ? 'fn-busy' : 'fn-idle'}">炉${furnace.slot} ${esc(furnace.state)}${tail}</span>`;
-      }).join('');
+        const chip = document.createElement('span');
+        chip.className = `fn-chip ${busy ? 'fn-busy' : 'fn-idle'}`;
+        if (busy && furnace.remain_sec != null) {
+          furnaceState.push({ element: chip, slot: furnace.slot, remain: Number(furnace.remain_sec) });
+        } else {
+          chip.textContent = `炉${furnace.slot} ${busy ? '锻造中 时间未识别' : furnace.state}`;
+        }
+        u.furnaces.appendChild(chip);
+      });
+      const furnaceTick = () => furnaceState.forEach(state => {
+        renderFurnaceCounter(state);
+        state.remain = Math.max(0, state.remain - 1);
+      });
+      furnaceTick();
+      if (furnaceState.length) furnaceTimer = setInterval(furnaceTick, 1000);
     } else {
+      if (furnaceTimer) clearInterval(furnaceTimer);
+      furnaceTimer = null;
+      furnaceState = [];
       u.resources.innerHTML = '<div class="dash-empty">还没有库存快照<br><small>跑一次日课或库存快照就有了</small></div>';
       u.resourceSub.innerHTML = '';
       u.furnaces.innerHTML = '';
@@ -142,14 +207,32 @@
   function showSchedulerWarning(message) {
     const u = ui();
     u.running.style.display = '';
+    u.running.classList.remove('is-idle');
+    applyScene(u, 'expedition');
     u.flavor.textContent = '⏳ 远征即将接管游戏';
     u.sub.innerHTML = `${esc(message)} <button id="cancel-scheduled-exp" class="small-btn">先别动游戏</button>`;
     $('#cancel-scheduled-exp')?.addEventListener('click', async () => {
       await app.api.post('/api/expedition-pause', { minutes: 30 });
       u.flavor.textContent = '已暂停自动远征 30 分钟';
       u.sub.textContent = '这次不会接管游戏';
-      setTimeout(() => { if (!isRunning()) u.running.style.display = 'none'; }, 3000);
+      setTimeout(() => {
+        if (isRunning()) return;
+        u.running.classList.add('is-idle');
+        applyScene(u);
+        u.flavor.textContent = '本丸待命';
+        u.sub.textContent = '庭院无事';
+      }, 3000);
     });
+  }
+
+  function preview(script, label) {
+    if (isRunning()) return;
+    const u = ui();
+    u.running.style.display = '';
+    u.running.classList.add('is-idle');
+    applyScene(u, script);
+    u.flavor.textContent = label || '本丸待命';
+    u.sub.textContent = '待命中';
   }
 
   function bind() {
@@ -172,5 +255,5 @@
     load();
   }
 
-  app.dashboard = Object.freeze({ init, load, render, showSchedulerWarning, duration });
+  app.dashboard = Object.freeze({ init, load, render, preview, showSchedulerWarning, duration });
 })(window);

@@ -10,13 +10,15 @@
   const $ = app.dom.one;
   const escape = app.dom.escape;
   const groups = [{ label: '系统配置', items: [
-    { key: 'ai', label: 'AI', icon: '🤖', desc: '近侍狐之助的脑子：API、模型、角色设定都在这' },
-    { key: 'qq', label: 'QQ', icon: '💬', desc: 'OneBot 协议端：连接状态、消息 API 与管理页面' },
+    { key: 'ai', label: 'AI', icon: '✦', desc: '近侍狐之助的脑子：API、模型、角色设定都在这' },
+    { key: 'qq', label: 'QQ', icon: '🗨︎', desc: 'OneBot 协议端：连接状态、消息 API 与管理页面' },
     { key: 'telegram', label: 'Telegram', icon: '✈', desc: 'Telegram Bot：Token + 白名单' },
-    { key: 'broadcast', label: '播报', icon: '📡', desc: '脚本状态变化时通知哪些渠道' },
+    { key: 'broadcast', label: '播报', icon: '◉', desc: '脚本状态变化时通知哪些渠道' },
   ]}];
 
   let nav;
+  let prev;
+  let next;
   let detail;
   let selected = localStorage.getItem('maamaru_system') || 'ai';
   let loaded = false;
@@ -105,6 +107,7 @@
 
   function renderNav() {
     if (!nav) return;
+    const previousScrollLeft = nav.scrollLeft;
     nav.innerHTML = '';
     groups.forEach(groupInfo => {
       const group = document.createElement('div');
@@ -128,6 +131,32 @@
       group.appendChild(list);
       nav.appendChild(group);
     });
+    requestAnimationFrame(() => {
+      nav.scrollLeft = previousScrollLeft;
+      const selectedItem = nav.querySelector('.config-item.sel');
+      if (selectedItem) {
+        const navRect = nav.getBoundingClientRect();
+        const itemRect = selectedItem.getBoundingClientRect();
+        if (itemRect.left < navRect.left) {
+          nav.scrollLeft += itemRect.left - navRect.left;
+        } else if (itemRect.right > navRect.right) {
+          nav.scrollLeft += itemRect.right - navRect.right;
+        }
+      }
+      updateCarousel();
+    });
+  }
+
+  function updateCarousel() {
+    if (!nav || !prev || !next) return;
+    const maxScroll = Math.max(0, nav.scrollWidth - nav.clientWidth);
+    prev.disabled = nav.scrollLeft <= 2;
+    next.disabled = nav.scrollLeft >= maxScroll - 2;
+  }
+
+  function moveCarousel(direction) {
+    const distance = Math.max(120, Math.round(nav.clientWidth * 0.72));
+    nav.scrollBy({ left: direction * distance, behavior: 'smooth' });
   }
 
   function addHint(form, text) {
@@ -201,8 +230,8 @@
     saveRow.className = 'sys-save-row';
     saveRow.innerHTML = '<span id="sys-save-msg" class="sys-save-msg"></span>';
     const button = document.createElement('button');
-    button.className = 's-run';
-    button.textContent = '💾 保存到配置';
+    button.className = 's-run with-ui-icon ui-check';
+    button.textContent = '保存到配置';
     button.addEventListener('click', save);
     saveRow.appendChild(button);
     form.appendChild(saveRow);
@@ -221,7 +250,13 @@
 
   function init(options) {
     nav = options.nav;
+    prev = options.prev;
+    next = options.next;
     detail = options.detail;
+    prev?.addEventListener('click', () => moveCarousel(-1));
+    next?.addEventListener('click', () => moveCarousel(1));
+    nav?.addEventListener('scroll', updateCarousel, { passive: true });
+    window.addEventListener('resize', updateCarousel, { passive: true });
     const tab = document.querySelector('[data-tab="system"]');
     tab?.addEventListener('click', () => setTimeout(render, 0));
     if (document.querySelector('.tab.active')?.dataset.tab === 'system') setTimeout(render, 0);

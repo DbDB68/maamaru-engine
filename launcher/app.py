@@ -3,15 +3,19 @@
 import json
 import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 import traceback
 import urllib.request
+from pathlib import Path
 
 import webview
 
 from touken.runtime_paths import DATA_ROOT, ensure_runtime_data
 from .health import has_blocker, run_checks
+from .version import CURRENT_VERSION
 
 
 HTML = r"""
@@ -29,7 +33,7 @@ button{font:inherit;cursor:pointer}.start{width:100%;margin-top:16px;height:58px
 .actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.actions button{height:39px;border:1px solid #d9cdb9;border-radius:8px;background:#fffaf1;color:#3c3429}.actions button:hover{background:#f8e9bd}
 .note{margin:14px 2px 0;color:#8b8173;font-size:12px}.loading{padding:90px 0;text-align:center;color:#8b8173}
 </style></head><body>
-<header><h1>🦊 まあ丸</h1><p>本丸近侍启动器 · 不懂电脑也能用版</p></header>
+<header><h1>🦊 まあ丸</h1><p>本丸近侍启动器 · 不懂电脑也能用版 · v__VERSION__</p></header>
 <main><div class="title"><b>启动前检查</b><span id="summary" class="summary">正在检查…</span></div>
 <div id="checks" class="card"><div class="loading">正在检查运行环境…</div></div>
 <button id="start" class="start" onclick="startApp()" disabled>▶　启动まあ丸</button>
@@ -45,8 +49,16 @@ async function refresh(){
  const summary=document.querySelector('#summary');summary.textContent=data.blocked?'需要修复':'可以启动';summary.className='summary '+(data.blocked?'error':'ok');document.querySelector('#start').disabled=data.blocked;
 }
 async function startApp(){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';const r=await pywebview.api.start();if(!r.ok){alert('启动失败：'+r.message);b.disabled=false;b.textContent='▶　启动まあ丸';}else{b.textContent='✓ 已启动';document.querySelector('#summary').textContent='面板已打开';}}
-async function repair(){const r=await pywebview.api.repair();alert(r.message);refresh()}
-async function update(){document.querySelector('#summary').textContent='正在检查 GitHub…';const r=await pywebview.api.check_update();alert(r.message);refresh()}
+async function repair(){
+ const summary=document.querySelector('#summary');summary.textContent='正在修复…';summary.className='summary info';
+ const r=await pywebview.api.repair();alert(r.message);await refresh();
+}
+async function update(){
+ const summary=document.querySelector('#summary');summary.textContent='正在检查 GitHub…';summary.className='summary info';
+ const r=await pywebview.api.check_update();
+ if(r.update_available&&r.url){if(confirm(r.message+'\n\n要打开下载页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
+ await refresh();
+}
 async function openData(){await pywebview.api.open_data()}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
@@ -85,9 +97,6 @@ class Api:
             def open_panel():
                 time.sleep(0.15)
                 window = webview.windows[0]
-                # 启动检查适合小窗，概览面板则按宽屏三栏设计；进入面板时
-                # 使用当前屏幕的可用空间，避免任务卡、日志和统计挤成一列。
-                window.maximize()
                 window.load_url("http://127.0.0.1:8080")
 
             threading.Thread(target=open_panel, daemon=True).start()
@@ -98,9 +107,39 @@ class Api:
 
     def repair(self):
         try:
+            repaired = _repair_runtime_files()
             ensure_runtime_data()
-            return {"ok": True, "message": "已补齐数据目录并重新检查核心文件。\n联网重装将在下一版加入。"}
+            checks = run_checks()
+            runtime = next((item for item in checks if item.key == "runtime"), None)
+            if runtime and runtime.state == "error" and not getattr(sys, "frozen", False):
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", str(_project_root())],
+                    capture_output=True,
+                    timeout=300,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                if result.returncode == 0:
+                    repaired.append("重新安装了缺失的 Python 依赖")
+                else:
+                    detail = (result.stderr or result.stdout or "未知错误").strip().splitlines()[-1]
+                    repaired.append(f"Python 依赖安装失败：{detail}")
+                checks = run_checks()
+
+            blockers = [item.detail for item in checks if item.state == "error"]
+            warnings = [item.detail for item in checks if item.state == "warn"]
+            lines = repaired or ["本地配置和数据目录无需修复"]
+            if blockers:
+                lines.append("仍需处理：" + "；".join(blockers))
+                lines.append("若程序文件缺失，请重新下载最新版启动器。")
+            elif warnings:
+                lines.append("环境已可启动。提示：" + "；".join(warnings))
+            else:
+                lines.append("环境已恢复并通过全部检查。")
+            return {"ok": not blockers, "message": "\n".join(lines)}
         except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": f"修复失败：{exc}"}
 
     def check_update(self):
@@ -111,9 +150,31 @@ class Api:
             with urllib.request.urlopen(request, timeout=8) as response:
                 data = json.load(response)
             tag = data.get("tag_name") or "未知版本"
-            return {"ok": True, "message": f"GitHub 最新版本：{tag}\n\n第一版只检查，不会自动覆盖当前程序。"}
+            latest = tag.removeprefix("v")
+            comparison = (_version_tuple(latest) > _version_tuple(CURRENT_VERSION)) - (
+                _version_tuple(latest) < _version_tuple(CURRENT_VERSION)
+            )
+            update_available = comparison > 0
+            if comparison > 0:
+                message = f"发现新版本 {tag}\n当前版本：v{CURRENT_VERSION}"
+            elif comparison == 0:
+                message = f"已经是最新版 v{CURRENT_VERSION}。\nGitHub 最新版本：{tag}"
+            else:
+                message = f"当前是待发布版本 v{CURRENT_VERSION}。\nGitHub 已发布版本：{tag}"
+            return {
+                "ok": True,
+                "message": message,
+                "update_available": update_available,
+                "url": data.get("html_url") or "https://github.com/DbDB68/maamaru-engine/releases/latest",
+            }
         except Exception:
-            return {"ok": False, "message": "暂时连不上 GitHub，稍后再试。"}
+            return {"ok": False, "message": "暂时连不上 GitHub，稍后再试。", "update_available": False}
+
+    def open_url(self, url):
+        if isinstance(url, str) and url.startswith("https://github.com/DbDB68/maamaru-engine/"):
+            os.startfile(url)
+            return {"ok": True}
+        return {"ok": False}
 
     def open_data(self):
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -123,9 +184,52 @@ class Api:
 
 def main():
     ensure_runtime_data()
-    webview.create_window("まあ丸启动器", html=HTML, js_api=Api(), width=700, height=660,
-                          min_size=(620, 590), resizable=True)
+    webview.create_window("まあ丸启动器", html=HTML.replace("__VERSION__", CURRENT_VERSION),
+                          js_api=Api(), width=1360, height=900,
+                          min_size=(900, 700), resizable=True)
     webview.start(debug=False)
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _repair_runtime_files() -> list[str]:
+    """Restore writable JSON defaults without overwriting healthy user data."""
+    repaired = []
+    for target, source, label in _runtime_defaults():
+        if not target.exists():
+            continue
+        try:
+            json.loads(target.read_text(encoding="utf-8"))
+        except Exception:
+            backup = target.with_suffix(target.suffix + f".broken-{time.strftime('%Y%m%d-%H%M%S')}")
+            target.replace(backup)
+            if source.is_file():
+                target.write_bytes(source.read_bytes())
+            else:
+                target.write_text("{}\n", encoding="utf-8")
+            repaired.append(f"已备份并重建损坏的{label}")
+    ensure_runtime_data()
+    return repaired
+
+
+def _runtime_defaults():
+    from touken.runtime_paths import CONFIG_PATH, PANEL_CONFIG_PATH, SCHEDULE_PATH
+
+    return (
+        (CONFIG_PATH, _project_root() / "touken_config.json", "本丸配置"),
+        (PANEL_CONFIG_PATH, _project_root() / "panel" / "panel_config.example.json", "面板配置"),
+        (SCHEDULE_PATH, _project_root() / "panel" / "expedition_schedule.json", "远征排班"),
+    )
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    parts = []
+    for segment in value.split("."):
+        digits = "".join(char for char in segment if char.isdigit())
+        parts.append(int(digits or 0))
+    return tuple((parts + [0, 0, 0])[:3])
 
 
 def _port_alive() -> bool:

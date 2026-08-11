@@ -7,7 +7,7 @@
   async function render(item, target) {
     const card = document.createElement('div');
     card.className = 'config-detail-card';
-    card.innerHTML = `<div class="cd-head"><div class="cd-title"><span>📋</span> ${esc(item.label)}</div></div>
+    card.innerHTML = `<div class="cd-head"><div class="cd-title with-ui-icon ui-menu-list">${esc(item.label)}</div></div>
       <div class="cd-desc">${esc(item.desc)}</div>`;
 
     const editor = document.createElement('div');
@@ -18,8 +18,8 @@
     textarea.placeholder = '留空 = 不限制'; editor.appendChild(textarea); card.appendChild(editor);
 
     const actions = document.createElement('div'); actions.className = 'cd-actions';
-    const save = document.createElement('button'); save.className = 's-run';
-    save.textContent = '💾 保存名单'; actions.appendChild(save); card.appendChild(actions);
+    const save = document.createElement('button'); save.className = 's-run with-ui-icon ui-check';
+    save.textContent = '保存名单'; actions.appendChild(save); card.appendChild(actions);
     target.replaceChildren(card);
 
     let original = [];
@@ -42,7 +42,7 @@
       } catch (_) {
         save.textContent = '保存失败'; app.feedback?.show(`${item.label}保存失败`, 'error');
       } finally {
-        setTimeout(() => { save.disabled = false; save.textContent = '💾 保存名单'; }, 1800);
+        setTimeout(() => { save.disabled = false; save.textContent = '保存名单'; }, 1800);
       }
     });
   }

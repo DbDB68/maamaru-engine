@@ -43,7 +43,7 @@
               ? 'OneBot 消息 API 可以访问'
               : '可能尚未安装、未启动，或端口配置不正确'}</small>
           </div>
-          <button id="qq-recheck" type="button" class="small-btn">↻ 重新检测</button>
+          <button id="qq-recheck" type="button" class="small-btn with-ui-icon ui-return">重新检测</button>
         </div>
         <div class="qq-check-grid">
           ${checkItem('消息 API', data.api_online, '可用', '不可用', data.api_detail)}
@@ -68,7 +68,7 @@
         <div class="qq-status-main">
           <span class="qq-light"></span>
           <div><b>状态检测失败</b><small>まあ丸后端暂时没有响应</small></div>
-          <button id="qq-recheck" type="button" class="small-btn">↻ 重试</button>
+          <button id="qq-recheck" type="button" class="small-btn with-ui-icon ui-return">重试</button>
         </div>`;
       document.getElementById('qq-recheck')?.addEventListener('click', refresh);
     }

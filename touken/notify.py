@@ -26,6 +26,13 @@ def _load_notify_conf() -> dict:
         return {}
 
 
+def notify_destination() -> str | None:
+    """返回已启用的 ntfy 频道；未配置时返回 None。"""
+    conf = _load_notify_conf()
+    topic = str(conf.get("topic", "")).strip()
+    return topic if conf.get("enabled") and topic else None
+
+
 def notify(message: str, title: str = "Touken Daily", tags: str = "tada",
            priority: str = "default") -> bool:
     """
@@ -38,12 +45,10 @@ def notify(message: str, title: str = "Touken Daily", tags: str = "tada",
         priority: min/low/default/high/urgent
     """
     conf = _load_notify_conf()
-    if not conf.get("enabled"):
-        return False
-    server = conf.get("server", "https://ntfy.sh").rstrip("/")
-    topic = conf.get("topic", "")
+    topic = notify_destination()
     if not topic:
         return False
+    server = conf.get("server", "https://ntfy.sh").rstrip("/")
     try:
         req = urllib.request.Request(
             f"{server}/{topic}",

@@ -11,34 +11,51 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
       - name: 获取版本号
         id: version
+        shell: pwsh
         run: |
-          echo "tag=${GITHUB_REF_NAME#refs/tags/}" >> $GITHUB_OUTPUT
+          "tag=$env:GITHUB_REF_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          "CURRENT_VERSION = `"$version`"" | Set-Content -LiteralPath "launcher/version.py" -Encoding utf8
 
       - name: 检查识别资源
+        shell: pwsh
         run: |
-          test -f resource/base/model/ocr/rec.onnx
-          test -f resource/base/model/ocr/det.onnx
-          test -f resource/base/image/登录.png
+          $required = @(
+            "resource/base/model/ocr/rec.onnx",
+            "resource/base/model/ocr/det.onnx",
+            "resource/base/image/登录.png"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "缺少发布资源：$path" }
+          }
 
-      - name: 打包代码
+      - name: 安装构建依赖
+        run: python -m pip install . pyinstaller
+
+      - name: 构建启动器
+        run: python -m PyInstaller --clean --noconfirm "まあ丸启动器.spec"
+
+      - name: 打包启动器
+        shell: pwsh
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          mkdir -p dist/maamaru-$TAG
-          rsync -a --exclude='.venv/' --exclude='__pycache__/' \
-            --exclude='*.pyc' --exclude='.git/' --exclude='.workbuddy/' \
-            --exclude='_archive/' --exclude='debug/' --exclude='status/' \
-            --exclude='dist/' --exclude='.create-maa-project/' \
-            --exclude='*.egg-info/' --exclude='.uv-cache/' \
-            ./ dist/maamaru-$TAG/
-          cd dist
-          zip -r maamaru-$TAG.zip maamaru-$TAG/
-          echo "size=$(du -h maamaru-$TAG.zip | cut -f1)" >> $GITHUB_OUTPUT
+          $tag = "${{ steps.version.outputs.tag }}"
+          $exe = "dist/まあ丸启动器.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "启动器构建失败：没有生成 $exe" }
+          $package = "dist/package"
+          New-Item -ItemType Directory -Path $package -Force | Out-Null
+          Copy-Item -LiteralPath $exe -Destination $package
+          Compress-Archive -Path "$package/*" -DestinationPath "dist/maamaru-launcher-$tag.zip" -Force
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
@@ -49,11 +66,11 @@ jobs:
             ## 🦊 まあ丸 ${{ steps.version.outputs.tag }}
 
             **使用方法：**
-            1. 下载 `maamaru-${{ steps.version.outputs.tag }}.zip` 并解压
-            2. 双击 `启动面板.bat`
-            3. 浏览器会自动打开 http://localhost:8080
+            1. 下载 `maamaru-launcher-${{ steps.version.outputs.tag }}.zip` 并解压
+            2. 双击 `まあ丸启动器.exe`
+            3. 启动器检查通过后，点击“启动まあ丸”
 
-            识别模板与 OCR 模型已包含在压缩包中，不需要另外下载资源包。
+            Python、运行依赖、识别模板与 OCR 模型均已内置，不需要运行 `.bat`，也不需要另装资源包。
 
-            **需要：** Windows + Python 3.12+
-          files: dist/maamaru-${{ steps.version.outputs.tag }}.zip
+            **需要：** Windows 10/11
+          files: dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip

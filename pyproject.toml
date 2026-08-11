@@ -1,6 +1,6 @@
 [project]
 name = "maamaru-engine"
-version = "0.1.0"
+version = "0.1.4"
 description = "刀剑乱舞自动化引擎 (Touken Ranbu automation engine based on MaaFramework)"
 requires-python = ">=3.12"
 license = {text = "AGPL-3.0-or-later"}

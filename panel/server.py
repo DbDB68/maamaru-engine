@@ -129,6 +129,13 @@ def _team_field(default="3"):
             "options": _TEAM_OPTIONS, "default": default}
 
 
+def _sword_names(raw) -> list[str]:
+    if isinstance(raw, list):
+        return [str(name).strip() for name in raw if str(name).strip()]
+    return [name.strip() for name in str(raw or "").replace("，", ",").split(",")
+            if name.strip()]
+
+
 # ── 各脚本 builder（签名统一：(config_path, params) -> generator）──
 
 def _build_daily(config_path, params):
@@ -157,16 +164,11 @@ def _build_daily(config_path, params):
                        "repair_threshold": saved_sortie.get("repair_threshold") or "light",
                        "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue"}
     elif mode == "pumpkin":
-        # 出阵走南瓜大作战：面板传的 watch 沿用 pumpkin 的解析逻辑
-        watch_raw = params.get("pumpkin_watch") or ""
-        if isinstance(watch_raw, list):
-            watch = [str(w).strip() for w in watch_raw if str(w).strip()]
-        else:
-            watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
+        # 日课南瓜就是每天送的四次：不认刀，不读取单独挂机的名单与令牌数。
         sortie_plan = {"mode": "pumpkin",
                        "team_no": _i(params, "team_no", 3),
-                       "watch_names": watch,
-                       "max_skips": _i(params, "pumpkin_max_skips", 4)}
+                       "watch_names": [],
+                       "max_skips": 4}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -188,16 +190,17 @@ def _build_raid(config_path, params):
 
 def _build_pumpkin(config_path, params):
     difficulty = _i(params, "difficulty", 0)
-    watch_raw = params.get("watch") or ""
-    if isinstance(watch_raw, list):
-        watch = [str(w).strip() for w in watch_raw if str(w).strip()]
+    if params.get("run_mode") == "daily":
+        watch = []
+        max_skips = 4
     else:
-        watch = [w.strip() for w in str(watch_raw).replace("，", ",").split(",") if w.strip()]
+        watch = _sword_names(params.get("watch"))
+        max_skips = 99
     yield from _make_agent(config_path).pumpkin_stream(
         team_no=_i(params, "team_no", 3),
         difficulty=difficulty or None,
         watch_names=watch or None,
-        max_skips=_i(params, "max_skips", 4))
+        max_skips=max_skips)
 
 
 def _build_sortie(config_path, params):
@@ -391,16 +394,8 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完�
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
-                        {"key": "pumpkin_max_skips", "type": "number",
-                         "label": "更新令牌烧几枚（烧完收工）",
-                         "hint": "令牌 = 一切：打满拿刀后的刷新、认出非目标的刷新都算。默认 4，想全刷就把数字填大",
-                         "default": 4, "min": 1, "max": 99,
-                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
-                        {"key": "pumpkin_watch", "type": "text", "swords": True,
-                         "label": "只刷这些刀（留空=全刷不认人）",
-                         "default": "",
-                         "placeholder": "点下方候选添加，或手动输入逗号分隔",
-                         "presets": [{"label": "清空", "value": []}],
+                        {"key": "pumpkin_daily_note", "type": "note",
+                         "text": "日课南瓜固定使用“每日四次”：不识别目标刀，消耗 4 枚更新令牌后收工。指定刀并长期挂机请使用左侧“南瓜大作战”。",
                          "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
@@ -418,19 +413,21 @@ register_script("raid", "联队战", "活动图刷票，默认部队三",
                          "default": 30, "min": 0, "max": 99}])
 register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
                 _build_pumpkin,
-                params=[_team_field("3"),
+                params=[{"key": "run_mode", "type": "select", "label": "运行方案",
+                         "options": [["farm", "令牌挂机（按目标名单刷）"],
+                                     ["daily", "每日四次（全刷，不认刀）"]],
+                         "default": "farm",
+                         "help": "两种方案不会读取一键日课的南瓜设置；日课始终使用自己的每日四次方案。"},
+                        _team_field("3"),
                         {"key": "difficulty", "type": "select", "label": "难度",
                          "options": [["0", "不点（用当前tab）"],
                                      ["1", "初级"], ["2", "中级"], ["3", "上级"]],
                          "default": "0"},
                         {"key": "watch", "type": "text", "swords": True,
-                         "label": "只刷这些刀（逗号分隔，留空=全刷不认人）",
+                         "label": "挂机目标名单（留空=全刷不认人）",
                          "default": "", "placeholder": "点下方候选添加，或手动输入逗号分隔",
-                         "presets": [{"label": "清空", "value": []}]},
-                        {"key": "max_skips", "type": "number",
-                         "label": "更新令牌烧几枚（烧完收工）",
-                         "hint": "令牌 = 一切：打满拿刀后的刷新、认出非目标的刷新都算。默认 4，想全刷就把数字填大",
-                         "default": 4, "min": 1, "max": 99}])
+                         "presets": [{"label": "清空", "value": []}],
+                         "visibleWhen": {"key": "run_mode", "is": "farm"}}])
 register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
                 _build_sortie,
                 params=[_team_field("3"),
@@ -913,6 +910,54 @@ def _flavor_text(script: str | None, step: str) -> str:
     return _SCRIPT_FLAVOR.get(script or "", "正在本丸干活🔧")
 
 
+def _dashboard_inventory(inventory: dict | None, now: float) -> dict | None:
+    """把库存快照里的炉子剩余时间换算成看板此刻的秒数。"""
+    if not inventory:
+        return inventory
+    result = dict(inventory)
+    try:
+        captured = time.mktime(time.strptime(
+            str(inventory.get("captured_at", "")), "%Y-%m-%d %H:%M:%S"))
+        age = max(0, now - captured)
+    except Exception:
+        age = 0
+    furnaces = []
+    for raw in inventory.get("furnaces", []):
+        furnace = dict(raw)
+        remain = furnace.get("remain")
+        match = re.fullmatch(r"(\d{1,2}):([0-5]\d):([0-5]\d)", str(remain or ""))
+        if furnace.get("state") == "锻造中" and match:
+            seconds = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + int(match.group(3))
+            furnace["remain_sec"] = max(0, int(seconds - age))
+        else:
+            furnace["remain_sec"] = None
+        furnaces.append(furnace)
+    result["furnaces"] = furnaces
+    return result
+
+
+def _dashboard_expeditions(raw_exp: dict, now: float,
+                           overdue_grace_sec: int = 6 * 3600) -> list[dict]:
+    """整理远征记录；已到点太久的旧记录不再永久占着看板。"""
+    expeditions = []
+    for team_no, raw in raw_exp.items():
+        item = dict(raw)
+        item["team_no"] = team_no
+        try:
+            dispatched = time.mktime(time.strptime(
+                raw["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
+            remain = dispatched + float(raw.get("duration_min", 0)) * 60 - now
+            if remain < -overdue_grace_sec:
+                continue
+            item["remain_sec"] = max(0, int(remain))
+            item["done"] = remain <= 0
+        except Exception:
+            item["remain_sec"] = None
+            item["done"] = False
+        expeditions.append(item)
+    return sorted(expeditions, key=lambda item: item.get("remain_sec") or 0)
+
+
 @app.get("/api/dashboard")
 async def api_dashboard():
     """首页仪表盘：家底 + 远征倒计时 + 日课成绩单 + 内番，一次拿全"""
@@ -927,30 +972,17 @@ async def api_dashboard():
                 return None
         return None
 
+    now = time.time()
     data = {
         "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "inventory": _read("inventory.json"),
+        "inventory": _dashboard_inventory(_read("inventory.json"), now),
         "latest_report": _read("latest_report.json"),
         "naihanka": _read("naihanka.json"),
     }
 
     # 远征：给每条算好剩余秒数，前端只管倒计时
-    expeditions = []
     raw_exp = _read("expeditions.json") or {}
-    now = time.time()
-    for team_no, e in raw_exp.items():
-        item = dict(e)
-        item["team_no"] = team_no
-        try:
-            dispatched = time.mktime(time.strptime(e["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
-            remain = dispatched + float(e.get("duration_min", 0)) * 60 - now
-            item["remain_sec"] = max(0, int(remain))
-            item["done"] = remain <= 0
-        except Exception:
-            item["remain_sec"] = None
-            item["done"] = False
-        expeditions.append(item)
-    data["expeditions"] = sorted(expeditions, key=lambda x: x.get("remain_sec") or 0)
+    data["expeditions"] = _dashboard_expeditions(raw_exp, now)
 
     # 远征时刻表：今天还没派的安排（前端显示用）
     try:

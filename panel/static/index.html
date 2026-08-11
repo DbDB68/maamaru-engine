@@ -4,30 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>まあ丸 — 本丸近侍パネル</title>
-<link rel="stylesheet" href="/static/style.css?v=20260809-7">
+<link rel="stylesheet" href="/static/style.css?v=20260811-26">
 </head>
 <body>
 <div id="app">
-  <!-- ====== 顶栏 ====== -->
-  <header id="topbar">
-    <div class="logo">
-      <span class="logo-icon">🦊</span>
-      <span class="logo-text">まあ丸</span>
-      <span class="logo-sub">本丸近侍面板</span>
+  <!-- 本丸舞台是まあ丸的固定门面，不隶属于任何单独页面。 -->
+  <div id="dash-running" class="run-banner is-idle" data-scene="garden" style="display:none">
+    <div class="run-track">
+      <span class="run-brand" aria-label="まあ丸 本丸自动管家">
+        <strong>まあ丸</strong>
+        <small>本丸自动管家</small>
+      </span>
+      <span class="stage-fox" aria-hidden="true"></span>
+      <span class="run-fox"></span>
     </div>
-    <div class="top-right">
-      <span id="status-dot" class="dot dot-green"></span>
-      <span id="status-text" class="status-label">待命中</span>
-      <button id="btn-theme" class="icon-btn" title="切换像素主题">👾</button>
+    <div class="run-info">
+      <div id="run-place" class="run-place">本丸庭院</div>
+      <div class="run-flavor" id="run-flavor"></div>
+      <div class="run-sub" id="run-sub"></div>
     </div>
-  </header>
+  </div>
 
   <!-- ====== 选项卡 ====== -->
   <nav id="tabs">
-    <button class="tab active" data-tab="home">🏠 概览</button>
-    <button class="tab" data-tab="control">⚙ 配置</button>
-    <button class="tab" data-tab="chat">💬 近侍</button>
-    <button class="tab" data-tab="system">🔧 系统</button>
+    <button class="tab active with-ui-icon ui-home" data-tab="home">概览</button>
+    <button class="tab with-ui-icon ui-gear" data-tab="control">配置</button>
+    <button class="tab with-ui-icon ui-singleplayer" data-tab="chat">近侍</button>
+    <button class="tab with-ui-icon ui-wrench" data-tab="system">系统</button>
+    <div class="top-right nav-tools">
+      <span id="status-dot" class="dot dot-green"></span>
+      <span id="status-text" class="status-label">待命中</span>
+      <button id="btn-theme" class="icon-btn with-ui-icon ui-contrast" title="切换像素主题" aria-label="切换像素主题"></button>
+    </div>
   </nav>
 
   <!-- ====== 面板内容 ====== -->
@@ -35,38 +43,32 @@
 
     <!-- ── 概览：左常用功能 / 中选中功能+日志 / 右统计表（按鹿目圆草图）── -->
     <section id="panel-home" class="tab-panel active">
-      <!-- 小狐狸跑步区（谁 都 不 许 动） -->
-      <div id="dash-running" class="run-banner" style="display:none">
-        <div class="run-track">
-          <span class="run-fox"></span>
-        </div>
-        <div class="run-info">
-          <div class="run-flavor" id="run-flavor"></div>
-          <div class="run-sub" id="run-sub"></div>
-        </div>
-      </div>
-
       <div class="home-grid">
-        <!-- 左：常用功能列表，点一下选中 -->
+        <!-- 常用功能：按实际启动次数排序，只展示最常用的入口 -->
         <aside class="home-left">
-          <label class="home-box-head" for="func-select">⚔ 常用功能</label>
-          <select id="func-select" class="func-select" aria-label="选择常用功能"></select>
-          <div id="func-list"></div>
+          <div class="home-box-head">
+            <span>常用功能</span>
+          </div>
+          <div class="func-carousel">
+            <button id="func-prev" class="func-page-btn" type="button" aria-label="向前查看更多功能">‹</button>
+            <div id="func-list"></div>
+            <button id="func-next" class="func-page-btn" type="button" aria-label="向后查看更多功能">›</button>
+          </div>
         </aside>
 
         <!-- 中：选中功能区 + 日志 -->
         <div class="home-center">
           <div id="func-detail" class="func-detail"></div>
           <div class="home-log-head">
-            <span class="hl-title">📋 日志</span>
+            <span class="hl-title with-ui-icon ui-menu-list">日志</span>
             <div class="panel-actions">
               <div class="view-toggle" id="log-view-toggle" title="日志显示模式">
-                <button class="vt-btn active" data-view="visual">📊 可视化</button>
-                <button class="vt-btn" data-view="raw">💻 源码日志</button>
+                <button class="vt-btn active with-ui-icon ui-chart" data-view="visual">可视化</button>
+                <button class="vt-btn with-ui-icon ui-menu-list" data-view="raw">源码日志</button>
               </div>
-              <button id="btn-noise" class="small-btn" title="显示或收起界面导航过程">🦊 过程</button>
-              <button id="btn-clear-logs" class="small-btn" title="清屏">清屏</button>
-              <button id="btn-auto-scroll" class="small-btn active" title="自动滚动">自动滚动</button>
+              <button id="btn-noise" class="small-btn with-ui-icon ui-film" title="显示或收起界面导航过程">过程</button>
+              <button id="btn-clear-logs" class="small-btn with-ui-icon ui-trash" title="清屏">清屏</button>
+              <button id="btn-auto-scroll" class="small-btn active with-ui-icon ui-scroll" title="自动滚动">自动滚动</button>
             </div>
           </div>
           <div id="log-container">
@@ -83,7 +85,7 @@
           <div class="home-box-head">📊 本丸统计
             <span class="hr-tools">
               <span id="dash-updated" class="dash-updated"></span>
-              <button id="btn-dash-refresh" class="small-btn" title="刷新">↻</button>
+              <button id="btn-dash-refresh" class="small-btn icon-only with-ui-icon ui-return" title="刷新" aria-label="刷新本丸统计"></button>
             </span>
           </div>
           <div class="home-right-scroll">
@@ -114,11 +116,15 @@
     <!-- ── 配置：双栏大气调参，运行按钮小小的 ── -->
     <section id="panel-control" class="tab-panel">
       <div class="panel-header">
-        <h2>⚙ 配置 — 参数都在卡片上直接调，调好去概览点开始</h2>
+        <h2 class="with-ui-icon ui-gear">配置 — 参数都在卡片上直接调，调好去概览点开始</h2>
         <div class="panel-actions">
           <span id="task-indicator" class="badge badge-idle">空闲</span>
         </div>
       </div>
+      <label class="config-select-wrap" for="config-select">
+        <span>选择要调整的功能</span>
+        <select id="config-select" aria-label="选择要调整的功能"></select>
+      </label>
       <!-- 配置：左分类导航 / 右选中项配置 -->
       <div id="config-layout">
         <nav id="config-nav"></nav>
@@ -141,7 +147,7 @@
           </section>
           <div class="sched-tools">
             <span id="common-plan-msg" class="sched-msg"></span>
-            <button id="common-plan-save" class="s-save">💾 保存手动安排</button>
+            <button id="common-plan-save" class="s-save with-ui-icon ui-check">保存手动安排</button>
           </div>
         </div>
         <div id="sched-panel" class="sched-card">
@@ -194,21 +200,21 @@
           </section>
           <div class="sched-tools">
             <span id="sched-msg" class="sched-msg"></span>
-            <button id="sched-save" class="s-save">💾 保存自动排班</button>
+            <button id="sched-save" class="s-save with-ui-icon ui-check">保存自动排班</button>
           </div>
         </div>
       </div>
 
       <div class="control-footer">
-        <button id="btn-stop-all" class="btn-danger" disabled>■ 紧急停止</button>
+        <button id="btn-stop-all" class="btn-danger with-ui-icon ui-stop" disabled>紧急停止</button>
       </div>
     </section>
 
     <!-- ── 聊天 ── -->
     <section id="panel-chat" class="tab-panel">
       <div class="panel-header">
-        <h2>💬 狐之助</h2>
-        <button id="btn-clear-chat" class="small-btn" title="清空对话">清空</button>
+        <h2 class="with-ui-icon ui-singleplayer">狐之助</h2>
+        <button id="btn-clear-chat" class="small-btn with-ui-icon ui-trash" title="清空对话">清空</button>
       </div>
       <div id="chat-container">
         <div id="chat-messages">
@@ -230,13 +236,17 @@
     <!-- ── 系统：双栏，左分组导航 / 右表单 ── -->
     <section id="panel-system" class="tab-panel">
       <div class="panel-header">
-        <h2>🔧 系统设置 — 协议端、播报、角色设定都集中在这里</h2>
+        <h2 class="with-ui-icon ui-wrench">系统设置 — 协议端、播报、角色设定都集中在这里</h2>
         <div class="panel-actions">
           <span id="sys-status" class="cfg-status-inline"></span>
         </div>
       </div>
       <div id="system-layout">
-        <nav id="system-nav"></nav>
+        <div class="system-carousel">
+          <button id="system-prev" class="system-page-btn" type="button" aria-label="向前查看更多系统设置">‹</button>
+          <nav id="system-nav"></nav>
+          <button id="system-next" class="system-page-btn" type="button" aria-label="向后查看更多系统设置">›</button>
+        </div>
         <div id="system-detail"></div>
       </div>
     </section>
@@ -248,16 +258,16 @@
 <script src="/static/js/theme-manager.js?v=20260809-1"></script>
 <script src="/static/js/ui-feedback.js?v=20260731-1"></script>
 <script src="/static/js/system-qq.js?v=20260731-1"></script>
-<script src="/static/js/system-settings.js?v=20260804-1"></script>
+<script src="/static/js/system-settings.js?v=20260811-4"></script>
 <script src="/static/js/expedition-schedule.js?v=20260804-2"></script>
-<script src="/static/js/dashboard.js?v=20260804-1"></script>
+<script src="/static/js/dashboard.js?v=20260811-1"></script>
 <script src="/static/js/log-viewer.js?v=20260804-1"></script>
 <script src="/static/js/chat.js?v=20260804-1"></script>
-<script src="/static/js/sword-picker.js?v=20260731-1"></script>
-<script src="/static/js/param-form.js?v=20260731-1"></script>
-<script src="/static/js/task-card.js?v=20260731-1"></script>
+<script src="/static/js/sword-picker.js?v=20260809-2"></script>
+<script src="/static/js/param-form.js?v=20260809-2"></script>
+<script src="/static/js/task-card.js?v=20260809-3"></script>
 <script src="/static/js/list-editor.js?v=20260731-2"></script>
-<script src="/static/js/task-runner.js?v=20260804-1"></script>
-<script src="/static/app.js?v=20260809-2"></script>
+<script src="/static/js/task-runner.js?v=20260811-2"></script>
+<script src="/static/app.js?v=20260811-7"></script>
 </body>
 </html>

@@ -126,6 +126,13 @@
         box.querySelectorAll('.pill').forEach(pill => pill.classList.toggle('on', action === 'all'));
       });
       wrap.append(box, tools);
+    } else if (field.type === 'note') {
+      wrap.classList.add('pf-note');
+      wrap.removeChild(label);
+      const note = document.createElement('div');
+      note.className = 'pf-help';
+      note.textContent = field.text || '';
+      wrap.appendChild(note);
     }
 
     if (field.help) {

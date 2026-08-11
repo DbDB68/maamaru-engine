@@ -39,16 +39,23 @@
       editor.appendChild(presetsBox);
     }
 
+    const candidatesPanel = document.createElement('details');
+    candidatesPanel.className = 'sl-candidates';
+    const summary = document.createElement('summary');
+    summary.textContent = '展开候选刀剑';
+    candidatesPanel.appendChild(summary);
+
     const search = document.createElement('input');
     search.type = 'text';
     search.className = 'sl-search';
     search.placeholder = '搜索刀剑…';
-    editor.appendChild(search);
+    candidatesPanel.appendChild(search);
 
     const pool = document.createElement('div');
     pool.className = 'sl-pool';
     pool.innerHTML = '<div class="sl-loading">加载刀剑名册中…</div>';
-    editor.appendChild(pool);
+    candidatesPanel.appendChild(pool);
+    editor.appendChild(candidatesPanel);
     wrap.appendChild(editor);
 
     function parseNames() {
@@ -57,6 +64,9 @@
 
     function syncChips() {
       const selected = new Set(parseNames());
+      summary.textContent = selected.size
+        ? `展开候选刀剑 · 已选 ${selected.size} 把`
+        : '展开候选刀剑 · 当前不认刀';
       pool.querySelectorAll('.sl-chip').forEach(chip => {
         chip.classList.toggle('on', selected.has(chip.dataset.name));
       });
@@ -87,6 +97,7 @@
 
     textarea.addEventListener('input', syncChips);
     search.addEventListener('input', filterChips);
+    syncChips();
 
     loadCandidates().then(candidates => {
       pool.replaceChildren();

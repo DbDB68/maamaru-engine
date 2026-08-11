@@ -18,12 +18,14 @@
     panels:     $$('.tab-panel'),
     scriptGrid: $('#script-grid'),
     configNav:  $('#config-nav'),
+    configSelect: $('#config-select'),
     configDetail: $('#config-detail'),
     commonExpPanel: $('#exp-common-panel'),
     schedPanel: $('#sched-panel'),
     schedDock:  $('#sched-dock'),
     funcList:   $('#func-list'),
-    funcSelect: $('#func-select'),
+    funcPrev:   $('#func-prev'),
+    funcNext:   $('#func-next'),
     funcDetail: $('#func-detail'),
     taskIndicator: $('#task-indicator'),
     stopAll:    $('#btn-stop-all'),
@@ -32,6 +34,8 @@
     settingsBtn: null,
     themeBtn:   $('#btn-theme'),
     systemNav:  $('#system-nav'),
+    systemPrev: $('#system-prev'),
+    systemNext: $('#system-next'),
     systemDetail: $('#system-detail'),
     sysStatus:  $('#sys-status'),
   };
@@ -74,8 +78,6 @@
         desc: '修复列表里看到这几把刀就跳过，适合碰瓷队带伤上班' },
       { key: '_dismantle_whitelist', label: '刀解白名单', listKey: 'dismantle_whitelist',
         desc: '刀解只解这里面的刀，留空不解' },
-      { key: 'pumpkin_watch', label: '南瓜监视名单', target: 'pumpkin', scrollTo: 'watch',
-        desc: '只刷这些刀的剪影，认出别的刀就烧令牌换板子' },
     ]},
   ];
 
@@ -107,6 +109,10 @@
       currentScript = current;
     },
     render: renderScripts,
+    onStarted: realName => {
+      recordScriptUse(realName);
+      renderFuncList();
+    },
     onFinished: () => frontend.dashboard?.load(),
   });
 
@@ -116,7 +122,7 @@
     const nextTheme = frontend.theme.themes[
       (frontend.theme.themes.findIndex(item => item.id === theme.id) + 1) % frontend.theme.themes.length
     ];
-    els.themeBtn.textContent = nextTheme.icon;
+    els.themeBtn.textContent = '';
     els.themeBtn.title = `切换到${nextTheme.label}主题`;
     els.themeBtn.setAttribute('aria-label', els.themeBtn.title);
     // 同步到服务器（合并式存储，不会冲掉脚本参数记忆）
@@ -218,9 +224,65 @@
     sugar: '🍬', repair: '🛠', snapshot: '📦',
   };
 
+  const FUNC_ICON_IMAGES = {
+    daily: '/static/img/ui/daily.png',
+    raid: '/static/img/ui/raid.png',
+    pumpkin: '/static/img/ui/pumpkin.png',
+    sortie: '/static/img/ui/sortie.png',
+    sakura: '/static/img/ui/sakura.png',
+    practice: '/static/img/ui/practice.png',
+    expedition: '/static/img/ui/expedition.png',
+    dispatch: '/static/img/ui/expedition.png',
+    forge: '/static/img/ui/forge.png',
+    sugar: '/static/img/ui/sugar.png',
+    repair: '/static/img/ui/repair-tools.png',
+    snapshot: '/static/img/ui/snapshot.png',
+  };
+
+  const FUNC_USAGE_KEY = 'maamaru_func_usage_v1';
+  const DEFAULT_FREQUENT_ORDER = [
+    'daily', 'sortie', 'expedition', 'repair', 'forge', 'pumpkin',
+    'raid', 'sugar', 'sakura', 'practice', 'snapshot', 'dispatch',
+  ];
+
+  function funcIconMarkup(key) {
+    const src = FUNC_ICON_IMAGES[key];
+    if (src) return `<img class="task-pixel-icon" src="${src}" alt="">`;
+    return FUNC_ICONS[key] || '🧰';
+  }
+
   function scriptOrder() {
     return ['daily', ...Object.keys(scriptMeta).filter(k => k !== 'daily')]
       .filter(k => scriptMeta[k]);
+  }
+
+  function readScriptUsage() {
+    try {
+      const value = JSON.parse(localStorage.getItem(FUNC_USAGE_KEY) || '{}');
+      return value && typeof value === 'object' ? value : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function recordScriptUse(key) {
+    try {
+      const realKey = resolveAlias(key);
+      const usage = readScriptUsage();
+      usage[realKey] = (Number(usage[realKey]) || 0) + 1;
+      localStorage.setItem(FUNC_USAGE_KEY, JSON.stringify(usage));
+    } catch (_) {}
+  }
+
+  function rankedScriptOrder() {
+    const usage = readScriptUsage();
+    const fallbackIndex = new Map(DEFAULT_FREQUENT_ORDER.map((key, index) => [key, index]));
+    const ranked = scriptOrder().sort((a, b) => {
+      const countDiff = (Number(usage[b]) || 0) - (Number(usage[a]) || 0);
+      if (countDiff) return countDiff;
+      return (fallbackIndex.get(a) ?? 999) - (fallbackIndex.get(b) ?? 999);
+    });
+    return ranked;
   }
 
   function selectOverviewScript(key) {
@@ -228,33 +290,47 @@
     localStorage.setItem('maamaru_selected', key);
     renderFuncList();
     renderFuncDetail();
+    frontend.dashboard?.preview(resolveAlias(key), scriptMeta[resolveAlias(key)]?.label || '');
   }
+
+  function updateFuncCarousel() {
+    if (!els.funcList || !els.funcPrev || !els.funcNext) return;
+    const maxScroll = Math.max(0, els.funcList.scrollWidth - els.funcList.clientWidth);
+    els.funcPrev.disabled = els.funcList.scrollLeft <= 2;
+    els.funcNext.disabled = els.funcList.scrollLeft >= maxScroll - 2;
+  }
+
+  function moveFuncCarousel(direction) {
+    const distance = Math.max(120, Math.round(els.funcList.clientWidth * 0.72));
+    els.funcList.scrollBy({ left: direction * distance, behavior: 'smooth' });
+  }
+
+  els.funcPrev?.addEventListener('click', () => moveFuncCarousel(-1));
+  els.funcNext?.addEventListener('click', () => moveFuncCarousel(1));
+  els.funcList?.addEventListener('scroll', updateFuncCarousel, { passive: true });
+  window.addEventListener('resize', updateFuncCarousel, { passive: true });
 
   function renderFuncList() {
     const selReal = resolveAlias(selectedScript);
+    const previousScrollLeft = els.funcList.scrollLeft;
     els.funcList.innerHTML = '';
-    els.funcSelect.replaceChildren();
-    scriptOrder().forEach(k => {
+    rankedScriptOrder().forEach(k => {
       const info = scriptMeta[k];
       const running = isRunning && currentScript === k;
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'func-item' + (k === selReal ? ' sel' : '')
                      + (running ? ' running' : '');
-      item.innerHTML = `<span class="fi-icon">${FUNC_ICONS[k] || '🧰'}</span>`
+      item.innerHTML = `<span class="fi-icon">${funcIconMarkup(k)}</span>`
         + `<span class="fi-name">${escHtml(info.label)}</span>`;
       item.addEventListener('click', () => selectOverviewScript(k));
       els.funcList.appendChild(item);
-
-      const option = document.createElement('option');
-      option.value = k;
-      option.textContent = `${FUNC_ICONS[k] || '🧰'} ${info.label}${running ? ' · 运行中' : ''}`;
-      option.selected = k === selReal;
-      els.funcSelect.appendChild(option);
+    });
+    requestAnimationFrame(() => {
+      els.funcList.scrollLeft = previousScrollLeft;
+      updateFuncCarousel();
     });
   }
-
-  els.funcSelect.addEventListener('change', event => selectOverviewScript(event.target.value));
 
   // ── 概览中间：选中功能区（开始任务 / 强制关闭）──
   function renderFuncDetail() {
@@ -268,8 +344,9 @@
     const busy = isRunning && !running;
 
     frontend.taskCard.renderOverview(els.funcDetail, {
+      key: realKey,
       info,
-      icon: FUNC_ICONS[realKey] || '🧰',
+      icon: funcIconMarkup(realKey),
       running,
       busy,
       params: paramsOf(selectedScript),
@@ -286,9 +363,22 @@
   function renderConfigNav() {
     if (!els.configNav) return;
     els.configNav.innerHTML = '';
+    if (els.configSelect) els.configSelect.innerHTML = '';
     CONFIG_GROUPS.forEach(g => {
       const items = g.items.filter(it => it.listKey || scriptMeta[resolveAlias(it.key)]);
       if (!items.length) return;
+      if (els.configSelect) {
+        const optionGroup = document.createElement('optgroup');
+        optionGroup.label = g.label;
+        items.forEach(it => {
+          const option = document.createElement('option');
+          option.value = it.key;
+          option.textContent = `${it.label}${isRunning && currentScript === resolveAlias(it.key) ? ' · 运行中' : ''}`;
+          option.selected = selectedScript === it.key;
+          optionGroup.appendChild(option);
+        });
+        els.configSelect.appendChild(optionGroup);
+      }
       const group = document.createElement('div');
       group.className = 'config-group';
       const title = document.createElement('div');
@@ -300,7 +390,7 @@
       items.forEach(it => {
         const real = resolveAlias(it.key);
         const running = isRunning && currentScript === real;
-        const icon = it.listKey ? '📋' : (it.panel === 'schedule' ? '⏰' : (FUNC_ICONS[real] || '🧰'));
+        const icon = it.listKey ? '📋' : (it.panel === 'schedule' ? '⏰' : funcIconMarkup(real));
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'config-item' + (selectedScript === it.key ? ' sel' : '')
@@ -321,6 +411,15 @@
       els.configNav.appendChild(group);
     });
   }
+
+  els.configSelect?.addEventListener('change', event => {
+    selectedScript = event.target.value;
+    localStorage.setItem('maamaru_selected', selectedScript);
+    renderConfigNav();
+    renderConfigDetail();
+    renderFuncList();
+    renderFuncDetail();
+  });
 
   // ── 配置页：右侧选中项配置 ──
   function renderConfigDetail() {
@@ -355,7 +454,7 @@
       key,
       label: item ? item.label : info.label,
       info,
-      icon: FUNC_ICONS[key] || '🧰',
+      icon: funcIconMarkup(key),
       running: isRunning && currentScript === key,
       busy: isRunning,
       form: paramForms[key],
@@ -459,7 +558,12 @@
 
   // ── Init ──
   async function init() {
-    frontend.systemSettings?.init({ nav: els.systemNav, detail: els.systemDetail });
+    frontend.systemSettings?.init({
+      nav: els.systemNav,
+      prev: els.systemPrev,
+      next: els.systemNext,
+      detail: els.systemDetail,
+    });
     // 先从服务器加载保存的设置（会在 render 之前写入 localStorage）
     await loadSavedSettings();
     await frontend.logViewer?.init();
