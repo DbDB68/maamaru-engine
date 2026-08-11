@@ -56,9 +56,6 @@ pumpkin_now.png
 final_state.png
 stuck*.png
 
-# 剪影素材库（群友 Silhouette 工具的产物，本地用，不在公开仓二次分发）
-profiles/
-
 # 待清理归档（确认后可删）
 _trash/
 
