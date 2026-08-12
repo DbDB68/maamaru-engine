@@ -119,7 +119,7 @@ def _validate_plan(plan: dict) -> None:
     if data_root != DATA_ROOT.resolve():
         raise ApplyError("更新计划的用户数据目录不匹配")
     program_dir = Path(plan["program_dir"]).resolve()
-    if program_dir != _program_dir():
+    if program_dir != _program_dir().resolve():
         raise ApplyError("更新计划的程序目录不匹配")
     if program_dir == data_root or program_dir.is_relative_to(data_root):
         raise ApplyError("程序目录不能位于用户数据目录内")
