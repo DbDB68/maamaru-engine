@@ -5,7 +5,7 @@ a = Analysis(
     ['maamaru_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('panel/static', 'panel/static'), ('touken_config.json', '.'), ('touken/data', 'touken/data'), ('resource', 'resource')],
+    datas=[('panel/static', 'panel/static'), ('touken_config.example.json', '.'), ('manifest.json', '.'), ('touken/data', 'touken/data'), ('resource', 'resource')],
     hiddenimports=['uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on'],
     hookspath=[],
     hooksconfig={},

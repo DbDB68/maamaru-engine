@@ -13,7 +13,7 @@ from pathlib import Path
 
 import webview
 
-from touken.runtime_paths import DATA_ROOT, ensure_runtime_data
+from touken.runtime_paths import DATA_ROOT, LOG_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
 from .version import CURRENT_VERSION
 
@@ -90,7 +90,7 @@ class Api:
                     time.sleep(0.2)
             if not _port_alive():
                 detail = error["traceback"].strip().splitlines()[-1] if error["traceback"] else "启动等待超时"
-                return {"ok": False, "message": f"面板服务没有成功启动：{detail}\n错误记录：{DATA_ROOT / 'launcher.log'}"}
+                return {"ok": False, "message": f"面板服务没有成功启动：{detail}\n错误记录：{LOG_DIR / 'launcher.log'}"}
 
             # pywebview 的 JS 正在等待本次 API 调用返回；此时同步换页会互相等待。
             # 稍后从独立线程切换，先让“启动”调用顺利结束。
@@ -218,7 +218,7 @@ def _runtime_defaults():
     from touken.runtime_paths import CONFIG_PATH, PANEL_CONFIG_PATH, SCHEDULE_PATH
 
     return (
-        (CONFIG_PATH, _project_root() / "touken_config.json", "本丸配置"),
+        (CONFIG_PATH, _project_root() / "touken_config.example.json", "本丸配置"),
         (PANEL_CONFIG_PATH, _project_root() / "panel" / "panel_config.example.json", "面板配置"),
         (SCHEDULE_PATH, _project_root() / "panel" / "expedition_schedule.json", "远征排班"),
     )
@@ -242,7 +242,7 @@ def _port_alive() -> bool:
 
 def _write_launcher_log(content: str) -> None:
     try:
-        DATA_ROOT.mkdir(parents=True, exist_ok=True)
-        (DATA_ROOT / "launcher.log").write_text(content, encoding="utf-8")
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        (LOG_DIR / "launcher.log").write_text(content, encoding="utf-8")
     except OSError:
         pass

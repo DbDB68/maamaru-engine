@@ -82,7 +82,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe maamaru_app.py
 ```
 
-默认面板地址为 `http://127.0.0.1:8080`。主要配置可以直接在面板里保存，也可以编辑 `touken_config.json` 和 `panel_config.json`。
+默认面板地址为 `http://127.0.0.1:8080`。主要配置可以直接在面板里保存。安装版用户数据位于 `%LOCALAPPDATA%\Maamaru`，源码开发数据位于 `%LOCALAPPDATA%\Maamaru-Dev`；仓库只保存不含个人路径与通知信息的配置模板。
+
+程序文件与用户数据严格分开。旧版放在 EXE 或项目目录旁的配置会在首次启动时复制到新目录并留下备份，原文件不会自动删除。详细结构和迁移规则见 [`docs/data-layout.md`](docs/data-layout.md)。
 识别模板与 OCR 模型已经随仓库提供，克隆后不需要另外寻找资源包。
 
 ## 一键日课流程

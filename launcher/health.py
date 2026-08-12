@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from touken.runtime_paths import CONFIG_PATH, RESOURCE_DIR
+from touken.runtime_paths import CONFIG_DIR, CONFIG_PATH, DATA_VERSION_PATH, MIGRATION_PATH, RESOURCE_DIR
 
 
 @dataclass
@@ -66,6 +66,19 @@ def run_checks() -> list[Check]:
     checks.append(Check(
         "files", "程序文件", "ok" if not missing else "error",
         "核心配置与识别资源完整" if not missing else "缺少：" + "、".join(missing),
+    ))
+    migrated = 0
+    try:
+        migrated = int(json.loads(MIGRATION_PATH.read_text(encoding="utf-8")).get("copied", 0))
+    except (OSError, ValueError, TypeError):
+        pass
+    data_detail = "配置与程序文件已分开保存"
+    if migrated:
+        data_detail += f"；已安全迁移 {migrated} 项旧数据"
+    checks.append(Check(
+        "data", "用户数据", "ok" if CONFIG_DIR.is_dir() and DATA_VERSION_PATH.is_file() else "error",
+        data_detail if CONFIG_DIR.is_dir() and DATA_VERSION_PATH.is_file()
+        else "用户数据目录尚未正确建立",
     ))
 
     if getattr(sys, "frozen", False):

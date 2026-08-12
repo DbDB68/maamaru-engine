@@ -327,15 +327,25 @@ class PumpkinMixin:
             return self._profile_lib
         if self._profile_lib is False:
             return None
-        lib_dir = self._root / cfg.get("profiles", "profiles")
+        from ..runtime_paths import BUNDLED_PROFILES_DIR, USER_PROFILES_DIR
+
+        configured = cfg.get("profiles", "profiles")
+        if configured and configured != "profiles":
+            custom = Path(configured)
+            if not custom.is_absolute():
+                custom = self._root / custom
+            lib_dirs = (BUNDLED_PROFILES_DIR, custom, USER_PROFILES_DIR)
+        else:
+            lib_dirs = (BUNDLED_PROFILES_DIR, USER_PROFILES_DIR)
         try:
-            lib = load_library(lib_dir)
+            lib = load_library(lib_dirs)
             if not lib:
                 raise ValueError("库里一个模板都没有")
             self._profile_lib = lib
             return lib
         except Exception as exc:
-            print(f"[南瓜] 剪影素材库加载失败: {exc}（{lib_dir}）")
+            joined = "、".join(str(path) for path in lib_dirs)
+            print(f"[南瓜] 剪影素材库加载失败: {exc}（{joined}）")
             self._profile_lib = False
             return None
 

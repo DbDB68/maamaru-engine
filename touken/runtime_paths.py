@@ -1,39 +1,244 @@
-"""Runtime paths shared by source mode and the packaged launcher."""
+"""Program resources, writable user data, and legacy-data migration."""
 
+from __future__ import annotations
+
+import json
 import os
 import shutil
+import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 
+DATA_SCHEMA_VERSION = 1
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent
-_data_override = os.environ.get("MAAMARU_DATA_DIR", "").strip()
-DATA_ROOT = Path(_data_override).expanduser().resolve() if _data_override else BUNDLE_ROOT
-STATUS_DIR = DATA_ROOT / "status"
-CONFIG_PATH = DATA_ROOT / "touken_config.json"
-PANEL_CONFIG_PATH = DATA_ROOT / "panel_config.json"
-SCHEDULE_PATH = DATA_ROOT / "expedition_schedule.json"
-PROFILES_DIR = DATA_ROOT / "profiles"
+
+
+def _default_data_root() -> Path:
+    override = os.environ.get("MAAMARU_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    name = "Maamaru" if getattr(sys, "frozen", False) else "Maamaru-Dev"
+    return (local_app_data / name).resolve()
+
+
+DATA_ROOT = _default_data_root()
+CONFIG_DIR = DATA_ROOT / "config"
+STATE_DIR = DATA_ROOT / "state"
+LOG_DIR = DATA_ROOT / "logs"
+DEBUG_DIR = DATA_ROOT / "debug"
+BACKUP_DIR = DATA_ROOT / "backups"
+UPDATES_DIR = DATA_ROOT / "updates"
+USER_PROFILES_DIR = DATA_ROOT / "profiles" / "overrides"
+
+# Kept as an API alias while callers move to the clearer STATE_DIR name.
+STATUS_DIR = STATE_DIR
+CONFIG_PATH = CONFIG_DIR / "touken.json"
+PANEL_CONFIG_PATH = CONFIG_DIR / "panel.json"
+SCHEDULE_PATH = CONFIG_DIR / "expedition.json"
+MIGRATION_PATH = DATA_ROOT / "migration.json"
+DATA_VERSION_PATH = DATA_ROOT / "data-version.json"
+
 RESOURCE_DIR = BUNDLE_ROOT / "resource" / "base"
+BUNDLED_PROFILES_DIR = BUNDLE_ROOT / "profiles"
+PROFILES_DIR = USER_PROFILES_DIR
 
 
-def ensure_runtime_data() -> None:
-    """Create writable runtime data without overwriting an existing user config."""
-    DATA_ROOT.mkdir(parents=True, exist_ok=True)
-    STATUS_DIR.mkdir(parents=True, exist_ok=True)
-    defaults = (
-        (BUNDLE_ROOT / "touken_config.json", CONFIG_PATH),
-        (BUNDLE_ROOT / "panel" / "panel_config.json", PANEL_CONFIG_PATH),
-        (BUNDLE_ROOT / "panel" / "panel_config.example.json", PANEL_CONFIG_PATH),
-        (BUNDLE_ROOT / "panel" / "expedition_schedule.json", SCHEDULE_PATH),
+@dataclass(frozen=True)
+class _Layout:
+    root: Path
+    config: Path
+    state: Path
+    logs: Path
+    debug: Path
+    backups: Path
+    updates: Path
+    profiles: Path
+
+
+def _layout(root: Path) -> _Layout:
+    return _Layout(
+        root=root,
+        config=root / "config",
+        state=root / "state",
+        logs=root / "logs",
+        debug=root / "debug",
+        backups=root / "backups",
+        updates=root / "updates",
+        profiles=root / "profiles" / "overrides",
     )
-    claimed = set()
-    for source, target in defaults:
-        if target in claimed or target.exists() or not source.exists() or source == target:
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    """Replace a small metadata file without exposing a half-written JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _copy_missing_file(source: Path, target: Path, backup: Path | None = None) -> bool:
+    if not source.is_file() or target.exists() or source.resolve() == target.resolve():
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if backup is not None and not backup.exists():
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, backup)
+    shutil.copy2(source, target)
+    return True
+
+
+def _copy_missing_tree(
+    source: Path,
+    target: Path,
+    backup: Path | None = None,
+    skip_names: set[str] | None = None,
+) -> list[str]:
+    copied = []
+    if not source.is_dir() or source.resolve() == target.resolve():
+        return copied
+    target_resolved = target.resolve()
+    for item in source.rglob("*"):
+        if not item.is_file():
             continue
-        shutil.copy2(source, target)
-        claimed.add(target)
-    # profiles/：首次运行时把内置素材库展开到数据目录
-    # 不覆盖用户已有的（如果用户在群里拿到了更新版，删掉数据目录的再让程序自动展开）
-    src_profiles = BUNDLE_ROOT / "profiles"
-    if src_profiles.is_dir() and not PROFILES_DIR.exists():
-        shutil.copytree(src_profiles, PROFILES_DIR)
+        if skip_names and item.name in skip_names:
+            continue
+        if item.resolve().is_relative_to(target_resolved):
+            continue
+        relative = item.relative_to(source)
+        destination = target / relative
+        if destination.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if backup is not None:
+            backup_file = backup / relative
+            backup_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, backup_file)
+        shutil.copy2(item, destination)
+        copied.append(relative.as_posix())
+    return copied
+
+
+def _legacy_roots(data_root: Path, bundle_root: Path) -> list[Path]:
+    candidates = [data_root, data_root / "data", bundle_root, bundle_root / "data"]
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent)
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    return unique
+
+
+def migrate_legacy_data(
+    data_root: Path = DATA_ROOT,
+    bundle_root: Path = BUNDLE_ROOT,
+    legacy_roots: list[Path] | None = None,
+) -> dict:
+    """Copy known old layouts into the v1 layout; never delete or overwrite user files."""
+    layout = _layout(Path(data_root).resolve())
+    marker = layout.root / "migration.json"
+    if marker.is_file():
+        try:
+            previous = json.loads(marker.read_text(encoding="utf-8"))
+            if int(previous.get("data_schema", 0)) >= DATA_SCHEMA_VERSION:
+                return previous
+        except (OSError, ValueError, TypeError):
+            pass
+
+    roots = legacy_roots or _legacy_roots(layout.root, Path(bundle_root).resolve())
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_root = layout.backups / f"legacy-{stamp}"
+    events: list[dict] = []
+
+    file_mappings = (
+        ("touken_config.json", layout.config / "touken.json", "config/touken.json"),
+        ("panel_config.json", layout.config / "panel.json", "config/panel.json"),
+        ("expedition_schedule.json", layout.config / "expedition.json", "config/expedition.json"),
+        ("launcher.log", layout.logs / "launcher.log", "logs/launcher.log"),
+    )
+    for root in roots:
+        for old_name, target, backup_name in file_mappings:
+            source = root / old_name
+            if _copy_missing_file(source, target, backup_root / backup_name):
+                events.append({"source": str(source), "target": str(target), "kind": "file"})
+
+        old_status = root / "status"
+        if old_status.is_dir():
+            database = old_status / "maamaru_logs.db"
+            if _copy_missing_file(database, layout.logs / database.name, backup_root / "logs" / database.name):
+                events.append({"source": str(database), "target": str(layout.logs / database.name), "kind": "file"})
+            state_files = _copy_missing_tree(
+                old_status,
+                layout.state,
+                backup_root / "state",
+                skip_names={"maamaru_logs.db"},
+            )
+            for name in state_files:
+                events.append({"source": str(old_status / name), "target": str(layout.state / name), "kind": "state"})
+
+        folders = []
+        # A source/program bundle may contain official profiles and developer screenshots;
+        # neither belongs in a user's data migration. Flat data roots from old releases do.
+        if root.resolve() != Path(bundle_root).resolve():
+            folders.extend((
+                ("debug", layout.debug, "debug"),
+                ("profiles", layout.profiles, "profile-override"),
+            ))
+        for folder_name, target, kind in folders:
+            source = root / folder_name
+            copied = _copy_missing_tree(source, target, backup_root / folder_name)
+            events.extend(
+                {"source": str(source / name), "target": str(target / name), "kind": kind}
+                for name in copied
+            )
+
+    result = {
+        "data_schema": DATA_SCHEMA_VERSION,
+        "completed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "copied": len(events),
+        "backup": str(backup_root) if events else None,
+        "events": events,
+    }
+    _write_json(marker, result)
+    return result
+
+
+def ensure_runtime_data(
+    data_root: Path = DATA_ROOT,
+    bundle_root: Path = BUNDLE_ROOT,
+    legacy_roots: list[Path] | None = None,
+) -> dict:
+    """Create the writable layout, migrate old data, then fill missing defaults."""
+    layout = _layout(Path(data_root).resolve())
+    for directory in (
+        layout.root,
+        layout.config,
+        layout.state,
+        layout.logs,
+        layout.debug,
+        layout.backups,
+        layout.updates,
+        layout.profiles,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    migration = migrate_legacy_data(layout.root, Path(bundle_root).resolve(), legacy_roots)
+    defaults = (
+        (Path(bundle_root) / "touken_config.example.json", layout.config / "touken.json"),
+        (Path(bundle_root) / "panel" / "panel_config.example.json", layout.config / "panel.json"),
+        (Path(bundle_root) / "panel" / "expedition_schedule.json", layout.config / "expedition.json"),
+    )
+    for source, target in defaults:
+        _copy_missing_file(source, target)
+
+    _write_json(layout.root / "data-version.json", {
+        "data_schema": DATA_SCHEMA_VERSION,
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    return migration

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .maa_adapter import MAAAdapter
 from .navigator import NavigationMixin
+from .runtime_paths import STATUS_DIR
 from .flows import LoginMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin
 
 
@@ -28,7 +29,7 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
         self.maa = maa
         self.current_location = None
         self._root = Path(config_path).resolve().parent
-        self._progress_file = self._root / "status" / "progress.json"
+        self._progress_file = STATUS_DIR / "progress.json"
 
     def set_progress(self, step: str):
         """上报当前进度给面板仪表盘横幅（如 'raid:lulian'、'daily:内番'）。

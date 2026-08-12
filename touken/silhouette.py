@@ -43,8 +43,14 @@ def load_library(lib_dir):
     加载素材库 → [(名字, view, 300×300 bool mask)]，黑影=True
     文件名格式：00047_五虎退_foot.png / 00107_小竜景光_head.png
     """
+    directories = lib_dir if isinstance(lib_dir, (list, tuple)) else (lib_dir,)
+    files = {}
+    # Later directories override an identically named bundled profile.
+    for directory in directories:
+        for file in sorted(Path(directory).glob("*.png")):
+            files[file.name] = file
     lib = []
-    for f in sorted(Path(lib_dir).glob("*.png")):
+    for f in files.values():
         parts = f.stem.split("_")
         if len(parts) < 3 or parts[2] not in ("head", "foot"):
             continue
