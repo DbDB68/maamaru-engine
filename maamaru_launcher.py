@@ -41,7 +41,11 @@ if getattr(sys, "frozen", False):
 
 
 def main():
-    if "--worker" in sys.argv:
+    if "--apply-update" in sys.argv:
+        from launcher.update_apply import run_plan
+        plan_index = sys.argv.index("--apply-update") + 1
+        raise SystemExit(run_plan(Path(sys.argv[plan_index])))
+    elif "--worker" in sys.argv:
         # 工人子进程：跑脚本、把 yield 逐行 print 给父进程（面板）收
         from panel.worker import main as worker_main
         worker_main()

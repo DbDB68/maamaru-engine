@@ -15,6 +15,7 @@ import webview
 
 from touken.runtime_paths import DATA_ROOT, LOG_DIR, UPDATES_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
+from .update_apply import consume_result, prepare_apply
 from .updater import UpdateError, download_installer, select_installer
 from .version import CURRENT_VERSION
 
@@ -46,6 +47,7 @@ async function refresh(){
  document.querySelector('#summary').textContent='正在检查…';document.querySelector('#start').disabled=true;
  document.querySelector('#checks').innerHTML='<div class="loading">正在检查运行环境…</div>';
  const data=await pywebview.api.check();
+ if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}
  document.querySelector('#checks').innerHTML=data.items.map(x=>`<div class="row"><span class="dot ${x.state}">●</span><span class="label">${esc(x.label)}</span><span class="detail">${esc(x.detail)}</span></div>`).join('');
  const summary=document.querySelector('#summary');summary.textContent=data.blocked?'需要修复':'可以启动';summary.className='summary '+(data.blocked?'error':'ok');document.querySelector('#start').disabled=data.blocked;
 }
@@ -61,7 +63,9 @@ async function update(){
   if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){
    summary.textContent='正在下载并校验安装包…';
    const d=await pywebview.api.download_update();alert(d.message);
-   if(d.ok&&confirm('安装包已经校验完成。\n\n要打开所在文件夹吗？'))await pywebview.api.open_updates();
+   if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){
+    const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message);
+   }
   }
  }else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
  await refresh();
@@ -79,7 +83,11 @@ class Api:
     def check(self):
         ensure_runtime_data()
         checks = run_checks()
-        return {"blocked": has_blocker(checks), "items": [item.__dict__ for item in checks]}
+        return {
+            "blocked": has_blocker(checks),
+            "items": [item.__dict__ for item in checks],
+            "update_result": consume_result(),
+        }
 
     def start(self):
         try:
@@ -197,6 +205,19 @@ class Api:
         except Exception as exc:
             _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": f"更新下载失败：{exc}"}
+
+    def apply_update(self):
+        if self._pending_update is None:
+            return {"ok": False, "message": "请先重新检查并下载更新。"}
+        installer = UPDATES_DIR / self._pending_update["version"] / self._pending_update["name"]
+        try:
+            prepare_apply(installer, self._pending_update["digest"].removeprefix("sha256:"),
+                          self._pending_update["version"])
+            threading.Thread(target=lambda: (time.sleep(0.3), webview.windows[0].destroy()), daemon=True).start()
+            return {"ok": True, "message": "まあ丸即将退出并打开安装向导。"}
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"无法开始安装：{exc}"}
 
     def open_updates(self):
         UPDATES_DIR.mkdir(parents=True, exist_ok=True)
