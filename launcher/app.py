@@ -13,8 +13,9 @@ from pathlib import Path
 
 import webview
 
-from touken.runtime_paths import DATA_ROOT, LOG_DIR, ensure_runtime_data
+from touken.runtime_paths import DATA_ROOT, LOG_DIR, UPDATES_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
+from .updater import UpdateError, download_installer, select_installer
 from .version import CURRENT_VERSION
 
 
@@ -56,7 +57,13 @@ async function repair(){
 async function update(){
  const summary=document.querySelector('#summary');summary.textContent='正在检查 GitHub…';summary.className='summary info';
  const r=await pywebview.api.check_update();
- if(r.update_available&&r.url){if(confirm(r.message+'\n\n要打开下载页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
+ if(r.update_available&&r.download_ready){
+  if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){
+   summary.textContent='正在下载并校验安装包…';
+   const d=await pywebview.api.download_update();alert(d.message);
+   if(d.ok&&confirm('安装包已经校验完成。\n\n要打开所在文件夹吗？'))await pywebview.api.open_updates();
+  }
+ }else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
  await refresh();
 }
 async function openData(){await pywebview.api.open_data()}
@@ -66,6 +73,9 @@ window.addEventListener('pywebviewready',refresh);
 
 
 class Api:
+    def __init__(self):
+        self._pending_update = None
+
     def check(self):
         ensure_runtime_data()
         checks = run_checks()
@@ -155,8 +165,13 @@ class Api:
                 _version_tuple(latest) < _version_tuple(CURRENT_VERSION)
             )
             update_available = comparison > 0
+            self._pending_update = None
             if comparison > 0:
                 message = f"发现新版本 {tag}\n当前版本：v{CURRENT_VERSION}"
+                try:
+                    self._pending_update = select_installer(data)
+                except UpdateError as exc:
+                    message += f"\n自动下载暂不可用：{exc}"
             elif comparison == 0:
                 message = f"已经是最新版 v{CURRENT_VERSION}。\nGitHub 最新版本：{tag}"
             else:
@@ -165,10 +180,28 @@ class Api:
                 "ok": True,
                 "message": message,
                 "update_available": update_available,
+                "download_ready": self._pending_update is not None,
                 "url": data.get("html_url") or "https://github.com/DbDB68/maamaru-engine/releases/latest",
             }
         except Exception:
+            self._pending_update = None
             return {"ok": False, "message": "暂时连不上 GitHub，稍后再试。", "update_available": False}
+
+    def download_update(self):
+        if self._pending_update is None:
+            return {"ok": False, "message": "请先重新检查更新。"}
+        try:
+            result = download_installer(self._pending_update)
+            action = "已找到此前校验完成的安装包" if result["reused"] else "安装包已下载并通过安全校验"
+            return {"ok": True, "message": f"{action}。\n位置：{result['path']}"}
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"更新下载失败：{exc}"}
+
+    def open_updates(self):
+        UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(UPDATES_DIR)
+        return {"ok": True}
 
     def open_url(self, url):
         if isinstance(url, str) and url.startswith("https://github.com/DbDB68/maamaru-engine/"):
