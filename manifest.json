@@ -1,7 +1,2298 @@
-{
-  "product": "Maamaru",
-  "version": "0.1.4",
-  "data_schema": 1,
-  "minimum_data_schema": 1,
-  "files": []
+﻿{
+    "product":  "Maamaru",
+    "version":  "0.1.5",
+    "data_schema":  1,
+    "minimum_data_schema":  1,
+    "files":  [
+                  {
+                      "path":  "profiles/00178_松井江_foot.png",
+                      "size":  11244,
+                      "sha256":  "910dc14be1d9f45d3408af00c615edc00369d6b884df68d7ab0970400d9e2d0c"
+                  },
+                  {
+                      "path":  "profiles/00178_松井江_head.png",
+                      "size":  7503,
+                      "sha256":  "f550e3d524ad381eb7c6dba2e5b293bf2a80606a8916061d3096a7940ce1ae04"
+                  },
+                  {
+                      "path":  "profiles/00180_山鳥毛_foot.png",
+                      "size":  9415,
+                      "sha256":  "e34fe35920b3d6e82994bfffbcae8373d5cc145f092a619c6b43b174536a513d"
+                  },
+                  {
+                      "path":  "profiles/00176_源清麿_head.png",
+                      "size":  6278,
+                      "sha256":  "1a093a19778a96a8c91c3d09dfdffaf77098de02fbd5096e5f51da64c91337d6"
+                  },
+                  {
+                      "path":  "profiles/00174_水心子正秀_foot.png",
+                      "size":  9117,
+                      "sha256":  "b0baa0a4a40bc1692463edc2f64f80e224ab642151b9a853484a98f89bfd02b8"
+                  },
+                  {
+                      "path":  "profiles/00174_水心子正秀_head.png",
+                      "size":  6911,
+                      "sha256":  "08287301b53e04ac2275826bedc2138ae1b3990e5b5c876f7ae4653154cddfb9"
+                  },
+                  {
+                      "path":  "profiles/00176_源清麿_foot.png",
+                      "size":  10314,
+                      "sha256":  "a2ccc9c056cca09578438cfdcbbffbdcc441e3b9d0cf87cfa533b75bb5209c2c"
+                  },
+                  {
+                      "path":  "profiles/00184_地蔵行平_head.png",
+                      "size":  10439,
+                      "sha256":  "a952fc493607d0fe221c70a5cb9b8d9072f5b6c005294c38d2ed3993a4d6d4bd"
+                  },
+                  {
+                      "path":  "profiles/00186_治金丸_foot.png",
+                      "size":  9558,
+                      "sha256":  "1a66f1791196b7b4e429e198080b3267f103c95fcd99b3f9018231f4206feba5"
+                  },
+                  {
+                      "path":  "profiles/00186_治金丸_head.png",
+                      "size":  9870,
+                      "sha256":  "3d79f34391724b2206d8a0a3af19da170a50b2c7a184bba6c6c62f84d87de5ae"
+                  },
+                  {
+                      "path":  "profiles/00184_地蔵行平_foot.png",
+                      "size":  5703,
+                      "sha256":  "3cdb03c927b1cc58d8e859c25beadfb6462858ef459892ef0ba71316a7cd93ea"
+                  },
+                  {
+                      "path":  "profiles/00180_山鳥毛_head.png",
+                      "size":  7194,
+                      "sha256":  "10f9542159e7a7d6b2b49809b7fc322290e9c6cbfdd762e8fb135be07e026e7f"
+                  },
+                  {
+                      "path":  "profiles/00182_古今伝授の太刀_foot.png",
+                      "size":  6441,
+                      "sha256":  "b46aee235ffbaf576ed0adf7aa9a41a4618f27ec1f62b4527dc5a6d6171ec3e7"
+                  },
+                  {
+                      "path":  "profiles/00182_古今伝授の太刀_head.png",
+                      "size":  7383,
+                      "sha256":  "aaeac5ee3bdca21eb6d509a1c4a251c5ef93cd7a5fc94c90d520841174b2868e"
+                  },
+                  {
+                      "path":  "profiles/00162_祢々切丸_head.png",
+                      "size":  6400,
+                      "sha256":  "2d1fecb108a307c6b16ea9070ed5cb39eedf34f30138bb3d3953e0d4d2e6b358"
+                  },
+                  {
+                      "path":  "profiles/00164_白山吉光_foot.png",
+                      "size":  11441,
+                      "sha256":  "b7a20a1951115b5b2e00a748ad21aeb32b74c99504c672684803385247c844e2"
+                  },
+                  {
+                      "path":  "profiles/00164_白山吉光_head.png",
+                      "size":  10430,
+                      "sha256":  "927192be0c0359ba772779529aeb98ba02ff6b1ef75b6f977f54b31489b17157"
+                  },
+                  {
+                      "path":  "profiles/00162_祢々切丸_foot.png",
+                      "size":  7940,
+                      "sha256":  "f78e38191a5ba6f3d3a66c770d9050c3f105ae15a2009a23a7c93fd41821510a"
+                  },
+                  {
+                      "path":  "profiles/00158_山姥切長義_head.png",
+                      "size":  7161,
+                      "sha256":  "bbec7a092dd99c3c7b800bff8a380ba94a921d4888c7370d5ad41bdca3b1e7dd"
+                  },
+                  {
+                      "path":  "profiles/00160_豊前江_foot.png",
+                      "size":  10534,
+                      "sha256":  "71565c3795013f20ff91c491606dcca13de60a7ff6ad3b99e5ad8d80dbe6d214"
+                  },
+                  {
+                      "path":  "profiles/00160_豊前江_head.png",
+                      "size":  7929,
+                      "sha256":  "c59865043c2642fe6f5caf7c46d025abce6da912b183f03a92c5499caa98f2f4"
+                  },
+                  {
+                      "path":  "profiles/00170_北谷菜切_foot.png",
+                      "size":  7828,
+                      "sha256":  "8f6030476d6ccc41f5afd717a438186e06b81e841a70f3b61dbb14ed1973afd8"
+                  },
+                  {
+                      "path":  "profiles/00172_桑名江_foot.png",
+                      "size":  10482,
+                      "sha256":  "b499952ca1055a86cc6c5639182910ba536b947f2267cba013565f20678de20d"
+                  },
+                  {
+                      "path":  "profiles/00172_桑名江_head.png",
+                      "size":  7418,
+                      "sha256":  "f5a51d5f81635ac4309b53552f672c504ba98f3e61345974eecf7113acd89a1d"
+                  },
+                  {
+                      "path":  "profiles/00168_肥前忠広_head.png",
+                      "size":  9228,
+                      "sha256":  "7838a7b997110ea54b97d77cc6c1b833c86918b1282ff6c2d564a033081e4876"
+                  },
+                  {
+                      "path":  "profiles/00166_南海太郎朝尊_foot.png",
+                      "size":  7322,
+                      "sha256":  "f11f4152dacf104bcb3d3bf71c5dc2b0dd3bb76c3f0f3766145adef1a5c6a6a7"
+                  },
+                  {
+                      "path":  "profiles/00166_南海太郎朝尊_head.png",
+                      "size":  7706,
+                      "sha256":  "5789faaede435077c8462e47e519ba56fa5222b0f9b3b984f7383e7217a0b716"
+                  },
+                  {
+                      "path":  "profiles/00168_肥前忠広_foot.png",
+                      "size":  9627,
+                      "sha256":  "6e73887d19afcda0538a249a36d4cc75dfbb5d89f4aa18c493a26698cb65d51d"
+                  },
+                  {
+                      "path":  "profiles/00188_日光一文字_foot.png",
+                      "size":  8271,
+                      "sha256":  "39aff58c08df76d8d9f94400e6df813d59108628438318fcaeedc2c7e906e000"
+                  },
+                  {
+                      "path":  "profiles/00208_丙子椒林剣_head.png",
+                      "size":  6750,
+                      "sha256":  "2d3116c0de94ba2fcf53e89e95bad79c12cbf8fb105f55d049ef2337888e8e19"
+                  },
+                  {
+                      "path":  "profiles/00210_稲葉江_head.png",
+                      "size":  6237,
+                      "sha256":  "7e9e3bcec362e16419251104dc74971156228f7c743153ba1cf3930badab7280"
+                  },
+                  {
+                      "path":  "profiles/00212_笹貫_foot.png",
+                      "size":  6985,
+                      "sha256":  "cf8077bf0649cd43acbb64e8e2e9ceb36e836d8eedee5e41d8209a5891826158"
+                  },
+                  {
+                      "path":  "profiles/00206_七星剣_head.png",
+                      "size":  12974,
+                      "sha256":  "36bf9d354a5327b0178ee519bc80bfed4658817474bd327cdbb01f42aca33372"
+                  },
+                  {
+                      "path":  "profiles/00202_姫鶴一文字_head.png",
+                      "size":  8716,
+                      "sha256":  "c28288fbdf3ee8e96848867a9cb1db1dfd82a07f7eae3da2c6dc5c16dc7fb8c1"
+                  },
+                  {
+                      "path":  "profiles/00204_福島光忠_foot.png",
+                      "size":  8575,
+                      "sha256":  "f0e010ffc6b67289e4889187a4a2e12dc4a5f8287365aca9536edc6d519661d8"
+                  },
+                  {
+                      "path":  "profiles/00204_福島光忠_head.png",
+                      "size":  8602,
+                      "sha256":  "d0c1722dd9e1a2f9bd6a743da03e863dc9c004558c454f94c950b6c390a2b8f4"
+                  },
+                  {
+                      "path":  "profiles/00216_八丁念仏_head.png",
+                      "size":  9141,
+                      "sha256":  "9d0966c908f24baad087cfee0a0173ff465c9aa3a3d1a48b5c475fa39fc4f94b"
+                  },
+                  {
+                      "path":  "profiles/00218_石田正宗_foot.png",
+                      "size":  11598,
+                      "sha256":  "bdcfcb64d4ce2fc97ab73c8f5cdb6812394fc6aaa6154baeb74a5e6ebd33adf2"
+                  },
+                  {
+                      "path":  "profiles/00218_石田正宗_head.png",
+                      "size":  6926,
+                      "sha256":  "02b5f3fee38deb06088f0c9926396347101d5b84a2d31307a6d5706c26da8093"
+                  },
+                  {
+                      "path":  "profiles/00216_八丁念仏_foot.png",
+                      "size":  8576,
+                      "sha256":  "21a66d54ab3ea6622b246ebe4c3bf3c622507d17c7124c36885a067caa929f8b"
+                  },
+                  {
+                      "path":  "profiles/00212_笹貫_head.png",
+                      "size":  8829,
+                      "sha256":  "acc2c6c6888b08d131637c88f7a0978b9e3eac2963b6e9ad3c6bd08115b8e141"
+                  },
+                  {
+                      "path":  "profiles/00214_人間無骨_foot.png",
+                      "size":  10122,
+                      "sha256":  "6bae48cf461fcfc350333dc778963333584a2808af6329a5fcbf21fc1c0c713b"
+                  },
+                  {
+                      "path":  "profiles/00214_人間無骨_head.png",
+                      "size":  12536,
+                      "sha256":  "30c973bd14726faaef4a232f1e47178d5ba293b41ffa57345443b377401785e7"
+                  },
+                  {
+                      "path":  "profiles/00192_五月雨江_head.png",
+                      "size":  6233,
+                      "sha256":  "75a484c770f025415ce5712c88fbdd6cc2ea4877ff58549d3d74e6386615fa2f"
+                  },
+                  {
+                      "path":  "profiles/00194_大千鳥十文字槍_foot.png",
+                      "size":  11645,
+                      "sha256":  "cff39182abc0d962ee85b519a860f43e359f13aa9f43c90c733e329983e5f4c5"
+                  },
+                  {
+                      "path":  "profiles/00194_大千鳥十文字槍_head.png",
+                      "size":  7981,
+                      "sha256":  "7922cad462a5daa45c0d976a68cf0f3da4593000ad46c8b68271d6d77f172d8f"
+                  },
+                  {
+                      "path":  "profiles/00192_五月雨江_foot.png",
+                      "size":  9303,
+                      "sha256":  "9dfc60b4ef171c1751bb7862a1fd4dc2a2d7dd5477a907c64992ad898bbacf64"
+                  },
+                  {
+                      "path":  "profiles/00188_日光一文字_head.png",
+                      "size":  7350,
+                      "sha256":  "8ea4f9554c8eb60ae763cc824b2b92790a96ade0d8cfe5c5a7df81f4d003a94e"
+                  },
+                  {
+                      "path":  "profiles/00190_太閤左文字_foot.png",
+                      "size":  10215,
+                      "sha256":  "42a521088d0986159b1e4e7abd1c2a0b86ba3bd8a4e1cb7974967a58e94fea6e"
+                  },
+                  {
+                      "path":  "profiles/00190_太閤左文字_head.png",
+                      "size":  8537,
+                      "sha256":  "5a62229498f741104109c026fced1fd3566c1f5a6c2804d2a5ddab4d85055245"
+                  },
+                  {
+                      "path":  "profiles/00200_村雲江_foot.png",
+                      "size":  9812,
+                      "sha256":  "12a790b6d672802f8d38b2c65f596bd815ed768778c2fa92689b95591f3fbe6f"
+                  },
+                  {
+                      "path":  "profiles/00200_村雲江_head.png",
+                      "size":  9370,
+                      "sha256":  "f341d3fe03b6450410547c886efc5a9758e474d03f31c52f9c8be75499ac04be"
+                  },
+                  {
+                      "path":  "profiles/00202_姫鶴一文字_foot.png",
+                      "size":  9541,
+                      "sha256":  "210816f3a1d21084af3d641e96b834dd1b93d13b5c4a629b1a8b2bb3d0cbde39"
+                  },
+                  {
+                      "path":  "profiles/00198_一文字則宗_head.png",
+                      "size":  9634,
+                      "sha256":  "612137296f267720f722ae06cf3f3bbb6d3580e385269e0cf1e720d419a73857"
+                  },
+                  {
+                      "path":  "profiles/00196_泛塵_foot.png",
+                      "size":  12914,
+                      "sha256":  "f5d788a620185e290af21724c7edfd594d64d29fe0a86e4702d4a54907e00f0d"
+                  },
+                  {
+                      "path":  "profiles/00196_泛塵_head.png",
+                      "size":  10709,
+                      "sha256":  "1f78d80f41c3bff19950be3dedbb9b5920fd0103db1d9e70aba017e784f604d4"
+                  },
+                  {
+                      "path":  "profiles/00198_一文字則宗_foot.png",
+                      "size":  8622,
+                      "sha256":  "7d2da9c704701b2aa7cd40913b7a2839ad1f2219d7929780ece98193f1fdd27e"
+                  },
+                  {
+                      "path":  "profiles/00118_へし切長谷部_head.png",
+                      "size":  7207,
+                      "sha256":  "0a3520522be99507e60c172753e4967d2f43a64b2f0d8e648a4bf4f5c55d75c4"
+                  },
+                  {
+                      "path":  "profiles/00120_不動行光_foot.png",
+                      "size":  9762,
+                      "sha256":  "c22432924b8aadba44bf28db04370ef1779a01049cfe60f5d1db961521a49792"
+                  },
+                  {
+                      "path":  "profiles/00120_不動行光_head.png",
+                      "size":  10751,
+                      "sha256":  "c6433f48bcaf51fb0af6200d1782965a4d9da3eff6a55def2f03c3b8afbd7a33"
+                  },
+                  {
+                      "path":  "profiles/00118_へし切長谷部_foot.png",
+                      "size":  8529,
+                      "sha256":  "324fbede23668708695138281e5747e575b537aac1559e633dd5095b65b9be23"
+                  },
+                  {
+                      "path":  "profiles/00112_膝丸_head.png",
+                      "size":  6455,
+                      "sha256":  "84506849f208b0e1b80c2aaa0d8e9d183586fba641c592093f448f1be16790c9"
+                  },
+                  {
+                      "path":  "profiles/00116_大倶利伽羅_foot.png",
+                      "size":  9791,
+                      "sha256":  "fce2e46c84318cee5bdf06c9d2001376f3322303a51895a60c7526d3bd1b6871"
+                  },
+                  {
+                      "path":  "profiles/00116_大倶利伽羅_head.png",
+                      "size":  9212,
+                      "sha256":  "4ead7efcde01cfdd6281af130a71657a1041d8a9010508d68f2929f3198d054c"
+                  },
+                  {
+                      "path":  "profiles/00126_抜丸_head.png",
+                      "size":  10238,
+                      "sha256":  "33c8dbd7f3dacdc175dfc6be665766b8e22113e9b33274b8de7d58ee92757c96"
+                  },
+                  {
+                      "path":  "profiles/00128_同田貫正国_foot.png",
+                      "size":  10927,
+                      "sha256":  "6276f08fba1e6e0edbde82366ce03925ad60d4ebe5a6b01c7f3e48b4273a3526"
+                  },
+                  {
+                      "path":  "profiles/00128_同田貫正国_head.png",
+                      "size":  8660,
+                      "sha256":  "f58b5549961e456a5b705c76d365e59be77be4c071e386ae967a1602166d93a0"
+                  },
+                  {
+                      "path":  "profiles/00124_小烏丸_head.png",
+                      "size":  22686,
+                      "sha256":  "9b06bb05c0bb81867a842c130a4d2f7381a42b2c4429a778c6a0d0317140a1e3"
+                  },
+                  {
+                      "path":  "profiles/00122_獅子王_foot.png",
+                      "size":  11168,
+                      "sha256":  "81b7635f02a21655ea3d24571093528c18a1b05d3732aad3d31d52e236324d77"
+                  },
+                  {
+                      "path":  "profiles/00122_獅子王_head.png",
+                      "size":  4316,
+                      "sha256":  "e38ea44e4d3b8be184f2494558bc1e40161086a8dd7948304d07e8e783e84394"
+                  },
+                  {
+                      "path":  "profiles/00124_小烏丸_foot.png",
+                      "size":  14156,
+                      "sha256":  "9071ce1e780fe00024cc1fada178986be8e35c5130d87e66151f75aeb0c6102e"
+                  },
+                  {
+                      "path":  "profiles/00099_堀川国広_head.png",
+                      "size":  7427,
+                      "sha256":  "ab1ccbbd5daaada5760c5c7a31cc263c66d5729be45f810d9abf8c55663e9645"
+                  },
+                  {
+                      "path":  "profiles/00101_蜂須賀虎徹_foot.png",
+                      "size":  8478,
+                      "sha256":  "bdaf6b7ea99267421755678f8e0175803ddb5db56f6e4e9d4ba036e6f690223d"
+                  },
+                  {
+                      "path":  "profiles/00101_蜂須賀虎徹_head.png",
+                      "size":  4742,
+                      "sha256":  "bd5bb30dd66d4d4234ee3063ddb6f8ef1b39cc1d77af8705d39b78d33e368c46"
+                  },
+                  {
+                      "path":  "profiles/00099_堀川国広_foot.png",
+                      "size":  7479,
+                      "sha256":  "cdaa34bce613ec4f2cd1259b073431e2a5e0597a98f706d0595fb6a127257493"
+                  },
+                  {
+                      "path":  "profiles/00095_山姥切国広_head.png",
+                      "size":  5635,
+                      "sha256":  "cdd7f08aac0c28c680d5f3be8e20c8c900faac6ebb60615fd639306de5be18e4"
+                  },
+                  {
+                      "path":  "profiles/00097_山伏国広_foot.png",
+                      "size":  8864,
+                      "sha256":  "4ae61d43ca907235df9f7f2ab888c3ba03966d620df06e7803854979e90b47bb"
+                  },
+                  {
+                      "path":  "profiles/00097_山伏国広_head.png",
+                      "size":  5358,
+                      "sha256":  "fdff94f3e823299b9e56d476f20a6672a5bf038c171a716a37dde59cc5e54366"
+                  },
+                  {
+                      "path":  "profiles/00107_髭切_foot.png",
+                      "size":  6023,
+                      "sha256":  "e6b502b08a4b4b51e138b0f05d9d924020668596d72454ad6a2bb25faa9c035f"
+                  },
+                  {
+                      "path":  "profiles/00107_髭切_head.png",
+                      "size":  6280,
+                      "sha256":  "4c01fd10987fface3aebc235de85d131faafd250a4e0757e0932df0be9ef9955"
+                  },
+                  {
+                      "path":  "profiles/00112_膝丸_foot.png",
+                      "size":  6082,
+                      "sha256":  "5975007b0268a8f22e2c47393778caca7dea6be446d98be52a407455723c2131"
+                  },
+                  {
+                      "path":  "profiles/00105_長曽祢虎徹_head.png",
+                      "size":  7647,
+                      "sha256":  "0ceaf3425dedca494e73ed350189e38c4750422b7c3ad016a81c9f429e4d33a8"
+                  },
+                  {
+                      "path":  "profiles/00103_浦島虎徹_foot.png",
+                      "size":  8744,
+                      "sha256":  "138b4c9951be4eb0817f5a5817d546f48605d626c25794fb4a7f2c6633602eed"
+                  },
+                  {
+                      "path":  "profiles/00103_浦島虎徹_head.png",
+                      "size":  8822,
+                      "sha256":  "e4b0b56d73d335767b0d7514e60044dc48d6b6445bba5aab14cbefbbefd91dd0"
+                  },
+                  {
+                      "path":  "profiles/00105_長曽祢虎徹_foot.png",
+                      "size":  10029,
+                      "sha256":  "ceeb08d2cd1463c05f788fd077f6364edaad2efc5aba7c6599bd70077d03eb89"
+                  },
+                  {
+                      "path":  "profiles/00130_鶴丸国永_foot.png",
+                      "size":  7414,
+                      "sha256":  "6e20c70e067bb38da6347d7320d50800f89fe32d81fbc6eca067864373622e0f"
+                  },
+                  {
+                      "path":  "profiles/00148_小豆長光_head.png",
+                      "size":  6330,
+                      "sha256":  "eeb94ad646644d6c7b4b85ac2c1d0c6f26c250f0a2dbda3354b0d5c7d19fc07b"
+                  },
+                  {
+                      "path":  "profiles/00150_日向正宗_foot.png",
+                      "size":  7635,
+                      "sha256":  "726abb3930c1ff4ed192e99e8ebbb90d43f787e10168909aa91dfb83489dcbcd"
+                  },
+                  {
+                      "path":  "profiles/00150_日向正宗_head.png",
+                      "size":  6787,
+                      "sha256":  "47ba6302bf1c804f755b8d0061e4067a80aa330f12c208c31f642e93496ce82e"
+                  },
+                  {
+                      "path":  "profiles/00148_小豆長光_foot.png",
+                      "size":  8363,
+                      "sha256":  "bcf6abb6a58af6d76683f1c7cfdb59512133e623ae4a840b69c210985e804efd"
+                  },
+                  {
+                      "path":  "profiles/00144_篭手切江_head.png",
+                      "size":  8355,
+                      "sha256":  "70a2d25fb5e5e4484dbfa40a8515e2dd39276912c37f0c9cd62da37e275fe407"
+                  },
+                  {
+                      "path":  "profiles/00146_謙信景光_foot.png",
+                      "size":  7987,
+                      "sha256":  "05fab07f89672d83078bcd0e8987c77dc541a594c0234916823d7d5c2b807ef4"
+                  },
+                  {
+                      "path":  "profiles/00146_謙信景光_head.png",
+                      "size":  6182,
+                      "sha256":  "4d9a5bf491090ffcef33e59838f443e943d0213882cd0ed92ca24a5716b30141"
+                  },
+                  {
+                      "path":  "profiles/00156_千代金丸_foot.png",
+                      "size":  8747,
+                      "sha256":  "625f20cedbef0fe2366b9060c12bba0f9b0c46d6973d3de4ec2eb6f86d56a32b"
+                  },
+                  {
+                      "path":  "profiles/00156_千代金丸_head.png",
+                      "size":  8221,
+                      "sha256":  "106127501b3df85fc765431271a2ab1d60f13eddaf0a13be95025aba5758fbc6"
+                  },
+                  {
+                      "path":  "profiles/00158_山姥切長義_foot.png",
+                      "size":  10064,
+                      "sha256":  "4cc4a3518c9795fca09a47004bd1a71ceee093d0af934a10cadf90296b78db6f"
+                  },
+                  {
+                      "path":  "profiles/00154_南泉一文字_head.png",
+                      "size":  10037,
+                      "sha256":  "306b88252e6235182fe8e58783e53e4d79dfa08d38f44d704531552680c27b62"
+                  },
+                  {
+                      "path":  "profiles/00152_静形薙刀_foot.png",
+                      "size":  8507,
+                      "sha256":  "66470b5a996c54361c28a50efae8a16e1b421eaf5a010c6a54d38cd2014e0fb3"
+                  },
+                  {
+                      "path":  "profiles/00152_静形薙刀_head.png",
+                      "size":  7171,
+                      "sha256":  "8b11d5a4ab137e608b4196442e433b070f9bd5c506e3c244b437f3ead1c607ef"
+                  },
+                  {
+                      "path":  "profiles/00154_南泉一文字_foot.png",
+                      "size":  9701,
+                      "sha256":  "f88b01c7e072a210044562e1b240b2a84417c9eda13c2e1306ca65c72a69ac71"
+                  },
+                  {
+                      "path":  "profiles/00134_次郎太刀_head.png",
+                      "size":  11894,
+                      "sha256":  "bd378f15d787daa7275bab078fbe120cdafbd476eb153269ca022df6c4d42335"
+                  },
+                  {
+                      "path":  "profiles/00136_日本号_foot.png",
+                      "size":  8200,
+                      "sha256":  "ce0e9028b88f4ebeace780a2ac278c5492563194d561cc45ad582594d5881534"
+                  },
+                  {
+                      "path":  "profiles/00136_日本号_head.png",
+                      "size":  10838,
+                      "sha256":  "6eff21fb017d2c8bf8e40019e4743536c0f1cb926057760dda2a48fe92bc3cd7"
+                  },
+                  {
+                      "path":  "profiles/00134_次郎太刀_foot.png",
+                      "size":  9528,
+                      "sha256":  "251885354999f204625c64409d9d2f0852005c99e0cb28c79658f21927873a8c"
+                  },
+                  {
+                      "path":  "profiles/00130_鶴丸国永_head.png",
+                      "size":  7397,
+                      "sha256":  "4d7e07c6b96d701a7121ae0eed96804a65b2afe77e9c190a4b9789d5823a3746"
+                  },
+                  {
+                      "path":  "profiles/00132_太郎太刀_foot.png",
+                      "size":  8065,
+                      "sha256":  "506757a765d31131172d65a435e22df004f15c63f4dda3eea27230187109b86e"
+                  },
+                  {
+                      "path":  "profiles/00132_太郎太刀_head.png",
+                      "size":  7242,
+                      "sha256":  "1f615f725ca16175ef056711101a1fd69d4d223b797e1cfa05f75ea05921b2cb"
+                  },
+                  {
+                      "path":  "profiles/00142_毛利藤四郎_foot.png",
+                      "size":  8433,
+                      "sha256":  "a7e1c64ab0bf3b1c5e75df24e771f6c42540cd0695d76394d0f326265c72ef34"
+                  },
+                  {
+                      "path":  "profiles/00142_毛利藤四郎_head.png",
+                      "size":  8916,
+                      "sha256":  "367e6a24a4ddef08e2335117f4b0a36b1d60baad177e70a2360f4c68fc4cf6e2"
+                  },
+                  {
+                      "path":  "profiles/00144_篭手切江_foot.png",
+                      "size":  8600,
+                      "sha256":  "6a8ffdd5753d6caef00d10cb4ceaf15c3bffd7cc0768e2e6ea952cf91daaef27"
+                  },
+                  {
+                      "path":  "profiles/00140_巴形薙刀_head.png",
+                      "size":  8248,
+                      "sha256":  "332927ae36ab74a89741ed8daf33c50bccc31d3c15c71020154f2f95cc5c61c8"
+                  },
+                  {
+                      "path":  "profiles/00138_御手杵_foot.png",
+                      "size":  8223,
+                      "sha256":  "14527d6c903c8557eafab2fba12307bf90eec336a21eb0fe3610977eff4b3c61"
+                  },
+                  {
+                      "path":  "profiles/00138_御手杵_head.png",
+                      "size":  9129,
+                      "sha256":  "2cdc415c2bdd12847f4e601e3f7c941ff3a84b332ba90224ad712ae8287486d9"
+                  },
+                  {
+                      "path":  "profiles/00140_巴形薙刀_foot.png",
+                      "size":  9176,
+                      "sha256":  "3b0b5543361a833b750349d59a14913db25ac972d9a7dc9e5356b87af3ceafd8"
+                  },
+                  {
+                      "path":  "profiles/00220_実休光忠_foot.png",
+                      "size":  9400,
+                      "sha256":  "860208a86be3de01ad050b18d73be76ae95bedf9ba1d9af22d5207a582ad5608"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/koban.png",
+                      "size":  1457,
+                      "sha256":  "80b68891473dbe45abd8284477164d5c76b4356bdd740b1d2b7b34ebb61205af"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/koushu-gold.png",
+                      "size":  2256,
+                      "sha256":  "8526c4d58b39c2f61ece161ba60e3902bc725a19fc6dba786ffd50826fc1a7ce"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/leaderboardsComplex.png",
+                      "size":  1229,
+                      "sha256":  "65bc0107d9a0c6fd05db25c079eb3f0fac806f9e05c6c5c3691fdeb3effbe412"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/home.png",
+                      "size":  1143,
+                      "sha256":  "b7e8691dd291a3fb4ee426b79423f6c82ee967af1f6f1b9c7ef6f9e7c45cbfa9"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/forge.png",
+                      "size":  1176,
+                      "sha256":  "b8a53d7beb071cd91185e10c957fc4d8c312ab7d14cfd250c2cc08a25c9b983d"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/forward.png",
+                      "size":  1153,
+                      "sha256":  "cbaf4312c2043ebe627f8cefa759d9df96f021431d50770a6dec8a2d6a57e01a"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/gear.png",
+                      "size":  1512,
+                      "sha256":  "dc9430cc5489e1f3afdec2854ebc85c0dd40adb3101c3756914df970eea470b2"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/raid.png",
+                      "size":  1372,
+                      "sha256":  "d44092ac0e65d16747e7d542e2f1ecb38cc97e0d6f46c3290f82d62c4dffa99d"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/repair-tools-24.png",
+                      "size":  872,
+                      "sha256":  "6ab04453a1c0320a22655d4f7900ed9d9a75be2a078655d879659e68d62ede93"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/repair-tools.png",
+                      "size":  1520,
+                      "sha256":  "89d630d872c0ecfaafa90cd0b2d137d1f25d2c597a8ca968a973c34d57a5c72d"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/pumpkin.png",
+                      "size":  1733,
+                      "sha256":  "8d098dcbe9f2afe84c35a18b78c86138f3c5bafbd292a97e0738a897624d9428"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/LICENSE.txt",
+                      "size":  481,
+                      "sha256":  "68a86b3a620be3366d6dc28a4a8ffb8d5de12e0b86b5199c86e51fc617e29a49"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/menuList.png",
+                      "size":  1099,
+                      "sha256":  "a3c99d46610b50c9ecdc86fb40296dc339155e0861e62ff56388e8629d193f68"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/practice.png",
+                      "size":  1516,
+                      "sha256":  "27a5ab2967b19599bc098203cc52bfadf72b2c34e4a9aedb06c2b0798597ec74"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_04.png",
+                      "size":  49500,
+                      "sha256":  "958f429221384ffe0fff7fd4976d3d0f4e83e29b3b89e5311470a206b44d4daf"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_05.png",
+                      "size":  47987,
+                      "sha256":  "f656645a6be5108d80a78d204ebe0a622468d43dcae42a1f9272e1f1f91b39ad"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_06.png",
+                      "size":  50368,
+                      "sha256":  "114c8308fd978a93162407fc4af91c393a28c4e983e453a2fadf43207b7e3e00"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_03.png",
+                      "size":  50219,
+                      "sha256":  "57a46aa6031ce1eae2bdfc2105a53a53dce8c4d5f4dccbf1250b98d1eb1ed3ee"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_08.png",
+                      "size":  42092,
+                      "sha256":  "56b96b8f132fd08b5d882ec300be4bbf30df030eff1809e770b9b3a533673574"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_01.png",
+                      "size":  50582,
+                      "sha256":  "8e5b6c510934ebc5b3236c1fbd730c558d7d91a8c73a63cb6f9c1480581f132f"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_02.png",
+                      "size":  52918,
+                      "sha256":  "480c6aaa19e89b761f125c38fb07b06d723541f964ae675cfce71b3c17dfd94f"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/daily.png",
+                      "size":  1761,
+                      "sha256":  "adee89f2936caabbdb36fcbd8da01bdd6510b6e1b00e46034e373fc041aa177f"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/expedition.png",
+                      "size":  1897,
+                      "sha256":  "e23f3c6b7c820c57d9abae5c2cec9f30c273d5805f7fe0adb91493ed43d7a93b"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/film.png",
+                      "size":  1101,
+                      "sha256":  "72f150eaa4fd94b4f03a8754295214210e2f0f828a65cea89a89f8063224f0b7"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/contrast.png",
+                      "size":  1328,
+                      "sha256":  "5d8ace1275a4702bde50cd920078317e8b196cfbfdcde77225e29377f0cf9aa6"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_07.png",
+                      "size":  50477,
+                      "sha256":  "45fc58e9f84c579d04bca1ac519e22731fed723d82d088d9efbcea05980cf9cb"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/walk/transparent/frame_08.png",
+                      "size":  48923,
+                      "sha256":  "079add3a17b152a793e5a707536eb08137244a1e7e28c0e463c6b52dff7e5cae"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/checkmark.png",
+                      "size":  1255,
+                      "sha256":  "1a55af5b70226ce5fdd170ee716bbd4ace727a3edd0e3665f52b9e933b76f68b"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/request-token.png",
+                      "size":  1309,
+                      "sha256":  "8a0040a2b4d8d3c020a9eee74e8fe9ca6fd8453d364caf698844c5d32ecb34fe"
+                  },
+                  {
+                      "path":  "panel/static/js/sword-picker.js",
+                      "size":  5494,
+                      "sha256":  "1f6f998051df956e94c4f31ec1189491cb62f78eadef655d9688800e58c8fc35"
+                  },
+                  {
+                      "path":  "panel/static/js/system-qq.js",
+                      "size":  3119,
+                      "sha256":  "a8d5051186dead628692902e497d7554c839e64ac1999523d49ebae4d0a78127"
+                  },
+                  {
+                      "path":  "panel/static/js/system-settings.js",
+                      "size":  11514,
+                      "sha256":  "b08a0a17ba4764a2f0bfd9949b8e3711be84822eb168cbfb17efc2356b20d09b"
+                  },
+                  {
+                      "path":  "panel/static/js/param-form.js",
+                      "size":  7731,
+                      "sha256":  "82398ec3fe2d289cea14c9b205215c8e54215072d4903d74165df4dd8ced61f3"
+                  },
+                  {
+                      "path":  "panel/static/js/expedition-schedule.js",
+                      "size":  8874,
+                      "sha256":  "58eedeb1e18644f59d37fa0e761f212e399fdab7ec3dab0169341a880c95fe4d"
+                  },
+                  {
+                      "path":  "panel/static/js/list-editor.js",
+                      "size":  2475,
+                      "sha256":  "a79b37a8ce71c3a4b57d937505870dd417fe596f3222ba4be2c3a1637b862e2c"
+                  },
+                  {
+                      "path":  "panel/static/js/log-viewer.js",
+                      "size":  6667,
+                      "sha256":  "4cfd0303fba40533a6e446977196a4bc99dc0b23b2832857d20691ff64a02037"
+                  },
+                  {
+                      "path":  "touken_config.example.json",
+                      "size":  27003,
+                      "sha256":  "d403d84d4ae12a82337e28b75ada76f0790d654fb3a9983e982ca29ce79162c9"
+                  },
+                  {
+                      "path":  "panel/panel_config.example.json",
+                      "size":  485,
+                      "sha256":  "7292fe9f189a10f7cfff73a23d8413dcc1079e3ad2e87b87ace14d7daca21886"
+                  },
+                  {
+                      "path":  "panel/expedition_schedule.json",
+                      "size":  761,
+                      "sha256":  "e0fdcf599622d2b3bd3104a114b8933f08e05132b1fdb0270d6c1ae8a5d829c7"
+                  },
+                  {
+                      "path":  "panel/static/js/ui-feedback.js",
+                      "size":  1219,
+                      "sha256":  "bfe00b3bb97df46f6aae6d4bd43a9540cc6877f0c5f288dcc90f21c6c3f5dc81"
+                  },
+                  {
+                      "path":  "panel/static/js/task-card.js",
+                      "size":  6341,
+                      "sha256":  "b8606c17bed04da07d348e76c2db4cef9902c46add5897931bd773924fd61ec7"
+                  },
+                  {
+                      "path":  "panel/static/js/task-runner.js",
+                      "size":  3060,
+                      "sha256":  "98c2060336ef00c3736a108dc5fec7bb0177da910c9ecb3a5fd58afe8de7a7d3"
+                  },
+                  {
+                      "path":  "panel/static/js/theme-manager.js",
+                      "size":  1043,
+                      "sha256":  "9474cdfe0a2b7b22176351cd533bf1b512280affa555f14e154ae514e914c510"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/snapshot.png",
+                      "size":  1826,
+                      "sha256":  "f02ac13f27db4274710f3d548fb6a530ab10a6c3e2a0309db066db2cb389bf47"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/sortie.png",
+                      "size":  1351,
+                      "sha256":  "843762196da662b6e1d01c0b98962bf70b36cf6db8a1eb6dbc6f63d2c3d9673b"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/speed-token.png",
+                      "size":  1363,
+                      "sha256":  "32c0007d1bbd25f81cc0213c2f407446eed7510b92b7d2a252dd9dfac0d6f61b"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/singleplayer.png",
+                      "size":  1310,
+                      "sha256":  "dc75f161bd04a8610454a138b11942e685a7747a899c1774a56575bcf3f54cfb"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/return.png",
+                      "size":  1334,
+                      "sha256":  "f2a13ce0560553c9684fad174edf28636330696818c82c4ea69ff2357841c016"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/sakura.png",
+                      "size":  1719,
+                      "sha256":  "2038b0696d15f909ea775e901471621f71538c9b0c767f23491c42a937cc3181"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/scrollVertical.png",
+                      "size":  1207,
+                      "sha256":  "37136091ec50720d9959389e2e261d799970d55f3d836c08ce26d0e26626d3bd"
+                  },
+                  {
+                      "path":  "panel/static/js/chat.js",
+                      "size":  3966,
+                      "sha256":  "5934181fa61bd840c02f7846aac16a5f539a54835134e6eca402f72011401431"
+                  },
+                  {
+                      "path":  "panel/static/js/core.js",
+                      "size":  5392,
+                      "sha256":  "a27cfaa8355678f126aac7f5e1ceec01b37d164f553d1945d7798a5f40ad43f3"
+                  },
+                  {
+                      "path":  "panel/static/js/dashboard.js",
+                      "size":  10968,
+                      "sha256":  "22e54d0c981f466ba655eee09c6fc9906404caa2bf195b64e5bd4bec0a68daed"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/wrench.png",
+                      "size":  1312,
+                      "sha256":  "85da523c973425e3ca85fbe02a7e801cb583abd8a2bf9525f392a37f84e0e85e"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/stop.png",
+                      "size":  1048,
+                      "sha256":  "2a3ad25e8fa14ed5ce88ec5f4ccef5590f3061077e40fad0edf9e79f20926d7d"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/sugar.png",
+                      "size":  1851,
+                      "sha256":  "93a1c8b182da3d40b12dc8f97d039bb1be21b94390df5be9bff2486064bc7d97"
+                  },
+                  {
+                      "path":  "panel/static/img/ui/trashcan.png",
+                      "size":  1104,
+                      "sha256":  "df52b058be0a2d501b13ee52b02bba14ecc6a49e8ba86656921b31d7ce8517a4"
+                  },
+                  {
+                      "path":  "profiles/00250_安宅切_head.png",
+                      "size":  9141,
+                      "sha256":  "498b3202323cc21f88f14a48009b47efd48ff8cbcb5de1f7780c787391602514"
+                  },
+                  {
+                      "path":  "profiles/00252_二筋樋貞宗_head.png",
+                      "size":  9002,
+                      "sha256":  "b455d1b7af88ae80d6b4b29523ca6b1ccfdef4a0f4406ea8f30489e862ffcb0a"
+                  },
+                  {
+                      "path":  "profiles/00254_雲重_foot.png",
+                      "size":  8097,
+                      "sha256":  "51635f475c3f7fa4ecfb89b11d1d3f1fd111fc8868bcc537314c6e4bb2609ad8"
+                  },
+                  {
+                      "path":  "profiles/00248_三郎国宗_head.png",
+                      "size":  9242,
+                      "sha256":  "160049f4c4e3e8d142bf2d4fe7b4384df77534ecc6dec89d5d1784adacc26f56"
+                  },
+                  {
+                      "path":  "profiles/00242_面影_head.png",
+                      "size":  8889,
+                      "sha256":  "3e9a846a38e48c04fe4f0e46445f9a814a89fbe21b333345fb182867d410c2f1"
+                  },
+                  {
+                      "path":  "profiles/00244_古備前信房_head.png",
+                      "size":  8756,
+                      "sha256":  "bf1320b2df192302f39acec4071c02400476e53a53638dde76da5b74abefa5e7"
+                  },
+                  {
+                      "path":  "profiles/00246_倶利伽羅江_head.png",
+                      "size":  7101,
+                      "sha256":  "8477a29253939aaf011c6216e7f3b3e2bff317eea2c6d7ded65862dce0747b2f"
+                  },
+                  {
+                      "path":  "panel/static/style.css",
+                      "size":  78861,
+                      "sha256":  "ee62943dafdf457e4ed51576acf01228ae695363b752d2e51f80682535424bdc"
+                  },
+                  {
+                      "path":  "panel/static/fonts/fusion-pixel-12px-proportional-ja.ttf.woff2",
+                      "size":  926616,
+                      "sha256":  "d7c04903cee87a8ff5b60e7cbb47beb6b0efdaa40e5fbbe7f2f56d4adb09f94b"
+                  },
+                  {
+                      "path":  "panel/static/fonts/fusion-pixel-12px-proportional-zh_hans.ttf.woff2",
+                      "size":  917432,
+                      "sha256":  "87886f3c93cc4528575f1c58f67fd8a94c9483a3e466006a97c6ddc63086d25b"
+                  },
+                  {
+                      "path":  "panel/static/index.html",
+                      "size":  12867,
+                      "sha256":  "c6ffdd78e2cfb4c15d0f4a1d6ff98a18cd48840938e9d5e08ac798cc030ae2ac"
+                  },
+                  {
+                      "path":  "profiles/00254_雲重_head.png",
+                      "size":  8392,
+                      "sha256":  "a2c9d1afb51e8dd413d084a87458ee0b3304b7a3b787a6a9e08004bdc6e6f200"
+                  },
+                  {
+                      "path":  "profiles/00900_童子切安綱_head.png",
+                      "size":  7888,
+                      "sha256":  "9d3977465816079e75bfd36a503391e9a78792eb49b400f366bbbc1d1d82cfb7"
+                  },
+                  {
+                      "path":  "panel/static/app.js",
+                      "size":  20907,
+                      "sha256":  "0e97c1dc1650437eae6beca0eb57a2e098d5d3667a56b53e1c6adbaa3ac33c89"
+                  },
+                  {
+                      "path":  "profiles/00228_火車切_head.png",
+                      "size":  8910,
+                      "sha256":  "9c688f6a22679210d66cab7e2c7c99706c4869adce87f634c3796ff87ca023d5"
+                  },
+                  {
+                      "path":  "profiles/00230_富田江_head.png",
+                      "size":  8108,
+                      "sha256":  "2a685168b04032f443a86a741099c58cb3b7b389ae26cfe10763a71963a088b5"
+                  },
+                  {
+                      "path":  "profiles/00232_大慶直胤_head.png",
+                      "size":  7270,
+                      "sha256":  "07b4ebe9845dedd0590abcf228c4aed75032af1b2f5aff07839e97666327703f"
+                  },
+                  {
+                      "path":  "profiles/00226_後家兼光_head.png",
+                      "size":  11223,
+                      "sha256":  "dce3adde6a4250cb9a09b5982a5359c0de000a7c242b12a5d0ceb8dfdb4a0962"
+                  },
+                  {
+                      "path":  "profiles/00220_実休光忠_head.png",
+                      "size":  8784,
+                      "sha256":  "bed2ae0f1b56a0302d27847cd6438cf0dc42a0616ef24d300e552bc4f9285544"
+                  },
+                  {
+                      "path":  "profiles/00222_京極正宗_head.png",
+                      "size":  12093,
+                      "sha256":  "53d0d41db4ff59610cd07ac8f91a4d6363997b954c32ecce2fb7e490cb5b6be3"
+                  },
+                  {
+                      "path":  "profiles/00224_孫六兼元_head.png",
+                      "size":  9088,
+                      "sha256":  "c5a4b0f58b4e7ebb43743335e1af0eedb7bfc6cce0eda19b264c3f0e2f32555b"
+                  },
+                  {
+                      "path":  "profiles/00240_雲次_foot.png",
+                      "size":  7256,
+                      "sha256":  "dc488ec7b03775848541b5386398fd6f92f74b54e6f0e13c1ce681dddf4f9321"
+                  },
+                  {
+                      "path":  "profiles/00240_雲次_head.png",
+                      "size":  11009,
+                      "sha256":  "699f1d0b4b4ab1331de62b0af6f4558782d1b7494a51857aa9f49c308f5f41fe"
+                  },
+                  {
+                      "path":  "profiles/00242_面影_foot.png",
+                      "size":  10233,
+                      "sha256":  "635106a1e9603867ecf44645b713d9d3f8ab97663db37dfdbc7f789741ae0bdf"
+                  },
+                  {
+                      "path":  "profiles/00238_道誉一文字_head.png",
+                      "size":  13294,
+                      "sha256":  "469d718b8a8f6def486ee07a48dc729bbe72720de7d13f0d87284abcebaf02d4"
+                  },
+                  {
+                      "path":  "profiles/00234_九鬼正宗_head.png",
+                      "size":  11368,
+                      "sha256":  "078b3b99bd42e17eb462028cf911b5ac6c03b8bd87c649ce8a2c027adab490b2"
+                  },
+                  {
+                      "path":  "profiles/00236_雲生_foot.png",
+                      "size":  5929,
+                      "sha256":  "41e0058955d95050b69e721f8eedc4664f43c82214d081d96900b999a1291ffe"
+                  },
+                  {
+                      "path":  "profiles/00236_雲生_head.png",
+                      "size":  8429,
+                      "sha256":  "4963d78591e180f900b4211922326f91bbd97870b9d5567847cd21f007f1ccb8"
+                  },
+                  {
+                      "path":  "panel/static/fonts/LICENSE.txt",
+                      "size":  4360,
+                      "sha256":  "86a3ee9495f942f0243f18c103da9faca27adb88142613edb8bb852e56c892c1"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_04.png",
+                      "size":  99406,
+                      "sha256":  "baddcffdc8cfacbea4783905e64b9263adb5333f4560ae117155382a945f265f"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_05.png",
+                      "size":  98488,
+                      "sha256":  "d5f80499b34c7fca15aca1832b9c94a1b03fed4ad46e82076f2ef06ea301f749"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_06.png",
+                      "size":  97716,
+                      "sha256":  "6bd68056bfb7e80a5d492d28e3b304293400bcd60533d45747c32c9585f8a78a"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_03.png",
+                      "size":  93302,
+                      "sha256":  "4667ea4979e191a426abad75a6c1f4ae84f5dc01fb08e7d8ed51cbb19a39cad7"
+                  },
+                  {
+                      "path":  "panel/static/img/honmaru_sortie_stage.png",
+                      "size":  2706555,
+                      "sha256":  "dab2fb58eb42add23265a17be1e000b6771f03524d51edbca852dbbc91fd59c1"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_01.png",
+                      "size":  98302,
+                      "sha256":  "58c4cf12e028ade7a73e45a7f9fd08868f39b2b5f7c6276a6c3e0bae778a02af"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/idle/transparent/frame_02.png",
+                      "size":  101351,
+                      "sha256":  "7940638c5003323e4001eebe2cd93feb65759be9eb36ddc87f19183ce602e06b"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_05.png",
+                      "size":  38414,
+                      "sha256":  "5f0ead12a94dd5ca3ed7e9bd9c7cae6d51bc7e20f24543046825d098be161b96"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_06.png",
+                      "size":  41586,
+                      "sha256":  "161078f587c91cab358e70489b9c8c40ec32dc191da625d16dfe1abec343d4fd"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_07.png",
+                      "size":  46038,
+                      "sha256":  "34397f2c3db8bedea6c6d3da514efaa8ba26fbe398f7b9ddd31e2d8117f94843"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_04.png",
+                      "size":  28484,
+                      "sha256":  "83a00f204dcd8099dd6679522a647a3b0fafaddd5532b3833654c546a06d9719"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_01.png",
+                      "size":  40240,
+                      "sha256":  "c46964d1311d9bab3ca1dbcea56df28af7b0722b2121e6fa79faa0fd7980051c"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_02.png",
+                      "size":  37768,
+                      "sha256":  "bceb371696b3f1c152c0dcb884fc41e56fead18d31644877d190e0d2e0e2bf5b"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_frames/v2/run/transparent/frame_03.png",
+                      "size":  31951,
+                      "sha256":  "80195b0adde2d7854e8ce3b11e7594be9f3cbba24d094ab97fcb1c651a9d6bdb"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_body_run.png",
+                      "size":  282762,
+                      "sha256":  "fb543df7f8e6001ca3379ab3c6764f34eb09a3c97277fe334791f8e831258b41"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_body_walk.png",
+                      "size":  284734,
+                      "sha256":  "f4feb1ed23fa08f8cef1933c4ff04f1d5db4d9492efca9f234bcac574e63186a"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_character_turnaround.png",
+                      "size":  1035081,
+                      "sha256":  "b8906f4c87220b8cf775d8633d0461be8af057a5aa64b840521ce4d4423f159a"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_body_idle.png",
+                      "size":  524261,
+                      "sha256":  "1a67785434b9f313b872257933b4b93aea17ff7ff126bb9422632173a15a1fc4"
+                  },
+                  {
+                      "path":  "panel/static/fonts/OFL.txt",
+                      "size":  5364,
+                      "sha256":  "2b6e5938e5cffa0b9e183bd05f8c363e174e7ebed1a0556e2855fd1707fa2188"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_actions.png",
+                      "size":  1020689,
+                      "sha256":  "940e34d5f27d571707d25a49169ea84349d935844b2694cdbe201d97ed0d1abc"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_base_turnaround.png",
+                      "size":  396701,
+                      "sha256":  "0fcfe4607ccaf31f0dfdfa24712f089ee9d91b26d337e0c61fd09fab6f34365f"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_run_2_alpha.png",
+                      "size":  2796,
+                      "sha256":  "e549030cd886a3f1b8da11970069aee3965bd872b6f0150372ebefc53d4a7e0e"
+                  },
+                  {
+                      "path":  "panel/static/img/honmaru_forge_stage.png",
+                      "size":  2108190,
+                      "sha256":  "1f2e7faa7a8e94dbb1e26dfbd2ae595fcf42af3a12a39c4c19483c8219e7d9b7"
+                  },
+                  {
+                      "path":  "panel/static/img/honmaru_garden_stage.png",
+                      "size":  2304213,
+                      "sha256":  "86fe49b69f4732dd72e0e4a4c6d18f42b9bd507bac28e8e56de2a09e66cfab6f"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_run_2.PNG",
+                      "size":  4213,
+                      "sha256":  "7191f9a57a9ce2d4600fe6570815d7f1ec8a2d15ffa0b568ee6d873eb705011e"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_read_scroll.png",
+                      "size":  611730,
+                      "sha256":  "3cc313c6f9b3ca9af0f28c19f10bc4b91954db3e7c9842cbb24d2507cd05e5e8"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_run_1.PNG",
+                      "size":  4389,
+                      "sha256":  "eddc02e759de4f415ef7dfd119b5130eb8d721e0c1dd0cef7c711b9333c62e4e"
+                  },
+                  {
+                      "path":  "panel/static/img/fox_run_1_alpha.png",
+                      "size":  2821,
+                      "sha256":  "1a507335732c72863f42cd374574fb7c217d1324b6ed856cfbcd94d3af2ccab8"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_景趣.png",
+                      "size":  7367,
+                      "sha256":  "dd9493b18eb986de224e998be225fd416fe6a90cb47e0fd82426015067e99759"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_本丸.png",
+                      "size":  10154,
+                      "sha256":  "f0f97616264a7a7e0b2b6a3be7d8badb5ad2e5510f89ab0f97b278bb947a9dee"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_演练.png",
+                      "size":  11002,
+                      "sha256":  "c214ca393964a5744e1557c001f43b4400fbb75c5e93b4a197f335574927b132"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_收件箱.png",
+                      "size":  4148,
+                      "sha256":  "27da8291fec3d86bb5a7062b66e710cc6205cd4cdab85cda80fe380614c4a40e"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_刀装.png",
+                      "size":  10287,
+                      "sha256":  "34dfa1d66acfe6ba340335fe5a860f9fba68a0d1c9da980739e08a7bf9badea3"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_强化.png",
+                      "size":  9127,
+                      "sha256":  "7cbcf8549849be93487ac54662caa3de3c5e320ce701bbe354156474361bb11f"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_所持道具.png",
+                      "size":  5344,
+                      "sha256":  "95aa81d019e4f79cf2ac8a97eb297943e34b13f169dda8b9be9d6bb86ca5df20"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/角标目录_任务.png",
+                      "size":  6061,
+                      "sha256":  "6fbb7eb1b6770411209a833cdb998e5f42212c778620077e6f7dd60d4891a75b"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/角标目录_公告.png",
+                      "size":  7303,
+                      "sha256":  "8100820e08ea67697629e67e585b96fef2a1cf6d8b1c3a13b0a6321de6571271"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/角标目录_内番.png",
+                      "size":  11157,
+                      "sha256":  "5be69c89867586962e5405223c376fd270c34d01c0760313d81a6075eea76a14"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_锻刀.png",
+                      "size":  8792,
+                      "sha256":  "bf5a9a3455dc434e659689291c5c975939b446709243b81b5daad40c2621f789"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_组织.png",
+                      "size":  8679,
+                      "sha256":  "c2d88b8c2b452c559de20ea5378fde97d816e54b9bad96d56df578759b0eecf8"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_编队.png",
+                      "size":  3157,
+                      "sha256":  "6b533df618dd3b03979b069d05862469984cab04c1f4edc55a07e178a5bd8cc1"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_远征.png",
+                      "size":  8196,
+                      "sha256":  "e47e0a160960110e02aa4058cba507eb00d8043c0ad5433ce9187c775e53f3a7"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/阵形选择手动.png",
+                      "size":  7267,
+                      "sha256":  "f300fcfd9382dd3092c42bbbe773a6b8554765ae3fbe9ad73883bc569d49650f"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/阵形选择自动.png",
+                      "size":  7306,
+                      "sha256":  "ddac3d5d363997337b90082bf0c0b33f15f498b8fc50ea45476d0a06651a7b7f"
+                  },
+                  {
+                      "path":  "resource/base/image/lulian/ui陆联.png",
+                      "size":  34917,
+                      "sha256":  "9ef863c7f15df05c9cdc049c0189bf08488138c5f07457e2d963752b121c5770"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/部队恢复.png",
+                      "size":  10438,
+                      "sha256":  "f14293f3b4ab8ddd3ed206e983a1335aa5d675dc1f7d69aea4cea509a2bf72db"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/行军.png",
+                      "size":  12878,
+                      "sha256":  "31618c9aad1d8be42e26c3b3b9e34fce321f51de2dc1721a56b35ea8a6f365e6"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/轻伤.png",
+                      "size":  4914,
+                      "sha256":  "ac205a725c5723bbb69c86c8666e75a9e6af08820c1e7478129655e7cd8dd687"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/返回本丸.png",
+                      "size":  11263,
+                      "sha256":  "471f5a73518821bcbf8767068177226e20d862f82228b129059a193f9461ecfb"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_公告.png",
+                      "size":  3390,
+                      "sha256":  "5b196c432d49b9e776edfc93cb614795f506493a54f4b861fe6282dd63424242"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_内番.png",
+                      "size":  9919,
+                      "sha256":  "e0b55600733ab5943c59b8962ca68bb99936a579af421782475f31fe5893c069"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_出阵.png",
+                      "size":  8390,
+                      "sha256":  "321752961aa06f6b26e383e5bc1c6c00b1083ce42b2be18de85139f4dff5b130"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_修复.png",
+                      "size":  8632,
+                      "sha256":  "f9c30de44a8e81ef254e8ef8aac6db42e7f1058edf71ebdef19afa53abf3f75a"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/ui目录.png",
+                      "size":  3671,
+                      "sha256":  "6cb90127e010a445ba3a06ce5c6db91e00042942bfbd399de42e648679cd3dcc"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_万屋.png",
+                      "size":  5141,
+                      "sha256":  "93ecf56c350c1c65d4bea8647ca5e0f5b8b9e2f22dec1225ff539140d7246263"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/目录_任务.png",
+                      "size":  2999,
+                      "sha256":  "e558e693f0b4a425f9037ec588d7593f7defedb408b7fa10d073e56d28c5a17f"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/角标目录_收件箱.png",
+                      "size":  8035,
+                      "sha256":  "349878947c6ea20c9615ecaaf5a23b4339c540297f6e30b1f85a66bdd1171cc5"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花大太刀.png",
+                      "size":  6195,
+                      "sha256":  "da5d070326cfcf1c72b13db5d87fb3f3f24d7b97ab906f2ef04bb0a10cd074a2"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花太刀.png",
+                      "size":  5043,
+                      "sha256":  "a962aa39682e92866b53b5ac889e25ace38656420c45568711e9aa6b090f3cd5"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花打刀.png",
+                      "size":  6267,
+                      "sha256":  "0b1944643f74dfffb1ba3072ec726917ed7ed4f1259419d4aaf456d7847cb6f5"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/一花短刀.png",
+                      "size":  4157,
+                      "sha256":  "ceb60f807dec4facb22be521d4c7fbd1d814a61cdd4ff3e196a8b5c5deffcc6b"
+                  },
+                  {
+                      "path":  "resource/base/image/team/进行记录.png",
+                      "size":  5727,
+                      "sha256":  "148b26072d73ff65f9464cf4ab837cf5787298790e8ea99a791a2dc5a301142a"
+                  },
+                  {
+                      "path":  "resource/base/image/team/部队记录.png",
+                      "size":  5581,
+                      "sha256":  "75a2941948c1c0121efae37789c3acd78cfc99861c0fdee52177f8948fd3981d"
+                  },
+                  {
+                      "path":  "resource/base/image/team/部队选择.png",
+                      "size":  5742,
+                      "sha256":  "a844dd85240838db42eeb73734f024a5fbf4d3dc8158f30fd9ea56f602760a48"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/二花短刀.png",
+                      "size":  4811,
+                      "sha256":  "1e32e2e913fa1f9dee13330d68015acf2e0cc6db857cbcf34f51fcf1c1b09289"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/二花胁差.png",
+                      "size":  4971,
+                      "sha256":  "84c12fc9f50284de7e1158e00193fd6e92bed127cbf98fbfd4c24aac5dc7c5a9"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/五花剑.png",
+                      "size":  7130,
+                      "sha256":  "efe9534df7775ef8eb4f8ab378420be0c1d9c16735c96c2346b377b093e4b9fa"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/二花打刀.png",
+                      "size":  5067,
+                      "sha256":  "e600f6f6aa794daa850b6f1de0576de483f37447da201da618f53798ab117224"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花枪.png",
+                      "size":  5342,
+                      "sha256":  "dfb386a9a87c33a8db9111c33f12a3d6e59764ec284f282427fc34a29567285d"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花胁差.png",
+                      "size":  6085,
+                      "sha256":  "1163f22f353f1d0d20ab10d3e9210e20ea52a320ae74ed626b2bfd1e607a752c"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/三花薙刀.png",
+                      "size":  9160,
+                      "sha256":  "7e21be9f44f2c57c3a0b2222a3095785aa02fa0d70804f646c72adb31e58a041"
+                  },
+                  {
+                      "path":  "resource/base/image/team/使用记录.png",
+                      "size":  5237,
+                      "sha256":  "1333f547460a88640bd6e024459605ce640b1acd35fbc646ba21562f794fd285"
+                  },
+                  {
+                      "path":  "resource/base/image/team/关闭.png",
+                      "size":  3190,
+                      "sha256":  "cad75f503d1fdebbc02538fc04f2db3ad1d1c885fe531332f8d3f3517e19457f"
+                  },
+                  {
+                      "path":  "resource/base/image/team/即刻出阵.png",
+                      "size":  8835,
+                      "sha256":  "debdbbb56b1a9a7c9515539bc210914923f5eb5f818a0a362c5265cce540446c"
+                  },
+                  {
+                      "path":  "resource/base/image/team/ui道具勾选.png",
+                      "size":  1234,
+                      "sha256":  "2813e0025808d4117e70fa5fc115f67fe9d8c4945bee128931401336336b9a08"
+                  },
+                  {
+                      "path":  "resource/base/image/menu/角标目录_演练.png",
+                      "size":  15394,
+                      "sha256":  "9d79d4229e8647f0be18d95e200b59b0a4d7df2a391aa610d03e2b7fae077c26"
+                  },
+                  {
+                      "path":  "resource/base/image/team/ui出阵确认.png",
+                      "size":  5868,
+                      "sha256":  "3c220c02c1a31b2eefdeaee6443d0ea8b3985ffcdf6ecbae9d019564ffd37b3e"
+                  },
+                  {
+                      "path":  "resource/base/image/team/ui委托中.png",
+                      "size":  2371,
+                      "sha256":  "9b3167508ba59d21b19096e0ae38ae5ce5ab3ed779ce143d2a56cd9b4c25cee6"
+                  },
+                  {
+                      "path":  "resource/base/image/team/继续出阵.png",
+                      "size":  6572,
+                      "sha256":  "45b962d0c8ed34ccfa07fb6d6cb0bfe91094f86ac5791b45f594dc9e00330c53"
+                  },
+                  {
+                      "path":  "resource/base/image/team/自动行军.png",
+                      "size":  4938,
+                      "sha256":  "f7459ac7dad6cb74fec8b20e634d0bfc82cbc53f20e339895f9e85f3daf6078b"
+                  },
+                  {
+                      "path":  "resource/base/image/team/补充.png",
+                      "size":  3922,
+                      "sha256":  "710ee09509fa34a96366f616847e06b6fe5d3cbd6208e26fecfb6ef303e92641"
+                  },
+                  {
+                      "path":  "resource/base/image/team/是.png",
+                      "size":  2364,
+                      "sha256":  "947c1eac3ea6a0e24760887e796b0f5391d2aab5f1a0faa2ea0ce4ca5e3500cc"
+                  },
+                  {
+                      "path":  "resource/base/image/team/委托.png",
+                      "size":  3990,
+                      "sha256":  "11194d4bcffa398031f912282cee59a5151f53297ddc8e0c11ef022ea7500d1f"
+                  },
+                  {
+                      "path":  "resource/base/image/team/恢复一个.png",
+                      "size":  4816,
+                      "sha256":  "dde24339984c0c1a5c140ead5bc28d5ee1635ef5a8d7f1aa79be766374db3bfe"
+                  },
+                  {
+                      "path":  "resource/base/image/team/整备刀装.png",
+                      "size":  4913,
+                      "sha256":  "0e5375df01a8f7bbc4877131d78bcec085dfdbdbaec7d188fcd32bc174e6d108"
+                  },
+                  {
+                      "path":  "resource/base/image/习合开始.png",
+                      "size":  4415,
+                      "sha256":  "5f2f1f3e80ba05061515ceb68e9bb3c92040368dc749993a762f83a5ff28373e"
+                  },
+                  {
+                      "path":  "resource/base/image/今日不再弹出.png",
+                      "size":  7726,
+                      "sha256":  "61d75bfca01772c984f2791368174ed6b9324e4b435f2e31225e9a3d9f40d90b"
+                  },
+                  {
+                      "path":  "resource/base/image/修复开始.png",
+                      "size":  8020,
+                      "sha256":  "c0686a0b7f6196c77bb217a8eef347fe574743cfd3ddb8482618c985592c747c"
+                  },
+                  {
+                      "path":  "resource/base/image/习合.png",
+                      "size":  2986,
+                      "sha256":  "9f73991c1115e687a2f03ae1fc87924a63105e87881f0e814676ca479127a663"
+                  },
+                  {
+                      "path":  "resource/base/image/ui锻刀.png",
+                      "size":  11767,
+                      "sha256":  "99f63cd3bf11c1ca58835dc6403694d48aea20e1a8b39a88dfae46c6907bb7e5"
+                  },
+                  {
+                      "path":  "resource/base/image/一键选择.png",
+                      "size":  3810,
+                      "sha256":  "599ff8b0027a9663d7dc5421d7626b0e4705081bf8370020e8fd6f6563e88f7d"
+                  },
+                  {
+                      "path":  "resource/base/image/一键领取.png",
+                      "size":  8648,
+                      "sha256":  "76e036e45b83638baf7c5183b3788e1d790696666f33233238141362e1a4f4d4"
+                  },
+                  {
+                      "path":  "resource/base/image/刀解.png",
+                      "size":  3285,
+                      "sha256":  "64dd5a47b161eacf4d57b7ae4d7e3f7d80a974cdc8b6601b4eb201a57eafda72"
+                  },
+                  {
+                      "path":  "resource/base/image/刀解开始.png",
+                      "size":  4757,
+                      "sha256":  "37e9b1c58d5390885234aad98d70a26c57e808a729ef142a5ecfc129d04a490f"
+                  },
+                  {
+                      "path":  "resource/base/image/加载.png",
+                      "size":  3354,
+                      "sha256":  "a92dcd1825f4e7896be4a9bed96fdce696a789358f5ac9d4952ac0186b0f3374"
+                  },
+                  {
+                      "path":  "resource/base/image/刀剑乱舞.png",
+                      "size":  8442,
+                      "sha256":  "7b9eee9183a0095b9781bc188abe90496d0294bacd289a349468e4761b64ac85"
+                  },
+                  {
+                      "path":  "resource/base/image/内番中.png",
+                      "size":  4484,
+                      "sha256":  "d31d67717338f34559f4f3dfab0187b713934d9937d1f41ccd925b14be9f189c"
+                  },
+                  {
+                      "path":  "resource/base/image/内番开始.png",
+                      "size":  8866,
+                      "sha256":  "cfcde21c31fd411d7b4793896517a44e2c1f53b02f23d392481760a4030463a6"
+                  },
+                  {
+                      "path":  "resource/base/image/决定.png",
+                      "size":  3464,
+                      "sha256":  "cc3c6686b90ac32f84b78c8f8f330e186528909318bfc9d1c94c836d5a5cbcc8"
+                  },
+                  {
+                      "path":  "resource/base/image/ui内番.png",
+                      "size":  11522,
+                      "sha256":  "e16f304aaa2192cb524acac9fc9909b9ce7baddfca377644eba9a7dfde22448f"
+                  },
+                  {
+                      "path":  "resource/base/image/ui出阵.png",
+                      "size":  9967,
+                      "sha256":  "5cf614c20698a9bfcbb1d07d3de19e0ff2f4c2bdae4528ba6237bb6248b9bea4"
+                  },
+                  {
+                      "path":  "resource/base/image/ui地域选择.png",
+                      "size":  7221,
+                      "sha256":  "15ff5d7635879b10d28786bb1e5af55e022565c0525979f4a68e9daf718cfb35"
+                  },
+                  {
+                      "path":  "resource/base/image/ui任务.png",
+                      "size":  9642,
+                      "sha256":  "28caa937ac9925824be1e375585ca3862c5a73a903b07146cf74d51cf584b976"
+                  },
+                  {
+                      "path":  "resource/base/default_pipeline.json",
+                      "size":  890,
+                      "sha256":  "89e0c16f7e9fea51f3e95f6a9fdcd92780bc5d2e74d909bab66514b5f2ac9150"
+                  },
+                  {
+                      "path":  "resource/base/image/empty.png",
+                      "size":  68,
+                      "sha256":  "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
+                  },
+                  {
+                      "path":  "resource/base/image/ui万屋.png",
+                      "size":  10923,
+                      "sha256":  "127fda298d02334d00ef65e2b0a6a4e35614e2d7f13deccc11440a48de8e105b"
+                  },
+                  {
+                      "path":  "resource/base/image/ui本丸.png",
+                      "size":  9178,
+                      "sha256":  "917356c318407643ba292aa8ccb674bacae8c39aa8441b26358cbf7c125e4a78"
+                  },
+                  {
+                      "path":  "resource/base/image/ui签到.png",
+                      "size":  9980,
+                      "sha256":  "19a3ceff47b49477de54d78cbf4643c61f8e417b0077de5e814eeb38ec6540d0"
+                  },
+                  {
+                      "path":  "resource/base/image/ui远征.png",
+                      "size":  11235,
+                      "sha256":  "45b65620aebc6c441acc2a4903dea5beca1899a512593f296167a6ce28b21bc5"
+                  },
+                  {
+                      "path":  "resource/base/image/ui收件箱.png",
+                      "size":  10272,
+                      "sha256":  "2b097b469f55054a46ed3f990360db709a0164c1c65ae07b1986403e0c452d1a"
+                  },
+                  {
+                      "path":  "resource/base/image/ui完成任务.png",
+                      "size":  17417,
+                      "sha256":  "cadb9d03d84d4626f561fa723b7fbc2afb349fba261840945a1833c6186c3c06"
+                  },
+                  {
+                      "path":  "resource/base/image/ui强化.png",
+                      "size":  12693,
+                      "sha256":  "c036f8740a8b95fe5a81f9e1f38a799d459addab94259160eba1643b9e2281d6"
+                  },
+                  {
+                      "path":  "resource/base/image/ui所持.png",
+                      "size":  10072,
+                      "sha256":  "2e26d9cfd30ccb587861daf7f9c5f9e0ddfacff45a641001fc7df6bedf4e2572"
+                  },
+                  {
+                      "path":  "resource/base/image/合成.png",
+                      "size":  4831,
+                      "sha256":  "7cc1d5bce8b7ab6fb5825c4b9fbe93a5d4afcc1e97424ec9005c78cf5e3e38b3"
+                  },
+                  {
+                      "path":  "resource/base/image/领取.png",
+                      "size":  2232,
+                      "sha256":  "edc42a82357e1d02d13e0f8744cacbeea24f2dc617ba0f3a5fc82d088beec165"
+                  },
+                  {
+                      "path":  "resource/base/image/领取奖励.png",
+                      "size":  10597,
+                      "sha256":  "e6dc2902493b005c37dbe359b27738719d21a3880c81b663fd43f5a54614c3c2"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui不利.png",
+                      "size":  2685,
+                      "sha256":  "9dcbca3c70851f5a5cdd18b788c9700c6ea77e91654766a6a8bdb4cb3adebf94"
+                  },
+                  {
+                      "path":  "resource/base/image/锻刀.png",
+                      "size":  4988,
+                      "sha256":  "2362e665d40931cf0f2bc3cf8d0ff0037a5e35f8194423f629e0e4508d4bbf6e"
+                  },
+                  {
+                      "path":  "resource/base/image/通用_关闭.png",
+                      "size":  1767,
+                      "sha256":  "ef841997166605ccdb141645db030642b76a89065d1963f274e64505f9392d07"
+                  },
+                  {
+                      "path":  "resource/base/image/通用_取消.png",
+                      "size":  3421,
+                      "sha256":  "47e82971f8e2a540bd5103d2bf594056c329edd0a8ee37b424181e79c4f19cb3"
+                  },
+                  {
+                      "path":  "resource/base/image/通用_确定.png",
+                      "size":  4064,
+                      "sha256":  "7d8a75c78090a999d82b3f68111125e5642307bee4d112c806dd46e6ca8195e1"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui阵形选择.png",
+                      "size":  8033,
+                      "sha256":  "8504677f5acf8372f88a66d30c16345309c4abe76275e45166a7961841e1ca3c"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/中伤.png",
+                      "size":  3960,
+                      "sha256":  "5b05104f63f5a64acb82b5b488ca228ad02152cb51231dcb80618be15e551193"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/自动行军中.png",
+                      "size":  10136,
+                      "sha256":  "8ab0d3811e24482fe49e6811d53baedd38805502d0463dda6929f3c9b069b013"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui重伤.png",
+                      "size":  3782,
+                      "sha256":  "1d232f2f83c79defb7b0218a1c19bbd3f4892c35cd479935b246143df52a692d"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui战斗结果.png",
+                      "size":  5837,
+                      "sha256":  "2215c42f64dc3ae582165830e8d5c816494f5fa2b700b09b854d9e101bbf8ebb"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui有利.png",
+                      "size":  3067,
+                      "sha256":  "80a29509f6f8d87d21a4ebf725a71e41815e6d340bcaa93cc2fbf83686aa63c0"
+                  },
+                  {
+                      "path":  "resource/base/image/battle/ui红脸.png",
+                      "size":  1274,
+                      "sha256":  "184a8f3f3d4bd84ea1bb1c16f6f2bde367ce4b22929fec8de4ec8f84dfb3bf96"
+                  },
+                  {
+                      "path":  "resource/base/image/暖心礼包.png",
+                      "size":  65453,
+                      "sha256":  "976190a5aaf0186dab3277bca8c841eb33d1ec63cd81f7bdca2466ee66496bc7"
+                  },
+                  {
+                      "path":  "resource/base/image/极化樱花.png",
+                      "size":  3267,
+                      "sha256":  "8d2f3f38f85795083aac6aa071ac38383590cfce30e8ab90a4a88f671478b17c"
+                  },
+                  {
+                      "path":  "resource/base/image/活动.png",
+                      "size":  3206,
+                      "sha256":  "0380d032f4becc7302c00dfbc6f2c850c0ca6dc2090c69aa247b32b8491d87e1"
+                  },
+                  {
+                      "path":  "resource/base/image/整备刀装.png",
+                      "size":  4987,
+                      "sha256":  "6fd26ab37533d100c5189b6f623be1e49f413f3e423a19d4c11a2ce4a992ddba"
+                  },
+                  {
+                      "path":  "resource/base/image/否.png",
+                      "size":  2159,
+                      "sha256":  "b9f367407f1f01dfe929246bf30ad497e19db9c7dd2c90918ed5af5a80434731"
+                  },
+                  {
+                      "path":  "resource/base/image/售罄.png",
+                      "size":  1934,
+                      "sha256":  "228ed744e116b8b8e3dfcd598cfde7c4663e3d19d0de8b1f65063e1a998a50f5"
+                  },
+                  {
+                      "path":  "resource/base/image/收件箱一键领取.png",
+                      "size":  8583,
+                      "sha256":  "479db614f2023f97344a818475a88dd717542433a8755ad01a458f50f0e159a9"
+                  },
+                  {
+                      "path":  "resource/base/image/购买.png",
+                      "size":  4674,
+                      "sha256":  "57cbb3cc134f2c5fad804afa75b4d44ed486302e22ada5a2e58679eee5e94d01"
+                  },
+                  {
+                      "path":  "resource/base/image/远征开始.png",
+                      "size":  7564,
+                      "sha256":  "ce171eb9fb4c3df9a389985c00897eaaa2b8a3d49c866b781fb09c51253545c0"
+                  },
+                  {
+                      "path":  "resource/base/image/选择png.png",
+                      "size":  2642,
+                      "sha256":  "5f14658d261f9b5edc3c70677f5133ed923c890a81537eeede14d89b7252f72a"
+                  },
+                  {
+                      "path":  "resource/base/image/筛选.png",
+                      "size":  2012,
+                      "sha256":  "c8bc8b1f5cdac1815a9d0ec2820c858a1f673a5a8ea26582351a5e7a73b304b1"
+                  },
+                  {
+                      "path":  "resource/base/image/登录.png",
+                      "size":  8803,
+                      "sha256":  "40aafda6eed7ea3a8808a94459599a0331d94b44d642545a55c1818df5383f78"
+                  },
+                  {
+                      "path":  "resource/base/image/目录.png",
+                      "size":  4166,
+                      "sha256":  "8101d1dc24c91ee58165848711565207abd7d57524e91ec4f3d402e9ff49a25c"
+                  },
+                  {
+                      "path":  "resource/base/image/空闲中.png",
+                      "size":  23295,
+                      "sha256":  "3f233a6af8fa5d4c5f29f2195bb703b8947c681eb069c274bb8282a29c6f0859"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/五花大太刀.png",
+                      "size":  5284,
+                      "sha256":  "1cb17ccd2d1553fd9bc23a1b8662f623d129c0f3e4c08f7a89f5d3d8eabe06de"
+                  },
+                  {
+                      "path":  "profiles/00057_明石国行_foot.png",
+                      "size":  6654,
+                      "sha256":  "78e32f3ae9ba66e0a7ab95cbf9277e5f522b3fa86af424a218abcd91f557d8bc"
+                  },
+                  {
+                      "path":  "profiles/00057_明石国行_head.png",
+                      "size":  9290,
+                      "sha256":  "23dd2866a4adc18e607aee35ac2cbaa7e7ef23307e98d6658f232268a849a90e"
+                  },
+                  {
+                      "path":  "profiles/00059_蛍丸_foot.png",
+                      "size":  7772,
+                      "sha256":  "abde54fd3b746f7e93d3aae066933b0b43b24a34a078f25b84ff87fd89880832"
+                  },
+                  {
+                      "path":  "profiles/00055_鶯丸_head.png",
+                      "size":  6892,
+                      "sha256":  "072a64e3b48907ab02a817d06ea2be7e01484e741e198ef5c25da59708c8793f"
+                  },
+                  {
+                      "path":  "profiles/00053_大包平_foot.png",
+                      "size":  8954,
+                      "sha256":  "b3df1afeadf29b4a0b40b4518706ed96fb6d3445b6ac96d83447cc2fefac07df"
+                  },
+                  {
+                      "path":  "profiles/00053_大包平_head.png",
+                      "size":  7485,
+                      "sha256":  "bca8ba3d44e9e58b1a88be78df51ba90de7b3069a37b0c1ce08319ef8756167e"
+                  },
+                  {
+                      "path":  "profiles/00055_鶯丸_foot.png",
+                      "size":  7304,
+                      "sha256":  "75978f00c49ba9651503b5139e05cd70b0a247c85c97e8d4d1a78f66dad45ded"
+                  },
+                  {
+                      "path":  "profiles/00063_千子村正_head.png",
+                      "size":  10748,
+                      "sha256":  "e35005a0506602cb4a29b4d7f8b7b79473157dcad71903cd0d36edc341012c5a"
+                  },
+                  {
+                      "path":  "profiles/00065_蜻蛉切_foot.png",
+                      "size":  7706,
+                      "sha256":  "e336dc749af390d8e08a2b78c5784f77fda6e014aad3396dfed9aa5e958d7834"
+                  },
+                  {
+                      "path":  "profiles/00065_蜻蛉切_head.png",
+                      "size":  9067,
+                      "sha256":  "9decd9eb2d531250db2c8dee8b8add6e67e35f2b1178e39d3a681375c45541a0"
+                  },
+                  {
+                      "path":  "profiles/00063_千子村正_foot.png",
+                      "size":  7747,
+                      "sha256":  "2bc7d63af5cb6a4b8f940f42944b00651c17fb36b2e45f73fdac1e44a625e234"
+                  },
+                  {
+                      "path":  "profiles/00059_蛍丸_head.png",
+                      "size":  9692,
+                      "sha256":  "ba19a3b7591e766d5f0eedca970652044fd96918540e5f40bb1a7f99a43633e9"
+                  },
+                  {
+                      "path":  "profiles/00061_愛染国俊_foot.png",
+                      "size":  9433,
+                      "sha256":  "b1de76bf9c2f641e0b3c48534c346e7477db9de08080e597568d92eeef316fc3"
+                  },
+                  {
+                      "path":  "profiles/00061_愛染国俊_head.png",
+                      "size":  10292,
+                      "sha256":  "e4e5a4df3efb435c724c41343eb522fe5d3eebbb5294adf12b3a2efc374e59fc"
+                  },
+                  {
+                      "path":  "profiles/00043_博多藤四郎_foot.png",
+                      "size":  8931,
+                      "sha256":  "18bff1a89d35487ab1ea5d758d8a951fb47f6269271c9844c3eb116b293f3a2a"
+                  },
+                  {
+                      "path":  "profiles/00043_博多藤四郎_head.png",
+                      "size":  8768,
+                      "sha256":  "970f9282ed8e7493d8564452b94ed899b179d6f7b0c839c7bc8bdd578f0b08da"
+                  },
+                  {
+                      "path":  "profiles/00045_乱藤四郎_foot.png",
+                      "size":  7758,
+                      "sha256":  "1dc02941b33678694f7e7c5289c948556b44ac7a539b1d1408d99997ad83704e"
+                  },
+                  {
+                      "path":  "profiles/00041_秋田藤四郎_head.png",
+                      "size":  7236,
+                      "sha256":  "caaa3742c8295efce5616184f3625c9f97b2ec7de5422f25d47bff3ebcec2305"
+                  },
+                  {
+                      "path":  "profiles/00039_前田藤四郎_foot.png",
+                      "size":  6189,
+                      "sha256":  "f7dfdeb28b8ae1c7b231c50da1e3fda4e43e9ad18487200502b33794c7320985"
+                  },
+                  {
+                      "path":  "profiles/00039_前田藤四郎_head.png",
+                      "size":  6651,
+                      "sha256":  "3dc9d441baba69624a59e22524f5ccc986c8e365ad05215a111bc375dff00d23"
+                  },
+                  {
+                      "path":  "profiles/00041_秋田藤四郎_foot.png",
+                      "size":  7085,
+                      "sha256":  "69d9497b531464b09119049326fc754bda9b9f0e40af7ca57caddfa1d55e3f86"
+                  },
+                  {
+                      "path":  "profiles/00049_薬研藤四郎_head.png",
+                      "size":  6881,
+                      "sha256":  "a4357ec3c372dc10ad537c4c06757c722c906a676b0bb98307750e7615057064"
+                  },
+                  {
+                      "path":  "profiles/00051_包丁藤四郎_foot.png",
+                      "size":  7890,
+                      "sha256":  "a61f862317c368ac63403f6d5a06ad14c4a717ad33be061c19c66f0f5eca3fd2"
+                  },
+                  {
+                      "path":  "profiles/00051_包丁藤四郎_head.png",
+                      "size":  7136,
+                      "sha256":  "69fd848f7990c8ca022f11c5a7a57e279818d154a2b081569fc6236f428ce1b7"
+                  },
+                  {
+                      "path":  "profiles/00049_薬研藤四郎_foot.png",
+                      "size":  8711,
+                      "sha256":  "b834f8dee051ab1d1457a95c213e2fb1c507885fe3452ad131956af7b37fb0c2"
+                  },
+                  {
+                      "path":  "profiles/00045_乱藤四郎_head.png",
+                      "size":  8068,
+                      "sha256":  "d63606a27e66dc86e5be9b6b43066b43cf9af64c0af79730e178a74f106af617"
+                  },
+                  {
+                      "path":  "profiles/00047_五虎退_foot.png",
+                      "size":  14966,
+                      "sha256":  "226a9d5400931c0a3c5855eeb47813336152166fae7a35e9d63edfcb98521df8"
+                  },
+                  {
+                      "path":  "profiles/00047_五虎退_head.png",
+                      "size":  9422,
+                      "sha256":  "01b78d63b1203a312cb2acdaa664b3b7693d31451fd07a2192ef93e54603062a"
+                  },
+                  {
+                      "path":  "profiles/00067_物吉貞宗_foot.png",
+                      "size":  8332,
+                      "sha256":  "63335fa48285bd4237e16ce5785a9745a6364c8667731c9d3e16acebe18d2ea4"
+                  },
+                  {
+                      "path":  "profiles/00085_加州清光_head.png",
+                      "size":  8260,
+                      "sha256":  "26e71793988e022f5d413b962f57a2b3e6da8d84a3840d0fa952ccadf7b9e095"
+                  },
+                  {
+                      "path":  "profiles/00087_大和守安定_foot.png",
+                      "size":  5863,
+                      "sha256":  "47da97c0431119dfa849e8d2279267c87b59269227d17eba14135ed505db6e98"
+                  },
+                  {
+                      "path":  "profiles/00087_大和守安定_head.png",
+                      "size":  7876,
+                      "sha256":  "433f50962d40900887fe3952e20acf0845b2776080e9266e2038b0b7b11b0030"
+                  },
+                  {
+                      "path":  "profiles/00085_加州清光_foot.png",
+                      "size":  10910,
+                      "sha256":  "3ecc761a86cf7b427e6a3255c944c1bcbbfe2e9a6f9159759c61b341850495a9"
+                  },
+                  {
+                      "path":  "profiles/00081_宗三左文字_head.png",
+                      "size":  8049,
+                      "sha256":  "1b7c28cd39f282f3aef2e14c273dc14728a1d90c619f24451b47839b28e2a042"
+                  },
+                  {
+                      "path":  "profiles/00083_小夜左文字_foot.png",
+                      "size":  10680,
+                      "sha256":  "2a4e4a2fa7ce9f0b9353154875b72ce78b22f21a1c10903cbcb5f6409e17a8e6"
+                  },
+                  {
+                      "path":  "profiles/00083_小夜左文字_head.png",
+                      "size":  6170,
+                      "sha256":  "eb3292651a6bbec477a6e741ecd6c969a09ba4356eaa7fd7ccc083050eb69f82"
+                  },
+                  {
+                      "path":  "profiles/00093_陸奥守吉行_foot.png",
+                      "size":  9884,
+                      "sha256":  "c555ab390590251c3e6a76692288f4dfa5702049f4de7fd2e82c13243f8823bf"
+                  },
+                  {
+                      "path":  "profiles/00093_陸奥守吉行_head.png",
+                      "size":  8752,
+                      "sha256":  "9b0d602ef3b515625a3b82fcf270244159f533276a9c341b3ccd8c823005bd0c"
+                  },
+                  {
+                      "path":  "profiles/00095_山姥切国広_foot.png",
+                      "size":  9476,
+                      "sha256":  "cc248908d017673caf6918acb86912286124933b36a6c6f44d342c5c084df5ed"
+                  },
+                  {
+                      "path":  "profiles/00091_和泉守兼定_head.png",
+                      "size":  7874,
+                      "sha256":  "b3ce5f0e8400ec6a29255c66d11690c1778d5b4f75d972b32d31ea4a318e4244"
+                  },
+                  {
+                      "path":  "profiles/00089_歌仙兼定_foot.png",
+                      "size":  6852,
+                      "sha256":  "3b98e2c3df78a5dea8747e69d9643189b455f24809755e69c481d4ca2ca66c73"
+                  },
+                  {
+                      "path":  "profiles/00089_歌仙兼定_head.png",
+                      "size":  8082,
+                      "sha256":  "e4bd4dcf29d4b51df8d91cf818fadd50f64e29a563853077e09f530808ef1cde"
+                  },
+                  {
+                      "path":  "profiles/00091_和泉守兼定_foot.png",
+                      "size":  9677,
+                      "sha256":  "e8963d2b11b5748c2b8c11fd4161cf9411f59a6b83b643122ccf11b1e73c8572"
+                  },
+                  {
+                      "path":  "profiles/00071_亀甲貞宗_head.png",
+                      "size":  6730,
+                      "sha256":  "313c4e52d344aca14c1e0949cce637ad187a46dd689a9da8fd012b9942ba78ce"
+                  },
+                  {
+                      "path":  "profiles/00073_燭台切光忠_foot.png",
+                      "size":  7807,
+                      "sha256":  "ba3390073a4ab34223ba1e09fb38cc57997567718300bb0739c61b6f24016e6e"
+                  },
+                  {
+                      "path":  "profiles/00073_燭台切光忠_head.png",
+                      "size":  7385,
+                      "sha256":  "1e89169457b6c90151b74f90b3224d3849971a26db89411789b7d96bff3ef793"
+                  },
+                  {
+                      "path":  "profiles/00071_亀甲貞宗_foot.png",
+                      "size":  5588,
+                      "sha256":  "b02fe083102268257856c0a875c63d56b98fddd39a5c3319080748cb91c78c8d"
+                  },
+                  {
+                      "path":  "profiles/00067_物吉貞宗_head.png",
+                      "size":  10146,
+                      "sha256":  "83feee286d7dd6deee537f86abefc95344099a9649323aba87fb6108bb7e22e2"
+                  },
+                  {
+                      "path":  "profiles/00069_太鼓鐘貞宗_foot.png",
+                      "size":  7248,
+                      "sha256":  "33f67e79325a778a5039b6e191467b34b13db9a3291f1a88525070e8f3471ea1"
+                  },
+                  {
+                      "path":  "profiles/00069_太鼓鐘貞宗_head.png",
+                      "size":  8551,
+                      "sha256":  "386b06286e8c6ea57fd61ee52558bc7ecde2766b92ce1411b8631a5d6de140ee"
+                  },
+                  {
+                      "path":  "profiles/00079_江雪左文字_foot.png",
+                      "size":  5553,
+                      "sha256":  "e8e6120d60e295545bd9b79356b868a063e9aab4e2f7c386ac07ed984bcad6c3"
+                  },
+                  {
+                      "path":  "profiles/00079_江雪左文字_head.png",
+                      "size":  5843,
+                      "sha256":  "8f112aa7d8c4a884121e772f1180bb73f0c116bc728625b5d91b508998e4b620"
+                  },
+                  {
+                      "path":  "profiles/00081_宗三左文字_foot.png",
+                      "size":  8187,
+                      "sha256":  "679b757ac2d8178c35ddd0472b7aad5677c4d1bb21ed53e17e2c25dbc6b9706a"
+                  },
+                  {
+                      "path":  "profiles/00077_小竜景光_head.png",
+                      "size":  13033,
+                      "sha256":  "93513a90d071caaf48c5954969adce1c5cac5ac3c8420d9add7ea067b254240f"
+                  },
+                  {
+                      "path":  "profiles/00075_大般若長光_foot.png",
+                      "size":  10022,
+                      "sha256":  "1d8f2b7359f5b0fb992e050b403dfcb701fa4cd1803a6f7a0ba7bf701c2f134c"
+                  },
+                  {
+                      "path":  "profiles/00075_大般若長光_head.png",
+                      "size":  9539,
+                      "sha256":  "b5678c39447f007b0b2286cb2445fd0a0c4b34048500de7f7caf5529df892eb6"
+                  },
+                  {
+                      "path":  "profiles/00077_小竜景光_foot.png",
+                      "size":  8671,
+                      "sha256":  "8120f8434df3110d15b29480974daebc0aad7b1d8cf0148a92fba3ab13c21199"
+                  },
+                  {
+                      "path":  "resource/base/model/ocr/rec.onnx",
+                      "size":  21146753,
+                      "sha256":  "7dcf6298d77d2a6eb44c1ebeed990826ca895a9c68d955a3eace00763d052949"
+                  },
+                  {
+                      "path":  "resource/base/pipeline/tutorial.json",
+                      "size":  212,
+                      "sha256":  "57879ba7e8b58429ebc688fba6d5dd4fa5d4d7d6159581ea04293131fbfc0348"
+                  },
+                  {
+                      "path":  "profiles/00003_三日月宗近_foot.png",
+                      "size":  8589,
+                      "sha256":  "7e91cb9dcae57ab71033aa0b994a7c79f7064437ec0bbdf87bfb7f078033bde7"
+                  },
+                  {
+                      "path":  "resource/base/model/ocr/README.md",
+                      "size":  478,
+                      "sha256":  "1688e1ae8aa45cd7a266e23eaabe88dc930ff4e2068b23b3b0377b16ef400c34"
+                  },
+                  {
+                      "path":  "resource/base/model/ocr/det.onnx",
+                      "size":  9893172,
+                      "sha256":  "66c0f34caaf432553710fd9973a7134d8cf924db7109310c3d2562dcc39b209d"
+                  },
+                  {
+                      "path":  "resource/base/model/ocr/keys.txt",
+                      "size":  74947,
+                      "sha256":  "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d"
+                  },
+                  {
+                      "path":  "resource/base/model/ocr/manifest.json",
+                      "size":  1166,
+                      "sha256":  "15de10a3ab5a9983c42fdeaa134ceef42ddfd3054a48ea94ef9d078fd6c73f14"
+                  },
+                  {
+                      "path":  "profiles/00007_石切丸_head.png",
+                      "size":  7831,
+                      "sha256":  "fe828c13a8fca5ad5963fb916348c07b06a261769895f1b6ed727b22fbd27119"
+                  },
+                  {
+                      "path":  "profiles/00009_岩融_foot.png",
+                      "size":  6712,
+                      "sha256":  "13b4b2bb1496ddfd7656d0347572b2b5e3b690866f54cd8b0953f1fabc5f8826"
+                  },
+                  {
+                      "path":  "profiles/00009_岩融_head.png",
+                      "size":  6319,
+                      "sha256":  "ad770b2846a93bbc8350ea0d65060d2861dbc2a31da001ac891c12a3543f2c44"
+                  },
+                  {
+                      "path":  "profiles/00007_石切丸_foot.png",
+                      "size":  7352,
+                      "sha256":  "f27dbeb9759de58e3f511909c477a0f12fb83f9b3d7515f88b63356d75423364"
+                  },
+                  {
+                      "path":  "profiles/00003_三日月宗近_head.png",
+                      "size":  8152,
+                      "sha256":  "4e53f50a98d23a58f3ee04c231f3c6dd0ef380f5e561326a7a47ba093098c081"
+                  },
+                  {
+                      "path":  "profiles/00005_小狐丸_foot.png",
+                      "size":  8552,
+                      "sha256":  "cfe8588cb892669415284c82e4ba603cec0eca70b96cd9a6a435f9a672ba0ff4"
+                  },
+                  {
+                      "path":  "profiles/00005_小狐丸_head.png",
+                      "size":  9404,
+                      "sha256":  "2402b45e7d417b94b7c73e841a63723a19a441ea2e0736d2a273493a8cc42889"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花大太刀.png",
+                      "size":  7084,
+                      "sha256":  "ae391387080bcb909ac9211c9025a658c6dfe7dcd67de6d954cda6dc041d89ff"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花太刀.png",
+                      "size":  5902,
+                      "sha256":  "6ab73e032a9b90cd7d7c74341ec34d90355c2e945cf14ee1b4f3186bc971304c"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花打刀.png",
+                      "size":  5190,
+                      "sha256":  "72ce6e2e0d3a507fdddd59baf9c7e22f8d53f59d78a8158bc6189df3ddb65598"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花剑.png",
+                      "size":  6856,
+                      "sha256":  "83e50cdbcd984f10e5c5673df24b5780b23d4c40e1b8fa58751973305b6ba668"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/五花太刀.png",
+                      "size":  6184,
+                      "sha256":  "c09f90a2a9591308d8950338a0df83947fb8ffb860d55a97c1280718eb911add"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/五花枪.png",
+                      "size":  6020,
+                      "sha256":  "2573e771e7f9b218e5e5c30c8092d2aff04e97f5fc0652144bfc5f0bb76378e1"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/六花太刀.png",
+                      "size":  5275,
+                      "sha256":  "92879af898bf2ad7c397573a1103b418ac70658bd22f838850aa5a6a9d4f1a0a"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种2/短_银.png",
+                      "size":  3855,
+                      "sha256":  "7075a8269d83cf7f099c7ae5c644844fdeda18122307b2681f272fadb5c3ee31"
+                  },
+                  {
+                      "path":  "resource/base/image/刮刮乐/ui南瓜.png",
+                      "size":  53731,
+                      "sha256":  "bd4c8c942e15e44031b68e215d89b1cf2ad7dfd4c9aedc5d8b2addb68be2048e"
+                  },
+                  {
+                      "path":  "resource/base/image/刮刮乐/剪影更新.png",
+                      "size":  5522,
+                      "sha256":  "edb54da9c050bdd3e28069305185980c0358d8c4362ff4a035c576d9cd09fd87"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种2/打_银.png",
+                      "size":  3205,
+                      "sha256":  "db6f1f121e18388594f596f3f225afd6603a3f4cc5356ba435b026485bdc67ba"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花枪.png",
+                      "size":  5792,
+                      "sha256":  "1b8bb2a6f36bfe3619037ab935f026a8c70ca2470956c60f0ad374431ea01144"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种/四花薙刀.png",
+                      "size":  6494,
+                      "sha256":  "0d740331c55ee51b09d1e08f536031fde994ce2e701b6bb19a047f99da6ef8b6"
+                  },
+                  {
+                      "path":  "resource/base/image/刀种2/太_金.png",
+                      "size":  4209,
+                      "sha256":  "10c36d9cec3f707bcbdcc8c3ec4b595e3c18582a4de212a18ced18447a51d40e"
+                  },
+                  {
+                      "path":  "profiles/00011_今剣_foot.png",
+                      "size":  8363,
+                      "sha256":  "1acd2bce91286db91dde73f37a8feb6aa952ec92da02b1ee6b55b686ca1b02e3"
+                  },
+                  {
+                      "path":  "profiles/00029_骨喰藤四郎_foot.png",
+                      "size":  5821,
+                      "sha256":  "f4d4907cb700141488a8292580073e3d7ab07536559b23727177650936472e1a"
+                  },
+                  {
+                      "path":  "profiles/00029_骨喰藤四郎_head.png",
+                      "size":  8788,
+                      "sha256":  "33638924ac15c3c1be3ebaf09ade90c8b33e033850298ce2258d75b90ba63305"
+                  },
+                  {
+                      "path":  "profiles/00031_平野藤四郎_foot.png",
+                      "size":  7231,
+                      "sha256":  "ae114caa8d541a778b409ce8abaaad6f93d6e0e0322d9dc522a812f5f158717e"
+                  },
+                  {
+                      "path":  "profiles/00027_鯰尾藤四郎_head.png",
+                      "size":  8600,
+                      "sha256":  "f9865207391b8d864924a2c2e5be971cc8091884ccbfd58f14c5fc5a7581494d"
+                  },
+                  {
+                      "path":  "profiles/00025_一期一振_foot.png",
+                      "size":  7029,
+                      "sha256":  "5aed1564b428644e35c7fc51d14f4ac4d64bf38fc5b567005c170cada6cedfa6"
+                  },
+                  {
+                      "path":  "profiles/00025_一期一振_head.png",
+                      "size":  7652,
+                      "sha256":  "6d9b776ab50d7afd133fcbe8941d0b8d8ad7b8307fa09c5b84e54df9d635766f"
+                  },
+                  {
+                      "path":  "profiles/00027_鯰尾藤四郎_foot.png",
+                      "size":  8261,
+                      "sha256":  "7ae457543e21c7e47bc42aba0e70b7536a438e40fa2405d41a7b7d281d1518bb"
+                  },
+                  {
+                      "path":  "profiles/00035_後藤藤四郎_head.png",
+                      "size":  10338,
+                      "sha256":  "b8fbe9121434838554ad10f2d7d39359d13fc474aad6b52c815cc202127c4958"
+                  },
+                  {
+                      "path":  "profiles/00037_信濃藤四郎_foot.png",
+                      "size":  8258,
+                      "sha256":  "2147494a00e255999e6d9b7f084184d2aef2d3c58ecdb4fbb3d520f32909a409"
+                  },
+                  {
+                      "path":  "profiles/00037_信濃藤四郎_head.png",
+                      "size":  8515,
+                      "sha256":  "ae62dd8f03b0752d188c487e2160e1e2ca4af8f9e7e3d300906730e8888b6f19"
+                  },
+                  {
+                      "path":  "profiles/00035_後藤藤四郎_foot.png",
+                      "size":  7715,
+                      "sha256":  "d92f9596af39cd4b5bcf5d360a23d2ab32879eb95d36b64a95b968ce58bc44a6"
+                  },
+                  {
+                      "path":  "profiles/00031_平野藤四郎_head.png",
+                      "size":  6359,
+                      "sha256":  "612707d0ec616acbe13099faef55327e3707a9905d4cfa3f095f38787f19372d"
+                  },
+                  {
+                      "path":  "profiles/00033_厚藤四郎_foot.png",
+                      "size":  8240,
+                      "sha256":  "a8df6dfc12b6b1d25533984181dc98084a7140b3ecbf512c3080750ee8997ebb"
+                  },
+                  {
+                      "path":  "profiles/00033_厚藤四郎_head.png",
+                      "size":  7386,
+                      "sha256":  "aaf63fc788ba80509d503d4849536323f9e31c403313a701c4b917cd2fa433c0"
+                  },
+                  {
+                      "path":  "profiles/00015_ソハヤノツルキ_head.png",
+                      "size":  8742,
+                      "sha256":  "c2696068e57f9c7f12b3beccaa2b96fb007e91ba191e2cd07cede73aad0042fa"
+                  },
+                  {
+                      "path":  "profiles/000170_silhouette_2.png",
+                      "size":  8938,
+                      "sha256":  "a74ff2ee81925738d2da153c1859e26dacc9d5dbd1943f326397122495af59c5"
+                  },
+                  {
+                      "path":  "profiles/00017_数珠丸恒次_foot.png",
+                      "size":  15321,
+                      "sha256":  "7485571a5d1886146af6b40ff25468d343dd721442f15d34fa720b5992b4376b"
+                  },
+                  {
+                      "path":  "profiles/00015_ソハヤノツルキ_foot.png",
+                      "size":  10676,
+                      "sha256":  "c2f2d241978234f16eceeefeeb52c540f728f260acfe1b0e75985121dbc32dbc"
+                  },
+                  {
+                      "path":  "profiles/00011_今剣_head.png",
+                      "size":  9149,
+                      "sha256":  "dd33b0b31dd6beb8cc88c28dd648d8a870e6e900f17178212dc66c6454fbec98"
+                  },
+                  {
+                      "path":  "profiles/00013_大典太光世_foot.png",
+                      "size":  9729,
+                      "sha256":  "a4734d6cbc7f6a1da7eb89335a6328ab34bc04903df0c16b06296ec74b515a68"
+                  },
+                  {
+                      "path":  "profiles/00013_大典太光世_head.png",
+                      "size":  8885,
+                      "sha256":  "8ea953cd506be8e7dbf4e4dc4570ae9e5ccff1dc9c617cd6f6fb82bfc3b2711a"
+                  },
+                  {
+                      "path":  "profiles/00021_鬼丸国綱_head.png",
+                      "size":  9042,
+                      "sha256":  "56ef1f9cecffb79951401d8509e0f9f49148c1502adf96f700d18cf109a5c4d3"
+                  },
+                  {
+                      "path":  "profiles/00023_鳴狐_foot.png",
+                      "size":  7376,
+                      "sha256":  "c02f0985bbe1ecc2bf2725720d4c0062497300c676a7d2599689ad7d1037b16d"
+                  },
+                  {
+                      "path":  "profiles/00023_鳴狐_head.png",
+                      "size":  9441,
+                      "sha256":  "5d9d4dc62fd50deecd367ff9f1201f7bda2cf65f63e8dd3a8d19eddcc6b4fca8"
+                  },
+                  {
+                      "path":  "profiles/00021_鬼丸国綱_foot.png",
+                      "size":  8873,
+                      "sha256":  "1ace7a41311773ad148d031917310c40571cf7dd05f5727019424875db2bf11a"
+                  },
+                  {
+                      "path":  "profiles/00017_数珠丸恒次_head.png",
+                      "size":  13164,
+                      "sha256":  "ed3ace3be390eceb9f5bb926836ee731e9c0d959b23e500e49ebf78dacf3775a"
+                  },
+                  {
+                      "path":  "profiles/00019_にっかり青江_foot.png",
+                      "size":  9562,
+                      "sha256":  "e60963aa912a4423ac691c3593d2a56ae514603662a29f2c6b37067c4b0e1300"
+                  },
+                  {
+                      "path":  "profiles/00019_にっかり青江_head.png",
+                      "size":  8783,
+                      "sha256":  "54b7dc6c25b8f329c8c360df6a0d511cbe002cb8360d1e345395abdc2ce47bff"
+                  }
+              ]
 }
