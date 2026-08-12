@@ -40,6 +40,20 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# The third-party PyInstaller hook named ``panel`` also sees our local panel
+# package and may collect ignored runtime files from a developer checkout.
+# Release artifacts must contain templates only, never real user configuration.
+_private_bundle_paths = {
+    'panel/panel_config.json',
+    'panel_config.json',
+    'touken_config.json',
+    'expedition_schedule.json',
+}
+a.datas = [
+    item for item in a.datas
+    if item[0].replace('\\', '/') not in _private_bundle_paths
+]
 pyz = PYZ(a.pure)
 
 exe = EXE(

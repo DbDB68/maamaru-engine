@@ -96,6 +96,20 @@ jobs:
       - name: 构建启动器
         run: python -m PyInstaller --clean --noconfirm "まあ丸启动器.spec"
 
+      - name: 检查成品不含用户数据
+        shell: pwsh
+        run: |
+          $archive = & pyi-archive_viewer -l "dist/まあ丸启动器.exe" | Out-String
+          $forbidden = @(
+            "'panel\\panel_config.json'",
+            "'panel_config.json'",
+            "'touken_config.json'",
+            "'expedition_schedule.json'"
+          )
+          foreach ($entry in $forbidden) {
+            if ($archive.Contains($entry)) { throw "发布成品混入用户数据：$entry" }
+          }
+
       - name: 打包启动器
         shell: pwsh
         run: |
