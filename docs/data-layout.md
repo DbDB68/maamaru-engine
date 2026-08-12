@@ -35,6 +35,7 @@ Maamaru/
 
 ## 安装、更新和卸载约束
 
+- Windows 安装器默认安装到 `%LOCALAPPDATA%\Programs\Maamaru`，无需管理员权限；开始菜单快捷方式默认创建，桌面快捷方式由用户选择。
 - 安装和更新不得把真实用户配置打进发布包。
 - 更新前必须校验 `manifest.json`，停止工作进程，并保留至少一个可回滚版本。
 - 数据结构升级前必须备份，并用 `data-version.json` 决定迁移步骤。

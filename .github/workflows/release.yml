@@ -124,6 +124,21 @@ jobs:
           Copy-Item -LiteralPath "manifest.json" -Destination $package
           Compress-Archive -Path "$package/*" -DestinationPath "dist/maamaru-launcher-$tag.zip" -Force
 
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: 构建安装器
+        shell: pwsh
+        env:
+          MAAMARU_VERSION: ${{ steps.version.outputs.tag }}
+          MAAMARU_PACKAGE_DIR: ${{ github.workspace }}\dist\package
+        run: |
+          $env:MAAMARU_VERSION = $env:MAAMARU_VERSION.TrimStart("v")
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\maamaru.iss"
+          $setup = "dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe"
+          if (-not (Test-Path -LiteralPath $setup)) { throw "安装器构建失败：没有生成 $setup" }
+
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:
@@ -133,11 +148,16 @@ jobs:
             ## 🦊 まあ丸 ${{ steps.version.outputs.tag }}
 
             **使用方法：**
-            1. 下载 `maamaru-launcher-${{ steps.version.outputs.tag }}.zip` 并解压
-            2. 双击 `まあ丸启动器.exe`
+            1. 推荐下载 `maamaru-setup-${{ steps.version.outputs.tag }}.exe` 并按提示安装
+            2. 从开始菜单或桌面启动まあ丸
             3. 启动器检查通过后，点击“启动まあ丸”
 
+            想免安装使用，也可以下载 `maamaru-launcher-${{ steps.version.outputs.tag }}.zip`，解压后双击 `まあ丸启动器.exe`。
+
             Python、运行依赖、识别模板与 OCR 模型均已内置，不需要运行 `.bat`，也不需要另装资源包。
+            卸载默认只移除程序，不会删除 `%LOCALAPPDATA%\Maamaru` 中的配置与历史记录。
 
             **需要：** Windows 10/11
-          files: dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip
+          files: |
+            dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip
+            dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe
