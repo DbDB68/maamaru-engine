@@ -79,6 +79,19 @@ def _write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def _ensure_data_version(path: Path) -> None:
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+        if int(current.get("data_schema", 0)) == DATA_SCHEMA_VERSION:
+            return
+    except (OSError, ValueError, TypeError):
+        pass
+    _write_json(path, {
+        "data_schema": DATA_SCHEMA_VERSION,
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
 def _copy_missing_file(source: Path, target: Path, backup: Path | None = None) -> bool:
     if not source.is_file() or target.exists() or source.resolve() == target.resolve():
         return False
@@ -237,8 +250,5 @@ def ensure_runtime_data(
     for source, target in defaults:
         _copy_missing_file(source, target)
 
-    _write_json(layout.root / "data-version.json", {
-        "data_schema": DATA_SCHEMA_VERSION,
-        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    })
+    _ensure_data_version(layout.root / "data-version.json")
     return migration
