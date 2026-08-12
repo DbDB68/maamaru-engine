@@ -36,7 +36,7 @@ class LauncherMaintenanceTests(unittest.TestCase):
 
         kwargs = create_window.call_args.kwargs
         self.assertEqual((kwargs["width"], kwargs["height"]), (1360, 900))
-        self.assertIn("v0.1.5", kwargs["html"])
+        self.assertIn("v0.1.6", kwargs["html"])
 
 
 if __name__ == "__main__":

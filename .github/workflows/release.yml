@@ -93,6 +93,9 @@ jobs:
       - name: 安装构建依赖
         run: python -m pip install . pyinstaller
 
+      - name: 运行完整测试
+        run: python -m unittest discover -s tests -v
+
       - name: 构建启动器
         run: python -m PyInstaller --clean --noconfirm "まあ丸启动器.spec"
 
@@ -110,6 +113,10 @@ jobs:
           )
           foreach ($entry in $forbidden) {
             if ($archive.Contains($entry)) { throw "发布成品混入用户数据：$entry" }
+          }
+          $modules = & pyi-archive_viewer -r -b "dist/まあ丸启动器.exe" | Out-String
+          foreach ($required in @("launcher.updater", "launcher.update_apply")) {
+            if (-not $modules.Contains($required)) { throw "发布成品缺少更新安全模块：$required" }
           }
 
       - name: 打包启动器

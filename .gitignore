@@ -62,6 +62,7 @@ stuck*.png
 
 # 待清理归档（确认后可删）
 _trash/
+.codex-remote-attachments/
 
 # 内部交接文档（绝不公开）
 交接文档.md
