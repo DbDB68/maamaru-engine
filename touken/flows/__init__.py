@@ -22,5 +22,6 @@ from .sugar import SugarMixin
 from .sakura import SakuraMixin
 from .logout import LogoutMixin
 from .snapshot import SnapshotMixin
+from .osaka import OsakaMixin
 
-__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin"]
+__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin", "OsakaMixin"]

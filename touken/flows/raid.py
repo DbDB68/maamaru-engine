@@ -25,7 +25,8 @@ class RaidMixin:
     """联队战流程。依赖宿主类的 navigate_to_stream、_click_point。"""
 
     def raid_stream(self, max_rounds: int = 1, team_no: int = None,
-                    use_triple: bool = True, max_buys: int = None):
+                    use_triple: bool = True, max_buys: int = None,
+                    difficulty_no: int = 4, auto_buy_ticket: bool = None):
         """
         流式跑联队战
 
@@ -46,6 +47,9 @@ class RaidMixin:
         if max_buys is not None:
             cfg = dict(cfg)
             cfg["max_buys_per_run"] = max_buys
+        if auto_buy_ticket is not None:
+            cfg = dict(cfg)
+            cfg["auto_buy_ticket"] = bool(auto_buy_ticket)
 
         team_no = team_no or cfg.get("team_no", 3)
         teams = self.config.get("team_select", {}).get("teams", {})
@@ -89,8 +93,15 @@ class RaidMixin:
         for round_no in range(1, max_rounds + 1):
             yield f"[RAID] ===== 第 {round_no}/{max_rounds} 圈 ====="
 
-            # 3.1 选难度（固定坐标，教材指定图4-乱）
-            self._click_point(cfg["difficulty_target"])
+            # 3.1 选难度。旧配置只有图4坐标；其他图未标定时安全停止。
+            targets = cfg.get("difficulty_targets", {})
+            target = targets.get(str(difficulty_no))
+            if target is None and difficulty_no == 4:
+                target = cfg.get("difficulty_target")
+            if target is None:
+                yield f"[RAID] 联队战{difficulty_no}图坐标尚未配置，本次不出阵"
+                return
+            self._click_point(target)
             time.sleep(0.8)
 
             # 3.2 点"部队选择"，OCR 验证标题
@@ -101,32 +112,17 @@ class RaidMixin:
             self.maa.click(deploy)
             time.sleep(1.5)
 
-            ocr_cfg = cfg["team_ui_ocr"]
-            roi = roi_4to4(*ocr_cfg["roi"])
-            team_ui_ok = False
-            for _ in range(10):
-                self.maa.screenshot(force=True)
-                if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
-                    team_ui_ok = True
-                    break
-                time.sleep(0.5)
-            if not team_ui_ok:
+            if not self._wait_for_team_select(cfg, attempts=10):
                 yield "[RAID] 部队选择界面没打开，本圈放弃"
                 continue
 
             # 3.3 选部队（固定坐标，点两下确认）
-            self._click_point(teams[str(team_no)])
-            time.sleep(0.3)
-            self._click_point(teams[str(team_no)])
-            time.sleep(0.5)
+            self._pick_team(team_no)
 
             # 3.4 点"即刻出阵"
-            depart = self.maa.template_match(cfg["depart_button"]["template"])
-            if not depart:
+            if not self._click_depart(cfg):
                 yield "[RAID] 找不到即刻出阵按钮，本圈放弃"
                 continue
-            self.maa.click(depart)
-            time.sleep(1.5)
 
             # 3.5 出阵后的分支：刀装警告 / 确认弹窗 / 手形不足
             self.maa.screenshot(force=True)
@@ -158,7 +154,7 @@ class RaidMixin:
                     return
 
                 yield f"[RAID] 手形不足，小判自动补充（本次第 {buys + 1} 次买）..."
-                for rec_msg in self._recover_ticket_stream(cfg):
+                for rec_msg in self._recover_ticket_stream(cfg, tag="[RAID]"):
                     yield rec_msg
                 if not self._recover_ok:
                     yield "[RAID] 手形补充失败，停"
@@ -166,10 +162,7 @@ class RaidMixin:
                 self._ticket_buys = buys + 1
 
                 # 补充完重新点即刻出阵
-                depart = self.maa.template_match(cfg["depart_button"]["template"])
-                if depart:
-                    self.maa.click(depart)
-                    time.sleep(1.5)
+                self._click_depart(cfg)
                 self.maa.screenshot(force=True)
                 if not self.maa.template_match(cfg["confirm_ui"]["template"]):
                     yield "[RAID] 补充手形后还是没看到确认弹窗，停"
@@ -284,46 +277,3 @@ class RaidMixin:
             time.sleep(0.8)
 
         self._battle_loop_result = (round_done, battles)
-
-    # ---------- 手形补充（模板已就位）----------
-
-    _recover_ok: bool = False
-
-    def _recover_ticket_stream(self, cfg: dict):
-        """
-        手形不足：补充（模板）→ 恢复1个（模板）→ 确定（模板）
-        会消耗小判，调用方负责计数和上限。
-        结果放在 self._recover_ok。
-        """
-        self._recover_ok = False
-        rec_cfg = cfg["ticket_recover"]
-
-        # 点"补充"
-        self.maa.screenshot(force=True)
-        buchong = self.maa.template_match(rec_cfg["popup_button"]["template"])
-        if not buchong:
-            yield "[RAID] 找不到补充按钮"
-            return
-        self.maa.click(buchong)
-        time.sleep(1.5)
-
-        # 点"恢复1个"
-        self.maa.screenshot(force=True)
-        recover = self.maa.template_match(rec_cfg["recover_button"]["template"])
-        if not recover:
-            yield "[RAID] 找不到恢复1个按钮"
-            return
-        self.maa.click(recover)
-        time.sleep(1.5)
-
-        # 点恢复完毕的"确定"
-        self.maa.screenshot(force=True)
-        ok = self.maa.template_match(rec_cfg["confirm_button"]["template"])
-        if not ok:
-            yield "[RAID] 找不到恢复完毕的确定按钮"
-            return
-        self.maa.click(ok)
-        time.sleep(2.0)
-
-        self._recover_ok = True
-        yield "[RAID] 手形补充完成"

@@ -64,21 +64,28 @@ class RewardsMixin:
 
         # 3. 点击领取按钮
         claim_config = shop_config["claim_button"]
-        claim_roi_raw = claim_config.get("roi", [0, 0, 1280, 720])
-        claim_roi = roi_4to4(claim_roi_raw[0], claim_roi_raw[1], claim_roi_raw[2], claim_roi_raw[3])
+        # 万屋商品会随限时礼包增减而重新排版，不能用旧的固定纵坐标找“领取”。
+        # 以刚识别到的“暖心”标题为锚，只框住它所在的左上商品卡；范围在
+        # 下一行开始前截止，绝不能误点下面的“异去探索道具”。
+        card_left = max(0, result.x - 180)
+        card_top = max(90, result.y - 55)
+        card_right = min(700, card_left + 680)
+        card_bottom = min(720, card_top + 270)
+        # “领取/售罄”只可能出现在商品卡右下方的按钮条。
+        claim_roi = roi_4to4(
+            card_left + 350, card_top + 175, card_right, card_bottom)
 
         # 售罄是“今天已经领过”的明确成功状态，不要再去点旧兜底坐标。
-        sold_out_config = shop_config.get("sold_out", {})
-        sold_out_template = sold_out_config.get("template")
-        if sold_out_template and self.maa.template_match(
-                sold_out_template, roi=claim_roi, threshold=0.5):
+        # 旧“售罄.png”是很小的灰底白字图，0.5 阈值在商品图片和边框上也会
+        # 误命中。售罄属于文字状态，只接受按钮条内 OCR 的明确结果。
+        if self.maa.ocr("售罄", claim_roi, match_mode="contains"):
             yield "[SHOP] 今日暖心礼包已售罄，说明此前已经领取，跳过"
             return
 
         claim_result = self.maa.template_match(
             template=claim_config["template"],
             roi=claim_roi,
-            threshold=0.5
+            threshold=0.75
         )
 
         if claim_result:

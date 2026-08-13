@@ -20,6 +20,18 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: 构建新版面板
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: 获取版本号
         id: version
         shell: pwsh
@@ -152,20 +164,7 @@ jobs:
           name: まあ丸 ${{ steps.version.outputs.tag }}
           tag_name: ${{ steps.version.outputs.tag }}
           overwrite_files: true
-          body: |
-            ## 🦊 まあ丸 ${{ steps.version.outputs.tag }}
-
-            **使用方法：**
-            1. 推荐下载 `maamaru-setup-${{ steps.version.outputs.tag }}.exe` 并按提示安装
-            2. 从开始菜单或桌面启动まあ丸
-            3. 启动器检查通过后，点击“启动まあ丸”
-
-            想免安装使用，也可以下载 `maamaru-launcher-${{ steps.version.outputs.tag }}.zip`，解压后双击 `まあ丸启动器.exe`。
-
-            Python、运行依赖、识别模板与 OCR 模型均已内置，不需要运行 `.bat`，也不需要另装资源包。
-            卸载默认只移除程序，不会删除 `%LOCALAPPDATA%\Maamaru` 中的配置与历史记录。
-
-            **需要：** Windows 10/11
+          body_path: docs/releases/${{ steps.version.outputs.tag }}.md
           files: |
             dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip
             dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe

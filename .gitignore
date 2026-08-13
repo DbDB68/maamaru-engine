@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 .uv-cache/
 dist/
+node_modules/
+panel/static/vue/
+*.tsbuildinfo
 *.egg-info/
 
 # Runtime data

@@ -48,8 +48,6 @@
       parts.push(`联队战 ${params.raid_rounds || 1} 圈`);
     } else if (params.sortie_mode === 'sortie') {
       parts.push(`${params.chapter || 1}-${params.map_no || 1} × ${params.loops || 1} 圈`);
-    } else if (params.sortie_mode === 'pumpkin') {
-      parts.push('南瓜每日四次');
     } else {
       parts.push('不出阵');
     }
@@ -60,8 +58,7 @@
   function compactPlanValue(item) {
     const value = String(item.value);
     if (!/^\d+(?:[章图])?$/.test(value) || !item.label) return value;
-    if (item.label === '圈数') return `${value} 圈`;
-    if (item.label.startsWith('手形最多买几次')) return `最多买手形 ${value} 次`;
+    if (item.label === '打多少次' || item.label === '出阵次数') return `${value} 次`;
     return `${item.label.replace(/（.*）/, '')} ${value}`;
   }
 

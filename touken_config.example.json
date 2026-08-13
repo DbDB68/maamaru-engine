@@ -467,6 +467,21 @@
         641
       ]
     },
+    "异去": {
+      "chapters": {
+        "1": [
+          243,
+          378
+        ]
+      },
+      "maps": {
+        "1": [222, 241],
+        "2": [526, 241],
+        "3": [823, 241],
+        "4": [1126, 241]
+      },
+      "confirm": [1205, 641]
+    },
     "活动": {
       "entry": {
         "target": [
@@ -739,6 +754,9 @@
         980,
         68
       ],
+      "auto_template": "battle/阵形选择自动.png",
+      "manual_template": "battle/阵形选择手动.png",
+      "threshold": 0.9,
       "toggle": [
         910,
         32
@@ -799,10 +817,10 @@
       "claim_button": {
         "template": "领取.png",
         "roi": [
-          350,
-          430,
-          700,
-          650
+          80,
+          120,
+          660,
+          355
         ]
       },
       "sold_out": {
@@ -1045,6 +1063,70 @@
     ],
     "max_skips": 4
   },
+  "osaka": {
+    "team_no": 3,
+    "activity_entry": {
+      "template": "活动.png"
+    },
+    "event_entry": {
+      "template": "大阪城/挖地.png"
+    },
+    "floor_title_ocr": {
+      "roi": [75, 155, 555, 225]
+    },
+    "floor_arrows": {
+      "tens_up": [1014, 284],
+      "ones_up": [1084, 284],
+      "tens_down": [1014, 420],
+      "ones_down": [1084, 420]
+    },
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [506, 1, 774, 77]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "injury_deny_button": {
+      "template": "否.png"
+    },
+    "injury_stamps": {
+      "重伤": {"template": "battle/ui重伤.png"},
+      "中伤": {"template": "battle/中伤.png"},
+      "轻伤": {"template": "battle/轻伤.png"}
+    },
+    "injury_status_roi": [0, 90, 570, 690],
+    "confirm_ui": {
+      "template": "team/ui出阵确认.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png",
+      "roi": [536, 565, 842, 637],
+      "target": [780, 603]
+    },
+    "floor_end_ocr": {
+      "expected": "当前层数",
+      "roi": [825, 270, 1280, 355]
+    },
+    "floor_end_witness_ocr": {
+      "expected": "传送凭证",
+      "roi": [825, 85, 1280, 285]
+    },
+    "march_button": {
+      "template": "battle/行军.png",
+      "roi": [1030, 500, 1280, 720]
+    },
+    "march_stop_button": {"template": "battle/返回本丸.png"},
+    "return_home_confirm": {"template": "team/是.png"},
+    "home_ui": {"template": "ui本丸.png"},
+    "skip_tap": [775, 695]
+  },
   "naihanka": {
     "start_button": {
       "template": "内番开始.png"
@@ -1077,7 +1159,7 @@
       "template": "决定.png"
     },
     "area_select_ui": {
-      "template": "ui地域选择.png"
+      "template": "team/部队选择.png"
     },
     "deploy_button": {
       "template": "team/部队选择.png"
@@ -1111,8 +1193,8 @@
     "injury_status_roi": [
       0,
       90,
-      1280,
-      560
+      570,
+      690
     ],
     "equip_warning_button": {
       "template": "team/继续出阵.png"
@@ -1139,8 +1221,42 @@
         260
       ]
     },
+    "march_continue_button": {
+      "template": "battle/行军.png",
+      "roi": [990, 510, 1280, 720]
+    },
     "return_home_confirm": {
       "template": "team/是.png"
+    }
+  },
+  "yosari": {
+    "entry": {
+      "target": [978, 93],
+      "expected": "归城提灯",
+      "verify_roi": [285, 50, 850, 145]
+    },
+    "departure_confirm": {
+      "expected": "归城提灯进行出阵",
+      "roi": [310, 155, 970, 330],
+      "confirm_target": [640, 603]
+    },
+    "ticket_refill": {
+      "purchase_screen": {
+        "expected": "补充所需",
+        "roi": [270, 75, 1010, 555],
+        "confirm_target": [638, 611],
+        "close_target": [1040, 48]
+      },
+      "spend_confirm": {
+        "expected": "是否消耗",
+        "roi": [300, 80, 1010, 560],
+        "confirm_target": [784, 604]
+      },
+      "completed": {
+        "expected": "补充了归城提灯",
+        "roi": [330, 120, 950, 460],
+        "confirm_target": [638, 511]
+      }
     }
   },
   "expedition": {

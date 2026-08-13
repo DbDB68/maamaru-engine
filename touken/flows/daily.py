@@ -288,6 +288,7 @@ class DailyMixin:
                 for msg in self.raid_stream(
                         max_rounds=sortie_plan.get("rounds", 1),
                         team_no=sortie_plan.get("team_no"),
+                        auto_buy_ticket=sortie_plan.get("auto_buy_ticket", False),
                         max_buys=sortie_plan.get("max_buys")):
                     yield msg
                     if _is_fail(msg):
@@ -321,14 +322,36 @@ class DailyMixin:
                 watch = sortie_plan.get("watch_names") or []
                 for msg in self.pumpkin_stream(
                         team_no=sortie_plan.get("team_no", 3),
+                        difficulty=sortie_plan.get("difficulty", 1),
                         watch_names=watch or None,
-                        max_skips=sortie_plan.get("max_skips", 4)):
+                        max_skips=sortie_plan.get("max_skips", 4),
+                        auto_refill=False):
                     yield msg
                     if _is_fail(msg):
                         ok = False
                     equip_status = _equip_warning_status(msg, equip_status)
                 status = equip_status or ("✓" if ok else "✗")
                 report.append(("出阵(南瓜)", status))
+            elif mode == "yosari":
+                ok = True
+                equip_status = None
+                for msg in self.yosari_stream(
+                        map_no=sortie_plan.get("map_no", 1),
+                        team_no=sortie_plan.get("team_no", 3),
+                        max_loops=sortie_plan.get("loops", 1),
+                        auto_refill=sortie_plan.get("auto_refill", False),
+                        auto_march=sortie_plan.get("auto_march", True),
+                        formation_mode=sortie_plan.get("formation_mode", "manual"),
+                        formation_strategy=sortie_plan.get("formation_strategy", "fixed"),
+                        formation=sortie_plan.get("formation", "鱼鳞阵"),
+                        repair_threshold=sortie_plan.get("repair_threshold", "light"),
+                        injury_action=sortie_plan.get("repair_on_injury", "continue")):
+                    yield msg
+                    if _is_fail(msg):
+                        ok = False
+                    equip_status = _equip_warning_status(msg, equip_status)
+                status = equip_status or ("✓" if ok else "✗")
+                report.append(("出阵(异去)", status))
             else:
                 yield "[日课] 配置为不打，跳过"
         except Exception as exc:

@@ -22,13 +22,13 @@
 
   const FORGE_SCRIPTS = new Set(['forge', 'repair', 'sugar']);
   const SORTIE_SCRIPTS = new Set([
-    'raid', 'pumpkin', 'sortie', 'sakura', 'practice', 'expedition', 'dispatch',
+    'raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch',
   ]);
 
   function sceneFor(script = '', step = '') {
     const detail = String(step || '');
     if (/(锻刀|手入|刀解|合成|炼糖|根兵糖)/.test(detail)) return 'forge';
-    if (/(出阵|合战|演练|远征|联队|南瓜|刷花|派遣)/.test(detail)) return 'sortie';
+    if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|派遣)/.test(detail)) return 'sortie';
     if (FORGE_SCRIPTS.has(script)) return 'forge';
     if (SORTIE_SCRIPTS.has(script)) return 'sortie';
     return 'garden';

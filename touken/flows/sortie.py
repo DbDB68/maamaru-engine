@@ -33,6 +33,43 @@ class SortieMixin:
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
                       injury_action: str = "continue"):
+        yield from self._map_sortie_stream(
+            chapter=chapter, map_no=map_no, team_no=team_no,
+            auto_march=auto_march, max_loops=max_loops,
+            formation_mode=formation_mode,
+            formation_strategy=formation_strategy, formation=formation,
+            repair_threshold=repair_threshold, injury_action=injury_action,
+        )
+
+    def yosari_stream(self, map_no: int, team_no: int = 3,
+                      auto_march: bool = True, max_loops: int = 1,
+                      auto_refill: bool = False,
+                      formation_mode: str = "manual",
+                      formation_strategy: str = "fixed",
+                      formation: str = "鱼鳞阵",
+                      repair_threshold: str = "light",
+                      injury_action: str = "continue"):
+        """流式跑常驻玩法“异去”；目前只有第一章。"""
+        yield from self._map_sortie_stream(
+            chapter=1, map_no=map_no, team_no=team_no,
+            auto_march=auto_march, max_loops=max_loops,
+            auto_refill=auto_refill,
+            formation_mode=formation_mode,
+            formation_strategy=formation_strategy, formation=formation,
+            repair_threshold=repair_threshold, injury_action=injury_action,
+            map_type="异去", cfg_key="yosari",
+        )
+
+    def _map_sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
+                           auto_march: bool = True, max_loops: int = 1,
+                           formation_mode: str = "manual",
+                           formation_strategy: str = "fixed",
+                           formation: str = "鱼鳞阵",
+                           repair_threshold: str = "light",
+                           injury_action: str = "continue",
+                           auto_refill: bool = False,
+                           map_type: str = "合战场",
+                           cfg_key: str = "sortie"):
         """
         流式跑合战场
 
@@ -47,12 +84,13 @@ class SortieMixin:
         Yields:
             str: 执行状态消息
         """
-        cfg = self.config.get("sortie", {})
+        cfg = dict(self.config.get("sortie", {}))
+        cfg.update(self.config.get(cfg_key, {}))
         if not cfg:
-            yield "[出阵] 未配置合战场"
+            yield f"[出阵] 未配置{map_type}"
             return
 
-        map_cfg = self.config.get("map_select", {}).get("合战场", {})
+        map_cfg = self.config.get("map_select", {}).get(map_type, {})
         teams = self.config.get("team_select", {}).get("teams", {})
         if str(chapter) not in map_cfg.get("chapters", {}):
             yield f"[出阵] 配置里没有章节{chapter}的坐标"
@@ -74,6 +112,7 @@ class SortieMixin:
 
         loop_no = 1
         repair_attempts = 0
+        map_page_ready = False
         while loop_no <= max_loops:
             if self.current_location != "出阵":
                 for nav_msg in self.navigate_to_stream("出阵"):
@@ -83,55 +122,45 @@ class SortieMixin:
                     return
             yield f"[出阵] ⚔️ 第 {loop_no}/{max_loops} 圈：{chapter}章-{map_no}图，部队{team_no}准备上场"
 
-            # ========== 2. 选章节 → 决定 ==========
-            self._click_point(map_cfg["chapters"][str(chapter)])
-            time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            decide = self.maa.template_match(cfg["decide_button"]["template"])
-            if decide:
-                self.maa.click(decide)
-                time.sleep(1.5)
+            if not map_page_ready:
+                if cfg_key == "yosari" and not self._enter_yosari(cfg):
+                    yield "[异去] 没能从过去切换到异去，停止"
+                    return
 
-            # ========== 3. 等地域选择 → 选小图 ==========
-            area_ok = False
-            for _ in range(10):
-                self.maa.screenshot(force=True)
-                if self.maa.template_match(cfg["area_select_ui"]["template"]):
-                    area_ok = True
-                    break
+                # ========== 2. 选章节 → 决定 ==========
+                self._click_point(map_cfg["chapters"][str(chapter)])
                 time.sleep(0.5)
-            if not area_ok:
-                yield "[出阵] 地域选择界面没出现（章节坐标不对？），本圈放弃"
-                continue
+                self.maa.screenshot(force=True)
+                decide = self.maa.template_match(cfg["decide_button"]["template"])
+                if decide:
+                    self.maa.click(decide)
+                    time.sleep(1.5)
+
+                # ========== 3. 等小图页 ==========
+                area_ok = False
+                for _ in range(10):
+                    self.maa.screenshot(force=True)
+                    if self.maa.template_match(cfg["area_select_ui"]["template"]):
+                        area_ok = True
+                        break
+                    time.sleep(0.5)
+                if not area_ok:
+                    yield "[出阵] 没识别到小图页的部队选择按钮（章节坐标或页面状态不对），停止"
+                    return
+            else:
+                yield "[异去] 已回到四张小图页，直接开始下一圈"
             self._click_point(map_cfg["maps"][str(map_no)])
             time.sleep(1.0)
+            map_page_ready = False
 
             # ========== 4. 部队选择 → 选部队 ==========
             # 合战场点完小图会【直接】进部队选择界面，没有中间按钮；
             # 但保险起见：没在部队选择界面时才去找"部队选择"按钮点
-            ocr_cfg = cfg["team_ui_ocr"]
-            roi = roi_4to4(*ocr_cfg["roi"])
-            team_ui_ok = False
-            for attempt in range(12):
-                self.maa.screenshot(force=True)
-                if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
-                    team_ui_ok = True
-                    break
-                # 第 3 次还没进，试着找部队选择按钮点一下（兼容其他入口）
-                if attempt == 2:
-                    deploy = self.maa.template_match(cfg["deploy_button"]["template"])
-                    if deploy:
-                        self.maa.click(deploy)
-                        time.sleep(1.5)
-                time.sleep(0.5)
-            if not team_ui_ok:
+            if not self._wait_for_team_select(cfg, attempts=12, open_after=2):
                 yield "[出阵] 部队选择界面没打开，本圈放弃"
                 continue
 
-            self._click_point(teams[str(team_no)])
-            time.sleep(0.3)
-            self._click_point(teams[str(team_no)])
-            time.sleep(0.5)
+            self._pick_team(team_no)
 
             # ========== 5. 【保命】重伤检查（先于一切出阵准备） ==========
             self.maa.screenshot(force=True)
@@ -175,17 +204,17 @@ class SortieMixin:
                 continue
 
             # ========== 6. 可选：委托自动行军 ==========
+            delegated_march = False
             if auto_march:
-                self._enable_auto_march()
+                delegated_march = self._enable_auto_march()
                 time.sleep(0.5)
+                if not delegated_march:
+                    yield "[出阵] ⚠️ 游戏自动行军没有挂成功，降级为脚本手动行军"
 
             # ========== 7. 即刻出阵 → 分支 ==========
-            depart = self.maa.template_match(cfg["depart_button"]["template"])
-            if not depart:
+            if not self._click_depart(cfg):
                 yield "[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停"
                 return
-            self.maa.click(depart)
-            time.sleep(1.5)
 
             self.maa.screenshot(force=True)
 
@@ -205,6 +234,19 @@ class SortieMixin:
                 yield "[出阵] 🛑 队员重伤确认弹窗，已点【否】。有重伤绝不出阵，停"
                 return
 
+            if cfg_key == "yosari":
+                confirmed = yield from self._confirm_yosari_departure(
+                    cfg, auto_refill=auto_refill)
+                if confirmed == "refilled":
+                    yield "[异去] 已补充归城提灯，重新点击即刻出阵"
+                    if not self._click_depart(cfg):
+                        yield "[异去] 补充后找不到即刻出阵按钮，收工"
+                        return
+                    confirmed = yield from self._confirm_yosari_departure(
+                        cfg, auto_refill=auto_refill, refill_attempted=True)
+                if not confirmed:
+                    return
+
             yield f"[出阵] 🐎 部队{team_no}出发！行军监控开着呢，我全程盯着"
 
             # ========== 8. 行军监控：打完自动回本丸 / 中断则返回本丸 ==========
@@ -213,13 +255,40 @@ class SortieMixin:
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
 
-                # 阵形选择蹦出来（没委托上自动行军时会问）：选一个再继续
+                # 异去一圈结束后回到四张小图页，不会回本丸。
+                if cfg_key == "yosari" and self._yosari_round_done(cfg):
+                    march_done = True
+                    map_page_ready = True
+                    break
+
+                # 普通合战场打完一圈会自动回本丸。
+                if self.maa.template_match(cfg["home_ui"]["template"]):
+                    march_done = True
+                    break
+
+                # 游戏自动行军确认挂上后，路线与阵形全交给游戏，不介入。
+                # 行军停止必须认“自动行军停止”横幅；不能拿“返回本丸”按钮判定，
+                # 因为那个按钮在行军区常驻，误认后点击就会变成脚本主动撤退。
+                if delegated_march:
+                    stop_ocr = cfg["march_stop_ocr"]
+                    stop_roi = roi_4to4(*stop_ocr["roi"])
+                    if self.maa.ocr(expected=stop_ocr["expected"], roi=stop_roi):
+                        field_injury = self._team_injury_status(cfg)
+                        detail = f"（检测到{field_injury}）" if field_injury else ""
+                        yield f"[出阵] ⚠️ 游戏自动行军已经停止{detail}，准备安全返回本丸"
+                        if not self._return_home_from_march(cfg):
+                            yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                            return
+                        interrupted = True
+                        break
+                    self._click_point(cfg["skip_tap"])
+                    time.sleep(0.8)
+                    continue
+
+                # 只有自动委托没挂上，或用户明确选择脚本手动行军，才处理阵形和岔路。
                 # ——刷花实测卡死在这的教训
-                fcfg = self.config.get("formation", {})
-                fv = fcfg.get("verify", {})
-                if fv and self.maa.exists(fv["template"], roi_4to4(*fv["roi"])):
-                    if auto_march:
-                        yield "[出阵] ⚠️ 已选自动行军但仍出现阵形页，按兜底阵形继续"
+                if self._formation_mode_state(
+                        allow_auto_without_title=formation_mode != "auto") is not None:
                     result = self.choose_formation(
                         strategy=formation_strategy,
                         formation_name=formation,
@@ -231,14 +300,14 @@ class SortieMixin:
                     for _ in range(8):
                         time.sleep(0.4)
                         self.maa.screenshot(force=True)
-                        if not self.maa.exists(
-                                fv["template"], roi_4to4(*fv["roi"])):
+                        if self._formation_mode_state() is None:
                             break
                     continue
 
                 # 手动行军决策屏（委托没挂上时每个节点都问）：点"行军"继续
                 # ——刷花实测：_enable_auto_march 会静默失败，不能全指望委托
-                if self.maa.ocr("行军", roi_4to4(1080, 550, 1215, 680)):
+                march_button = self._find_march_continue(cfg)
+                if march_button:
                     field_injury = self._team_injury_status(cfg)
                     if field_injury and self._injury_reaches_threshold(
                             field_injury, repair_threshold):
@@ -249,34 +318,21 @@ class SortieMixin:
                         interrupted = True
                         break
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
-                    self._click_point([1146, 617])
+                    self.maa.click(march_button)
                     time.sleep(1.0)
                     continue
-
-                # 打完一圈自动回本丸
-                if self.maa.template_match(cfg["home_ui"]["template"]):
-                    march_done = True
-                    break
-
-                # 行军停止（中伤等）→ 判定依据是"自动行军停止"横幅（OCR），
-                # 不是返回本丸按钮——那玩意在行军区常驻，点了就是手动撤退
-                stop_ocr = cfg["march_stop_ocr"]
-                stop_roi = roi_4to4(*stop_ocr["roi"])
-                if self.maa.ocr(expected=stop_ocr["expected"], roi=stop_roi):
-                    yield "[出阵] ⚠️ 检测到自动行军停止横幅"
-                    if not self._return_home_from_march(cfg):
-                        yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
-                        return
-                    interrupted = True
-                    break
 
                 # 安全区跳动画
                 self._click_point(cfg["skip_tap"])
                 time.sleep(0.8)
 
             if march_done:
-                yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
-                self.current_location = "本丸"
+                if cfg_key == "yosari":
+                    yield f"[异去] ✓ 第 {loop_no} 圈结束，已回到异去小图页"
+                    self.current_location = "出阵"
+                else:
+                    yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
+                    self.current_location = "本丸"
                 repair_attempts = 0
                 loop_no += 1
             elif interrupted:
@@ -290,12 +346,103 @@ class SortieMixin:
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
 
-    @staticmethod
-    def _injury_reaches_threshold(injury: str, threshold: str) -> bool:
-        severity_rank = {"轻伤": 1, "中伤": 2, "重伤": 3}
-        threshold_rank = {"light": 1, "medium": 2, "heavy": 3}.get(
-            str(threshold or "light"), 1)
-        return severity_rank.get(injury, 3) >= threshold_rank
+    def _enter_yosari(self, cfg: dict) -> bool:
+        """从默认的“过去”切换到右上角“异去”，并用文字复核。"""
+        entry = cfg.get("entry", {})
+        roi = roi_4to4(*entry.get("verify_roi", [285, 50, 850, 145]))
+        expected = entry.get("expected", "归城提灯")
+        self.maa.screenshot(force=True)
+        if self.maa.ocr(expected, roi):
+            return True
+        self._click_point(entry.get("target", [978, 93]))
+        time.sleep(1.2)
+        for _ in range(6):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected, roi):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _confirm_yosari_departure(self, cfg: dict, auto_refill: bool = False,
+                                  refill_attempted: bool = False):
+        """处理新版归城提灯确认；缺灯时按四段确认链补充后返回部队选择。"""
+        prompt = cfg.get("departure_confirm", {})
+        roi = roi_4to4(*prompt.get("roi", [310, 155, 970, 330]))
+        expected = prompt.get("expected", "归城提灯进行出阵")
+        for _ in range(8):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected, roi):
+                self._click_point(prompt.get("confirm_target", [640, 603]))
+                time.sleep(1.5)
+                break
+            time.sleep(0.5)
+        else:
+            yield "[异去] 没看到归城提灯出阵确认框；停止"
+            return False
+
+        refill = cfg.get("ticket_refill", {})
+
+        def _wait_text(step: dict, fallback_expected: str, fallback_roi: list) -> bool:
+            text = step.get("expected", fallback_expected)
+            text_roi = roi_4to4(*step.get("roi", fallback_roi))
+            for _ in range(8):
+                self.maa.screenshot(force=True)
+                if self.maa.ocr(text, text_roi):
+                    return True
+                time.sleep(0.4)
+            return False
+
+        purchase_screen = refill.get("purchase_screen", {})
+        if not _wait_text(purchase_screen, "补充所需", [270, 75, 1010, 555]):
+            # 没进入购买页，说明现有提灯有效，第一次确认后已经真正出阵。
+            yield "[异去] 已确认使用现有归城提灯（未勾选探索道具）"
+            return True
+
+        if refill_attempted:
+            yield "[异去] 补充后仍进入购买页，停止，避免重复消费小判"
+            return False
+        if not auto_refill:
+            self._click_point(purchase_screen.get("close_target", [1040, 48]))
+            yield "[异去] 归城提灯不足；自动补充已关闭，不消耗小判，收工"
+            return False
+
+        yield "[异去] 归城提灯不足，开始四段确认中的补充步骤"
+        self._click_point(purchase_screen.get("confirm_target", [638, 611]))
+        time.sleep(1.2)
+
+        spend_confirm = refill.get("spend_confirm", {})
+        if not _wait_text(spend_confirm, "是否消耗", [300, 80, 1010, 560]):
+            yield "[异去] 没看到消耗500小判的确认页，停止点击"
+            return False
+        self._click_point(spend_confirm.get("confirm_target", [784, 604]))
+        time.sleep(1.2)
+
+        completed = refill.get("completed", {})
+        if not _wait_text(completed, "补充了归城提灯", [330, 120, 950, 460]):
+            yield "[异去] 没看到归城提灯补充完成页，停止点击"
+            return False
+        self._click_point(completed.get("confirm_target", [638, 511]))
+        time.sleep(1.2)
+        yield "[异去] 归城提灯补充完成，已回到部队选择"
+        return "refilled"
+
+    def _yosari_round_done(self, cfg: dict) -> bool:
+        """归城提灯标题与部队选择同时出现，才算确实回到异去小图页。"""
+        marker = cfg.get("round_end_ocr", cfg.get("entry", {}))
+        roi_raw = marker.get("roi", marker.get("verify_roi", [285, 50, 850, 145]))
+        expected = marker.get("expected", "归城提灯")
+        if not self.maa.ocr(expected, roi_4to4(*roi_raw)):
+            return False
+        deploy_cfg = cfg.get("deploy_button", {})
+        template = deploy_cfg.get("template")
+        return bool(template and self.maa.template_match(template))
+
+    def _find_march_continue(self, cfg: dict):
+        """只在右下角按钮区寻找完整“行军”按钮，避免命中自动行军横幅。"""
+        march_cfg = cfg.get("march_continue_button", {})
+        roi = roi_4to4(*march_cfg.get("roi", [990, 510, 1280, 720]))
+        template = march_cfg.get("template", "battle/行军.png")
+        return self.maa.template_match(template, roi)
 
     def _return_home_from_march(self, cfg) -> bool:
         """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。"""
@@ -321,20 +468,3 @@ class SortieMixin:
                 return True
             time.sleep(0.8)
         return False
-
-    def _team_injury_status(self, cfg):
-        """在部队选择页识别最高伤势；重伤模板与文字 OCR 双保险。"""
-        stamps = cfg.get("injury_stamps", {})
-        for severity in ("重伤", "中伤", "轻伤"):
-            stamp = stamps.get(severity, {})
-            template = stamp.get("template")
-            if template and self.maa.template_match(template):
-                return severity
-        # 兼容尚未升级 injury_stamps 的旧配置。
-        if not stamps and self.maa.template_match(cfg["injury_stamp"]["template"]):
-            return "重伤"
-        roi = roi_4to4(*cfg.get("injury_status_roi", [0, 90, 1280, 560]))
-        for severity in ("重伤", "中伤", "轻伤"):
-            if self.maa.ocr(severity, roi):
-                return severity
-        return None

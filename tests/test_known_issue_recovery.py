@@ -8,6 +8,7 @@ from touken.flows.daily import (
     _is_fail,
     _shop_report_status,
 )
+from touken.flows.rewards import RewardsMixin
 from touken.maa_adapter import Point, _ocr_text_matches
 
 
@@ -105,6 +106,47 @@ class DailyReportTests(unittest.TestCase):
             _shop_report_status(msg),
             "✗ 未识别到领取按钮，未点击",
         )
+
+
+class ShopGiftTests(unittest.TestCase):
+    def test_claim_button_roi_is_anchored_to_warm_gift_card(self):
+        class Maa:
+            def __init__(self):
+                self.template_rois = []
+
+            def screenshot(self, force=False):
+                pass
+
+            def ocr(self, expected, roi, match_mode="contains"):
+                if expected == "暖心":
+                    return Point(145, 145)
+                return None
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                self.template_rois.append((template, roi))
+                return None
+
+        class Flow(RewardsMixin):
+            def __init__(self):
+                self.current_location = "万屋"
+                self.maa = Maa()
+                self.config = {"shop": {"free_gift": {
+                    "find_text": {"expected": "暖心", "roi": [0, 100, 700, 650]},
+                    "claim_button": {"template": "领取.png"},
+                    "sold_out": {"template": "售罄.png"},
+                }}}
+
+            def navigate_to_stream(self, location):
+                return iter(())
+
+        flow = Flow()
+        list(flow.claim_free_gift_stream())
+        rois = [roi for template, roi in flow.maa.template_rois
+                if template == "领取.png"]
+        self.assertTrue(rois)
+        for roi in rois:
+            self.assertEqual((roi.x, roi.y, roi.w, roi.h), (350, 265, 330, 95))
+            self.assertLessEqual(roi.y + roi.h, 360)
 
 
 class OcrMatchingTests(unittest.TestCase):

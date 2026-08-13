@@ -62,6 +62,8 @@
     ]},
     { label: '出阵配置', items: [
       { key: 'sortie', label: '出阵' },
+      { key: 'yosari', label: '异去' },
+      { key: 'osaka', label: '大阪城挖地' },
       { key: 'sakura', label: '刷花' },
       { key: 'practice', label: '演练' },
     ]},
@@ -168,7 +170,16 @@
   // ── 参数记忆：每张卡的上次选项存 localStorage，重启不丢 ──
   function savedParams(scriptName) {
     try {
-      return JSON.parse(localStorage.getItem('maamaru_params_' + scriptName) || '{}');
+      const params = JSON.parse(localStorage.getItem('maamaru_params_' + scriptName) || '{}');
+      // 出阵数量统一为 runs；第一次打开新版时接住旧页面保存的不同字段。
+      if (params.runs == null) {
+        const legacyKey = scriptName === 'raid' ? 'rounds'
+          : scriptName === 'pumpkin' ? 'max_skips'
+          : (scriptName === 'sortie' || scriptName === 'yosari') ? 'loops'
+          : null;
+        if (legacyKey && params[legacyKey] != null) params.runs = params[legacyKey];
+      }
+      return params;
     } catch(e) { return {}; }
   }
 
@@ -219,7 +230,7 @@
 
   // ── 概览左栏：常用功能列表 ──
   const FUNC_ICONS = {
-    daily: '🌅', raid: '⚔️', pumpkin: '🎃', sortie: '🗡', sakura: '🌸',
+    daily: '🌅', raid: '⚔️', pumpkin: '🎃', sortie: '🗡', yosari: '🏮', osaka: '⛏️', sakura: '🌸',
     practice: '🥊', expedition: '🏕', dispatch: '⛺', forge: '🔥',
     sugar: '🍬', repair: '🛠', snapshot: '📦',
   };
@@ -229,6 +240,8 @@
     raid: '/static/img/ui/raid.png',
     pumpkin: '/static/img/ui/pumpkin.png',
     sortie: '/static/img/ui/sortie.png',
+    yosari: '/static/img/ui/yosari.png',
+    osaka: '/static/img/ui/digging.png',
     sakura: '/static/img/ui/sakura.png',
     practice: '/static/img/ui/practice.png',
     expedition: '/static/img/ui/expedition.png',
@@ -237,11 +250,12 @@
     sugar: '/static/img/ui/sugar.png',
     repair: '/static/img/ui/repair-tools.png',
     snapshot: '/static/img/ui/snapshot.png',
+    _dismantle_whitelist: '/static/img/ui/dismantle.png',
   };
 
   const FUNC_USAGE_KEY = 'maamaru_func_usage_v1';
   const DEFAULT_FREQUENT_ORDER = [
-    'daily', 'sortie', 'expedition', 'repair', 'forge', 'pumpkin',
+    'daily', 'sortie', 'yosari', 'osaka', 'expedition', 'repair', 'forge', 'pumpkin',
     'raid', 'sugar', 'sakura', 'practice', 'snapshot', 'dispatch',
   ];
 

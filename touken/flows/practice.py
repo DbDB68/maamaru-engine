@@ -356,7 +356,8 @@ class PracticeMixin:
         got_formation = False
         for _ in range(10):  # 最多等 20s
             self.maa.screenshot(force=True)
-            if self.maa.exists("battle/ui阵形选择.png", threshold=0.7):
+            if self._formation_mode_state(
+                    allow_auto_without_title=formation_mode != "auto") is not None:
                 got_formation = True
                 break
             if self._on_list():

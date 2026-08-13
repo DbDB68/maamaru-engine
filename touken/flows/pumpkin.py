@@ -62,7 +62,7 @@ class PumpkinMixin:
 
     def pumpkin_stream(self, max_skips: int = None, team_no: int = None,
                        difficulty: int = None, debug_dir: str = None,
-                       watch_names: list = None, **kwargs):
+                       watch_names: list = None, auto_refill: bool = False, **kwargs):
         """
         流式刷南瓜大作战
 
@@ -78,6 +78,11 @@ class PumpkinMixin:
         if not cfg:
             yield "[南瓜] 未配置南瓜大作战"
             return
+
+        if auto_refill:
+            yield ("[南瓜] 自动补充目前仅为占位：新版更新令牌购买后不会正确刷新并关闭弹窗；"
+                   "本次按关闭处理，令牌不足时不消费小判")
+            auto_refill = False
 
         team_no = team_no or cfg.get("team_no", 3)
         if max_skips is None:
@@ -201,7 +206,7 @@ class PumpkinMixin:
                     yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），最后这块已打完，收工"
                     break
                 yield "[南瓜] 点剪影更新开新局..."
-                for msg in self._refresh_board_stream(cfg):
+                for msg in self._refresh_board_stream(cfg, auto_refill=auto_refill):
                     yield msg
                 if not self._refresh_ok:
                     yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
@@ -233,7 +238,7 @@ class PumpkinMixin:
                             yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），收工"
                             return
                         yield f"[南瓜] 复核一致，是【{pending_name}】，确认不要，烧令牌"
-                        for msg in self._refresh_board_stream(cfg):
+                        for msg in self._refresh_board_stream(cfg, auto_refill=auto_refill):
                             yield msg
                         if not self._refresh_ok:
                             yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
@@ -425,14 +430,7 @@ class PumpkinMixin:
 
         ocr_cfg = cfg["team_ui_ocr"]
         roi = roi_4to4(*ocr_cfg["roi"])
-        team_ui_ok = False
-        for _ in range(8):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
-                team_ui_ok = True
-                break
-            time.sleep(0.5)
-        if not team_ui_ok:
+        if not self._wait_for_team_select(cfg, attempts=8):
             # 部队界面没开：可能是弹窗挡路，不代表板子满了（满没满看「已解锁」OCR）
             yield "[南瓜] 部队选择界面没打开"
             # 把拦路弹窗点掉再退出去，免得挡后面的剪影更新
@@ -447,18 +445,12 @@ class PumpkinMixin:
             return
 
         # 选部队（固定坐标，点两下确认）
-        self._click_point(teams[str(team_no)])
-        time.sleep(0.3)
-        self._click_point(teams[str(team_no)])
-        time.sleep(0.5)
+        self._pick_team(team_no)
 
         # 即刻出阵
-        depart = self.maa.template_match(cfg["depart_button"]["template"])
-        if not depart:
+        if not self._click_depart(cfg):
             yield "[南瓜] 找不到即刻出阵按钮"
             return
-        self.maa.click(depart)
-        time.sleep(1.5)
 
         self.maa.screenshot(force=True)
 
@@ -499,7 +491,7 @@ class PumpkinMixin:
 
     # ---------- 内部：剪影更新 ----------
 
-    def _refresh_board_stream(self, cfg: dict):
+    def _refresh_board_stream(self, cfg: dict, auto_refill: bool = False):
         """
         剪影更新 → 二次弹窗确定。结果放在 self._refresh_ok。
         更新完会校验：能不能重新点开部队选择界面（能 = 新板子出来了）。
@@ -513,6 +505,7 @@ class PumpkinMixin:
 
         confirm = None
         for attempt in range(3):
+            recovered = False
             if attempt:
                 yield f"[南瓜] 剪影更新第 {attempt + 1} 次尝试..."
             # 先驱散可能挡路的狐狸对话（每点一下翻一页，没弹窗时点的是安全区，无害）
@@ -534,7 +527,29 @@ class PumpkinMixin:
                 confirm = self.maa.template_match(cfg["refresh_confirm"]["template"])
                 if confirm:
                     break
+                recover_cfg = self.config.get("raid", {}).get("ticket_recover", {})
+                popup_template = recover_cfg.get("popup_button", {}).get("template")
+                if popup_template and self.maa.template_match(popup_template):
+                    if not auto_refill:
+                        close_template = recover_cfg.get("close_button", {}).get("template")
+                        close = self.maa.template_match(close_template) if close_template else None
+                        if close:
+                            self.maa.click(close)
+                        yield "[南瓜] 手形不足；自动补充已关闭，不消耗小判，收工"
+                        return
+                    yield "[南瓜] 手形不足，按设置使用小判自动补充..."
+                    recovery = dict(cfg)
+                    recovery["ticket_recover"] = recover_cfg
+                    for recover_msg in self._recover_ticket_stream(recovery, tag="[南瓜]"):
+                        yield recover_msg
+                    if not self._recover_ok:
+                        yield "[南瓜] 手形补充失败，收工"
+                        return
+                    recovered = True
+                    break
                 time.sleep(0.8)
+            if not confirm and recovered:
+                continue
             if confirm:
                 break
             # 确认没出来 → 狐狸对话之类挡路，翻页驱散后重试

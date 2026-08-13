@@ -39,6 +39,40 @@ class BattleMixin:
             time.sleep(0.4)
         return False
 
+    _recover_ok: bool = False
+
+    def _recover_ticket_stream(self, cfg: dict, tag: str = "[出阵]"):
+        """通用手形补充：补充 → 恢复1个 → 确定。"""
+        self._recover_ok = False
+        rec_cfg = cfg["ticket_recover"]
+
+        self.maa.screenshot(force=True)
+        refill = self.maa.template_match(rec_cfg["popup_button"]["template"])
+        if not refill:
+            yield f"{tag} 找不到补充按钮"
+            return
+        self.maa.click(refill)
+        time.sleep(1.5)
+
+        self.maa.screenshot(force=True)
+        recover = self.maa.template_match(rec_cfg["recover_button"]["template"])
+        if not recover:
+            yield f"{tag} 找不到恢复1个按钮"
+            return
+        self.maa.click(recover)
+        time.sleep(1.5)
+
+        self.maa.screenshot(force=True)
+        confirm = self.maa.template_match(rec_cfg["confirm_button"]["template"])
+        if not confirm:
+            yield f"{tag} 找不到恢复完毕的确定按钮"
+            return
+        self.maa.click(confirm)
+        time.sleep(2.0)
+
+        self._recover_ok = True
+        yield f"{tag} 手形补充完成"
+
     # ==================== 地图选择 ====================
 
     def select_map(self, map_type: str, chapter: str = None,
@@ -96,6 +130,79 @@ class BattleMixin:
         return True
 
     # ==================== 部队选择 ====================
+
+    def _wait_for_team_select(self, cfg: dict, attempts: int = 10,
+                              open_after: int = None) -> bool:
+        """等待部队选择页；需要时点击玩法页上的“部队选择”按钮。"""
+        ocr_cfg = cfg.get("team_ui_ocr", {})
+        roi_raw = ocr_cfg.get("roi")
+        expected = ocr_cfg.get("expected", "部队选择")
+        if not roi_raw:
+            return False
+        roi = roi_4to4(*roi_raw)
+
+        for attempt in range(attempts):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected=expected, roi=roi):
+                return True
+            if open_after is not None and attempt == open_after:
+                deploy_cfg = cfg.get("deploy_button", {})
+                template = deploy_cfg.get("template")
+                deploy = self.maa.template_match(template) if template else None
+                if deploy:
+                    self.maa.click(deploy)
+                    time.sleep(1.5)
+            time.sleep(0.5)
+        return False
+
+    def _pick_team(self, team_no: int) -> bool:
+        """在部队选择页切换部队；第二次点击用于确认当前标签。"""
+        teams = self.config.get("team_select", {}).get("teams", {})
+        target = teams.get(str(team_no))
+        if not target:
+            return False
+        self._click_point(target)
+        time.sleep(0.3)
+        self._click_point(target)
+        time.sleep(0.5)
+        return True
+
+    def _click_depart(self, cfg: dict) -> bool:
+        """点击各玩法共用的“即刻出阵”按钮。"""
+        depart_cfg = cfg.get("depart_button", {})
+        template = depart_cfg.get("template")
+        depart = self.maa.template_match(template) if template else None
+        if not depart:
+            return False
+        self.maa.click(depart)
+        time.sleep(1.5)
+        return True
+
+    @staticmethod
+    def _injury_reaches_threshold(injury: str, threshold: str) -> bool:
+        """共用伤势阈值：轻伤 < 中伤 < 重伤。"""
+        severity = {"轻伤": 1, "中伤": 2, "重伤": 3}
+        limits = {"light": 1, "medium": 2, "heavy": 3}
+        return severity.get(injury, 3) >= limits.get(str(threshold or "light"), 1)
+
+    def _team_injury_status(self, cfg):
+        """在部队列表或战斗结果页识别当前最高伤势。"""
+        # 只看左侧我方六人。大阪城结果页右侧敌军会出现红色“破坏”章，
+        # 全屏模板匹配会把它误认成同为红底的“重伤”，进而错误触发手入。
+        roi = roi_4to4(*cfg.get("injury_status_roi", [0, 90, 570, 690]))
+        stamps = cfg.get("injury_stamps", {})
+        for severity in ("重伤", "中伤", "轻伤"):
+            template = stamps.get(severity, {}).get("template")
+            if template and self.maa.template_match(template, roi):
+                return severity
+        if not stamps:
+            legacy = cfg.get("injury_stamp", {}).get("template")
+            if legacy and self.maa.template_match(legacy, roi):
+                return "重伤"
+        for severity in ("重伤", "中伤", "轻伤"):
+            if self.maa.ocr(severity, roi):
+                return severity
+        return None
 
     def select_team(self, team_no: int, auto_march: bool = False,
                     load_record: int = None, equip: bool = False) -> bool:
@@ -243,16 +350,19 @@ class BattleMixin:
     def choose_formation(self, strategy: str = "fixed",
                          formation_name: str = "逆行阵",
                          enable_auto: bool = False) -> str:
-        """按策略选阵；自动模式下，无有利标记时使用固定阵形兜底。"""
+        """读取右上角状态，按需要切换自动/手动；手动时再选择阵形。"""
         cfg = self.config.get("formation", {})
         mode = cfg.get("auto_mode", {})
-        if mode:
-            roi_raw = mode.get("roi", [840, 0, 980, 68])
-            self.maa.screenshot(force=True)
-            current_opposite = "手动" if enable_auto else "自动"
-            if self.maa.ocr(current_opposite, roi_4to4(*roi_raw)):
-                self._click_point(mode.get("toggle", [910, 32]))
-                time.sleep(0.6)
+        current = self._formation_mode_state(
+            allow_auto_without_title=not enable_auto)
+        if current is None:
+            return "failed"
+        wanted = "auto" if enable_auto else "manual"
+        if current != wanted:
+            self._click_point(mode.get("toggle", [910, 32]))
+            time.sleep(0.6)
+        if enable_auto:
+            return "auto"
 
         if strategy == "advantage":
             point = self.maa.template_match(
@@ -268,6 +378,32 @@ class BattleMixin:
         return ("fixed" if self.select_formation(
             self._formation_name(formation_name)) else "failed")
 
+    def _formation_mode_state(self, allow_auto_without_title: bool = False):
+        """先确认阵形选择页，再读取右上角当前模式。"""
+        formation = self.config.get("formation", {})
+        verify = formation.get("verify", {})
+        verify_template = verify.get("template", "battle/ui阵形选择.png")
+        verify_roi = roi_4to4(*verify.get("roi", [571, 5, 707, 44]))
+        # 右上角模式按钮在整场战斗中常驻，不能单独作为阵形页判据。
+        # 只有顶部红色“阵形选择”标题出现时，才允许切模式或点击阵形卡。
+        mode = formation.get("auto_mode", {})
+        roi = roi_4to4(*mode.get("roi", [840, 0, 980, 68]))
+        auto_template = mode.get("auto_template", "battle/阵形选择自动.png")
+        manual_template = mode.get("manual_template", "battle/阵形选择手动.png")
+        threshold = float(mode.get("threshold", 0.9))
+        title_visible = bool(self.maa.template_match(verify_template, verify_roi))
+        # 两张图的上半截完全相同，实测整图相关度约 0.879；旧阈值 0.7 会让
+        # “手动”继续命中“自动”，于是脚本在战斗中反复拨动按钮。
+        if self.maa.template_match(auto_template, roi, threshold=threshold) and (
+                title_visible or allow_auto_without_title):
+            # 自动阵形会跳过选择页，因此切回手动时只能抓住常驻的自动状态按钮。
+            # 调用方仅在“想要手动”时开启此例外；想保持自动时不会在战斗中反复处理。
+            return "auto"
+        if title_visible and self.maa.template_match(
+                manual_template, roi, threshold=threshold):
+            return "manual"
+        return None
+
     def select_formation(self, formation_name: str) -> bool:
         """
         选择阵形
@@ -281,14 +417,10 @@ class BattleMixin:
         formation_name = self._formation_name(formation_name)
         formation_config = self.config.get("formation", {})
 
-        # 验证是否在阵形选择界面
-        verify = formation_config.get("verify")
-        if verify:
-            roi_raw = verify["roi"]
-            roi = roi_4to4(roi_raw[0], roi_raw[1], roi_raw[2], roi_raw[3])
-            if not self.maa.exists(verify["template"], roi):
-                print("[ERROR] 不在阵形选择界面")
-                return False
+        # 必须同时看到顶部阵形页标题和右上角模式状态。
+        if self._formation_mode_state() is None:
+            print("[ERROR] 不在阵形选择界面")
+            return False
 
         # 选择阵形
         formations = formation_config.get("formations", {})

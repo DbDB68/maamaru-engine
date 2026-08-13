@@ -129,6 +129,64 @@ def _team_field(default="3"):
             "options": _TEAM_OPTIONS, "default": default}
 
 
+def _run_count_field(*, ticket=False, default=1):
+    """四种出阵共用的目标数量；玩法内部再解释成圈数或手形预算。"""
+    return {"key": "runs", "type": "number",
+            "label": "出阵次数",
+            "default": default, "min": 1, "max": 99,
+            **({"help": "这是本次任务的目标次数；是否花小判补充手形由下方开关决定。"} if ticket else {})}
+
+
+def _ticket_refill_field():
+    return {"key": "auto_refill", "type": "toggle", "label": "是否自动补充手形？",
+            "default": False,
+            "help": "开启后，手形不足时将自动使用小判补充，直到完成设定的出阵次数。关闭后，手形不足时结束任务，不消耗小判。"}
+
+
+def _run_count(params, default, *legacy_keys):
+    """读取统一字段，同时兼容改版前已保存的各玩法字段。"""
+    if params.get("runs") not in (None, ""):
+        return _i(params, "runs", default)
+    for key in legacy_keys:
+        if params.get(key) not in (None, ""):
+            return _i(params, key, default)
+    return default
+
+
+def _march_and_injury_fields():
+    """合战场与异去共享；阵形仅在脚本行军时显示。"""
+    return [
+        {"key": "auto_march", "type": "toggle", "label": "是否使用自动行军",
+         "default": True},
+        {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
+         "options": [["manual", "手动阵形"],
+                     ["auto", "自动阵形"]],
+         "default": "manual",
+         "visibleWhen": {"key": "auto_march", "is": "false"}},
+        {"key": "formation_strategy", "type": "select", "label": "阵形策略",
+         "options": [["fixed", "固定阵形"],
+                     ["advantage", "优先选择有利阵形"]],
+         "default": "fixed",
+         "visibleWhen": {"key": "auto_march", "is": "false"}},
+        {"key": "formation", "type": "select",
+         "label": "固定或识别失败时的兜底阵形",
+         "options": [[name, name] for name in
+                     ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
+         "default": "鱼鳞阵",
+         "visibleWhen": {"key": "auto_march", "is": "false"}},
+        {"key": "repair_threshold", "type": "select", "label": "伤势停止条件",
+         "options": [["light", "轻伤时停止"],
+                     ["medium", "中伤时停止"],
+                     ["heavy", "重伤时停止"]],
+         "default": "light"},
+        {"key": "repair_on_injury", "type": "select", "label": "停止后的处理",
+         "options": [["continue", "手入加速后继续剩余圈数"],
+                     ["repair_stop", "手入后停止任务"],
+                     ["stop", "停止任务，不进行手入"]],
+         "default": "continue"},
+    ]
+
+
 def _sword_names(raw) -> list[str]:
     if isinstance(raw, list):
         return [str(name).strip() for name in raw if str(name).strip()]
@@ -148,7 +206,27 @@ def _build_daily(config_path, params):
         sortie_plan = {"mode": "raid",
                        "rounds": _i(params, "raid_rounds", 3),
                        "team_no": _i(params, "team_no", 3),
-                       "max_buys": _i(params, "raid_buys", 30)}
+                       "auto_buy_ticket": _bool(params.get("raid_auto_refill", False)),
+                       "max_buys": _i(params, "raid_rounds", 3)}
+    elif mode == "pumpkin":
+        sortie_plan = {"mode": "pumpkin",
+                       "difficulty": _i(params, "pumpkin_difficulty", 1),
+                       "team_no": _i(params, "team_no", 3),
+                       "watch_names": _sword_names(params.get("pumpkin_watch")),
+                       "max_skips": _i(params, "pumpkin_runs", 4)}
+    elif mode == "yosari":
+        saved_yosari = (_load_panel_settings().get("params", {}).get("yosari", {}) or {})
+        sortie_plan = {"mode": "yosari",
+                       "map_no": _i(params, "yosari_map_no", 1),
+                       "team_no": _i(params, "team_no", 3),
+                       "loops": _i(params, "yosari_runs", 1),
+                       "auto_refill": _bool(params.get("yosari_auto_refill", False)),
+                       "auto_march": _bool(saved_yosari.get("auto_march", True)),
+                       "formation_mode": saved_yosari.get("formation_mode") or "manual",
+                       "formation_strategy": saved_yosari.get("formation_strategy") or "fixed",
+                       "formation": saved_yosari.get("formation") or "鱼鳞阵",
+                       "repair_threshold": saved_yosari.get("repair_threshold") or "light",
+                       "repair_on_injury": saved_yosari.get("repair_on_injury") or "continue"}
     elif mode == "sortie":
         # 地图、队伍、圈数由一键日课决定；战斗行为统一沿用「出阵」配置页。
         saved_sortie = (_load_panel_settings().get("params", {}).get("sortie", {}) or {})
@@ -163,12 +241,6 @@ def _build_daily(config_path, params):
                        "formation": saved_sortie.get("formation") or "鱼鳞阵",
                        "repair_threshold": saved_sortie.get("repair_threshold") or "light",
                        "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue"}
-    elif mode == "pumpkin":
-        # 日课南瓜就是每天送的四次：不认刀，不读取单独挂机的名单与令牌数。
-        sortie_plan = {"mode": "pumpkin",
-                       "team_no": _i(params, "team_no", 3),
-                       "watch_names": [],
-                       "max_skips": 4}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -182,25 +254,27 @@ def _build_daily(config_path, params):
 
 
 def _build_raid(config_path, params):
+    runs = _run_count(params, 3, "rounds")
     yield from _make_agent(config_path).raid_stream(
-        max_rounds=_i(params, "rounds", 3),
+        max_rounds=runs,
         team_no=_i(params, "team_no", 3),
-        max_buys=_i(params, "max_buys", 30))
+        difficulty_no=_i(params, "map_no", 4),
+        auto_buy_ticket=_bool(params.get("auto_refill", False)),
+        max_buys=runs)
 
 
 def _build_pumpkin(config_path, params):
     difficulty = _i(params, "difficulty", 0)
-    if params.get("run_mode") == "daily":
-        watch = []
-        max_skips = 4
-    else:
-        watch = _sword_names(params.get("watch"))
-        max_skips = 99
+    watch = _sword_names(params.get("watch"))
+    runs = _run_count(params, 4, "max_skips")
     yield from _make_agent(config_path).pumpkin_stream(
         team_no=_i(params, "team_no", 3),
         difficulty=difficulty or None,
         watch_names=watch or None,
-        max_skips=max_skips)
+        max_skips=runs,
+        # 南瓜新版的更新令牌购买确认后不会刷新数量、也不会自动关闭弹窗。
+        # 前端先保留占位，流程端始终禁用，避免误消费小判后卡死。
+        auto_refill=False)
 
 
 def _build_sortie(config_path, params):
@@ -209,7 +283,34 @@ def _build_sortie(config_path, params):
         map_no=_i(params, "map_no", 1),
         team_no=_i(params, "team_no", 3),
         auto_march=_bool(params.get("auto_march", True)),
-        max_loops=_i(params, "loops", 1),
+        max_loops=_run_count(params, 1, "loops"),
+        formation_mode=params.get("formation_mode") or "manual",
+        formation_strategy=params.get("formation_strategy") or "fixed",
+        formation=params.get("formation") or "鱼鳞阵",
+        repair_threshold=params.get("repair_threshold") or "light",
+        injury_action=params.get("repair_on_injury") or "continue")
+
+
+def _build_yosari(config_path, params):
+    yield from _make_agent(config_path).yosari_stream(
+        map_no=_i(params, "map_no", 1),
+        team_no=_i(params, "team_no", 3),
+        auto_march=_bool(params.get("auto_march", True)),
+        auto_refill=_bool(params.get("auto_refill", False)),
+        max_loops=_run_count(params, 1, "loops"),
+        formation_mode=params.get("formation_mode") or "manual",
+        formation_strategy=params.get("formation_strategy") or "fixed",
+        formation=params.get("formation") or "鱼鳞阵",
+        repair_threshold=params.get("repair_threshold") or "light",
+        injury_action=params.get("repair_on_injury") or "continue")
+
+
+def _build_osaka(config_path, params):
+    yield from _make_agent(config_path).osaka_stream(
+        max_floors=_run_count(params, 1, "floors"),
+        team_no=_i(params, "team_no", 3),
+        select_floor=_bool(params.get("select_floor", False)),
+        target_floor=_i(params, "target_floor", 81),
         formation_mode=params.get("formation_mode") or "manual",
         formation_strategy=params.get("formation_strategy") or "fixed",
         formation=params.get("formation") or "鱼鳞阵",
@@ -362,27 +463,47 @@ def _build_simple(stream_method_name):
     return _fn
 
 
-register_script("daily", "一键日课", "勾选要干的活，一条龙跑完；演练和合战场行为沿用各自配置",
+register_script("daily", "一键日课", "",
                  _build_daily,
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
                           "options": _DAILY_STEPS, "default": _DAILY_STEPS,
-                           "help": "演练沿用左侧「演练」配置；合战场的自动行军、阵形和伤势处理沿用「出阵」配置。地图、部队与圈数仍在本页设置。"},
+                           "help": "这里的出阵安排是日课专用配置，不会修改各玩法的单独配置。"},
                         {"key": "sortie_mode", "type": "select", "label": "出阵安排",
                          "options": [["none", "不出阵"],
-                                     ["raid", "联队战（活动）"],
-                                     ["sortie", "合战场推图"],
-                                     ["pumpkin", "南瓜大作战（活动）"]],
-                         "default": "raid"},
+                                     ["raid", "联队战"],
+                                     ["pumpkin", "南瓜大作战"],
+                                     ["yosari", "异去"],
+                                     ["sortie", "合战场推图"]],
+                         "default": "none",
+                         "help": "自动行军、阵形和伤势处理沿用单独配置的战斗策略。"},
                         {"key": "team_no", "type": "select", "label": "出阵部队",
                          "options": _TEAM_OPTIONS, "default": "3",
                          "visibleWhen": {"key": "sortie_mode", "not": "none"}},
-                        {"key": "raid_rounds", "type": "number", "label": "联队战圈数",
+                        {"key": "raid_rounds", "type": "number", "label": "出阵次数",
                          "default": 3, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "raid"}},
-                        {"key": "raid_buys", "type": "number",
-                         "label": "手形最多买几次",
-                         "default": 30, "min": 0, "max": 99,
+                        {"key": "raid_auto_refill", "type": "toggle",
+                         "label": "是否自动补充手形？", "default": False,
+                         "help": "开启后，手形不足时将自动使用小判补充，直到完成设定的出阵次数。关闭后，手形不足时结束任务，不消耗小判。",
                          "visibleWhen": {"key": "sortie_mode", "is": "raid"}},
+                        {"key": "pumpkin_difficulty", "type": "select", "label": "难度",
+                         "options": [["1", "低级"], ["2", "中级"], ["3", "高级"]],
+                         "default": "1",
+                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
+                        {"key": "pumpkin_runs", "type": "number", "label": "出阵次数",
+                         "default": 4, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
+                        {"key": "yosari_map_no", "type": "select", "label": "小图",
+                         "options": [[str(i), f"{i}图"] for i in range(1, 5)],
+                         "default": "1",
+                         "visibleWhen": {"key": "sortie_mode", "is": "yosari"}},
+                        {"key": "yosari_runs", "type": "number", "label": "出阵次数",
+                         "default": 1, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "yosari"}},
+                        {"key": "yosari_auto_refill", "type": "toggle",
+                         "label": "是否自动补充手形？", "default": False,
+                         "help": "开启后，手形不足时将自动使用小判补充，直到完成设定的出阵次数。关闭后，手形不足时结束任务，不消耗小判。",
+                         "visibleWhen": {"key": "sortie_mode", "is": "yosari"}},
                         {"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)],
                          "default": "1",
@@ -394,88 +515,90 @@ register_script("daily", "一键日课", "勾选要干的活，一条龙跑完�
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
-                        {"key": "pumpkin_daily_note", "type": "note",
-                         "text": "日课南瓜固定使用“每日四次”：不识别目标刀，消耗 4 枚更新令牌后收工。指定刀并长期挂机请使用左侧“南瓜大作战”。",
-                         "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
                                      ["logout", "退出游戏"],
                                      ["shutdown", "退出游戏 + 关模拟器"],
                                      ["sleep", "退出 + 关模拟器 + 电脑休眠"]],
                          "default": "none"}])
-register_script("raid", "联队战", "活动图刷票，默认部队三",
+register_script("raid", "联队战", "",
                 _build_raid,
-                params=[_team_field("3"),
-                        {"key": "rounds", "type": "number", "label": "圈数",
-                         "default": 3, "min": 1, "max": 99},
-                        {"key": "max_buys", "type": "number",
-                         "label": "手形最多买几次（加班烧小判用）",
-                         "default": 30, "min": 0, "max": 99}])
+                params=[{"key": "map_no", "type": "select", "label": "打哪张图",
+                         "options": [["1", "1图（坐标待补）"], ["2", "2图（坐标待补）"],
+                                     ["3", "3图（坐标待补）"], ["4", "4图"]],
+                         "default": "4"},
+                        _team_field("3"),
+                        _run_count_field(ticket=True, default=3),
+                        _ticket_refill_field()])
 register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
                 _build_pumpkin,
-                params=[{"key": "run_mode", "type": "select", "label": "运行方案",
-                         "options": [["farm", "令牌挂机（按目标名单刷）"],
-                                     ["daily", "每日四次（全刷，不认刀）"]],
-                         "default": "farm",
-                         "help": "两种方案不会读取一键日课的南瓜设置；日课始终使用自己的每日四次方案。"},
+                params=[{"key": "difficulty", "type": "select", "label": "打哪张图",
+                         "options": [["1", "低级"], ["2", "中级"], ["3", "高级"]],
+                         "default": "1"},
                         _team_field("3"),
-                        {"key": "difficulty", "type": "select", "label": "难度",
-                         "options": [["0", "不点（用当前tab）"],
-                                     ["1", "初级"], ["2", "中级"], ["3", "上级"]],
-                         "default": "0"},
-                        {"key": "watch", "type": "text", "swords": True,
-                         "label": "挂机目标名单（留空=全刷不认人）",
-                         "default": "", "placeholder": "点下方候选添加，或手动输入逗号分隔",
-                         "presets": [{"label": "清空", "value": []}],
-                         "visibleWhen": {"key": "run_mode", "is": "farm"}}])
-register_script("sortie", "出阵", "普通图：部队x 去打 x-x",
+                        _run_count_field(ticket=True, default=4),
+                        {**_ticket_refill_field(),
+                         "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"}])
+register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
                 _build_sortie,
-                params=[_team_field("3"),
-                        {"key": "chapter", "type": "select", "label": "章节",
+                params=[{"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)], "default": "1"},
                         {"key": "map_no", "type": "select", "label": "小图",
                          "options": [[str(i), f"{i}图"] for i in range(1, 5)], "default": "1"},
-                        {"key": "loops", "type": "number", "label": "连打几圈",
-                         "default": 1, "min": 1, "max": 99},
-                        {"key": "auto_march", "type": "select",
-                         "label": "行军方式",
-                         "options": [["true", "使用游戏自动行军"],
-                                     ["false", "脚本手动行军"]],
-                         "default": "true",
-                         "help": "自动行军会由游戏处理路线与阵形；关闭后才使用下方阵形设置。"},
+                        _team_field("3"),
+                        _run_count_field(),
+                        *_march_and_injury_fields()])
+register_script("yosari", "异去", "",
+                _build_yosari,
+                params=[{"key": "chapter", "type": "select", "label": "章节",
+                         "options": [["1", "1章"]], "default": "1",
+                         "help": "异去目前只开放第一章；以后新增章节会在这里继续添加。"},
+                        {"key": "map_no", "type": "select", "label": "小图",
+                         "options": [[str(i), f"{i}图"] for i in range(1, 5)], "default": "1"},
+                        _team_field("3"),
+                        _run_count_field(ticket=True),
+                        _ticket_refill_field(),
+                        *_march_and_injury_fields(),
+                        ])
+register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动行军，也不会消耗手形",
+                _build_osaka,
+                params=[_team_field("3"),
+                        {**_run_count_field(), "label": "出阵次数"},
+                        {"key": "select_floor", "type": "toggle",
+                         "label": "指定挂机层数", "default": False},
+                        {"key": "target_floor", "type": "number",
+                         "label": "指定层数", "default": 81,
+                         "min": 1, "max": 99,
+                         "visibleWhen": {"key": "select_floor", "is": True}},
                         {"key": "formation_mode", "type": "select",
                          "label": "阵形选择方式",
-                         "options": [["manual", "游戏内手动阵形"],
-                                     ["auto", "游戏内自动阵形"]],
-                         "default": "manual",
-                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                         "options": [["manual", "手动阵形"],
+                                     ["auto", "自动阵形"]],
+                         "default": "manual"},
                         {"key": "formation_strategy", "type": "select",
                          "label": "阵形策略",
                          "options": [["fixed", "固定阵形"],
                                      ["advantage", "优先选择有利阵形"]],
                          "default": "fixed",
-                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
                         {"key": "formation", "type": "select",
                          "label": "固定或识别失败时的兜底阵形",
                          "options": [[name, name] for name in
-                                     ["鱼鳞阵", "横队阵", "雁行阵",
-                                      "鹤翼阵", "方阵", "逆行阵"]],
+                                     ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
                          "default": "鱼鳞阵",
-                         "visibleWhen": {"key": "auto_march", "is": "false"}},
+                         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
                         {"key": "repair_threshold", "type": "select",
-                         "label": "什么时候开始手入",
-                         "options": [["light", "轻伤开始手入"],
-                                     ["medium", "轻伤继续，中伤开始手入"],
-                                     ["heavy", "轻伤和中伤继续，只在重伤时手入"]],
-                         "default": "light",
-                         "help": "出阵前和局内行军选择时都会检查；重伤永远不会继续出阵。"},
+                         "label": "伤势停止条件",
+                         "options": [["light", "轻伤时停止"],
+                                     ["medium", "中伤时停止"],
+                                     ["heavy", "重伤时停止"]],
+                         "default": "light"},
                         {"key": "repair_on_injury", "type": "select",
-                         "label": "达到上述伤势后",
-                         "options": [["continue", "自动手入后继续"],
-                                     ["repair_stop", "立即收工，手入但不用加速符"],
-                                     ["stop", "立即收工，不手入"]],
-                         "default": "continue",
-                         "help": "选择继续时会加速修复当前出阵队，并接着完成剩余圈数。重伤即使选择“不手入”也会尝试普通手入后收工；黑名单仍不修。"}])
+                         "label": "停止后的处理",
+                         "options": [["continue", "手入加速后继续剩余层数"],
+                                     ["repair_stop", "手入后停止任务"],
+                                     ["stop", "返回本丸，不进行手入"]],
+                         "default": "continue"}])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _build_sakura,
                 params=[_team_field("1"),
@@ -492,16 +615,16 @@ def _build_practice(config_path, params):
         formation=params.get("formation") or "逆行阵")
 
 
-register_script("practice", "演练", "只认人打软柿子，赢 3 场收工",
+register_script("practice", "演练", "",
                 _build_practice,
                 params=[
                     _team_field("2"),
                     {"key": "formation_mode", "type": "select",
                      "label": "阵形选择方式",
-                     "options": [["manual", "手动选择（每战按策略点阵形）"],
-                                 ["auto", "使用游戏自动阵形"]],
+                     "options": [["manual", "手动选择"],
+                                 ["auto", "自动阵形"]],
                      "default": "manual",
-                     "help": "自动模式会先切换右上角开关并选择一次；敌方阵形不明时仍使用兜底阵形。"},
+                     },
                     {"key": "formation_strategy", "type": "select",
                      "label": "手动/首次选择策略",
                      "options": [["fixed", "固定阵形"],
@@ -549,7 +672,8 @@ register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过�
                          "label": "单独手入时，使用加速符的部队",
                          "options": ["部队一", "部队二", "部队三", "部队四", "部队五"],
                          "default": ["部队三"],
-                         "help": "这里只影响单独运行“手入”：黑名单始终跳过，选中部队即时修好，其他队只安排普通手入。连续出阵选择“自动手入后继续”时，会自动加速当前出阵队，不读取这里。"}])
+                         "help": "这里只影响单独运行“手入”：黑名单始终跳过，选中部队即时修好，其他队只安排普通手入。连续出阵选择“自动手入后继续”时，会自动加速当前出阵队，不读取这里。"}],
+                hidden=True)
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
                 _build_simple("sugar_stream"))
 register_script("snapshot", "库存快照", "刷新看板库存数据",
@@ -596,7 +720,29 @@ async def startup():
 
 @app.get("/")
 async def index():
+    built = _STATIC / "vue" / "index.html"
+    if built.exists():
+        return FileResponse(str(built))
+    # 开发环境尚未构建新版时仍可进入旧面板，不让启动器直接白屏。
     return FileResponse(str(_STATIC / "index.html"))
+
+
+@app.get("/legacy")
+async def legacy_index():
+    """迁移后的临时回退入口；确认新版长期稳定后再移除。"""
+    return FileResponse(str(_STATIC / "index.html"))
+
+
+@app.get("/next")
+async def next_index():
+    """兼容迁移期间使用的预览地址。"""
+    built = _STATIC / "vue" / "index.html"
+    if not built.exists():
+        return JSONResponse(
+            {"ok": False, "error": "新版面板尚未构建，请先运行前端构建。"},
+            status_code=503,
+        )
+    return FileResponse(str(built))
 
 
 @app.get("/favicon.ico")
@@ -894,6 +1040,8 @@ _SCRIPT_FLAVOR = {
     "raid": "正在和时间溯行军搏斗中⚔️",
     "pumpkin": "正在南瓜田里刨剪影🎃",
     "sortie": "正在出阵打图🗡",
+    "yosari": "正在提灯照耀的异去探索🏮",
+    "osaka": "正在大阪城地下咔咔挖土⛏️",
     "sakura": "正在给刀剑男士刷樱花🌸",
     "practice": "正在演练场挑软柿子捏🥊",
     "expedition": "正在流放刀剑男士⛺",

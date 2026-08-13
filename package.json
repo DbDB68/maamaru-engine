@@ -2,8 +2,20 @@
   "name": "maamaru-panel",
   "version": "1.0.0",
   "private": true,
-  "description": "本丸近侍面板（FastAPI，无需构建）",
+  "description": "本丸近侍面板（FastAPI + Vue）",
   "scripts": {
-    "dev": ".venv\\Scripts\\python.exe -m panel.server --host 0.0.0.0"
+    "dev": "vite --config panel/frontend/vite.config.mts",
+    "dev:server": ".venv\\Scripts\\python.exe -m panel.server --host 0.0.0.0",
+    "build": "vue-tsc -b panel/frontend/tsconfig.app.json && vite build --config panel/frontend/vite.config.mts",
+    "typecheck": "vue-tsc -b panel/frontend/tsconfig.app.json",
+    "check": "pnpm run typecheck",
+    "check:py": "python -m unittest discover -s tests -p test_*.py"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "typescript": "^5.9.3",
+    "vite": "latest",
+    "vue": "latest",
+    "vue-tsc": "latest"
   }
 }
