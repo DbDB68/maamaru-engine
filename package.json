@@ -1,6 +1,7 @@
 {
   "name": "maamaru-panel",
   "version": "1.0.0",
+  "packageManager": "pnpm@11.19.0",
   "private": true,
   "description": "本丸近侍面板（FastAPI + Vue）",
   "scripts": {
