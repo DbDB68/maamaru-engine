@@ -199,8 +199,13 @@ class BattleMixin:
             legacy = cfg.get("injury_stamp", {}).get("template")
             if legacy and self.maa.template_match(legacy, roi):
                 return "重伤"
+        # 通用 ocr(expected) 允许模糊匹配，曾把单独一个“伤”以高分命中“重伤”，
+        # 导致本应保持中伤挨打的极化太刀被错误送回手入。这里读取原始文字，
+        # 只有完整出现伤势名称才成立；“伤”这种残片不能推断等级。
+        tokens = self.maa.ocr_all(roi)
+        texts = [str(text).replace(" ", "") for text, _ in tokens]
         for severity in ("重伤", "中伤", "轻伤"):
-            if self.maa.ocr(severity, roi):
+            if any(severity in text for text in texts):
                 return severity
         return None
 

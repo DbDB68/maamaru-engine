@@ -32,6 +32,14 @@ class OsakaMixin:
             yield f"[挖地] 配置里没有部队{team_no}的坐标"
             return
 
+        # 任务启动时也可能正好停在更新框（例如上一次任务已被更新中断）。
+        self.maa.screenshot(force=True)
+        startup_update = yield from self.recover_game_update_stream()
+        if startup_update is None:
+            return
+        if startup_update:
+            yield "[挖地] 更新恢复完成，从活动入口重新开始"
+
         yield "[挖地] 正在从目录进入出阵 → 活动 → 大阪城..."
         for msg in self.navigate_to_stream("出阵"):
             yield msg
@@ -92,6 +100,33 @@ class OsakaMixin:
         idle_checks = 0
         while idle_checks < 300:
             self.maa.screenshot(force=True)
+
+            # 强制更新会把游戏从战斗中踢回登录页。恢复后旧战斗状态已经作废，
+            # 必须按已结算层数从活动入口重开，不能接着在原坐标上盲点。
+            update_recovered = yield from self.recover_game_update_stream()
+            if update_recovered is None:
+                return
+            if update_recovered:
+                total_completed = _completed_floors + floors
+                remaining = _target_floors - total_completed
+                yield (f"[挖地] 更新完成，原战斗已被重置；保留进度 "
+                       f"{total_completed}/{_target_floors}，重新进场继续剩余 {remaining} 层")
+                yield from self.osaka_stream(
+                    max_floors=remaining,
+                    team_no=team_no,
+                    select_floor=select_floor,
+                    target_floor=target_floor,
+                    formation_mode=formation_mode,
+                    formation_strategy=formation_strategy,
+                    formation=formation,
+                    repair_threshold=repair_threshold,
+                    injury_action=injury_action,
+                    _target_floors=_target_floors,
+                    _completed_floors=total_completed,
+                    _repair_count=_repair_count,
+                    _speedups_used=_speedups_used,
+                )
+                return
 
             # 道中和层末都有“部队恢复 / 返回本丸 / 行军”，三者全部是常驻操作，
             # 不能参与层末判断。只认结算页专有的“当前层数 + 传送凭证”。

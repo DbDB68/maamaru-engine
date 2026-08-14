@@ -104,6 +104,14 @@ class DailyMixin:
         def _w(name):
             return wanted is None or name in wanted
 
+        # 断点续跑时往往不会勾「登录」。因此不能把更新检查寄托在登录步骤里；
+        # 先于任何日课导航验一次，之后每个步骤开始前再验，避免把弹窗背后
+        # 露出来的「目录」误当成可操作的本丸。
+        update_state = yield from self._daily_update_gate()
+        if update_state is None:
+            yield "[日课] 游戏更新没有恢复完成，本次日课停止"
+            return
+
         # ========== ① 登录 + 弹窗扫地 ==========
         if _w("登录"):
             yield "========== ① 登录 =========="
@@ -164,6 +172,11 @@ class DailyMixin:
         for name, fn in seq:
             if not _w(name):
                 continue
+            update_state = yield from self._daily_update_gate()
+            if update_state is None:
+                report.append((name, "✗ 游戏更新未完成"))
+                yield f"[日课] 更新恢复失败，未开始{name}；后续步骤停止"
+                break
             if name == "出阵":
                 yield "========== ⑩ 出阵 =========="
                 self.set_progress("daily:出阵")
@@ -244,6 +257,20 @@ class DailyMixin:
                 sleep_computer()
             except Exception as exc:
                 yield f"[日课] 休眠翻车: {exc}"
+
+    def _daily_update_gate(self):
+        """日课导航前的更新门卫；兼容只勾中间步骤的断点续跑。"""
+        self.maa.screenshot(force=True)
+        recovered = yield from self.recover_game_update_stream()
+        if recovered is None:
+            return None
+        if recovered:
+            yield "[日课] 游戏更新完成，先清理登录弹窗再继续日课"
+            if not self._popup_sweep():
+                yield "[日课] 更新后没能确认本丸已可操作"
+                return None
+            yield "[日课] ✓ 本丸已恢复，可以继续当前步骤"
+        return recovered
 
     def _flush_report(self, report, finished: bool):
         """

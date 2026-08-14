@@ -63,6 +63,23 @@ class BattleComponentTests(unittest.TestCase):
             self.assertEqual((roi.x, roi.y, roi.w, roi.h),
                              (0, 90, 570, 600))
 
+    def test_partial_injury_ocr_never_promotes_hurt_to_heavy(self):
+        class Maa(FakeMaa):
+            def ocr_all(self, roi):
+                return [("伤", Point(290, 153))]
+
+        flow = Flow(Maa())
+        self.assertIsNone(flow._team_injury_status({"injury_stamps": {}}))
+
+    def test_full_injury_ocr_keeps_medium_injury_as_medium(self):
+        class Maa(FakeMaa):
+            def ocr_all(self, roi):
+                return [("米中伤", Point(290, 153))]
+
+        flow = Flow(Maa())
+        self.assertEqual(
+            flow._team_injury_status({"injury_stamps": {}}), "中伤")
+
     def test_formation_state_uses_the_two_status_templates(self):
         auto = Point(910, 32)
         title = Point(640, 24)
