@@ -363,6 +363,22 @@ class OsakaRouteTests(unittest.TestCase):
 
         self.assertEqual(flow._find_osaka_march({}), button)
 
+    def test_floor_end_waits_for_a_late_march_button(self):
+        button = Point(1130, 610)
+
+        class Maa(FakeMaa):
+            def __init__(self):
+                super().__init__()
+                self.results = iter([None, None, button])
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                return next(self.results)
+
+        flow = OsakaMixin()
+        flow.maa = Maa()
+        with patch("touken.flows.osaka.time.sleep"):
+            self.assertEqual(flow._wait_for_osaka_march({}, attempts=4), button)
+
 
 if __name__ == "__main__":
     unittest.main()

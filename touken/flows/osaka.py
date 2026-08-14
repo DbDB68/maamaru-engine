@@ -16,7 +16,13 @@ class OsakaMixin:
                      formation_strategy: str = "fixed",
                      formation: str = "鱼鳞阵",
                      repair_threshold: str = "light",
-                     injury_action: str = "continue"):
+                     injury_action: str = "continue",
+                     _target_floors: int = None,
+                     _completed_floors: int = 0,
+                     _repair_count: int = 0,
+                     _speedups_used: int = 0):
+        if _target_floors is None:
+            _target_floors = max_floors
         cfg = self.config.get("osaka", {})
         if not cfg:
             yield "[挖地] 未配置大阪城"
@@ -92,9 +98,10 @@ class OsakaMixin:
             if self._osaka_floor_done(cfg):
                 idle_checks = 0
                 floors += 1
-                yield f"[挖地] ✓ 已完成 {floors}/{max_floors} 层"
+                total_completed = _completed_floors + floors
+                yield f"[挖地] ✓ 已完成 {total_completed}/{_target_floors} 层"
                 injury = self._team_injury_status(cfg)
-                goal_reached = floors >= max_floors
+                goal_reached = total_completed >= _target_floors
                 injury_reached = bool(
                     injury and self._injury_reaches_threshold(
                         injury, repair_threshold))
@@ -115,7 +122,8 @@ class OsakaMixin:
                         yield "[挖地] 没能确认返回本丸；已停止点击，请手动查看"
                         return
                     if goal_reached:
-                        yield "[挖地] 目标层数完成，收工"
+                        yield (f"[挖地] 目标层数完成，收工；期间手入 {_repair_count} 次，"
+                               f"累计使用加速符 {_speedups_used} 个")
                         return
 
                     action = str(injury_action or "continue")
@@ -130,11 +138,19 @@ class OsakaMixin:
                             use_speedup=False if repair_and_stop else None,
                             speedup_teams=None if repair_and_stop else [team_no]):
                         yield repair_msg
+                    stats = getattr(self, "last_repair_stats", {})
+                    repaired = int(stats.get("repaired", 0))
+                    speedups = int(stats.get("speedups", 0))
+                    _repair_count += 1
+                    _speedups_used += speedups
+                    yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
+                           f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
                     if repair_and_stop:
                         yield "[挖地] 手入已安排，收工"
                         return
-                    remaining = max_floors - floors
-                    yield f"[挖地] 手入结束，继续剩余 {remaining} 层"
+                    remaining = _target_floors - total_completed
+                    yield (f"[挖地] 手入结束，当前总进度 {total_completed}/{_target_floors}，"
+                           f"继续剩余 {remaining} 层")
                     yield from self.osaka_stream(
                         max_floors=remaining,
                         team_no=team_no,
@@ -145,9 +161,13 @@ class OsakaMixin:
                         formation=formation,
                         repair_threshold=repair_threshold,
                         injury_action=injury_action,
+                        _target_floors=_target_floors,
+                        _completed_floors=total_completed,
+                        _repair_count=_repair_count,
+                        _speedups_used=_speedups_used,
                     )
                     return
-                march = self._find_osaka_march(cfg)
+                march = self._wait_for_osaka_march(cfg)
                 if not march:
                     yield "[挖地] 层末找不到行军按钮，停止点击"
                     return
@@ -197,11 +217,20 @@ class OsakaMixin:
                             use_speedup=False if repair_and_stop else None,
                             speedup_teams=None if repair_and_stop else [team_no]):
                         yield repair_msg
+                    stats = getattr(self, "last_repair_stats", {})
+                    repaired = int(stats.get("repaired", 0))
+                    speedups = int(stats.get("speedups", 0))
+                    _repair_count += 1
+                    _speedups_used += speedups
+                    yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
+                           f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
                     if repair_and_stop:
                         yield "[挖地] 手入已安排，收工"
                         return
-                    remaining = max_floors - floors
-                    yield f"[挖地] 手入结束，继续剩余 {remaining} 层"
+                    total_completed = _completed_floors + floors
+                    remaining = _target_floors - total_completed
+                    yield (f"[挖地] 手入结束，当前总进度 {total_completed}/{_target_floors}，"
+                           f"继续剩余 {remaining} 层")
                     yield from self.osaka_stream(
                         max_floors=remaining,
                         team_no=team_no,
@@ -212,6 +241,10 @@ class OsakaMixin:
                         formation=formation,
                         repair_threshold=repair_threshold,
                         injury_action=injury_action,
+                        _target_floors=_target_floors,
+                        _completed_floors=total_completed,
+                        _repair_count=_repair_count,
+                        _speedups_used=_speedups_used,
                     )
                     return
                 yield "[挖地] 行军，继续向下挖"
@@ -225,7 +258,8 @@ class OsakaMixin:
             time.sleep(0.8)
 
         yield (f"[挖地] 连续 {idle_checks} 次没有识别到阵形、行军或层末"
-               f"（已完成 {floors} 层），停止点击，请查看卡在哪个画面")
+               f"（总进度 {_completed_floors + floors}/{_target_floors}），"
+               f"停止点击，请查看卡在哪个画面")
 
     def _open_osaka(self, cfg: dict) -> bool:
         activity = cfg.get("activity_entry", {})
@@ -326,3 +360,13 @@ class OsakaMixin:
         roi = roi_4to4(*march.get("roi", [1030, 500, 1280, 720]))
         return self.maa.template_match(
             march.get("template", "battle/行军.png"), roi)
+
+    def _wait_for_osaka_march(self, cfg: dict, attempts: int = 8):
+        """层末文字通常先于按钮出现；等按钮动画落稳，不因单帧抢跑停机。"""
+        for _ in range(attempts):
+            self.maa.screenshot(force=True)
+            march = self._find_osaka_march(cfg)
+            if march:
+                return march
+            time.sleep(0.5)
+        return None

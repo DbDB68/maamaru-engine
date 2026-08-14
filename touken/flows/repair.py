@@ -37,6 +37,8 @@ class RepairMixin:
         Yields:
             str: 执行状态消息
         """
+        # 给连续出阵等上层流程读取；每次调用都重新开始统计。
+        self.last_repair_stats = {"repaired": 0, "speedups": 0, "skipped": 0}
         cfg = self.config.get("repair", {})
         if not cfg:
             yield "[手入] 未配置手入"
@@ -103,6 +105,7 @@ class RepairMixin:
 
                 if is_black:
                     skipped += 1
+                    self.last_repair_stats["skipped"] = skipped
                     yield f"[手入] {prefix} {std_name} → 黑名单（碰瓷队带伤上班），跳过"
                     continue
 
@@ -120,7 +123,9 @@ class RepairMixin:
                         ok = True
                 if ok:
                     repaired += 1
+                    self.last_repair_stats["repaired"] = repaired
                     if need_speed:
+                        self.last_repair_stats["speedups"] += 1
                         # 游戏的奇怪缓存：加速手入已经完成，但如果立刻去编队，
                         # 伤势章仍可能残留。必须离开手入再重新进入一次，等价于
                         # 把人从手入室“接出来”，编队状态才会刷新。
