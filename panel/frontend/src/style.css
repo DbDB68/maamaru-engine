@@ -1285,3 +1285,114 @@ body[data-theme='pixel'] .drawer-candidates button.active {
   background: #f1dea3;
   border-color: #c9a227;
 }
+
+/* 刷新符号属于按钮本身，不属于像素皮肤；两套主题都必须保留可辨认的操作图标。 */
+.home-dashboard .section-head > .dashboard-refresh {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  background-image: url('/static/img/ui/return.png');
+  background-position: center;
+  background-size: 16px 16px;
+  background-repeat: no-repeat;
+}
+
+/* 左栏卡片阴影会占掉一部分视觉间距；首页三列统一留出 16px 呼吸位。 */
+@media (min-width: 1101px) {
+  .overview-layout { gap: 16px; }
+  body[data-theme='pixel'] .overview-layout > .maamaru-surface { gap: 16px; }
+}
+
+/*
+ * 首页的三层盒模型属于 MaamaruFrame 组件，而不是像素皮肤：
+ * 外框托住 3px 底座，surface 再盖住中部，三列工作板统一叠在 surface 上。
+ * 和纸只使用柔和纸色；像素主题仍由上面的高优先级规则换成旧版木框和硬阴影。
+ */
+.overview-frame.overview-layout {
+  display: block;
+  padding: 3px;
+  overflow: hidden;
+  background: #d8c3a2;
+}
+/* 和纸细框 1px + 底座 7px，与像素木框 5px + 底座 3px 同为 8px 总承托厚度。 */
+body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
+.overview-frame.overview-layout > .maamaru-surface {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: 210px minmax(0, 1fr) 280px;
+  gap: 16px;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+  background: var(--paper-panel);
+}
+.home-functions,
+.home-center,
+.home-dashboard {
+  padding: 8px;
+  background: color-mix(in srgb, var(--paper-panel) 88%, var(--paper-card));
+  border: 1px solid var(--paper-line);
+  box-shadow: 2px 2px 0 rgba(139, 112, 76, .14);
+}
+
+/* 刷新键与右侧滚动条槽之间保留一个完整图标宽度的呼吸边。 */
+.home-dashboard .section-head { padding-right: 8px; }
+
+@media (max-width: 720px) {
+  .overview-frame.overview-layout > .maamaru-surface {
+    grid-template-columns: 1fr;
+    padding: 9px;
+    overflow: visible;
+  }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  .overview-frame.overview-layout > .maamaru-surface {
+    grid-template-columns: 170px minmax(0, 1fr);
+    overflow: visible;
+  }
+  .overview-frame.overview-layout .home-dashboard { grid-column: 1 / -1; }
+}
+
+/*
+ * 舞台演员和挂牌也是横幅组件的一部分，主题不得替它们改体型或锚点。
+ * 这里采用旧版桌面舞台的实测尺寸；皮肤仍可改变圆角、边色和字体质感。
+ */
+@media (min-width: 721px) {
+  .stage-brand {
+    top: 8px;
+    left: 8px;
+    min-width: 0;
+    padding: 6px 12px 5px;
+    line-height: 1.1;
+  }
+  .stage-brand::before { top: -5px; left: 12px; right: 12px; }
+  .stage-brand strong { font-size: 17px; }
+  .stage-brand small { margin-top: 2px; font-size: 8px; }
+  .stage-status { top: 8px; right: 8px; padding: 4px 9px; }
+  .stage-status small,
+  .stage-status span { font-size: 10px; line-height: 1.3; }
+  .stage-status strong { font-size: 13px; line-height: 1.3; }
+  .stage-fox {
+    --fox-size: 70px;
+    right: 13%;
+    bottom: 3px;
+    width: 72px;
+    height: 90px;
+    background-position: center -54px;
+  }
+}
+
+@media (max-width: 720px) {
+  .stage-fox {
+    --fox-size: 58px;
+    right: 9%;
+    bottom: 2px;
+    width: 60px;
+    height: 73px;
+    background-position: center -45px;
+  }
+}

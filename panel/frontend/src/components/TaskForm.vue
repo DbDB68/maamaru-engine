@@ -32,7 +32,32 @@ function isVisible(field: Field) {
 }
 
 function update(key: string, value: unknown) {
-  emit('update:modelValue', { ...props.modelValue, [key]: value })
+  const next = { ...props.modelValue, [key]: value }
+
+  /*
+   * 一键日课的“出阵”按钮和“出阵安排”是同一个开关的两种入口：
+   * 不出阵必须取消清单勾选；选了具体玩法必须勾上出阵，避免保存出互相矛盾的配置。
+   */
+  if (props.scriptKey === 'daily') {
+    if (key === 'sortie_mode') {
+      const steps = Array.isArray(next.steps) ? [...next.steps] : []
+      const sortieIndex = steps.indexOf('出阵')
+      if (String(value) === 'none' && sortieIndex >= 0) steps.splice(sortieIndex, 1)
+      if (String(value) !== 'none' && sortieIndex < 0) {
+        const rewardIndex = steps.indexOf('任务奖励')
+        steps.splice(rewardIndex >= 0 ? rewardIndex : steps.length, 0, '出阵')
+      }
+      next.steps = steps
+    } else if (key === 'steps' && Array.isArray(value)) {
+      const hasSortie = value.includes('出阵')
+      const currentMode = String(props.modelValue.sortie_mode ?? 'none')
+      next.sortie_mode = hasSortie
+        ? (currentMode === 'none' ? 'sortie' : currentMode)
+        : 'none'
+    }
+  }
+
+  emit('update:modelValue', next)
 }
 </script>
 
