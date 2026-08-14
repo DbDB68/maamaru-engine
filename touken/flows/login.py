@@ -32,6 +32,8 @@ class LoginMixin:
         if not self._game_update_prompt_visible():
             return False
 
+        if hasattr(self, "record_event"):
+            self.record_event("game_update.detected")
         yield "[更新] 检测到游戏强制更新，暂停当前玩法"
         confirm = self.maa.template_match(
             "通用_确定.png", roi=self.UPDATE_CONFIRM_ROI, threshold=0.7)
@@ -55,6 +57,8 @@ class LoginMixin:
                     and not self._game_update_prompt_visible()):
                 yield "[更新] ✓ 游戏已更新并重新回到本丸"
                 self.current_location = "本丸"
+                if hasattr(self, "record_event"):
+                    self.record_event("game_update.recovered")
                 return True
 
             login = self.maa.template_match("登录.png", threshold=0.7)

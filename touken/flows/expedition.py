@@ -220,6 +220,11 @@ class ExpeditionMixin:
                     _save_exp_record(rec)
                 except Exception:
                     pass
+                if hasattr(self, "record_event"):
+                    code, name, _ = _map_meta(era, map_slot)
+                    self.record_event("expedition.dispatched", team_no=team_no,
+                                      map_code=code, map_name=map_name or name,
+                                      era=era, slot=map_slot)
                 return
 
         # 过场后可能回了本丸也可能还在目的地界面，找不到"远征中"就截个图让人看
@@ -287,6 +292,9 @@ class ExpeditionMixin:
             if self.maa.ocr(expected=title_ocr["expected"], roi=title_roi):
                 collected += 1
                 info = self._read_settlement_info(cfg)
+                if hasattr(self, "record_event"):
+                    self.record_event("expedition.settled", sequence=collected,
+                                      **info)
                 if info["team_no"]:
                     settlements.append(info)
                     # 这支队回来了，派遣记录销掉

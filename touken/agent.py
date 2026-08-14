@@ -44,3 +44,11 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
             }, ensure_ascii=False), encoding="utf-8")
         except Exception:
             pass
+
+    def record_event(self, event_type: str, **payload):
+        """记录稳定的机器事件；展示文案变化不会影响统计和智能建议。"""
+        try:
+            from .telemetry import record_event
+            record_event(event_type, payload)
+        except Exception:
+            pass

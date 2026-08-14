@@ -116,6 +116,8 @@ class SnapshotMixin:
         _STATUS_DIR.mkdir(exist_ok=True)
         (_STATUS_DIR / "inventory.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        if hasattr(self, "record_event"):
+            self.record_event("inventory.captured", **payload)
 
         yield (f"[快照] 落盘：小判{resources.get('小判')} 甲州金{resources.get('甲州金')} "
                f"委托符{resources.get('委托符')} 加速符{resources.get('加速符')} 所持{doko} "

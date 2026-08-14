@@ -383,6 +383,8 @@ class MAAAdapter:
         """
         image = self.screenshot()
         if image is None:
+            self._record_ocr("match", roi, [], expected, match_mode, False,
+                             "screenshot_unavailable")
             return None
 
         try:
@@ -395,6 +397,8 @@ class MAAAdapter:
                 timeout=self.RECOGNIZE_TIMEOUT, label=f'OCR "{expected}"')
             if ocr_job is None:
                 self._note_recognize_timeout()
+                self._record_ocr("match", roi, [], expected, match_mode, False,
+                                 "recognition_timeout")
                 return None
             self._maa_timeouts = 0
             ocr_detail = ocr_job.get()
@@ -402,12 +406,14 @@ class MAAAdapter:
 
             if ocr_reco is None or not ocr_reco.hit:
                 print(f"[MAA] OCR 未命中: expected=\"{expected}\" in {roi.to_list()}")
+                self._record_ocr("match", roi, [], expected, match_mode, False)
                 return None
 
             # 检查所有识别结果，不只是 best_result
             all_results = ocr_reco.all_results if hasattr(ocr_reco, 'all_results') else []
             if ocr_reco.best_result:
                 all_results = [ocr_reco.best_result] + [r for r in all_results if r != ocr_reco.best_result]
+            structured = self._structured_ocr_tokens(all_results, roi)
 
             # 遍历所有结果，找包含目标文字的
             for result in all_results:
@@ -429,15 +435,21 @@ class MAAAdapter:
 
                     print(f'[MAA] OCR 命中: "{text}" (目标: "{expected}") '
                           f'at ({center.x}, {center.y}), score={score:.3f}')
+                    self._record_ocr("match", roi, structured, expected,
+                                     match_mode, True)
                     return center
 
             # 没有匹配到
             texts = [r.text if hasattr(r, 'text') else str(r) for r in all_results]
             print(f"[MAA] OCR 识别到文字但未匹配: {texts}, expected=\"{expected}\"")
+            self._record_ocr("match", roi, structured, expected,
+                             match_mode, False)
             return None
 
         except Exception as exc:
             print(f"[MAA 错误] OCR 异常: {exc}")
+            self._record_ocr("match", roi, [], expected, match_mode, False,
+                             type(exc).__name__)
             return None
 
     def ocr_all(self, roi: Region) -> list:
@@ -452,6 +464,7 @@ class MAAAdapter:
         """
         image = self.screenshot()
         if image is None:
+            self._record_ocr("all", roi, [], error="screenshot_unavailable")
             return []
 
         try:
@@ -464,12 +477,14 @@ class MAAAdapter:
                 timeout=self.RECOGNIZE_TIMEOUT, label="OCR 全量识别")
             if ocr_job is None:
                 self._note_recognize_timeout()
+                self._record_ocr("all", roi, [], error="recognition_timeout")
                 return []
             self._maa_timeouts = 0
             ocr_detail = ocr_job.get()
             ocr_reco = ocr_detail.nodes[0].recognition if ocr_detail and ocr_detail.nodes else None
 
             if ocr_reco is None or not ocr_reco.hit:
+                self._record_ocr("all", roi, [])
                 return []
 
             all_results = ocr_reco.all_results if hasattr(ocr_reco, 'all_results') else []
@@ -489,11 +504,51 @@ class MAAAdapter:
                 out.append((text, center))
 
             print(f"[MAA] OCR 全量识别: {[t for t, _ in out]}")
+            self._record_ocr("all", roi,
+                             self._structured_ocr_tokens(all_results, roi))
             return out
 
         except Exception as exc:
             print(f"[MAA 错误] OCR 全量识别异常: {exc}")
+            self._record_ocr("all", roi, [], error=type(exc).__name__)
             return []
+
+    @staticmethod
+    def _structured_ocr_tokens(results, roi: Region) -> list[dict]:
+        """Convert Maa result objects to the stable, JSON-safe observation shape."""
+        tokens = []
+        for result in results:
+            text = result.text if hasattr(result, "text") else str(result)
+            score = float(result.score) if hasattr(result, "score") else None
+            center = roi.center
+            box_value = None
+            box = getattr(result, "box", None)
+            if box:
+                if hasattr(box, "x"):
+                    box_value = [int(box.x), int(box.y), int(box.w), int(box.h)]
+                    center = Point(box.x + box.w // 2, box.y + box.h // 2)
+                elif isinstance(box, (list, tuple)) and len(box) >= 4:
+                    box_value = [int(v) for v in box[:4]]
+                    center = Point(box[0] + box[2] // 2, box[1] + box[3] // 2)
+            tokens.append({"text": str(text), "score": score,
+                           "center": [int(center.x), int(center.y)],
+                           "box": box_value})
+        return tokens
+
+    @staticmethod
+    def _record_ocr(kind: str, roi: Region, tokens: list[dict],
+                    expected: str | None = None, match_mode: str | None = None,
+                    matched: bool | None = None, error: str | None = None) -> None:
+        """Best-effort only: data collection must never affect automation."""
+        try:
+            from .telemetry import get_telemetry_store
+            get_telemetry_store().record_ocr(
+                kind=kind, roi=roi.to_list(), tokens=tokens,
+                expected=expected, match_mode=match_mode,
+                matched=matched, error=error,
+            )
+        except Exception:
+            pass
 
     def template_match(self, template: str, roi: Optional[Region] = None,
                        threshold: float = 0.7) -> Optional[Point]:

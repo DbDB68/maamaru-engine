@@ -336,7 +336,8 @@ class DailyMixin:
                         formation_strategy=sortie_plan.get("formation_strategy", "fixed"),
                         formation=sortie_plan.get("formation", "鱼鳞阵"),
                         repair_threshold=sortie_plan.get("repair_threshold", "light"),
-                        injury_action=sortie_plan.get("repair_on_injury", "continue")):
+                        injury_action=sortie_plan.get("repair_on_injury", "continue"),
+                        auto_equip=sortie_plan.get("auto_equip", True)):
                     yield msg
                     if _is_fail(msg):
                         ok = False
@@ -372,7 +373,8 @@ class DailyMixin:
                         formation_strategy=sortie_plan.get("formation_strategy", "fixed"),
                         formation=sortie_plan.get("formation", "鱼鳞阵"),
                         repair_threshold=sortie_plan.get("repair_threshold", "light"),
-                        injury_action=sortie_plan.get("repair_on_injury", "continue")):
+                        injury_action=sortie_plan.get("repair_on_injury", "continue"),
+                        auto_equip=sortie_plan.get("auto_equip", True)):
                     yield msg
                     if _is_fail(msg):
                         ok = False

@@ -184,6 +184,10 @@ def _march_and_injury_fields():
                      ["repair_stop", "手入后停止任务"],
                      ["stop", "停止任务，不进行手入"]],
          "default": "continue"},
+        {"key": "auto_equip", "type": "toggle", "label": "是否自动补充刀装",
+         "default": True,
+         "help": "出阵前将当前部队保存到记录一；刀装破损导致无法出阵时，自动用记录一补齐后继续。",
+         "visibleWhen": {"key": "repair_on_injury", "is": "continue"}},
     ]
 
 
@@ -226,7 +230,8 @@ def _build_daily(config_path, params):
                        "formation_strategy": saved_yosari.get("formation_strategy") or "fixed",
                        "formation": saved_yosari.get("formation") or "鱼鳞阵",
                        "repair_threshold": saved_yosari.get("repair_threshold") or "light",
-                       "repair_on_injury": saved_yosari.get("repair_on_injury") or "continue"}
+                       "repair_on_injury": saved_yosari.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(saved_yosari.get("auto_equip", True))}
     elif mode == "sortie":
         # 地图、队伍、圈数由一键日课决定；战斗行为统一沿用「出阵」配置页。
         saved_sortie = (_load_panel_settings().get("params", {}).get("sortie", {}) or {})
@@ -240,7 +245,8 @@ def _build_daily(config_path, params):
                        "formation_strategy": saved_sortie.get("formation_strategy") or "fixed",
                        "formation": saved_sortie.get("formation") or "鱼鳞阵",
                        "repair_threshold": saved_sortie.get("repair_threshold") or "light",
-                       "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue"}
+                       "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(saved_sortie.get("auto_equip", True))}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -288,7 +294,8 @@ def _build_sortie(config_path, params):
         formation_strategy=params.get("formation_strategy") or "fixed",
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
-        injury_action=params.get("repair_on_injury") or "continue")
+        injury_action=params.get("repair_on_injury") or "continue",
+        auto_equip=_bool(params.get("auto_equip", True)))
 
 
 def _build_yosari(config_path, params):
@@ -302,7 +309,8 @@ def _build_yosari(config_path, params):
         formation_strategy=params.get("formation_strategy") or "fixed",
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
-        injury_action=params.get("repair_on_injury") or "continue")
+        injury_action=params.get("repair_on_injury") or "continue",
+        auto_equip=_bool(params.get("auto_equip", True)))
 
 
 def _build_osaka(config_path, params):
@@ -315,7 +323,8 @@ def _build_osaka(config_path, params):
         formation_strategy=params.get("formation_strategy") or "fixed",
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
-        injury_action=params.get("repair_on_injury") or "continue")
+        injury_action=params.get("repair_on_injury") or "continue",
+        auto_equip=_bool(params.get("auto_equip", True)))
 
 
 def _build_sakura(config_path, params):
@@ -598,7 +607,11 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                          "options": [["continue", "手入加速后继续剩余层数"],
                                      ["repair_stop", "手入后停止任务"],
                                      ["stop", "返回本丸，不进行手入"]],
-                         "default": "continue"}])
+                         "default": "continue"},
+                        {"key": "auto_equip", "type": "toggle",
+                         "label": "是否自动补充刀装", "default": True,
+                         "help": "出阵前保存到记录一；刀装破损时自动恢复并继续剩余层数。",
+                         "visibleWhen": {"key": "repair_on_injury", "is": "continue"}}])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _build_sakura,
                 params=[_team_field("1"),
@@ -1354,49 +1367,77 @@ async def api_save_bot_config(request: Request):
             "qq_restart_required": qq_block.get("enabled", False)}
 
 
-# ── API：OCR 数据统计（日志流里扒拉出来的）──
+# ── API：结构化运行数据 ──
 
-import sqlite3
 
-_OCR_SWORD_PATTERN = re.compile(r"【([^】]+)】")
+@app.get("/api/data/summary")
+async def api_data_summary(days: int = 30):
+    """稳定机器数据总览；前端与智能建议共用，契约由 schema_version 标识。"""
+    from touken.telemetry import get_telemetry_store
+    data = get_telemetry_store().summary(days=days)
+
+    def _state(name: str):
+        path = STATUS_DIR / name
+        try:
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        except (OSError, ValueError):
+            return None
+
+    data["current_state"] = {
+        "inventory": _state("inventory.json"),
+        "daily_report": _state("latest_report.json"),
+        "expeditions": _state("expeditions.json") or {},
+        "naihanka": _state("naihanka.json"),
+    }
+    return data
+
+
+@app.get("/api/data/events")
+async def api_data_events(limit: int = 100, event_type: str = "",
+                          script: str = ""):
+    """结构化玩法事件；payload 只含机器字段，不依赖中文日志文案。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    return {
+        "schema_version": TELEMETRY_SCHEMA_VERSION,
+        "items": get_telemetry_store().recent_events(
+            limit=limit, event_type=event_type or None, script=script or None),
+    }
+
+
+@app.get("/api/data/ocr")
+async def api_data_ocr(limit: int = 100, script: str = "",
+                       matched: bool | None = None):
+    """OCR 观测明细；供识别质量页面及后续建议引擎使用。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    return {
+        "schema_version": TELEMETRY_SCHEMA_VERSION,
+        "items": get_telemetry_store().recent_observations(
+            limit=limit, script=script or None, matched=matched),
+    }
 
 
 @app.get("/api/stats/ocr")
 async def api_ocr_stats():
-    """从日志库里统计 OCR 数据：认刀排行、操作次数等"""
-    db_path = _PROJECT / "status" / "maamaru_logs.db"
-    if not db_path.exists():
-        return {"sword_ranks": [], "script_counts": {}, "total_logs": 0, "ok": True}
+    """旧前端兼容入口；数据已改从结构化仓库读取，不再解析中文日志。"""
     try:
-        conn = sqlite3.connect(str(db_path))
-        total = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
-
-        # 刀剑识别排行：从消息里扒 【刀名】
-        rows = conn.execute(
-            "SELECT message FROM logs WHERE message LIKE '%【%】%'"
-        ).fetchall()
+        from touken.telemetry import get_telemetry_store
+        store = get_telemetry_store()
+        summary = store.summary(days=7)
         sword_counts = {}
-        for (msg,) in rows:
-            for m in _OCR_SWORD_PATTERN.findall(msg):
-                if m:
-                    sword_counts[m] = sword_counts.get(m, 0) + 1
+        for event in store.recent_events(
+                limit=1000, event_type="pumpkin.sword_obtained"):
+            if event["ts"] < summary["window"]["since"]:
+                continue
+            name = str(event["payload"].get("name", "")).strip()
+            if name:
+                sword_counts[name] = sword_counts.get(name, 0) + 1
         sword_ranks = sorted(sword_counts.items(), key=lambda x: -x[1])[:20]
-
-        # 最近 7 天各脚本执行条数
-        week_ago = time.time() - 86400 * 7
-        rows = conn.execute(
-            "SELECT script, COUNT(*) as cnt FROM logs "
-            "WHERE ts > ? GROUP BY script ORDER BY cnt DESC",
-            (week_ago,),
-        ).fetchall()
-        script_counts = {r[0]: r[1] for r in rows}
-
-        conn.close()
         return {
             "sword_ranks": [{"name": n, "count": c} for n, c in sword_ranks],
-            "script_counts": script_counts,
-            "total_logs": total,
+            "script_counts": summary["runs"]["by_script"],
+            "total_logs": summary["ocr"]["total"],
             "ok": True,
+            "source": "telemetry-v1",
         }
     except Exception as exc:
         return {"sword_ranks": [], "script_counts": {}, "total_logs": 0,

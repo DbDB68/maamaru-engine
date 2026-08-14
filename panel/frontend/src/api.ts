@@ -25,6 +25,8 @@ export const api = {
   }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   dashboard: () => request<any>('/api/dashboard'),
+  dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
+  dataEvents: (limit = 100) => request<{ schema_version: number; items: any[] }>(`/api/data/events?limit=${limit}`),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {

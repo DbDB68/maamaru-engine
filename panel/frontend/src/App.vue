@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
 import TaskForm from './components/TaskForm.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
+import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
@@ -23,7 +24,7 @@ const running = ref(false)
 const current = ref<string | null>(null)
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'tasks' | 'chat' | 'system'>('home')
+const tab = ref<'home' | 'tasks' | 'report' | 'chat' | 'system'>('home')
 const theme = ref<'washi' | 'pixel'>('washi')
 const schedulerWarning = ref('')
 const advancedDrawer = ref<'pumpkin' | 'daily-pumpkin' | null>(null)
@@ -31,6 +32,8 @@ let pollTimer = 0
 let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
+const dashboardRun = ref<any>(null)
+const clock = ref(Date.now())
 
 const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
@@ -76,6 +79,29 @@ const dailyPumpkinTargets = computed({
   set: (pumpkin_watch: string[]) => {
     params.value.daily = { ...(params.value.daily || {}), pumpkin_watch }
   },
+})
+
+const stagePlace = computed(() => {
+  if (!dashboardRun.value?.active) return '本丸庭院'
+  const script = String(dashboardRun.value.script || '')
+  const step = String(dashboardRun.value.step || '')
+  if (/(锻刀|手入|刀解|合成|炼糖|根兵糖)/.test(step) || ['forge', 'repair', 'sugar'].includes(script)) return '锻冶工房'
+  if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|派遣)/.test(step) || ['raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch', 'osaka'].includes(script)) return '出阵之路'
+  return '本丸庭院'
+})
+const stageActive = computed(() => running.value || Boolean(dashboardRun.value?.active))
+const stageFlavor = computed(() => dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
+const stageSub = computed(() => {
+  if (!dashboardRun.value?.active) return '庭院无事'
+  const label = dashboardRun.value.label || scripts.value[current.value || '']?.label || '本丸任务'
+  const started = Number(dashboardRun.value.started || 0)
+  if (!started) return label
+  const elapsed = Math.max(0, Math.floor(clock.value / 1000 - started))
+  const hours = Math.floor(elapsed / 3600)
+  const minutes = Math.floor((elapsed % 3600) / 60)
+  const seconds = elapsed % 60
+  const duration = hours ? `${hours}小时${String(minutes).padStart(2, '0')}分` : minutes ? `${minutes}分${String(seconds).padStart(2, '0')}秒` : `${seconds}秒`
+  return `${label} · 已跑 ${duration}`
 })
 
 function defaults(info: ScriptInfo): ScriptParams {
@@ -125,7 +151,9 @@ function applyTheme() { document.body.dataset.theme = theme.value }
 async function toggleTheme() { theme.value = theme.value === 'washi' ? 'pixel' : 'washi'; applyTheme(); await api.saveTheme(theme.value) }
 async function pollStatus() {
   try {
-    const state = await api.scripts()
+    const [state, dashboard] = await Promise.all([api.scripts(), api.dashboard()])
+    dashboardRun.value = dashboard.running || null
+    clock.value = Date.now()
     const wasRunning = running.value
     // 停止请求后后台进程可能还会短暂报告一次 running；在真正停稳前不让 UI 反跳回“运行中”。
     if (stopping.value && state.running) return
@@ -164,31 +192,32 @@ watch(message, value => {
   if (value) toastTimer = window.setTimeout(() => { message.value = '' }, 3200)
 })
 
-onMounted(() => { load(); pollTimer = window.setInterval(pollStatus, 2000); window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
+onMounted(() => { load(); pollStatus(); pollTimer = window.setInterval(pollStatus, 2000); window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
 </script>
 
 <template>
   <div class="shell">
-    <section class="honmaru-stage" :class="{ working: running }" aria-label="狐之助工作现场">
+    <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>本丸自动管家</small></div>
       <div class="stage-fox" aria-hidden="true"></div>
       <div class="stage-status">
-        <small>{{ running ? '本丸执务' : '本丸庭院' }}</small>
-        <strong>{{ running ? (scripts[current || '']?.label || '任务进行中') : '本丸待命' }}</strong>
-        <span>{{ running ? '狐之助正在干活' : '庭院无事' }}</span>
+        <small>{{ stagePlace }}</small>
+        <strong>{{ stageFlavor }}</strong>
+        <span>{{ stageSub }}</span>
       </div>
     </section>
     <header class="topbar">
       <nav class="topnav">
         <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
         <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
+        <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">成绩单</button>
         <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
         <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
       </nav>
       <div class="top-status">
-        <i :class="{ running }"></i><span>{{ running ? '执务中' : '待命中' }}</span>
+        <i :class="{ running: stageActive }"></i><span>{{ stageActive ? '执务中' : '待命中' }}</span>
         <button class="theme-button" :title="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" :aria-label="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" @click="toggleTheme"></button>
         <a href="/legacy">旧版备用</a>
       </div>
@@ -277,8 +306,9 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
         />
         <LogPanel />
       </section>
-      <aside class="home-dashboard"><DashboardPanel /></aside>
+      <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page"><ReportPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>

@@ -193,6 +193,10 @@ class PumpkinMixin:
                 got = self._read_obtained_sword(cfg)
                 if got:
                     got_names.append(got)
+                    if hasattr(self, "record_event"):
+                        self.record_event("pumpkin.sword_obtained", name=got,
+                                          obtained_count=len(got_names),
+                                          boards_completed=boards_done + 1)
                     yield f"[南瓜] 🎉 获得【{got}】（累计 {len(got_names)} 把）"
                 else:
                     yield "[南瓜] 获得动画没 OCR 出名字（继续）"
@@ -201,6 +205,11 @@ class PumpkinMixin:
                     self._click_point(cfg["skip_tap"])
                     time.sleep(0.8)
                 boards_done += 1
+                if hasattr(self, "record_event"):
+                    self.record_event("pumpkin.board_completed",
+                                      sequence=boards_done,
+                                      sorties=battles_total,
+                                      tokens_used=skips)
                 # 预算还够 → 剪影更新开新局；不够 → 打满收工（不再白烧）
                 if _budge() <= 0:
                     yield f"[南瓜] 令牌预算用完了（{skips}/{max_skips}），最后这块已打完，收工"
@@ -212,6 +221,9 @@ class PumpkinMixin:
                     yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
                     return
                 skips += 1
+                if hasattr(self, "record_event"):
+                    self.record_event("pumpkin.token_used", reason="new_board",
+                                      used=skips, boards_completed=boards_done)
                 misses = 0
                 board_battles = 0
                 keep_confirmed = False
@@ -244,6 +256,10 @@ class PumpkinMixin:
                             yield "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工"
                             return
                         skips += 1
+                        if hasattr(self, "record_event"):
+                            self.record_event("pumpkin.token_used", reason="skip_sword",
+                                              used=skips, sword=pending_name,
+                                              boards_completed=boards_done)
                         board_battles = 0
                         keep_confirmed = False
                         pending_name = None
@@ -276,6 +292,11 @@ class PumpkinMixin:
                 if not round_done:
                     yield f"[南瓜] ⚠️ 战斗循环超过安全上限，强制停（共出阵 {battles_total} 次），你去看看卡哪了"
                     return
+                if hasattr(self, "record_event"):
+                    self.record_event("pumpkin.sortie_completed",
+                                      sequence=battles_total,
+                                      board_sorties=board_battles,
+                                      boards_completed=boards_done)
                 yield f"[南瓜] 第 {battles_total} 次出阵回来，格子 +1"
                 _bump_progress()
                 # 回来后可能有"获得刀剑男士"动画，点几下安全区

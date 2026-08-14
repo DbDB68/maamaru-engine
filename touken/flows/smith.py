@@ -130,6 +130,8 @@ class SmithMixin:
                     for nav_msg in self.navigate_to_stream("锻刀"):
                         yield nav_msg
                     time.sleep(1.0)
+                elif hasattr(self, "record_event"):
+                    self.record_event("forge.collected", slot=_SLOT_CY.index(cy) + 1)
                 continue
 
             if kind == "空闲中":
@@ -137,6 +139,10 @@ class SmithMixin:
                 if self._start_forge(cy):
                     forged += 1
                     hit = self._check_watch(cy, watch_secs)
+                    if hasattr(self, "record_event"):
+                        self.record_event("forge.started",
+                                          slot=_SLOT_CY.index(cy) + 1,
+                                          sequence=forged, target_hit=hit)
                     if hit:
                         yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
                         try:

@@ -196,6 +196,11 @@ class RaidMixin:
             round_done, battles = self._battle_loop_result
 
             if round_done:
+                if hasattr(self, "record_event"):
+                    self.record_event("raid.round_completed",
+                                      difficulty=difficulty_no,
+                                      sequence=round_no, battles=battles,
+                                      triple=bool(use_triple))
                 yield f"[RAID] 第 {round_no} 圈结束，打了 {battles} 场"
             else:
                 yield f"[RAID] ⚠️ 战斗循环超过安全上限，强制停（打了 {battles} 场），你去看看卡哪了"

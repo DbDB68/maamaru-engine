@@ -100,7 +100,9 @@ class ScriptRunner:
             self._stop_reason = ""
 
             try:
-                self._proc = self._spawn(script_name, config_path, params or {})
+                self._proc = self._spawn(script_name, config_path, params or {}, run_id)
+                from touken.telemetry import get_telemetry_store
+                get_telemetry_store().start_run(run_id, script_name, self._current_started)
             except Exception as exc:
                 self._proc = None
                 msg = f"[面板] 工人子进程启动失败: {exc}"
@@ -116,7 +118,8 @@ class ScriptRunner:
                              daemon=True, name=f"worker-dog-{run_id}").start()
             return run_id
 
-    def _spawn(self, script_name: str, config_path: str, params: dict) -> subprocess.Popen:
+    def _spawn(self, script_name: str, config_path: str, params: dict,
+               run_id: str) -> subprocess.Popen:
         """起工人子进程。源码模式走 python -m，exe 模式走 --worker 自分发。"""
         project_root = Path(__file__).resolve().parent.parent
         env = os.environ.copy()
@@ -124,6 +127,8 @@ class ScriptRunner:
         env["PYTHONIOENCODING"] = "utf-8"    # 日文/emoji 不许被 GBK 掐死
         env["MAAMARU_WORKER"] = "1"          # 告诉 maa_adapter：可以自我了断
         env["MAAMARU_WORKER_PARAMS"] = json.dumps(params, ensure_ascii=False)
+        env["MAAMARU_RUN_ID"] = run_id        # 结构化观测数据关联本轮任务
+        env["MAAMARU_SCRIPT"] = script_name
 
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--worker", script_name, config_path]
@@ -180,6 +185,14 @@ class ScriptRunner:
                      "建议重启模拟器后再跑")
         else:
             final = f"[脚本] 工人进程异常退出（代码 {rc}）— run {run_id}"
+        status = ("stopped" if self._stop_reason == "user" else
+                  "watchdog" if self._stop_reason == "watchdog" else
+                  "completed" if rc == 0 else "failed")
+        try:
+            from touken.telemetry import get_telemetry_store
+            get_telemetry_store().finish_run(run_id, status)
+        except Exception:
+            pass
         store.append(run_id, script_name, final)
         self._emit(run_id, script_name, final)
         print(final)

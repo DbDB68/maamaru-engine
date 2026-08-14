@@ -32,13 +32,15 @@ class SortieMixin:
                       formation_strategy: str = "fixed",
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
-                      injury_action: str = "continue"):
+                      injury_action: str = "continue",
+                      auto_equip: bool = True):
         yield from self._map_sortie_stream(
             chapter=chapter, map_no=map_no, team_no=team_no,
             auto_march=auto_march, max_loops=max_loops,
             formation_mode=formation_mode,
             formation_strategy=formation_strategy, formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
+            auto_equip=auto_equip,
         )
 
     def yosari_stream(self, map_no: int, team_no: int = 3,
@@ -48,7 +50,8 @@ class SortieMixin:
                       formation_strategy: str = "fixed",
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
-                      injury_action: str = "continue"):
+                      injury_action: str = "continue",
+                      auto_equip: bool = True):
         """流式跑常驻玩法“异去”；目前只有第一章。"""
         yield from self._map_sortie_stream(
             chapter=1, map_no=map_no, team_no=team_no,
@@ -57,6 +60,7 @@ class SortieMixin:
             formation_mode=formation_mode,
             formation_strategy=formation_strategy, formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
+            auto_equip=auto_equip,
             map_type="异去", cfg_key="yosari",
         )
 
@@ -67,6 +71,7 @@ class SortieMixin:
                            formation: str = "鱼鳞阵",
                            repair_threshold: str = "light",
                            injury_action: str = "continue",
+                           auto_equip: bool = True,
                            auto_refill: bool = False,
                            map_type: str = "合战场",
                            cfg_key: str = "sortie"):
@@ -113,6 +118,9 @@ class SortieMixin:
         loop_no = 1
         repair_attempts = 0
         map_page_ready = False
+        record_saved = False
+        auto_equip_active = bool(
+            auto_equip and str(injury_action or "continue") == "continue")
         while loop_no <= max_loops:
             if self.current_location != "出阵":
                 for nav_msg in self.navigate_to_stream("出阵"):
@@ -203,6 +211,17 @@ class SortieMixin:
                     return
                 continue
 
+            # 只在整轮任务第一次出阵前保存。战斗后刀装可能已碎，绝不能在
+            # 下一圈覆盖记录一，否则保存下来的就是缺刀装状态。
+            if auto_equip_active and not record_saved:
+                yield "[出阵] 自动补充刀装已开启，先把当前部队保存到记录一"
+                if self._save_team_record(cfg, record_no=1):
+                    record_saved = True
+                    yield "[出阵] ✓ 当前部队已保存到记录一"
+                else:
+                    yield "[出阵] ⚠️ 没能安全保存记录一，已停止；请查看是否有确认弹窗未处理"
+                    return
+
             # ========== 6. 可选：委托自动行军 ==========
             delegated_march = False
             if auto_march:
@@ -211,26 +230,49 @@ class SortieMixin:
                 if not delegated_march:
                     yield "[出阵] ⚠️ 游戏自动行军没有挂成功，降级为脚本手动行军"
 
-            # ========== 7. 即刻出阵 → 分支 ==========
-            if not self._click_depart(cfg):
-                yield "[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停"
-                return
+            # ========== 7. 即刻出阵 → 刀装恢复分支 ==========
+            equip_retries = 0
+            while True:
+                if not self._click_depart(cfg):
+                    yield "[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停"
+                    return
 
-            self.maa.screenshot(force=True)
+                self.maa.screenshot(force=True)
+                if auto_equip_active:
+                    equip_result = self._restore_equipment_from_warning(cfg, record_no=1)
+                    if equip_result is None:
+                        break
+                    if not equip_result:
+                        yield "[出阵] ⚠️ 刀装未满警告；从记录一恢复失败，已停止出阵"
+                        return
+                    equip_retries += 1
+                    yield "[出阵] 🛡️ 刀装有空缺，已使用记录一自动补齐"
+                    if equip_retries >= 2:
+                        yield "[出阵] 恢复刀装后仍出现空缺警告，停止重试"
+                        return
+                    # 使用记录后重新做保命检查；异常时绝不再次点出阵。
+                    self.maa.screenshot(force=True)
+                    restored_injury = self._team_injury_status(cfg)
+                    if restored_injury and self._injury_reaches_threshold(
+                            restored_injury, repair_threshold):
+                        yield f"[出阵] 恢复刀装后检测到{restored_injury}，不再出阵"
+                        return
+                    if auto_march:
+                        delegated_march = self._enable_auto_march()
+                    continue
 
-            # 刀装未满警告 → 安全取消整备，给后续日课让路
-            equip_cancelled = self._cancel_equip_warning(cfg)
-            if equip_cancelled is not None:
+                # 未开启自动补充时保持原安全行为：点整备刀装退出，不碰继续出阵。
+                equip_cancelled = self._cancel_equip_warning(cfg)
+                if equip_cancelled is None:
+                    break
                 if equip_cancelled:
-                    yield "[出阵] ⚠️ 刀装未满警告；已取消出阵并返回部队选择，本次跳过"
+                    yield "[出阵] ⚠️ 刀装未满警告；已进入整备，本次跳过"
                 else:
-                    yield "[出阵] ⚠️ 刀装未满警告；没能安全取消整备，本次出阵停止"
+                    yield "[出阵] ⚠️ 刀装未满警告；没能安全进入整备，本次出阵停止"
                 return
 
             # 队员重伤确认弹窗 → 教材规矩：永远点"否"
-            deny = self.maa.template_match(cfg["injury_deny_button"]["template"])
-            if deny:
-                self.maa.click(deny)
+            if self._deny_heavy_injury_warning(cfg):
                 yield "[出阵] 🛑 队员重伤确认弹窗，已点【否】。有重伤绝不出阵，停"
                 return
 
@@ -254,6 +296,15 @@ class SortieMixin:
             interrupted = False
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
+
+                if self._deny_heavy_injury_warning(cfg):
+                    yield "[出阵] 🛑 出现重伤行军警告，已点【否】，准备返回本丸"
+                    self.maa.screenshot(force=True)
+                    if not self._return_home_from_march(cfg):
+                        yield "[出阵] 点否后找不到返回本丸按钮，已停止点击"
+                        return
+                    interrupted = True
+                    break
 
                 # 异去一圈结束后回到四张小图页，不会回本丸。
                 if cfg_key == "yosari" and self._yosari_round_done(cfg):
@@ -333,6 +384,10 @@ class SortieMixin:
                 else:
                     yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
                     self.current_location = "本丸"
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "sortie.completed", mode=cfg_key, chapter=chapter,
+                        map_no=map_no, team_no=team_no, sequence=loop_no)
                 repair_attempts = 0
                 loop_no += 1
             elif interrupted:

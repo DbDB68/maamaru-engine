@@ -106,6 +106,10 @@ class RepairMixin:
                 if is_black:
                     skipped += 1
                     self.last_repair_stats["skipped"] = skipped
+                    if hasattr(self, "record_event"):
+                        self.record_event("repair.skipped", name=std_name,
+                                          sword_id=sid, team_mark=prefix,
+                                          reason="blacklist")
                     yield f"[手入] {prefix} {std_name} → 黑名单（碰瓷队带伤上班），跳过"
                     continue
 
@@ -126,6 +130,11 @@ class RepairMixin:
                     self.last_repair_stats["repaired"] = repaired
                     if need_speed:
                         self.last_repair_stats["speedups"] += 1
+                    if hasattr(self, "record_event"):
+                        self.record_event("repair.queued", name=std_name,
+                                          sword_id=sid, team_mark=prefix,
+                                          speedup=need_speed)
+                    if need_speed:
                         # 游戏的奇怪缓存：加速手入已经完成，但如果立刻去编队，
                         # 伤势章仍可能残留。必须离开手入再重新进入一次，等价于
                         # 把人从手入室“接出来”，编队状态才会刷新。

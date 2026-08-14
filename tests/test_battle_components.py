@@ -47,6 +47,123 @@ class Flow(BattleMixin):
 
 
 class BattleComponentTests(unittest.TestCase):
+    @staticmethod
+    def _record_flow(start="team", save_auto_return=True, yes_template=True):
+        points = {
+            "record": Point(1200, 145), "save": Point(480, 85),
+            "load": Point(740, 85), "yes": Point(784, 510),
+            "warning": Point(780, 510), "prepare": Point(500, 510),
+        }
+
+        class Maa:
+            def __init__(self):
+                self.state = start
+                self.clicked = []
+
+            def screenshot(self, force=False):
+                return object()
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                if template == "team/继续出阵.png" and self.state == "warning":
+                    return points["warning"]
+                if template == "team/整备刀装.png" and self.state == "warning":
+                    return points["prepare"]
+                if template == "team/部队记录.png" and self.state in ("team", "formation"):
+                    return points["record"]
+                if template == "team/进行记录.png" and self.state == "record":
+                    return points["save"]
+                if template == "team/使用记录.png" and self.state == "record":
+                    return points["load"]
+                if (template == "team/是.png" and yes_template
+                        and self.state.startswith("confirm")):
+                    return points["yes"]
+                return None
+
+            def ocr_all(self, roi):
+                if self.state == "confirm_save":
+                    return [("部队记录", Point(640, 170)),
+                            ("是否记录到记录部队一中", Point(640, 340))]
+                if self.state == "confirm_load":
+                    return [("部队记录", Point(640, 170)),
+                            ("是否使用记录部队一", Point(640, 340))]
+                return []
+
+            def click(self, point):
+                self.clicked.append(point)
+                if point == points["prepare"]:
+                    self.state = "formation"
+                elif point == points["record"]:
+                    self.state = "record"
+                elif point == points["save"]:
+                    self.state = "confirm_save"
+                elif point == points["load"]:
+                    self.state = "confirm_load"
+                elif point == points["yes"]:
+                    self.state = ("team" if self.state == "confirm_load"
+                                  or save_auto_return else "record")
+                elif point == Point(73, 31) and self.state == "record":
+                    self.state = "team"
+                return True
+
+            def ocr(self, expected, roi, match_mode="contains"):
+                return Point(640, 30) if self.state == "team" else None
+
+        class RecordFlow(BattleMixin):
+            def __init__(self):
+                self.maa = Maa()
+                self.config = {"team_select": {"team_record": {
+                    "button": {"template": "team/部队记录.png"},
+                    "records": {"1": [1225, 179]},
+                    "save_confirm": {"template": "team/进行记录.png"},
+                    "load_confirm": {"template": "team/使用记录.png"},
+                    "yes_button": {"template": "team/是.png"},
+                }}}
+
+            def _click_template_config(self, config):
+                point = self.maa.template_match(config.get("template"))
+                return self.maa.click(point) if point else False
+
+            def _click_point(self, target):
+                return self.maa.click(Point(*target))
+
+        return RecordFlow()
+
+    def test_saves_current_team_to_record_one_and_returns_to_team_select(self):
+        flow = self._record_flow("team")
+        cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(flow._save_team_record(cfg, record_no=1))
+        self.assertEqual(flow.maa.state, "team")
+        self.assertIn(Point(1225, 179), flow.maa.clicked)
+
+    def test_warning_restores_record_one_through_formation_screen(self):
+        flow = self._record_flow("warning")
+        cfg = {
+            "equip_warning_button": {"template": "team/继续出阵.png"},
+            "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(flow._restore_equipment_from_warning(cfg, record_no=1))
+        self.assertEqual(flow.maa.state, "team")
+        self.assertIn(Point(500, 510), flow.maa.clicked)
+        self.assertIn(Point(740, 85), flow.maa.clicked)
+
+    def test_save_uses_back_when_record_page_does_not_close_itself(self):
+        flow = self._record_flow("team", save_auto_return=False)
+        cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(flow._save_team_record(cfg, record_no=1))
+        self.assertEqual(flow.maa.state, "team")
+        self.assertIn(Point(73, 31), flow.maa.clicked)
+
+    def test_record_confirmation_uses_guarded_fallback_when_yes_template_changes(self):
+        flow = self._record_flow("team", yes_template=False)
+        cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(flow._save_team_record(cfg, record_no=1))
+        self.assertEqual(flow.maa.state, "team")
+        self.assertIn(Point(784, 510), flow.maa.clicked)
+
     def test_injury_templates_are_restricted_to_our_team_side(self):
         flow = Flow(FakeMaa(templates={"battle/轻伤.png": Point(200, 150)}))
         cfg = {
@@ -61,7 +178,9 @@ class BattleComponentTests(unittest.TestCase):
         self.assertTrue(flow.maa.template_calls)
         for _, roi in flow.maa.template_calls:
             self.assertEqual((roi.x, roi.y, roi.w, roi.h),
-                             (0, 90, 570, 600))
+                             (220, 90, 120, 600))
+        self.assertTrue(all(threshold == 0.88
+                            for _, threshold in flow.maa.template_thresholds))
 
     def test_partial_injury_ocr_never_promotes_hurt_to_heavy(self):
         class Maa(FakeMaa):
@@ -70,6 +189,47 @@ class BattleComponentTests(unittest.TestCase):
 
         flow = Flow(Maa())
         self.assertIsNone(flow._team_injury_status({"injury_stamps": {}}))
+
+    def test_medium_stamp_cannot_be_claimed_by_low_score_heavy_template(self):
+        class Maa(FakeMaa):
+            scores = {
+                "battle/ui重伤.png": 0.704,
+                "battle/中伤.png": 0.96,
+                "battle/轻伤.png": 0.80,
+            }
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                self.template_thresholds.append((template, threshold))
+                return Point(282, 147) if self.scores[template] >= threshold else None
+
+            def ocr_all(self, roi):
+                return []
+
+        cfg = {"injury_stamps": {
+            "重伤": {"template": "battle/ui重伤.png"},
+            "中伤": {"template": "battle/中伤.png"},
+            "轻伤": {"template": "battle/轻伤.png"},
+        }}
+        flow = Flow(Maa())
+
+        self.assertEqual(flow._team_injury_status(cfg), "中伤")
+        self.assertEqual(flow.maa.template_thresholds[:2], [
+            ("battle/ui重伤.png", 0.88),
+            ("battle/中伤.png", 0.88),
+        ])
+
+    def test_heavy_march_warning_always_chooses_no_in_scoped_roi(self):
+        deny = Point(500, 520)
+        flow = Flow(FakeMaa(templates={"否.png": deny}))
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(flow._deny_heavy_injury_warning({
+                "injury_deny_button": {"template": "否.png"},
+            }))
+        self.assertEqual(flow.maa.clicks, [deny])
+        template, roi = flow.maa.template_calls[-1]
+        self.assertEqual(template, "否.png")
+        self.assertEqual((roi.x, roi.y, roi.w, roi.h), (330, 400, 320, 220))
+        self.assertEqual(flow.maa.template_thresholds[-1], ("否.png", 0.75))
 
     def test_full_injury_ocr_keeps_medium_injury_as_medium(self):
         class Maa(FakeMaa):

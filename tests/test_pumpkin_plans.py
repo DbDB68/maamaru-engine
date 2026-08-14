@@ -49,6 +49,9 @@ class PumpkinPlanTests(unittest.TestCase):
                           ["heavy", "重伤时停止"]])
         self.assertEqual(by_key["repair_on_injury"]["options"][-1],
                          ["stop", "返回本丸，不进行手入"])
+        self.assertTrue(by_key["auto_equip"]["default"])
+        self.assertEqual(by_key["auto_equip"]["visibleWhen"],
+                         {"key": "repair_on_injury", "is": "continue"})
 
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
@@ -60,6 +63,7 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertEqual(agent.osaka_args["formation_mode"], "auto")
         self.assertEqual(agent.osaka_args["repair_threshold"], "medium")
         self.assertEqual(agent.osaka_args["injury_action"], "repair_stop")
+        self.assertTrue(agent.osaka_args["auto_equip"])
 
     def test_four_sortie_forms_share_one_quantity_key(self):
         scripts = list_scripts()
@@ -74,6 +78,7 @@ class PumpkinPlanTests(unittest.TestCase):
             keys = [field.get("key") for field in scripts[name]["params"]]
             self.assertIn("auto_march", keys, name)
             self.assertIn("repair_threshold", keys, name)
+            self.assertIn("auto_equip", keys, name)
 
     def test_yosari_uses_chapter_and_map_fields_like_sortie(self):
         fields = list_scripts()["yosari"]["params"]

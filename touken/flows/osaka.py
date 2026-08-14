@@ -17,12 +17,18 @@ class OsakaMixin:
                      formation: str = "鱼鳞阵",
                      repair_threshold: str = "light",
                      injury_action: str = "continue",
+                     auto_equip: bool = True,
                      _target_floors: int = None,
                      _completed_floors: int = 0,
                      _repair_count: int = 0,
-                     _speedups_used: int = 0):
+                     _speedups_used: int = 0,
+                     _team_record_saved: bool = False,
+                     _auto_equip_active: bool = None):
         if _target_floors is None:
             _target_floors = max_floors
+        if _auto_equip_active is None:
+            _auto_equip_active = bool(
+                auto_equip and str(injury_action or "continue") == "continue")
         cfg = self.config.get("osaka", {})
         if not cfg:
             yield "[挖地] 未配置大阪城"
@@ -74,19 +80,47 @@ class OsakaMixin:
                 initial_injury, repair_threshold):
             yield f"[挖地] 出阵前检测到{initial_injury}，已达到停止条件，本次不出阵"
             return
-        if not self._click_depart(cfg):
-            yield "[挖地] 找不到即刻出阵按钮"
-            return
+        if _auto_equip_active and not _team_record_saved:
+            yield "[挖地] 自动补充刀装已开启，先把当前部队保存到记录一"
+            if self._save_team_record(cfg, record_no=1):
+                _team_record_saved = True
+                yield "[挖地] ✓ 当前部队已保存到记录一"
+            else:
+                yield "[挖地] ⚠️ 没能安全保存记录一，已停止；请查看是否有确认弹窗未处理"
+                return
 
-        self.maa.screenshot(force=True)
-        equip_cancelled = self._cancel_equip_warning(cfg)
-        if equip_cancelled is not None:
-            yield "[挖地] 刀装未满，已取消出阵" if equip_cancelled else "[挖地] 刀装未满且无法安全取消，停止"
+        equip_retries = 0
+        while True:
+            if not self._click_depart(cfg):
+                yield "[挖地] 找不到即刻出阵按钮"
+                return
+            self.maa.screenshot(force=True)
+            if _auto_equip_active:
+                equip_result = self._restore_equipment_from_warning(cfg, record_no=1)
+                if equip_result is None:
+                    break
+                if not equip_result:
+                    yield "[挖地] 刀装有空缺，但从记录一恢复失败，停止出阵"
+                    return
+                equip_retries += 1
+                yield "[挖地] 🛡️ 刀装有空缺，已使用记录一自动补齐"
+                if equip_retries >= 2:
+                    yield "[挖地] 恢复刀装后仍出现空缺警告，停止重试"
+                    return
+                self.maa.screenshot(force=True)
+                restored_injury = self._team_injury_status(cfg)
+                if restored_injury and self._injury_reaches_threshold(
+                        restored_injury, repair_threshold):
+                    yield f"[挖地] 恢复刀装后检测到{restored_injury}，不再出阵"
+                    return
+                continue
+            equip_cancelled = self._cancel_equip_warning(cfg)
+            if equip_cancelled is None:
+                break
+            yield ("[挖地] 刀装未满，已进入整备，本次停止" if equip_cancelled
+                   else "[挖地] 刀装未满且无法安全进入整备，停止")
             return
-        deny_cfg = cfg.get("injury_deny_button", {})
-        deny = self.maa.template_match(deny_cfg.get("template"))
-        if deny:
-            self.maa.click(deny)
+        if self._deny_heavy_injury_warning(cfg):
             yield "[挖地] 队员重伤确认弹窗，已点【否】；有重伤绝不出阵"
             return
 
@@ -100,6 +134,18 @@ class OsakaMixin:
         idle_checks = 0
         while idle_checks < 300:
             self.maa.screenshot(force=True)
+
+            # 伤势章/OCR 理论上会在点击行军前拦住重伤；这里再兜游戏自己
+            # 弹出的“重伤仍要行军吗”。永远点否，然后返回本丸。
+            if self._deny_heavy_injury_warning(cfg):
+                yield "[挖地] 🛑 出现重伤行军警告，已点【否】，不再前进"
+                self.maa.screenshot(force=True)
+                if self._return_home_from_march(cfg):
+                    self.current_location = "本丸"
+                    yield "[挖地] ✓ 已从重伤警告处安全返回本丸"
+                else:
+                    yield "[挖地] 点否后没能确认返回本丸，已停止点击"
+                return
 
             # 强制更新会把游戏从战斗中踢回登录页。恢复后旧战斗状态已经作废，
             # 必须按已结算层数从活动入口重开，不能接着在原坐标上盲点。
@@ -121,10 +167,13 @@ class OsakaMixin:
                     formation=formation,
                     repair_threshold=repair_threshold,
                     injury_action=injury_action,
+                    auto_equip=auto_equip,
                     _target_floors=_target_floors,
                     _completed_floors=total_completed,
                     _repair_count=_repair_count,
                     _speedups_used=_speedups_used,
+                    _team_record_saved=_team_record_saved,
+                    _auto_equip_active=_auto_equip_active,
                 )
                 return
 
@@ -134,6 +183,13 @@ class OsakaMixin:
                 idle_checks = 0
                 floors += 1
                 total_completed = _completed_floors + floors
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "osaka.floor_completed",
+                        completed=total_completed,
+                        target=_target_floors,
+                        selected_floor=target_floor if select_floor else None,
+                    )
                 yield f"[挖地] ✓ 已完成 {total_completed}/{_target_floors} 层"
                 injury = self._team_injury_status(cfg)
                 goal_reached = total_completed >= _target_floors
@@ -178,6 +234,10 @@ class OsakaMixin:
                     speedups = int(stats.get("speedups", 0))
                     _repair_count += 1
                     _speedups_used += speedups
+                    if hasattr(self, "record_event"):
+                        self.record_event("repair.session_completed", source="osaka",
+                                          repaired=repaired, speedups=speedups,
+                                          session_count=_repair_count)
                     yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
                            f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
                     if repair_and_stop:
@@ -196,10 +256,13 @@ class OsakaMixin:
                         formation=formation,
                         repair_threshold=repair_threshold,
                         injury_action=injury_action,
+                        auto_equip=auto_equip,
                         _target_floors=_target_floors,
                         _completed_floors=total_completed,
                         _repair_count=_repair_count,
                         _speedups_used=_speedups_used,
+                        _team_record_saved=_team_record_saved,
+                        _auto_equip_active=_auto_equip_active,
                     )
                     return
                 march = self._wait_for_osaka_march(cfg)
@@ -257,6 +320,10 @@ class OsakaMixin:
                     speedups = int(stats.get("speedups", 0))
                     _repair_count += 1
                     _speedups_used += speedups
+                    if hasattr(self, "record_event"):
+                        self.record_event("repair.session_completed", source="osaka",
+                                          repaired=repaired, speedups=speedups,
+                                          session_count=_repair_count)
                     yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
                            f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
                     if repair_and_stop:
@@ -276,10 +343,13 @@ class OsakaMixin:
                         formation=formation,
                         repair_threshold=repair_threshold,
                         injury_action=injury_action,
+                        auto_equip=auto_equip,
                         _target_floors=_target_floors,
                         _completed_floors=total_completed,
                         _repair_count=_repair_count,
                         _speedups_used=_speedups_used,
+                        _team_record_saved=_team_record_saved,
+                        _auto_equip_active=_auto_equip_active,
                     )
                     return
                 yield "[挖地] 行军，继续向下挖"

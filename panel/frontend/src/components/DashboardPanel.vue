@@ -4,7 +4,11 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
 
+const emit = defineEmits<{ openReport: [] }>()
+
 const data = ref<any>(null)
+const activity = ref<any>(null)
+const activityEvents = ref<any[]>([])
 const error = ref('')
 const now = ref(Date.now())
 let timer = 0
@@ -51,6 +55,19 @@ async function load() {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '读取失败'
   }
+  try {
+    const [summary, recent] = await Promise.all([api.dataSummary(1), api.dataEvents(200)])
+    activity.value = summary
+    const since = Date.now() / 1000 - 86400
+    activityEvents.value = recent.items.filter(item => item.ts >= since)
+  } catch (_) {
+    activity.value = null
+    activityEvents.value = []
+  }
+}
+
+function eventCount(...types: string[]) {
+  return activityEvents.value.filter(item => types.includes(item.event_type)).length
 }
 
 onMounted(() => {
@@ -62,10 +79,22 @@ onBeforeUnmount(() => window.clearInterval(timer))
 
 <template>
   <section class="dashboard-panel">
-    <PanelHeader title="本丸统计" :subtitle="data?.server_time ? `更新于 ${data.server_time.slice(11)}` : error" title-class="dashboard-title">
-      <template #actions><button class="secondary dashboard-refresh" type="button" aria-label="刷新本丸统计" title="刷新" @click="load"></button></template>
+    <PanelHeader title="本丸快照" :subtitle="data?.server_time ? `更新于 ${data.server_time.slice(11)}` : error" title-class="dashboard-title">
+      <template #actions><button class="secondary dashboard-refresh" type="button" aria-label="刷新本丸快照" title="刷新" @click="load"></button></template>
     </PanelHeader>
     <div class="dashboard-grid">
+      <PaperCard variant="dashboard" class="activity-card">
+        <h3>📜 今日小结 <small>近 24 小时</small></h3>
+        <div class="activity-summary">
+          <template v-if="activity">
+            <span><strong>{{ eventCount('task_rewards.claimed') }}</strong>次领奖</span>
+            <span><strong>{{ eventCount('sortie.completed', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed') }}</strong>次出阵</span>
+            <span><strong>{{ eventCount('expedition.dispatched') }}</strong>次派遣</span>
+          </template>
+          <span v-else class="activity-waiting">新任务运行后开始记录</span>
+        </div>
+        <button class="report-link" type="button" @click="emit('openReport')">查看本丸成绩单 →</button>
+      </PaperCard>
       <PaperCard variant="dashboard" class="resources-card">
         <h3>💰 家底 <small>{{ data?.inventory?.captured_at ? `快照 ${data.inventory.captured_at.slice(5, 16)}` : '' }}</small></h3>
         <template v-if="resources">

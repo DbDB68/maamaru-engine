@@ -39,6 +39,151 @@ class BattleMixin:
             time.sleep(0.4)
         return False
 
+    def _wait_for_team_record_page(self, record_config: dict,
+                                   attempts: int = 10) -> bool:
+        """部队记录页同时有“进行记录”和“使用记录”，认任意一个即可。"""
+        for _ in range(attempts):
+            self.maa.screenshot(force=True)
+            for key in ("save_confirm", "load_confirm"):
+                button = record_config.get(key, {})
+                template = button.get("template")
+                if template and self.maa.template_match(template):
+                    return True
+            time.sleep(0.4)
+        return False
+
+    def _wait_team_select_after_record(self, cfg: dict,
+                                       attempts: int = 12) -> bool:
+        """保存/使用记录后必须确认回到部队选择，不能靠固定睡眠猜。"""
+        team_ui = cfg.get("team_ui_ocr", {})
+        roi_raw = team_ui.get("roi")
+        expected = team_ui.get("expected", "部队选择")
+        if not roi_raw:
+            return False
+        roi = roi_4to4(*roi_raw)
+        for _ in range(attempts):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected, roi):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _open_team_record(self) -> bool:
+        """从部队选择/编成页打开共用部队记录。"""
+        record = self.config.get("team_select", {}).get("team_record", {})
+        button = record.get("button", {})
+        if not button or not self._click_template_config(button):
+            return False
+        time.sleep(0.8)
+        return self._wait_for_team_record_page(record)
+
+    def _finish_team_record(self, cfg: dict, record: dict) -> bool:
+        """确认回到部队选择；保存记录不自动退页时，安全点左上返回。"""
+        if self._wait_team_select_after_record(cfg, attempts=4):
+            return True
+        if not self._wait_for_team_record_page(record, attempts=1):
+            return False
+        back = record.get("back", [73, 31])
+        self._click_point(back.get("target", [73, 31])
+                          if isinstance(back, dict) else back)
+        time.sleep(0.8)
+        return self._wait_team_select_after_record(cfg, attempts=8)
+
+    def _confirm_team_record(self, record: dict, action: str,
+                             record_no: int = 1) -> bool:
+        """确认保存/使用记录；模板失败时只在验明弹窗正文后用固定按钮位。"""
+        self.maa.screenshot(force=True)
+        yes_cfg = record.get("yes_button", {})
+        yes_roi_raw = yes_cfg.get("roi", [650, 430, 920, 590])
+        yes_roi = roi_4to4(*yes_roi_raw)
+        template = yes_cfg.get("template", "team/是.png")
+        yes = self.maa.template_match(template, yes_roi, threshold=0.65)
+        if yes:
+            self.maa.click(yes)
+            return True
+
+        # 游戏更新会微调按钮皮肤，旧模板可能失效。固定坐标只能在 OCR 同时
+        # 认出弹窗标题、动作和记录一时使用，绝不能见到任意“是”就点。
+        modal_roi = roi_4to4(*record.get("confirm_ocr_roi", [330, 130, 950, 590]))
+        tokens = self.maa.ocr_all(modal_roi)
+        text = "".join(str(token) for token, _ in tokens).replace(" ", "")
+        action_text = "记录到" if action == "save" else "使用"
+        record_labels = ("记录部队一", "记录部队1") if record_no == 1 else (
+            f"记录部队{record_no}",)
+        guarded = ("部队记录" in text and "是否" in text
+                   and action_text in text
+                   and any(label in text for label in record_labels))
+        if not guarded:
+            return False
+
+        ocr_yes = self.maa.ocr("是", yes_roi, match_mode="exact")
+        self.maa.click(ocr_yes or Point(784, 510))
+        return True
+
+    def _save_team_record(self, cfg: dict, record_no: int = 1) -> bool:
+        """把当前出阵部队保存到固定记录；目前产品只使用记录一。"""
+        record = self.config.get("team_select", {}).get("team_record", {})
+        if not self._open_team_record():
+            return False
+        target = record.get("records", {}).get(str(record_no))
+        if target:
+            self._click_point(target)
+            time.sleep(0.3)
+        if not self._click_template_config(record.get("save_confirm", {})):
+            return False
+        time.sleep(0.5)
+        if not self._confirm_team_record(record, "save", record_no):
+            return False
+        if not self._finish_team_record(cfg, record):
+            return False
+        if hasattr(self, "record_event"):
+            self.record_event("team_record.saved", record_no=record_no)
+        return True
+
+    def _restore_equipment_from_warning(self, cfg: dict,
+                                        record_no: int = 1) -> bool | None:
+        """空刀装警告 → 整备刀装 → 使用记录一 → 回部队选择。
+
+        None 表示没有警告；False 表示确有警告但恢复链路失败。
+        """
+        warning = cfg.get("equip_warning_button", {}).get("template")
+        if not warning or not self.maa.template_match(warning):
+            return None
+        prepare = cfg.get("equip_warning_prepare", {}).get(
+            "template", "team/整备刀装.png")
+        prepare_pt = self.maa.template_match(prepare)
+        if not prepare_pt:
+            return False
+        self.maa.click(prepare_pt)
+        time.sleep(1.0)
+
+        record = self.config.get("team_select", {}).get("team_record", {})
+        # “整备刀装”落在部队编成页，等右侧部队记录按钮真正可点。
+        opened = False
+        for _ in range(12):
+            self.maa.screenshot(force=True)
+            if self._click_template_config(record.get("button", {})):
+                opened = True
+                break
+            time.sleep(0.5)
+        if not opened or not self._wait_for_team_record_page(record):
+            return False
+
+        target = record.get("records", {}).get(str(record_no))
+        if target:
+            self._click_point(target)
+            time.sleep(0.3)
+        if not self._click_template_config(record.get("load_confirm", {})):
+            return False
+        time.sleep(0.5)
+        if not self._confirm_team_record(record, "load", record_no):
+            return False
+        if not self._finish_team_record(cfg, record):
+            return False
+        if hasattr(self, "record_event"):
+            self.record_event("equipment.restored", record_no=record_no)
+        return True
+
     _recover_ok: bool = False
 
     def _recover_ticket_stream(self, cfg: dict, tag: str = "[出阵]"):
@@ -190,10 +335,17 @@ class BattleMixin:
         # 只看左侧我方六人。大阪城结果页右侧敌军会出现红色“破坏”章，
         # 全屏模板匹配会把它误认成同为红底的“重伤”，进而错误触发手入。
         roi = roi_4to4(*cfg.get("injury_status_roi", [0, 90, 570, 690]))
+        # 三种伤势章版式几乎一样：实测中伤章能以 0.704 擦线命中重伤模板。
+        # 模板只搜六行头像右缘的伤势章窄栏，并使用分类阈值；下方 OCR 仍看
+        # 完整我方区域，作为模板漏识别时的文字兜底。
+        stamp_roi = roi_4to4(*cfg.get("injury_stamp_roi", [220, 90, 340, 690]))
         stamps = cfg.get("injury_stamps", {})
         for severity in ("重伤", "中伤", "轻伤"):
-            template = stamps.get(severity, {}).get("template")
-            if template and self.maa.template_match(template, roi):
+            stamp_cfg = stamps.get(severity, {})
+            template = stamp_cfg.get("template")
+            threshold = float(stamp_cfg.get("threshold", 0.88))
+            if template and self.maa.template_match(
+                    template, stamp_roi, threshold=threshold):
                 return severity
         if not stamps:
             legacy = cfg.get("injury_stamp", {}).get("template")
@@ -208,6 +360,24 @@ class BattleMixin:
             if any(severity in text for text in texts):
                 return severity
         return None
+
+    def _deny_heavy_injury_warning(self, cfg: dict) -> bool:
+        """识别重伤继续警告并永远点“否”；仅在战斗决策点调用。"""
+        deny_cfg = cfg.get("injury_deny_button", {})
+        template = deny_cfg.get("template")
+        if not template:
+            return False
+        roi_raw = deny_cfg.get("roi", [330, 400, 650, 620])
+        deny = self.maa.template_match(
+            template, roi_4to4(*roi_raw),
+            threshold=float(deny_cfg.get("threshold", 0.75)))
+        if not deny:
+            return False
+        self.maa.click(deny)
+        time.sleep(0.8)
+        if hasattr(self, "record_event"):
+            self.record_event("injury_warning.denied", severity="heavy")
+        return True
 
     def select_team(self, team_no: int, auto_march: bool = False,
                     load_record: int = None, equip: bool = False) -> bool:
@@ -256,7 +426,7 @@ class BattleMixin:
         return True
 
     def _load_team_record(self, record_no: int) -> bool:
-        """加载部队记录"""
+        """旧调用兼容：加载部队记录（新战斗流程使用带验证的恢复方法）。"""
         record_config = self.config["team_select"]["team_record"]
 
         # 点击部队记录按钮

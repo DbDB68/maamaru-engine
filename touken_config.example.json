@@ -652,8 +652,24 @@
         "template": "team/使用记录.png"
       },
       "yes_button": {
-        "template": "team/是.png"
-      }
+        "template": "team/是.png",
+        "roi": [
+          650,
+          430,
+          920,
+          590
+        ]
+      },
+      "confirm_ocr_roi": [
+        330,
+        130,
+        950,
+        590
+      ],
+      "back": [
+        73,
+        31
+      ]
     },
     "auto_march": {
       "check_delegated": {
@@ -1097,10 +1113,11 @@
       "template": "否.png"
     },
     "injury_stamps": {
-      "重伤": {"template": "battle/ui重伤.png"},
-      "中伤": {"template": "battle/中伤.png"},
-      "轻伤": {"template": "battle/轻伤.png"}
-    },
+      "重伤": {"template": "battle/ui重伤.png", "threshold": 0.88},
+      "中伤": {"template": "battle/中伤.png", "threshold": 0.88},
+      "轻伤": {"template": "battle/轻伤.png", "threshold": 0.88}
+      },
+      "injury_stamp_roi": [220, 90, 340, 690],
     "injury_status_roi": [0, 90, 570, 690],
     "confirm_ui": {
       "template": "team/ui出阵确认.png"
@@ -1181,15 +1198,24 @@
     },
     "injury_stamps": {
       "重伤": {
-        "template": "battle/ui重伤.png"
+        "template": "battle/ui重伤.png",
+        "threshold": 0.88
       },
       "中伤": {
-        "template": "battle/中伤.png"
+        "template": "battle/中伤.png",
+        "threshold": 0.88
       },
       "轻伤": {
-        "template": "battle/轻伤.png"
+        "template": "battle/轻伤.png",
+        "threshold": 0.88
       }
     },
+    "injury_stamp_roi": [
+      220,
+      90,
+      340,
+      690
+    ],
     "injury_status_roi": [
       0,
       90,

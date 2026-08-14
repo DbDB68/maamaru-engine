@@ -128,7 +128,12 @@ class PracticeMixin:
                 yield f"[演练] 对手{row_idx + 1}: 再次进入失败，跳过"
                 continue
             result = yield from self._fight_one(cfg, row_idx)
-            if result.startswith("win"):
+            won = result.startswith("win")
+            if hasattr(self, "record_event"):
+                self.record_event("practice.result", result=result,
+                                  won=won, wins=wins + int(won),
+                                  target=max_wins, dry_run=dry_run)
+            if won:
                 wins += 1
                 yield f"[演练] 胜场 {wins}/{max_wins}（{result}）"
             else:

@@ -212,6 +212,8 @@ class RewardsMixin:
             if claim_result:
                 yield f"[TASK] {tab_name} 有奖励可领，点击一键领取..."
                 self.maa.click(claim_result)
+                if hasattr(self, "record_event"):
+                    self.record_event("task_rewards.claimed", tab=tab_name)
 
                 # 等待领取动画/弹窗
                 time.sleep(1.5)
