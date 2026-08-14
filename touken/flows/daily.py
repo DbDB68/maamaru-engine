@@ -381,6 +381,26 @@ class DailyMixin:
                     equip_status = _equip_warning_status(msg, equip_status)
                 status = equip_status or ("✓" if ok else "✗")
                 report.append(("出阵(异去)", status))
+            elif mode == "osaka":
+                ok = True
+                equip_status = None
+                for msg in self.osaka_stream(
+                        max_floors=sortie_plan.get("loops", 1),
+                        team_no=sortie_plan.get("team_no", 3),
+                        select_floor=sortie_plan.get("select_floor", False),
+                        target_floor=sortie_plan.get("target_floor", 81),
+                        formation_mode=sortie_plan.get("formation_mode", "manual"),
+                        formation_strategy=sortie_plan.get("formation_strategy", "fixed"),
+                        formation=sortie_plan.get("formation", "鱼鳞阵"),
+                        repair_threshold=sortie_plan.get("repair_threshold", "light"),
+                        injury_action=sortie_plan.get("repair_on_injury", "continue"),
+                        auto_equip=sortie_plan.get("auto_equip", True)):
+                    yield msg
+                    if _is_fail(msg):
+                        ok = False
+                    equip_status = _equip_warning_status(msg, equip_status)
+                status = equip_status or ("✓" if ok else "✗")
+                report.append(("出阵(大阪城)", status))
             else:
                 yield "[日课] 配置为不打，跳过"
         except Exception as exc:

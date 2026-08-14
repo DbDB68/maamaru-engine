@@ -114,7 +114,7 @@ function taskIcon(key: string | number) {
 
 function migrateParams(script: string, value: ScriptParams): ScriptParams {
   const migrated = { ...value }
-  if (script === 'daily' && !['none', 'raid', 'pumpkin', 'yosari', 'sortie'].includes(String(migrated.sortie_mode ?? ''))) migrated.sortie_mode = 'none'
+  if (script === 'daily' && !['none', 'raid', 'pumpkin', 'yosari', 'osaka', 'sortie'].includes(String(migrated.sortie_mode ?? ''))) migrated.sortie_mode = 'none'
   if (script === 'pumpkin' && String(migrated.difficulty ?? '') === '0') migrated.difficulty = '1'
   if (migrated.runs == null) {
     const legacyKey = script === 'raid' ? 'rounds'

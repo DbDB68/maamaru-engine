@@ -159,6 +159,33 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertFalse(plan["auto_march"])
         self.assertEqual(plan["repair_threshold"], "medium")
 
+    def test_daily_can_schedule_osaka_with_shared_battle_strategy(self):
+        agent = FakeAgent()
+        params = {"sortie_mode": "osaka", "team_no": "4",
+                  "osaka_runs": "15", "osaka_select_floor": True,
+                  "osaka_target_floor": "88"}
+        saved = {"params": {"osaka": {"formation_mode": "auto",
+                                          "repair_threshold": "medium",
+                                          "repair_on_injury": "repair_stop",
+                                          "auto_equip": False}}}
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value=saved
+        ):
+            list(_build_daily("config.json", params))
+        plan = agent.daily_args["sortie_override"]
+        self.assertEqual(plan["mode"], "osaka")
+        self.assertEqual(plan["team_no"], 4)
+        self.assertEqual(plan["loops"], 15)
+        self.assertTrue(plan["select_floor"])
+        self.assertEqual(plan["target_floor"], 88)
+        self.assertEqual(plan["formation_mode"], "auto")
+        self.assertEqual(plan["repair_threshold"], "medium")
+        self.assertEqual(plan["repair_on_injury"], "repair_stop")
+        self.assertFalse(plan["auto_equip"])
+        daily_modes = next(field for field in list_scripts()["daily"]["params"]
+                           if field.get("key") == "sortie_mode")
+        self.assertIn("osaka", [value for value, _ in daily_modes["options"]])
+
     def test_standalone_plan_uses_targets_and_selected_handshape_budget(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):

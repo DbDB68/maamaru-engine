@@ -247,6 +247,20 @@ def _build_daily(config_path, params):
                        "repair_threshold": saved_sortie.get("repair_threshold") or "light",
                        "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue",
                        "auto_equip": _bool(saved_sortie.get("auto_equip", True))}
+    elif mode == "osaka":
+        # 楼层、部队和圈数由日课决定；阵形、伤势与刀装恢复沿用独立大阪城配置。
+        saved_osaka = (_load_panel_settings().get("params", {}).get("osaka", {}) or {})
+        sortie_plan = {"mode": "osaka",
+                       "team_no": _i(params, "team_no", 3),
+                       "loops": _i(params, "osaka_runs", 1),
+                       "select_floor": _bool(params.get("osaka_select_floor", False)),
+                       "target_floor": _i(params, "osaka_target_floor", 81),
+                       "formation_mode": saved_osaka.get("formation_mode") or "manual",
+                       "formation_strategy": saved_osaka.get("formation_strategy") or "fixed",
+                       "formation": saved_osaka.get("formation") or "鱼鳞阵",
+                       "repair_threshold": saved_osaka.get("repair_threshold") or "light",
+                       "repair_on_injury": saved_osaka.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(saved_osaka.get("auto_equip", True))}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -482,6 +496,7 @@ register_script("daily", "一键日课", "",
                                      ["raid", "联队战"],
                                      ["pumpkin", "南瓜大作战"],
                                      ["yosari", "异去"],
+                                     ["osaka", "大阪城挖地"],
                                      ["sortie", "合战场推图"]],
                          "default": "none",
                          "help": "自动行军、阵形和伤势处理沿用单独配置的战斗策略。"},
@@ -513,6 +528,16 @@ register_script("daily", "一键日课", "",
                          "label": "是否自动补充手形？", "default": False,
                          "help": "开启后，手形不足时将自动使用小判补充，直到完成设定的出阵次数。关闭后，手形不足时结束任务，不消耗小判。",
                          "visibleWhen": {"key": "sortie_mode", "is": "yosari"}},
+                        {"key": "osaka_runs", "type": "number", "label": "出阵次数",
+                         "default": 1, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "osaka"}},
+                        {"key": "osaka_select_floor", "type": "toggle",
+                         "label": "指定挂机层数", "default": False,
+                         "visibleWhen": {"key": "sortie_mode", "is": "osaka"}},
+                        {"key": "osaka_target_floor", "type": "number",
+                         "label": "指定层数", "default": 81, "min": 1, "max": 99,
+                         "help": "只有开启“指定挂机层数”时才会使用。",
+                         "visibleWhen": {"key": "sortie_mode", "is": "osaka"}},
                         {"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)],
                          "default": "1",
