@@ -34,6 +34,11 @@ _SLOT_CY = [205, 345, 475]
 _ROW_TOP = 147
 _ROW_PITCH = 96
 _VISIBLE_ROWS = 6
+# 刀名位于行底部的独立文字带；向上会读到头像，向右会混入「疲劳/生存」。
+_NAME_ROI_X1 = 120
+_NAME_ROI_X2 = 360
+_NAME_ROI_DY1 = 68
+_NAME_ROI_DY2 = 98
 
 _STATUS_DIR = STATUS_DIR
 _FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
@@ -321,7 +326,10 @@ class SmithMixin:
         for i in range(_VISIBLE_ROWS):
             top = _ROW_TOP + i * _ROW_PITCH
             cy = top + 48
-            tokens = self.maa.ocr_all(roi_4to4(95, top + 45, 260, top + 78))
+            tokens = self.maa.ocr_all(roi_4to4(
+                _NAME_ROI_X1, top + _NAME_ROI_DY1,
+                _NAME_ROI_X2, top + _NAME_ROI_DY2,
+            ))
             if not tokens:
                 continue
             raw = max((t for t, _ in tokens), key=len)
