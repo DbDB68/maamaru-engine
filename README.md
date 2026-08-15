@@ -154,7 +154,7 @@
 
 ## 开发者运行
 
-环境要求：Windows、Python 3.12+、MuMu 模拟器，以及可用的 MaaFramework 资源。
+环境要求：Windows、Python 3.12+、MuMu 模拟器和 ADB。MaaFramework 作为 Python 依赖安装；识别模板与 OCR 模型已随仓库提供。
 
 ```powershell
 git clone https://github.com/DbDB68/maamaru-engine.git
@@ -168,6 +168,16 @@ python -m venv .venv
 
 程序文件与用户数据严格分开。旧版放在 EXE 或项目目录旁的配置会在首次启动时复制到新目录并留下备份，原文件不会自动删除。详细结构和迁移规则见 [`docs/data-layout.md`](docs/data-layout.md)。
 识别模板与 OCR 模型已经随仓库提供，克隆后不需要另外寻找资源包。
+
+### 技术实现
+
+まあ丸从 MaaFramework 获得了稳定的 OCR、模板匹配与识别资源加载能力，并在此基础上按照自己的长时间托管需求逐步长出了 Python 任务引擎。目前三者的分工是：
+
+- **MaaFramework** 负责 OCR、模板匹配及相关模型与资源加载。
+- **ADB** 负责模拟器截图、点击和滑动。
+- **Python** 负责游戏流程、页面导航、异常恢复、进度保存和运行调度。
+
+项目没有使用 MaaFramework 的标准 Pipeline 来编排业务流程，但 MaaFramework 仍然是整套视觉识别能力的基础。简单来说，当前的技术组合是：**Python 自研自动化引擎 + ADB 设备操作 + MaaFramework 视觉识别**。
 
 ## 项目结构
 
@@ -247,7 +257,7 @@ maamaru-engine/
 
 | 项目 | 用途 | 许可证 |
 |---|---|---|
-| [MaaFramework](https://github.com/MaaXYZ/MaaFramework) | 图像识别、OCR、模拟器控制 | LGPL-3.0 |
+| [MaaFramework](https://github.com/MaaXYZ/MaaFramework) | OCR、模板匹配与识别资源加载 | LGPL-3.0 |
 | [DirectML](https://github.com/microsoft/DirectML) | MaaFramework 的 GPU 加速依赖 | MIT |
 | [FastAPI](https://github.com/tiangolo/fastapi) | 面板后端 | MIT |
 | [Uvicorn](https://github.com/encode/uvicorn) | ASGI 服务 | BSD-3-Clause |
@@ -258,7 +268,7 @@ maamaru-engine/
 | [缝合像素字体 Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) | 面板像素字体 | OFL-1.1 |
 | [Kenney Game Icons](https://kenney.nl/assets/game-icons) | 面板像素图标 | CC0-1.0 |
 
-特别感谢 MaaFramework 团队。没有他们提供的底层能力，这个项目不会存在。
+特别感谢 MaaFramework 团队。まあ丸最初正是站在 MaaFramework 提供的底层能力上起步，才得以把大量精力放在《刀剑乱舞》的具体流程与长时间托管上；它至今仍然支撑着项目的视觉识别能力。
 详细许可证信息见 [NOTICE](NOTICE)。
 ## 开发模式 `🐂`
 
