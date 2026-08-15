@@ -35,12 +35,19 @@ from ..maa_adapter import Point, roi_4to4
 # 判定步骤翻车的消息特征（别写太宽：'失败'会误伤"模板匹配失败，使用固定坐标"这种兜底）
 _FAIL_RE = re.compile(
     r"到达.{0,8}失败|没打开|放弃|超时|翻车|没能|没等到|刀装未满警告|"
-    r"未找到暖心礼包|未识别到领取按钮|未检测到0价格弹窗"
+    r"未找到暖心礼包|未识别到领取按钮|未检测到0价格弹窗|"
+    r"未确认一键领取按钮状态|点击后未确认领取成功|"
+    r"常用安排地图.{0,12}不存在"
 )
 
 
 def _is_fail(msg: str) -> bool:
     return bool(_FAIL_RE.search(msg))
+
+
+def _is_success_status(status: str) -> bool:
+    """Detailed successes such as ``✓ 本次领取成功`` are still green."""
+    return str(status).lstrip().startswith("✓")
 
 
 def _equip_warning_status(msg: str, current=None):
@@ -69,7 +76,8 @@ class DailyMixin:
     """一键日课。依赖宿主类已注册的各流程 Mixin。"""
 
     def daily_stream(self, logout: bool = False, only=None, after: str = None,
-                     sortie_override: dict = None, practice_override: dict = None):
+                     sortie_override: dict = None, practice_override: dict = None,
+                     expedition_override: list = None):
         """
         流式一键日课
 
@@ -140,8 +148,9 @@ class DailyMixin:
                 formation_mode=plan.get("practice", {}).get("formation_mode"),
                 formation_strategy=plan.get("practice", {}).get("formation_strategy"),
                 formation=plan.get("practice", {}).get("formation"))),
-            ("远征", lambda: self.collect_expedition_stream(
-                redispatch=plan.get("expedition_redispatch", "same"))),
+            ("远征", lambda: self._daily_expedition_step(
+                expedition_override,
+                fallback_redispatch=plan.get("expedition_redispatch", "same"))),
             ("内番", lambda: self.naihanka_stream()),
             ("锻刀", lambda: self.forge_stream(times=plan.get("forge_times", 3))),
             ("刀解", lambda: self._dismantle_step()),
@@ -216,7 +225,7 @@ class DailyMixin:
         yield "========== 日课成绩单 =========="
         for name, status in report:
             yield f"  {name}: {status}"
-        fails = [n for n, s in report if s != "✓"]
+        fails = [n for n, s in report if not _is_success_status(s)]
         yield "[日课] 全部跑完" + (f"，但有翻车项: {'、'.join(fails)}" if fails else "，全绿")
 
         # ========== 落盘最终成绩单 + 手机推送 ==========
@@ -282,7 +291,7 @@ class DailyMixin:
             from pathlib import Path
             status_dir = STATUS_DIR
             status_dir.mkdir(exist_ok=True)
-            fails = [n for n, s in report if s != "✓"]
+            fails = [n for n, s in report if not _is_success_status(s)]
             payload = {
                 "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "finished": finished,
@@ -304,6 +313,44 @@ class DailyMixin:
             yield "[日课] ✓ 今天已经刀解过了（锻刀收刀腾位置时顺手解的），这步跳过"
             return
         yield from self.dismantle_stream(max_dismantle=1)
+
+    def _daily_expedition_step(self, routes, fallback_redispatch="same"):
+        """收菜后按独立“远征”的常用安排补派；不读取自动排班。"""
+        if routes is None:
+            # 非面板调用保持旧配置兼容。
+            yield from self.collect_expedition_stream(
+                redispatch=fallback_redispatch)
+            return
+
+        yield from self.collect_expedition_stream(redispatch=None)
+        if not routes:
+            yield "[远征] 没有启用常用安排，本次只收取归来奖励"
+            return
+
+        from .expedition import _load_exp_record
+        records = _load_exp_record()
+        for route in routes:
+            team = int(route["team_no"])
+            record = records.get(str(team), {})
+            try:
+                started = time.mktime(time.strptime(
+                    record["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
+                remain = max(0, int(
+                    started + int(record["duration_min"]) * 60 - time.time()))
+            except (KeyError, TypeError, ValueError):
+                remain = 0
+            if remain > 0:
+                yield (f"[远征] 部队{team}仍在外面（约剩 {remain // 60} 分钟），"
+                       "按常用安排跳过")
+                continue
+            if not route.get("era") or not route.get("map_slot"):
+                yield f"[远征] 常用安排地图 {route.get('map_code')} 不存在，无法派遣"
+                continue
+            yield (f"[远征] 按常用安排派部队{team}去 {route['map_code']}"
+                   f"「{route.get('map_name') or ''}」")
+            yield from self.expedition_stream(
+                era=int(route["era"]), map_slot=int(route["map_slot"]),
+                team_no=team)
 
     def _sortie_step(self, plan, report):
         sortie_plan = plan.get("sortie", {"mode": "none"})

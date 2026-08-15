@@ -6,6 +6,7 @@ from touken.flows.daily import (
     DailyMixin,
     _equip_warning_status,
     _is_fail,
+    _is_success_status,
     _shop_report_status,
 )
 from touken.flows.rewards import RewardsMixin
@@ -99,6 +100,12 @@ class DailyReportTests(unittest.TestCase):
         self.assertFalse(_is_fail(msg))
         self.assertEqual(_shop_report_status(msg), "✓ 此前已领取（售罄）")
 
+    def test_detailed_shop_success_is_green_in_final_report(self):
+        self.assertTrue(_is_success_status("✓ 本次领取成功"))
+        self.assertTrue(_is_success_status("✓ 此前已领取（售罄）"))
+        self.assertFalse(_is_success_status("✗ 未识别到领取按钮，未点击"))
+        self.assertFalse(_is_success_status("⚠ 刀装未满，已取消出阵并跳过"))
+
     def test_shop_recognition_failure_is_not_green(self):
         msg = "[SHOP] 暖心礼包未售罄，但未识别到领取按钮，本次未点击"
         self.assertTrue(_is_fail(msg))
@@ -106,6 +113,40 @@ class DailyReportTests(unittest.TestCase):
             _shop_report_status(msg),
             "✗ 未识别到领取按钮，未点击",
         )
+
+    def test_daily_expedition_dispatches_idle_teams_from_common_plan(self):
+        flow = DailyMixin()
+        flow.collect_expedition_stream = lambda redispatch=None: iter(["collected"])
+        dispatched = []
+        flow.expedition_stream = lambda **kwargs: (
+            dispatched.append(kwargs) or iter(["dispatched"]))
+        routes = [{"team_no": 2, "map_code": "B2", "map_name": "测试图",
+                   "era": 2, "map_slot": 2}]
+
+        with patch("touken.flows.expedition._load_exp_record", return_value={}):
+            messages = list(flow._daily_expedition_step(routes))
+
+        self.assertEqual(dispatched, [{"era": 2, "map_slot": 2, "team_no": 2}])
+        self.assertIn("collected", messages)
+
+    def test_daily_expedition_does_not_touch_team_still_away(self):
+        flow = DailyMixin()
+        flow.collect_expedition_stream = lambda redispatch=None: iter(())
+        dispatched = []
+        flow.expedition_stream = lambda **kwargs: (
+            dispatched.append(kwargs) or iter(()))
+        routes = [{"team_no": 2, "map_code": "B2", "map_name": "测试图",
+                   "era": 2, "map_slot": 2}]
+        future_record = {"2": {
+            "dispatched_at": "2099-01-01 00:00:00", "duration_min": 60,
+        }}
+
+        with patch("touken.flows.expedition._load_exp_record",
+                   return_value=future_record):
+            messages = list(flow._daily_expedition_step(routes))
+
+        self.assertFalse(dispatched)
+        self.assertTrue(any("仍在外面" in message for message in messages))
 
 
 class ShopGiftTests(unittest.TestCase):
@@ -147,6 +188,74 @@ class ShopGiftTests(unittest.TestCase):
         for roi in rois:
             self.assertEqual((roi.x, roi.y, roi.w, roi.h), (350, 265, 330, 95))
             self.assertLessEqual(roi.y + roi.h, 360)
+
+
+class TaskRewardTests(unittest.TestCase):
+    class Maa:
+        def __init__(self, active_first=False, inactive=False):
+            self.active_first = active_first
+            self.inactive = inactive
+            self.active_calls = 0
+            self.clicked = []
+
+        def screenshot(self, force=False):
+            pass
+
+        def template_match(self, template, roi=None, threshold=0.7):
+            if template == "一键领取.png":
+                self.active_calls += 1
+                return Point(1165, 620) if self.active_first and self.active_calls == 1 else None
+            if template == "一键领取_灰.png":
+                return Point(1165, 620) if self.inactive else None
+            return None
+
+        def exists(self, template):
+            return False
+
+        def click(self, point):
+            self.clicked.append(point)
+
+    def _flow(self, maa):
+        flow = RewardsMixin()
+        flow.maa = maa
+        flow.current_location = "任务"
+        flow.config = {"task_reward": {
+            "tabs": {"日常": [48, 204]},
+            "claim_button": {"template": "一键领取.png"},
+        }}
+        flow.navigate_to_stream = lambda location: iter(())
+        flow._click_point = lambda point: None
+        flow.events = []
+        flow.record_event = lambda kind, **payload: flow.events.append((kind, payload))
+        return flow
+
+    def test_claim_is_counted_only_after_button_turns_gray(self):
+        flow = self._flow(self.Maa(active_first=True, inactive=True))
+        with patch("touken.flows.rewards.time.sleep"):
+            messages = list(flow.claim_task_rewards_stream())
+
+        self.assertIn(("task_rewards.claimed", {"tab": "日常"}), flow.events)
+        self.assertTrue(any("已确认按钮变灰" in msg for msg in messages))
+
+    def test_gray_button_records_no_reward_without_counting_claim(self):
+        flow = self._flow(self.Maa(inactive=True))
+        with patch("touken.flows.rewards.time.sleep"):
+            messages = list(flow.claim_task_rewards_stream())
+
+        self.assertEqual(flow.events, [("task_rewards.none", {"tab": "日常"})])
+        self.assertTrue(any("已确认没有可领奖励" in msg for msg in messages))
+
+    def test_unknown_button_state_is_not_clicked_or_counted(self):
+        maa = self.Maa()
+        flow = self._flow(maa)
+        with patch("touken.flows.rewards.time.sleep"):
+            messages = list(flow.claim_task_rewards_stream())
+
+        self.assertEqual(flow.events, [("task_rewards.unconfirmed", {
+            "tab": "日常", "stage": "before_click",
+        })])
+        self.assertFalse(maa.clicked)
+        self.assertTrue(any("不点击也不计成绩" in msg for msg in messages))
 
 
 class OcrMatchingTests(unittest.TestCase):

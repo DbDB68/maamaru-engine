@@ -91,6 +91,18 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["equipment_restores"], 1)
         self.assertEqual(result["resource_delta"], {"小判": 300, "加速符": -2})
 
+    def test_run_summary_does_not_count_empty_repair_visit(self):
+        self.store.start_run("run-1", "osaka", started_at=100)
+        self.store.record_event("osaka.floor_completed", {"selected_floor": 88})
+        self.store.record_event("repair.session_completed", {
+            "repaired": 0, "speedups": 0, "session_count": 1,
+        })
+        self.store.finish_run("run-1", "completed", ended_at=200)
+
+        result = self.store.run_summary("run-1")
+        self.assertEqual(result["repair_sessions"], 0)
+        self.assertEqual(result["repaired_swords"], 0)
+
     def test_prune_only_removes_expired_observations_and_events(self):
         self.store.record_event("keep", {})
         conn = self.store._conn()

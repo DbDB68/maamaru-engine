@@ -186,6 +186,25 @@ class PumpkinPlanTests(unittest.TestCase):
                            if field.get("key") == "sortie_mode")
         self.assertIn("osaka", [value for value, _ in daily_modes["options"]])
 
+    def test_daily_uses_standalone_expedition_common_plan(self):
+        agent = FakeAgent()
+        common = {"common_plan": [
+            {"team_no": 2, "map_code": "B2", "enabled": True},
+            {"team_no": 3, "map_code": "C3", "enabled": False},
+        ]}
+        with patch("panel.server._make_agent", return_value=agent), \
+                patch("panel.server._load_panel_settings", return_value={}), \
+                patch("panel.scheduler.load_config", return_value=common), \
+                patch("panel.scheduler.find_map", return_value={
+                    "code": "B2", "name": "享保の大飢饉", "era": 2, "slot": 2,
+                }):
+            list(_build_daily("config.json", {"steps": ["远征"]}))
+
+        self.assertEqual(agent.daily_args["expedition_override"], [{
+            "team_no": 2, "map_code": "B2", "era": 2, "map_slot": 2,
+            "map_name": "享保の大飢饉",
+        }])
+
     def test_standalone_plan_uses_targets_and_selected_handshape_budget(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):

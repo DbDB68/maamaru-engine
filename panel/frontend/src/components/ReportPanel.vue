@@ -13,7 +13,8 @@ const eventNames: Record<string, string> = {
   'practice.result': '演练结束', 'pumpkin.sword_obtained': '南瓜活动获得刀剑',
   'forge.started': '开始锻刀', 'forge.collected': '领取锻刀结果',
   'expedition.dispatched': '远征派遣成功', 'expedition.settled': '远征结算',
-  'task_rewards.claimed': '领取任务奖励', 'inventory.captured': '保存库存快照',
+  'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
+  'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
 }
 function countEvents(...types: string[]) { return events.value.filter(item => types.includes(item.event_type)).length }
 const rewardClaims = computed(() => countEvents('task_rewards.claimed'))
@@ -86,6 +87,15 @@ function isWin(payload: any) {
   const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
   return value.includes('胜') || value === 'win' || value === 'won'
 }
+function repairCount(payload: any) {
+  const queued = payload?.queued || []
+  return payload?.sessions ? Number(payload.repaired || 0) : queued.length
+}
+function eventTitle(item: any) {
+  return item.event_type === 'repair.summary' && repairCount(item.payload) === 0
+    ? '手入误报'
+    : (eventNames[item.event_type] || '本丸记录')
+}
 function eventDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed') return p.selected_floor == null ? '未指定层数 · 完成 1 圈' : `${p.selected_floor}F · 完成 1 圈`
@@ -96,10 +106,16 @@ function eventDetail(item: any) {
   if (item.event_type === 'pumpkin.token_used') return `累计使用 ${p.used ?? '？'} 枚`
   if (item.event_type === 'practice.result') return `结果：${p.result ?? p.outcome ?? '已记录'}`
   if (item.event_type === 'expedition.dispatched') return `部队 ${p.team_no ?? '？'} · ${p.map_name || p.map_code || '地图未识别'}`
-  if (item.event_type === 'task_rewards.claimed') return `${p.tab || '当前'}页 · 点击一键领取`
+  if (item.event_type === 'task_rewards.claimed') return `${p.tab || '当前'}页 · 已确认领取后按钮变灰`
+  if (item.event_type === 'task_rewards.none') return `${p.tab || '当前'}页 · 没有可领取奖励`
+  if (item.event_type === 'task_rewards.unconfirmed') return `${p.tab || '当前'}页 · ${p.stage === 'after_click' ? '点击后未确认到账' : '按钮状态未识别，不计成绩'}`
   if (item.event_type === 'repair.summary') {
     const queued = p.queued || [], skipped = p.skipped || []
-    const repaired = p.sessions ? p.repaired : queued.length
+    const repaired = repairCount(p)
+    if (repaired === 0) {
+      const evidence = skipped.length ? `（名单保护跳过 ${skipped.length} 振）` : ''
+      return `麻麻露眼花认错伤势了，九十度鞠躬私密马赛 🙇${evidence}`
+    }
     const parts = [`安排手入 ${repaired} 振`]
     const speedups = p.speedups || queued.filter((entry: any) => entry.speedup).length
     if (speedups) parts.push(`加速 ${speedups} 振`)
@@ -117,7 +133,6 @@ function loopTime(seconds: number | null) {
   return `${Math.floor(value / 60)}分${String(value % 60).padStart(2, '0')}秒/圈`
 }
 function runTitle(run: any) { return run.selected_floor == null ? `未指定层数 · ${run.loops} 圈` : `${run.selected_floor}F · ${run.loops} 圈` }
-function runStats(run: any) { return `手入 ${run.repair_sessions} 次 · 加速符 ${run.speedups} 枚 · 补刀装 ${run.equipment_restores} 次` }
 function chooseHours(value: number) { estimateHours.value = value; customHours.value = value; customEstimate.value = false }
 function chooseCustom() { customEstimate.value = true; estimateHours.value = Math.max(.5, Number(customHours.value) || 1) }
 function updateCustom() { estimateHours.value = Math.max(.5, Number(customHours.value) || 1) }
@@ -154,7 +169,7 @@ onMounted(() => load())
     </header>
     <p v-if="error" class="report-error">{{ error }}</p>
     <div class="report-stats" :class="{ loading }">
-      <article><small>领取任务奖励</small><strong>{{ rewardClaims }} 次</strong><span>按一键领取点击计数</span></article>
+      <article><small>领取任务奖励</small><strong>{{ rewardClaims }} 次</strong><span>确认领取后按钮变灰才计数</span></article>
       <article><small>出阵完成</small><strong>{{ sortieCount }} 次</strong><span>按确认完成的圈数计数</span></article>
       <article><small>派遣远征</small><strong>{{ expeditions }} 次</strong><span>确认“远征中”后记录</span></article>
       <article><small>演练战绩</small><strong>{{ practiceWins }} / {{ practiceTotal }}</strong><span>胜场 / 已记录场次</span></article>
@@ -172,7 +187,9 @@ onMounted(() => load())
                 <div class="estimate-control"><small>预计收益</small><label>挂机时间 <span v-if="!customEstimate">{{ estimateHours }} 小时</span><input v-else v-model.number="customHours" type="number" min="0.5" step="0.5" aria-label="自定义挂机小时数" @input="updateCustom"></label></div>
                 <nav aria-label="预计挂机时间"><button v-for="hour in [1, 6, 8]" :key="hour" type="button" :class="{ active: !customEstimate && estimateHours === hour }" @click="chooseHours(hour)">{{ hour }}小时</button><button type="button" :class="{ active: customEstimate }" @click="chooseCustom">自定义</button></nav>
               </div>
-              <p v-else>{{ loopTime(run.average_loop_seconds) }}</p><p>{{ runStats(run) }}</p><p v-if="deltaStats(run)" class="run-delta">家底变化：{{ deltaStats(run) }}</p><small v-else-if="!run.has_resource_comparison">这轮没有完整的前后库存快照</small></div>
+              <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
+              <div class="run-upkeep" aria-label="本轮养护"><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
+              <p v-if="deltaStats(run)" class="run-delta"><small>家底变化</small>{{ deltaStats(run) }}</p><small v-else-if="!run.has_resource_comparison">这轮没有完整的前后库存快照</small></div>
           </article>
         </section>
         <section class="report-sorties">
@@ -182,7 +199,7 @@ onMounted(() => load())
         </section>
         <section class="report-events">
           <header><h3>最近发生</h3><small>只展示结构化玩法记录</small></header>
-          <div v-if="groupedTimelineEvents.length" class="event-list"><article v-for="item in groupedTimelineEvents.slice(0, 60)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ eventNames[item.event_type] || '本丸记录' }}<em v-if="item.items.length > 1">× {{ item.items.length }}</em></strong><p>{{ eventDetail(item) }}</p><details v-if="item.items.length > 1"><summary>展开 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
+          <div v-if="groupedTimelineEvents.length" class="event-list"><article v-for="item in groupedTimelineEvents.slice(0, 60)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ eventTitle(item) }}<em v-if="item.items.length > 1">× {{ item.items.length }}</em></strong><p>{{ eventDetail(item) }}</p><details v-if="item.items.length > 1"><summary>展开 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
           <p v-else class="report-empty">这个时间段还没有玩法记录。新任务运行后，就会从这里开始积累。</p>
         </section>
       </div>

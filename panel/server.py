@@ -268,9 +268,23 @@ def _build_daily(config_path, params):
     practice_plan = dict(saved_practice)
     if practice_plan.get("team_no") not in (None, ""):
         practice_plan["team_no"] = int(practice_plan["team_no"])
+    # 日课里的“远征”沿用独立远征页的常用安排；自动排班是另一套配置，绝不混用。
+    from .scheduler import find_map, load_config
+    expedition_plan = []
+    for row in load_config().get("common_plan", []):
+        if not row.get("enabled") or not row.get("map_code"):
+            continue
+        found = find_map(row["map_code"])
+        expedition_plan.append({
+            "team_no": int(row["team_no"]), "map_code": row["map_code"],
+            "era": found.get("era") if found else None,
+            "map_slot": found.get("slot") if found else None,
+            "map_name": found.get("name") if found else None,
+        })
     yield from _make_agent(config_path).daily_stream(
         only=steps, after=after, sortie_override=sortie_plan,
-        practice_override=practice_plan or None)
+        practice_override=practice_plan or None,
+        expedition_override=expedition_plan)
 
 
 def _build_raid(config_path, params):
@@ -414,7 +428,7 @@ def _expedition_remaining(record: dict) -> int:
 
 
 def _read_expedition_records() -> dict:
-    path = _PROJECT / "status" / "expeditions.json"
+    path = STATUS_DIR / "expeditions.json"
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:

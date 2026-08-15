@@ -202,6 +202,9 @@ class TelemetryStore:
                      if b["ts"] > a["ts"]]
         average = sum(intervals) / len(intervals) if intervals else None
         repairs = [e for e in events if e["event_type"] == "repair.session_completed"]
+        completed_repairs = [e for e in repairs
+                             if int(e["payload"].get("repaired") or
+                                    e["payload"].get("count") or 0) > 0]
         snapshots = [e for e in events if e["event_type"] == "inventory.captured"]
         before = next((e for e in snapshots if e["payload"].get("phase") == "before"), None)
         after = next((e for e in reversed(snapshots)
@@ -225,7 +228,7 @@ class TelemetryStore:
             "selected_floor": selected[-1] if selected else None,
             "average_loop_seconds": round(average, 1) if average else None,
             "estimated_6h_loops": int(21600 // average) if average else None,
-            "repair_sessions": len(repairs),
+            "repair_sessions": len(completed_repairs),
             "repaired_swords": sum(int(e["payload"].get("repaired") or 0) for e in repairs),
             "speedups": sum(int(e["payload"].get("speedups") or 0) for e in repairs),
             "equipment_restores": sum(1 for e in events

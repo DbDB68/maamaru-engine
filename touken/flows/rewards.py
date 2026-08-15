@@ -206,14 +206,18 @@ class RewardsMixin:
             claim_result = self.maa.template_match(
                 template=claim_config["template"],
                 roi=None,
-                threshold=0.5
+                threshold=0.7
             )
+            inactive_template = claim_config.get(
+                "inactive_template", "一键领取_灰.png")
+            inactive_result = None
+            if not claim_result:
+                inactive_result = self.maa.template_match(
+                    template=inactive_template, roi=None, threshold=0.7)
 
             if claim_result:
                 yield f"[TASK] {tab_name} 有奖励可领，点击一键领取..."
                 self.maa.click(claim_result)
-                if hasattr(self, "record_event"):
-                    self.record_event("task_rewards.claimed", tab=tab_name)
 
                 # 等待领取动画/弹窗
                 time.sleep(1.5)
@@ -247,9 +251,32 @@ class RewardsMixin:
                     yield "[TASK] 任务信息已失效，刷新"
                     time.sleep(0.5)
 
-                yield f"[TASK] {tab_name} 领取完成"
+                # 点击不算成绩；必须确认橙色消失且灰色空状态出现。
+                self.maa.screenshot(force=True)
+                still_active = self.maa.template_match(
+                    template=claim_config["template"], roi=None, threshold=0.7)
+                now_inactive = self.maa.template_match(
+                    template=inactive_template, roi=None, threshold=0.7)
+                if now_inactive and not still_active:
+                    if hasattr(self, "record_event"):
+                        self.record_event("task_rewards.claimed", tab=tab_name)
+                    yield f"[TASK] {tab_name} 领取成功，已确认按钮变灰"
+                else:
+                    if hasattr(self, "record_event"):
+                        self.record_event(
+                            "task_rewards.unconfirmed", tab=tab_name,
+                            stage="after_click")
+                    yield f"[TASK] {tab_name} 点击后未确认领取成功，本次不计成绩"
+            elif inactive_result:
+                if hasattr(self, "record_event"):
+                    self.record_event("task_rewards.none", tab=tab_name)
+                yield f"[TASK] {tab_name} 已确认没有可领奖励，跳过"
             else:
-                yield f"[TASK] {tab_name} 没有可领奖励，跳过"
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "task_rewards.unconfirmed", tab=tab_name,
+                        stage="before_click")
+                yield f"[TASK] {tab_name} 未确认一键领取按钮状态，本次不点击也不计成绩"
 
         yield "[TASK] 所有任务奖励领取完毕"
         return
