@@ -46,6 +46,7 @@ panel/panel_config.json
 # PyInstaller 构建中间产物（spec 保留用于复现打包）
 build/
 .tmp/
+/tmp/
 
 # 刮刮乐开发调试（本地标定数据 + 调试截图，不入库）
 silhouette_lab/
