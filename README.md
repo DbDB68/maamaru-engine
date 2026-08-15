@@ -4,10 +4,11 @@
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
 
+まあ丸是面向《刀剑乱舞 ONLINE》国服的自动化辅助工具，基于
+[MaaFramework](https://github.com/MaaXYZ/MaaFramework) 的 Python API，提供日课、远征、出阵与活动挂机等流程自动化，并记录本丸运行数据，帮助玩家了解长期运营状态。
+
 > 不只是自动化脚本，更是一个会帮你打工、记得本丸近况、偶尔陪你说话的近侍。
 
-まあ丸是面向《刀剑乱舞 ONLINE》国服的本丸辅助工具，基于
-[MaaFramework](https://github.com/MaaXYZ/MaaFramework) 的 Python API 实现图像识别、模拟器控制和流程判断。
 这也是一个**人类 × AI 结对 vibe coding** 项目：玩法、素材和无数个“要不再加个……”来自人类，代码实现交给 AI。仓库按“AI 读得懂、改得动”的方向整理，除了直接使用，也很适合丢给自己的 Agent 继续魔改。
 
 > [!CAUTION]
