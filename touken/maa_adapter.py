@@ -15,6 +15,7 @@ OCR/模板匹配走 MAA 本地推理（不碰 ADB，天然安全）。
 """
 
 import os
+import sys
 import time  # noqa: F401  # 保留原文件的模块级导入，防止外部有人 from 这里拿
 from pathlib import Path
 from typing import Optional, Any
@@ -104,6 +105,24 @@ def _ocr_text_matches(text: str, expected: str, match_mode: str) -> bool:
     if match_mode == "contains":
         return expected in text or text in expected
     return False
+
+
+def _safe_print(message: object) -> None:
+    """Best-effort console output; logging must never change automation results."""
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        # Windows workers may inherit a GBK console. Preserve a readable escaped
+        # form for unsupported characters such as © instead of failing OCR.
+        try:
+            encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+            escaped = text.encode(encoding, errors="backslashreplace").decode(encoding)
+            print(escaped)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 class MAAAdapter:
@@ -433,21 +452,21 @@ class MAAAdapter:
                         elif isinstance(box, (list, tuple)) and len(box) >= 4:
                             center = Point(box[0] + box[2] // 2, box[1] + box[3] // 2)
 
-                    print(f'[MAA] OCR 命中: "{text}" (目标: "{expected}") '
-                          f'at ({center.x}, {center.y}), score={score:.3f}')
+                    _safe_print(f'[MAA] OCR 命中: "{text}" (目标: "{expected}") '
+                                f'at ({center.x}, {center.y}), score={score:.3f}')
                     self._record_ocr("match", roi, structured, expected,
                                      match_mode, True)
                     return center
 
             # 没有匹配到
             texts = [r.text if hasattr(r, 'text') else str(r) for r in all_results]
-            print(f"[MAA] OCR 识别到文字但未匹配: {texts}, expected=\"{expected}\"")
+            _safe_print(f"[MAA] OCR 识别到文字但未匹配: {texts}, expected=\"{expected}\"")
             self._record_ocr("match", roi, structured, expected,
                              match_mode, False)
             return None
 
         except Exception as exc:
-            print(f"[MAA 错误] OCR 异常: {exc}")
+            _safe_print(f"[MAA 错误] OCR 异常: {exc}")
             self._record_ocr("match", roi, [], expected, match_mode, False,
                              type(exc).__name__)
             return None
@@ -503,13 +522,13 @@ class MAAAdapter:
                         center = Point(box[0] + box[2] // 2, box[1] + box[3] // 2)
                 out.append((text, center))
 
-            print(f"[MAA] OCR 全量识别: {[t for t, _ in out]}")
+            _safe_print(f"[MAA] OCR 全量识别: {[t for t, _ in out]}")
             self._record_ocr("all", roi,
                              self._structured_ocr_tokens(all_results, roi))
             return out
 
         except Exception as exc:
-            print(f"[MAA 错误] OCR 全量识别异常: {exc}")
+            _safe_print(f"[MAA 错误] OCR 全量识别异常: {exc}")
             self._record_ocr("all", roi, [], error=type(exc).__name__)
             return []
 
