@@ -190,7 +190,14 @@ class ScriptRunner:
                   "completed" if rc == 0 else "failed")
         try:
             from touken.telemetry import get_telemetry_store
-            get_telemetry_store().finish_run(run_id, status)
+            telemetry = get_telemetry_store()
+            telemetry.finish_run(run_id, status)
+            summary = telemetry.run_summary(run_id)
+            result = self._format_result(summary)
+            if result:
+                store.append(run_id, script_name, result)
+                self._emit(run_id, script_name, result)
+                print(result)
         except Exception:
             pass
         store.append(run_id, script_name, final)
@@ -200,6 +207,28 @@ class ScriptRunner:
         with self._lock:
             if self._proc is proc:
                 self._proc = None
+
+    @staticmethod
+    def _format_result(summary: dict | None) -> str | None:
+        if not summary or not summary.get("loops"):
+            return None
+        floor = summary.get("selected_floor")
+        place = f"大阪城 {floor}F" if floor is not None else "本次出阵"
+        parts = [f"{place} {summary['loops']} 圈"]
+        average = summary.get("average_loop_seconds")
+        if average:
+            minutes, seconds = divmod(int(round(average)), 60)
+            parts.append(f"平均 {minutes}分{seconds:02d}秒/圈")
+            parts.append(f"照这个速度 6 小时约 {summary['estimated_6h_loops']} 圈")
+        parts.append(f"手入 {summary.get('repair_sessions', 0)} 次")
+        parts.append(f"加速符 {summary.get('speedups', 0)} 枚")
+        parts.append(f"补刀装 {summary.get('equipment_restores', 0)} 次")
+        deltas = summary.get("resource_delta") or {}
+        for name in ("小判", "木炭", "玉钢", "冷却材", "砥石", "委托符", "加速符"):
+            value = deltas.get(name)
+            if value:
+                parts.append(f"{name} {value:+,}")
+        return "[挂机成绩单] " + " · ".join(parts)
 
     # ---------- 内部：沉默看门狗 ----------
 

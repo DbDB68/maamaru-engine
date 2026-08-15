@@ -63,6 +63,34 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual([e["event_type"] for e in events], ["repair.completed"])
         self.assertEqual([o["expected"] for o in misses], ["登录"])
 
+    def test_run_summary_counts_upkeep_speed_and_resource_delta(self):
+        self.store.start_run("run-1", "osaka", started_at=100)
+        conn = self.store._conn()
+        samples = [
+            (110, "inventory.captured", {"phase": "before", "resources": {"小判": 1000, "加速符": 20}}),
+            (120, "osaka.floor_completed", {"selected_floor": 88}),
+            (180, "repair.session_completed", {"repaired": 2, "speedups": 2}),
+            (200, "equipment.restored", {"record_no": 1}),
+            (220, "osaka.floor_completed", {"selected_floor": 88}),
+            (320, "osaka.floor_completed", {"selected_floor": 88}),
+            (330, "inventory.captured", {"phase": "after", "resources": {"小判": 1300, "加速符": 18}}),
+        ]
+        for ts, kind, payload in samples:
+            conn.execute("INSERT INTO events(ts, run_id, script, event_type, payload) VALUES (?, 'run-1', 'osaka', ?, ?)",
+                         (ts, kind, __import__('json').dumps(payload)))
+        conn.commit()
+        self.store.finish_run("run-1", "completed", ended_at=340)
+
+        result = self.store.run_summary("run-1")
+        self.assertEqual(result["loops"], 3)
+        self.assertEqual(result["average_loop_seconds"], 100)
+        self.assertEqual(result["estimated_6h_loops"], 216)
+        self.assertEqual(result["repair_sessions"], 1)
+        self.assertEqual(result["repaired_swords"], 2)
+        self.assertEqual(result["speedups"], 2)
+        self.assertEqual(result["equipment_restores"], 1)
+        self.assertEqual(result["resource_delta"], {"小判": 300, "加速符": -2})
+
     def test_prune_only_removes_expired_observations_and_events(self):
         self.store.record_event("keep", {})
         conn = self.store._conn()

@@ -328,7 +328,12 @@ def _build_yosari(config_path, params):
 
 
 def _build_osaka(config_path, params):
-    yield from _make_agent(config_path).osaka_stream(
+    agent = _make_agent(config_path)
+    compare_resources = _bool(params.get("compare_resources", True))
+    if compare_resources and hasattr(agent, "status_snapshot_stream"):
+        yield "[挖地] 开工前先盘点一次家底"
+        yield from agent.status_snapshot_stream(phase="before")
+    yield from agent.osaka_stream(
         max_floors=_run_count(params, 1, "floors"),
         team_no=_i(params, "team_no", 3),
         select_floor=_bool(params.get("select_floor", False)),
@@ -339,6 +344,9 @@ def _build_osaka(config_path, params):
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
         auto_equip=_bool(params.get("auto_equip", True)))
+    if compare_resources and hasattr(agent, "status_snapshot_stream"):
+        yield "[挖地] 收工后再盘点一次，准备结算"
+        yield from agent.status_snapshot_stream(phase="after")
 
 
 def _build_sakura(config_path, params):
@@ -598,6 +606,9 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                 _build_osaka,
                 params=[_team_field("3"),
                         {**_run_count_field(), "label": "出阵次数"},
+                        {"key": "compare_resources", "type": "toggle",
+                         "label": "开工和收工时盘点库存", "default": True,
+                         "help": "各盘点一次小判、资源和符；识别失败不会影响挖地。"},
                         {"key": "select_floor", "type": "toggle",
                          "label": "指定挂机层数", "default": False},
                         {"key": "target_floor", "type": "number",
@@ -1426,6 +1437,17 @@ async def api_data_events(limit: int = 100, event_type: str = "",
         "schema_version": TELEMETRY_SCHEMA_VERSION,
         "items": get_telemetry_store().recent_events(
             limit=limit, event_type=event_type or None, script=script or None),
+    }
+
+
+@app.get("/api/data/runs")
+async def api_data_runs(limit: int = 20, script: str = ""):
+    """每轮任务的结构化结算；圈速按相邻完成事件计算，不含盘点时间。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    return {
+        "schema_version": TELEMETRY_SCHEMA_VERSION,
+        "items": get_telemetry_store().recent_run_summaries(
+            limit=limit, script=script or None),
     }
 
 

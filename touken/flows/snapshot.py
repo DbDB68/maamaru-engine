@@ -40,7 +40,7 @@ def _to_int(text: str):
 class SnapshotMixin:
     """库存快照。依赖宿主类的 navigate_to_stream、maa。"""
 
-    def status_snapshot_stream(self):
+    def status_snapshot_stream(self, phase=None):
         """
         流式库存快照：导航锻刀 → OCR 家底 → 落盘 status/inventory.json
 
@@ -109,6 +109,7 @@ class SnapshotMixin:
 
         payload = {
             "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "phase": phase,
             "resources": resources,
             "doko": doko,
             "furnaces": furnaces,

@@ -179,6 +179,74 @@ class TelemetryStore:
                  "script": r["script"], "event_type": r["event_type"],
                  "payload": _loads(r["payload"], {})} for r in rows]
 
+    def run_summary(self, run_id: str) -> dict | None:
+        """Build one human-facing task result from structured events only."""
+        run = self._conn().execute(
+            "SELECT run_id, script, started_at, ended_at, status FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if not run:
+            return None
+        rows = self._conn().execute(
+            "SELECT ts, event_type, payload FROM events WHERE run_id = ? ORDER BY id",
+            (run_id,),
+        ).fetchall()
+        events = [{"ts": r["ts"], "event_type": r["event_type"],
+                   "payload": _loads(r["payload"], {})} for r in rows]
+        loop_events = [e for e in events if e["event_type"] in {
+            "osaka.floor_completed", "sortie.completed", "raid.round_completed",
+            "pumpkin.sortie_completed",
+        }]
+        osaka = [e for e in loop_events if e["event_type"] == "osaka.floor_completed"]
+        intervals = [b["ts"] - a["ts"] for a, b in zip(loop_events, loop_events[1:])
+                     if b["ts"] > a["ts"]]
+        average = sum(intervals) / len(intervals) if intervals else None
+        repairs = [e for e in events if e["event_type"] == "repair.session_completed"]
+        snapshots = [e for e in events if e["event_type"] == "inventory.captured"]
+        before = next((e for e in snapshots if e["payload"].get("phase") == "before"), None)
+        after = next((e for e in reversed(snapshots)
+                      if e["payload"].get("phase") == "after"), None)
+        deltas = {}
+        if before and after:
+            left = before["payload"].get("resources") or {}
+            right = after["payload"].get("resources") or {}
+            for name in left.keys() | right.keys():
+                if isinstance(left.get(name), (int, float)) and isinstance(right.get(name), (int, float)):
+                    deltas[name] = right[name] - left[name]
+        selected = [e["payload"].get("selected_floor") for e in osaka
+                    if e["payload"].get("selected_floor") is not None]
+        return {
+            "run_id": run["run_id"], "script": run["script"],
+            "started_at": run["started_at"], "ended_at": run["ended_at"],
+            "status": run["status"],
+            "duration_seconds": ((run["ended_at"] - run["started_at"])
+                                 if run["ended_at"] else None),
+            "loops": len(loop_events),
+            "selected_floor": selected[-1] if selected else None,
+            "average_loop_seconds": round(average, 1) if average else None,
+            "estimated_6h_loops": int(21600 // average) if average else None,
+            "repair_sessions": len(repairs),
+            "repaired_swords": sum(int(e["payload"].get("repaired") or 0) for e in repairs),
+            "speedups": sum(int(e["payload"].get("speedups") or 0) for e in repairs),
+            "equipment_restores": sum(1 for e in events
+                                      if e["event_type"] == "equipment.restored"),
+            "resource_delta": deltas,
+            "has_resource_comparison": bool(before and after),
+        }
+
+    def recent_run_summaries(self, limit: int = 20, script: str | None = None) -> list[dict]:
+        clauses, args = ["status != 'running'"], []
+        if script:
+            clauses.append("script = ?")
+            args.append(script)
+        args.append(max(1, min(int(limit), 100)))
+        rows = self._conn().execute(
+            "SELECT run_id FROM runs WHERE " + " AND ".join(clauses) +
+            " ORDER BY started_at DESC LIMIT ?", args,
+        ).fetchall()
+        return [summary for row in rows
+                if (summary := self.run_summary(row["run_id"])) is not None]
+
     def recent_observations(self, limit: int = 100, script: str | None = None,
                             matched: bool | None = None) -> list[dict]:
         clauses, args = [], []
