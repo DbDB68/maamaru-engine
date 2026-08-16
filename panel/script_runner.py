@@ -213,7 +213,14 @@ class ScriptRunner:
         if not summary or not summary.get("loops"):
             return None
         floor = summary.get("selected_floor")
-        place = f"大阪城 {floor}F" if floor is not None else "本次出阵"
+        script = summary.get("script") or ""
+        if script == "osaka":
+            place = f"大阪城 {floor}F" if floor is not None else "大阪城"
+        else:
+            place = {
+                "sortie": "合战场", "yosari": "异去", "raid": "联队战",
+                "pumpkin": "南瓜大作战", "daily": "一键日课",
+            }.get(script, "本次出阵")
         parts = [f"{place} {summary['loops']} 圈"]
         average = summary.get("average_loop_seconds")
         if average:

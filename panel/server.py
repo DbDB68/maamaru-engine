@@ -199,9 +199,42 @@ def _sword_names(raw) -> list[str]:
             if name.strip()]
 
 
-# ── 各脚本 builder（签名统一：(config_path, params) -> generator）──
+# ── 各脚本 builder ──
+# 玩法脚本统一由 _wrap_inventory 包一层：开工前/收工后各拍一次库存（run 级
+# 整体归因）。builder 本体签名统一：(agent, config_path, params) -> generator。
 
-def _build_daily(config_path, params):
+def _wrap_inventory(tag: str, runner, inventory=True):
+    """给玩法脚本套开工前/收工后库存盘点（run 级整体归因）。
+
+    - before：任务开始前拍一张；after：任务结束后拍一张（含自然失败——异常
+      会穿过 try/finally，finally 里照样补拍；紧急停止/看门狗是 kill，子进程
+      没机会，由面板 has_after_snapshot=False 提示缺收工快照）。
+    - 盘点失败绝不拖垮任务：before/after 各自 try，坏了只打日志继续。
+    - inventory 可为 bool，或 callable(params)->bool（大阪城沿用面板的
+      compare_resources 开关）；默认全拍，想关某个任务就传 False。
+    """
+    def _fn(config_path, params):
+        agent = _make_agent(config_path)
+        enabled = inventory(params) if callable(inventory) else inventory
+        if enabled and hasattr(agent, "status_snapshot_stream"):
+            try:
+                yield f"[{tag}] 开工前先盘点一次家底"
+                yield from agent.status_snapshot_stream(phase="before")
+            except Exception as exc:
+                yield f"[{tag}] ⚠️ 开工盘点失败，继续干活：{exc}"
+        try:
+            yield from runner(agent, config_path, params)
+        finally:
+            if enabled and hasattr(agent, "status_snapshot_stream"):
+                try:
+                    yield f"[{tag}] 收工后再盘点一次，准备结算"
+                    yield from agent.status_snapshot_stream(phase="after")
+                except Exception as exc:
+                    yield f"[{tag}] ⚠️ 收工盘点失败（不影响任务结果）：{exc}"
+    return _fn
+
+
+def _build_daily(agent, config_path, params):
     # 面板传 steps，Agent 网关传 only，都认
     steps = params.get("steps") or params.get("only") or None   # 空列表=全跑
     after = params.get("after") or "none"
@@ -282,15 +315,15 @@ def _build_daily(config_path, params):
             "map_slot": found.get("slot") if found else None,
             "map_name": found.get("name") if found else None,
         })
-    yield from _make_agent(config_path).daily_stream(
+    yield from agent.daily_stream(
         only=steps, after=after, sortie_override=sortie_plan,
         practice_override=practice_plan or None,
         expedition_override=expedition_plan)
 
 
-def _build_raid(config_path, params):
+def _build_raid(agent, config_path, params):
     runs = _run_count(params, 3, "rounds")
-    yield from _make_agent(config_path).raid_stream(
+    yield from agent.raid_stream(
         max_rounds=runs,
         team_no=_i(params, "team_no", 3),
         difficulty_no=_i(params, "map_no", 4),
@@ -298,11 +331,11 @@ def _build_raid(config_path, params):
         max_buys=runs)
 
 
-def _build_pumpkin(config_path, params):
+def _build_pumpkin(agent, config_path, params):
     difficulty = _i(params, "difficulty", 0)
     watch = _sword_names(params.get("watch"))
     runs = _run_count(params, 4, "max_skips")
-    yield from _make_agent(config_path).pumpkin_stream(
+    yield from agent.pumpkin_stream(
         team_no=_i(params, "team_no", 3),
         difficulty=difficulty or None,
         watch_names=watch or None,
@@ -312,8 +345,8 @@ def _build_pumpkin(config_path, params):
         auto_refill=False)
 
 
-def _build_sortie(config_path, params):
-    yield from _make_agent(config_path).sortie_stream(
+def _build_sortie(agent, config_path, params):
+    yield from agent.sortie_stream(
         chapter=_i(params, "chapter", 1),
         map_no=_i(params, "map_no", 1),
         team_no=_i(params, "team_no", 3),
@@ -327,8 +360,8 @@ def _build_sortie(config_path, params):
         auto_equip=_bool(params.get("auto_equip", True)))
 
 
-def _build_yosari(config_path, params):
-    yield from _make_agent(config_path).yosari_stream(
+def _build_yosari(agent, config_path, params):
+    yield from agent.yosari_stream(
         map_no=_i(params, "map_no", 1),
         team_no=_i(params, "team_no", 3),
         auto_march=_bool(params.get("auto_march", True)),
@@ -342,12 +375,8 @@ def _build_yosari(config_path, params):
         auto_equip=_bool(params.get("auto_equip", True)))
 
 
-def _build_osaka(config_path, params):
-    agent = _make_agent(config_path)
-    compare_resources = _bool(params.get("compare_resources", True))
-    if compare_resources and hasattr(agent, "status_snapshot_stream"):
-        yield "[挖地] 开工前先盘点一次家底"
-        yield from agent.status_snapshot_stream(phase="before")
+def _build_osaka(agent, config_path, params):
+    # 库存盘点由 _wrap_inventory 统一包（开关沿用面板 compare_resources）
     yield from agent.osaka_stream(
         max_floors=_run_count(params, 1, "floors"),
         team_no=_i(params, "team_no", 3),
@@ -359,18 +388,15 @@ def _build_osaka(config_path, params):
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
         auto_equip=_bool(params.get("auto_equip", True)))
-    if compare_resources and hasattr(agent, "status_snapshot_stream"):
-        yield "[挖地] 收工后再盘点一次，准备结算"
-        yield from agent.status_snapshot_stream(phase="after")
 
 
-def _build_sakura(config_path, params):
-    yield from _make_agent(config_path).sakura_stream(
+def _build_sakura(agent, config_path, params):
+    yield from agent.sakura_stream(
         team_no=_i(params, "team_no", 1),
         slot=_i(params, "slot", 1))
 
 
-def _build_forge(config_path, params):
+def _build_forge(agent, config_path, params):
     watch_raw = params.get("watch") or ""
     if isinstance(watch_raw, list):
         # Agent 网关传的是数组 ["03:20:00", ...]
@@ -378,22 +404,22 @@ def _build_forge(config_path, params):
     else:
         # 面板传的是字符串 "03:20:00, 04:00:00"
         watch = [w.strip() for w in re.split(r"[，,、;；\s]+", str(watch_raw)) if w.strip()]
-    yield from _make_agent(config_path).forge_stream(
+    yield from agent.forge_stream(
         times=_i(params, "times", 3), watch=watch)
 
 
-def _build_repair(config_path, params):
+def _build_repair(agent, config_path, params):
     team_names = {f"部队{i}": i for i in range(1, 6)}
     raw_teams = params.get("speedup_teams")
     speedup_teams = None
     if isinstance(raw_teams, list):
         speedup_teams = [team_names[x] for x in raw_teams if x in team_names]
-    yield from _make_agent(config_path).repair_stream(
+    yield from agent.repair_stream(
         dry_run=_bool(params.get("dry_run", False)),
         speedup_teams=speedup_teams)
 
 
-def _build_dispatch(config_path, params):
+def _build_dispatch(agent, config_path, params):
     """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。"""
     from .scheduler import find_map
     code = params.get("map_code") or ""
@@ -411,7 +437,6 @@ def _build_dispatch(config_path, params):
         yield f"[远征等待] 部队{team_no}还剩 {remain // 60:02d}:{remain % 60:02d}（紧急停止可取消）"
         time.sleep(min(5, remain))
         remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
-    agent = _make_agent(config_path)
     yield from agent.collect_expedition_stream(redispatch=None)
     yield from agent.expedition_stream(
         era=m["era"], map_slot=m["slot"],
@@ -436,7 +461,7 @@ def _read_expedition_records() -> dict:
         return {}
 
 
-def _build_expedition_manager(config_path, params):
+def _build_expedition_manager(agent, config_path, params):
     """收取归来队伍，最多等十分钟，再按“常用安排”派遣。"""
     from .scheduler import find_map, load_config
 
@@ -446,7 +471,6 @@ def _build_expedition_manager(config_path, params):
         yield "[远征管理] 没有启用任何常用安排，先去配置页勾选部队"
         return
 
-    agent = _make_agent(config_path)
     yield "[远征管理] 先回本丸刷新归来状态并领取结算"
     yield from agent.collect_expedition_stream(redispatch=None)
 
@@ -500,17 +524,16 @@ def _build_expedition_manager(config_path, params):
 
 
 def _build_simple(stream_method_name):
-    def _fn(config_path, params):
-        agent = _make_agent(config_path)
+    def _run(agent, config_path, params):
         method = getattr(agent, stream_method_name, None)
         if method is None:
             raise RuntimeError(f"Agent 没有 {stream_method_name} 方法")
         yield from method()
-    return _fn
+    return _run
 
 
 register_script("daily", "一键日课", "",
-                 _build_daily,
+                 _wrap_inventory("日课", _build_daily),
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
                           "options": _DAILY_STEPS, "default": _DAILY_STEPS,
                            "help": "这里的出阵安排是日课专用配置，不会修改各玩法的单独配置。"},
@@ -579,7 +602,7 @@ register_script("daily", "一键日课", "",
                                      ["sleep", "退出 + 关模拟器 + 电脑休眠"]],
                          "default": "none"}])
 register_script("raid", "联队战", "",
-                _build_raid,
+                _wrap_inventory("RAID", _build_raid),
                 params=[{"key": "map_no", "type": "select", "label": "打哪张图",
                          "options": [["1", "1图（坐标待补）"], ["2", "2图（坐标待补）"],
                                      ["3", "3图（坐标待补）"], ["4", "4图"]],
@@ -588,7 +611,7 @@ register_script("raid", "联队战", "",
                         _run_count_field(ticket=True, default=3),
                         _ticket_refill_field()])
 register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
-                _build_pumpkin,
+                _wrap_inventory("南瓜", _build_pumpkin),
                 params=[{"key": "difficulty", "type": "select", "label": "打哪张图",
                          "options": [["1", "低级"], ["2", "中级"], ["3", "高级"]],
                          "default": "1"},
@@ -597,7 +620,7 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
                         {**_ticket_refill_field(),
                          "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"}])
 register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
-                _build_sortie,
+                _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)], "default": "1"},
                         {"key": "map_no", "type": "select", "label": "小图",
@@ -606,7 +629,7 @@ register_script("sortie", "合战场", "普通合战场：选择章节和小图�
                         _run_count_field(),
                         *_march_and_injury_fields()])
 register_script("yosari", "异去", "",
-                _build_yosari,
+                _wrap_inventory("异去", _build_yosari),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
                          "options": [["1", "1章"]], "default": "1",
                          "help": "异去目前只开放第一章；以后新增章节会在这里继续添加。"},
@@ -618,7 +641,8 @@ register_script("yosari", "异去", "",
                         *_march_and_injury_fields(),
                         ])
 register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动行军，也不会消耗手形",
-                _build_osaka,
+                _wrap_inventory("挖地", _build_osaka,
+                                inventory=lambda p: _bool(p.get("compare_resources", True))),
                 params=[_team_field("3"),
                         {**_run_count_field(), "label": "出阵次数"},
                         {"key": "compare_resources", "type": "toggle",
@@ -664,14 +688,14 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                          "help": "出阵前保存到记录一；刀装破损时自动恢复并继续剩余层数。",
                          "visibleWhen": {"key": "repair_on_injury", "is": "continue"}}])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
-                _build_sakura,
+                _wrap_inventory("刷花", _build_sakura),
                 params=[_team_field("1"),
                         {"key": "slot", "type": "select", "label": "位置",
                          "options": [[str(i), f"{i}号位" + ("（队长）" if i == 1 else "")]
                                      for i in range(1, 7)], "default": "1"}])
-def _build_practice(config_path, params):
+def _build_practice(agent, config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
-    return _make_agent(config_path).practice_stream(
+    return agent.practice_stream(
         dry_run=False,
         team_no=_i(params, "team_no", 2),
         formation_mode=params.get("formation_mode") or "manual",
@@ -680,7 +704,7 @@ def _build_practice(config_path, params):
 
 
 register_script("practice", "演练", "",
-                _build_practice,
+                _wrap_inventory("演练", _build_practice),
                 params=[
                     _team_field("2"),
                     {"key": "formation_mode", "type": "select",
@@ -702,7 +726,7 @@ register_script("practice", "演练", "",
                      "default": "逆行阵"},
                 ])
 register_script("expedition", "远征", "收菜、等待临近归来，并按常用安排派遣",
-                _build_expedition_manager)
+                _wrap_inventory("远征管理", _build_expedition_manager))
 
 
 def _map_select_field():
@@ -714,10 +738,10 @@ def _map_select_field():
 
 
 register_script("dispatch", "派遣远征", "立刻派一支部队去指定远征图",
-                _build_dispatch,
+                _wrap_inventory("派遣", _build_dispatch),
                 params=[_team_field("2"), _map_select_field()], hidden=True)
 register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；不使用加速符",
-                _build_forge,
+                _wrap_inventory("锻刀", _build_forge),
                 params=[{"key": "times", "type": "number", "label": "最多锻几炉",
                          "default": 3, "min": 1, "max": 12,
                          "help": "日课目标是锻刀 3 次，但脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常本次只能锻 2 次；没必要为了返还委托符强行加速。"},
@@ -725,7 +749,7 @@ register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；�
                          "label": "目标时长（命中时手机报喜，不添加则不盯）",
                          "default": ""}])
 register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过，其余按部队决定是否加速",
-                _build_repair,
+                _wrap_inventory("手入", _build_repair),
                 params=[{"key": "dry_run", "type": "select",
                          "label": "运行方式",
                          "options": [["false", "实际手入"],
@@ -739,7 +763,7 @@ register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过�
                          "help": "这里只影响单独运行“手入”：黑名单始终跳过，选中部队即时修好，其他队只安排普通手入。连续出阵选择“自动手入后继续”时，会自动加速当前出阵队，不读取这里。"}],
                 hidden=True)
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
-                _build_simple("sugar_stream"))
+                _wrap_inventory("炼糖", _build_simple("sugar_stream")))
 register_script("snapshot", "库存快照", "刷新看板库存数据",
                 _build_simple("status_snapshot_stream"))
 

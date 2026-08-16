@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from panel.server import _build_daily, _build_osaka, _build_pumpkin, _build_raid, list_scripts
+from panel.server import (_build_daily, _build_osaka, _build_pumpkin, _build_raid,
+                          _wrap_inventory, list_scripts)
+
+# 面板实际注册的是包装器（开工/收工盘点）；FakeAgent 没有 status_snapshot_stream，
+# 正好验证“无快照能力自动跳过盘点”的兜底路径
+wrap = lambda builder: _wrap_inventory("T", builder)
 
 
 class FakeAgent:
@@ -55,7 +60,7 @@ class PumpkinPlanTests(unittest.TestCase):
 
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
-            list(_build_osaka("config.json", {
+            list(wrap(_build_osaka)("config.json", {
                 "team_no": "3", "runs": "2", "formation_mode": "auto",
                 "formation_strategy": "fixed", "formation": "逆行阵",
                 "repair_threshold": "medium", "repair_on_injury": "repair_stop",
@@ -104,7 +109,7 @@ class PumpkinPlanTests(unittest.TestCase):
     def test_raid_selected_map_reaches_flow(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
-            list(_build_raid("config.json", {"map_no": "2", "runs": "5", "team_no": "4"}))
+            list(wrap(_build_raid)("config.json", {"map_no": "2", "runs": "5", "team_no": "4"}))
         self.assertEqual(agent.raid_args["difficulty_no"], 2)
         self.assertEqual(agent.raid_args["max_rounds"], 5)
         self.assertEqual(agent.raid_args["team_no"], 4)
@@ -128,7 +133,7 @@ class PumpkinPlanTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent), patch(
             "panel.server._load_panel_settings", return_value={}
         ):
-            list(_build_daily("config.json", params))
+            list(wrap(_build_daily)("config.json", params))
 
         plan = agent.daily_args["sortie_override"]
         self.assertEqual(plan, {"mode": "pumpkin", "difficulty": 2,
@@ -149,7 +154,7 @@ class PumpkinPlanTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent), patch(
             "panel.server._load_panel_settings", return_value=saved
         ):
-            list(_build_daily("config.json", params))
+            list(wrap(_build_daily)("config.json", params))
         plan = agent.daily_args["sortie_override"]
         self.assertEqual(plan["mode"], "yosari")
         self.assertEqual(plan["map_no"], 3)
@@ -171,7 +176,7 @@ class PumpkinPlanTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent), patch(
             "panel.server._load_panel_settings", return_value=saved
         ):
-            list(_build_daily("config.json", params))
+            list(wrap(_build_daily)("config.json", params))
         plan = agent.daily_args["sortie_override"]
         self.assertEqual(plan["mode"], "osaka")
         self.assertEqual(plan["team_no"], 4)
@@ -198,7 +203,7 @@ class PumpkinPlanTests(unittest.TestCase):
                 patch("panel.scheduler.find_map", return_value={
                     "code": "B2", "name": "享保の大飢饉", "era": 2, "slot": 2,
                 }):
-            list(_build_daily("config.json", {"steps": ["远征"]}))
+            list(wrap(_build_daily)("config.json", {"steps": ["远征"]}))
 
         self.assertEqual(agent.daily_args["expedition_override"], [{
             "team_no": 2, "map_code": "B2", "era": 2, "map_slot": 2,
@@ -208,7 +213,7 @@ class PumpkinPlanTests(unittest.TestCase):
     def test_standalone_plan_uses_targets_and_selected_handshape_budget(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
-            list(_build_pumpkin("config.json", {
+            list(wrap(_build_pumpkin)("config.json", {
                 "watch": "三日月宗近， 小狐丸", "team_no": "3", "runs": "12"
             }))
 
@@ -219,15 +224,15 @@ class PumpkinPlanTests(unittest.TestCase):
     def test_ticket_refill_choice_reaches_raid_but_pumpkin_stays_safe(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
-            list(_build_raid("config.json", {"runs": "99", "auto_refill": True}))
-            list(_build_pumpkin("config.json", {"runs": "99", "auto_refill": True}))
+            list(wrap(_build_raid)("config.json", {"runs": "99", "auto_refill": True}))
+            list(wrap(_build_pumpkin)("config.json", {"runs": "99", "auto_refill": True}))
         self.assertTrue(agent.raid_args["auto_buy_ticket"])
         self.assertFalse(agent.pumpkin_args["auto_refill"])
 
     def test_old_token_budget_is_still_read(self):
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
-            list(_build_pumpkin("config.json", {"max_skips": "7"}))
+            list(wrap(_build_pumpkin)("config.json", {"max_skips": "7"}))
         self.assertEqual(agent.pumpkin_args["max_skips"], 7)
 
 
