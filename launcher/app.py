@@ -297,6 +297,12 @@ def _port_alive() -> bool:
 def _write_launcher_log(content: str) -> None:
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        (LOG_DIR / "launcher.log").write_text(content, encoding="utf-8")
+        path = LOG_DIR / "launcher.log"
+        # The panel startup hook writes the original exception before Uvicorn
+        # converts it to SystemExit(3).  Append here instead of erasing it.
+        with path.open("a", encoding="utf-8") as stream:
+            if path.stat().st_size:
+                stream.write("\n\n--- launcher ---\n")
+            stream.write(content)
     except OSError:
         pass

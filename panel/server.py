@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import time
+import traceback
 from pathlib import Path
 
 # 确保能找到 touken 包（开发模式）
@@ -21,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from .log_store import get_store
 from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
 from touken.runtime_paths import (
-    BUNDLE_ROOT, CONFIG_PATH, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
+    BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
     ensure_runtime_data,
 )
 
@@ -747,6 +748,22 @@ register_script("snapshot", "库存快照", "刷新看板库存数据",
 
 @app.on_event("startup")
 async def startup():
+    try:
+        await _startup()
+    except BaseException:
+        # Uvicorn turns lifespan exceptions into SystemExit(3).  Persist the
+        # original traceback first so the launcher can show a useful cause.
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            (LOG_DIR / "launcher.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        raise
+
+
+async def _startup():
     _start_broadcast()
     runner = get_runner()
     runner.set_message_callback(_on_script_message)
@@ -768,7 +785,15 @@ async def startup():
     _qq_sender = init_qq(app, _get_gateway)
 
     from .bot_telegram import start_bot as _start_bot
-    _bot_instance = _start_bot(_get_gateway())
+    # Disabled bots must not initialize the optional AI/http client.  Besides
+    # doing unnecessary work, a damaged AI config used to prevent the entire
+    # local panel from starting.
+    try:
+        bot_cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8")).get("bot", {})
+    except (OSError, json.JSONDecodeError):
+        bot_cfg = {}
+    needs_gateway = bot_cfg.get("enabled", False) and bot_cfg.get("platform", "").lower() == "telegram"
+    _bot_instance = _start_bot(_get_gateway() if needs_gateway else None)
 
     # 事件播报器：挂上 QQ 出口（没配 QQ 也能跑，只发 ntfy）
     from .broadcaster import init_broadcaster
