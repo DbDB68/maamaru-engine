@@ -47,6 +47,27 @@ class SnapshotMixin:
         Yields:
             str: 执行状态消息
         """
+        # 收工回城可能在长时间挂机后加载几十秒。即使战斗流程自己的回城
+        # 确认先超时了，盘点也要独立等到目录真正可用，不能马上撞导航失败。
+        if phase == "after":
+            yield "[快照] 等待本丸加载完成、目录恢复可用..."
+            ready = False
+            deadline = time.monotonic() + 90.0
+            last_notice = time.monotonic()
+            while time.monotonic() < deadline:
+                self.maa.screenshot(force=True)
+                if (self.maa.exists("menu/ui目录.png")
+                        or self.maa.exists("目录.png", threshold=0.7)):
+                    ready = True
+                    break
+                if time.monotonic() - last_notice >= 15.0:
+                    yield "[快照] 游戏仍在回城加载，继续等待..."
+                    last_notice = time.monotonic()
+                time.sleep(1.0)
+            if not ready:
+                yield "[快照] 等待 90 秒后目录仍不可用，取消本次收工盘点"
+                return
+
         yield "[快照] 正在导航到锻刀..."
         for nav_msg in self.navigate_to_stream("锻刀"):
             yield nav_msg

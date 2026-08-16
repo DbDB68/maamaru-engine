@@ -1465,6 +1465,64 @@ async def api_data_runs(limit: int = 20, script: str = ""):
     }
 
 
+@app.post("/api/data/runs/{run_id}/attach-inventory")
+async def api_attach_run_inventory(run_id: str):
+    """把用户刚手动盘点的库存补为指定任务的收工快照。"""
+    inventory_path = STATUS_DIR / "inventory.json"
+    try:
+        snapshot = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return JSONResponse(
+            {"ok": False, "reason": "还没有库存快照，请先运行“库存快照”"}, status_code=400)
+    except (OSError, ValueError):
+        return JSONResponse(
+            {"ok": False, "reason": "最近的库存快照无法读取，请重新盘点"}, status_code=400)
+    captured_ts = inventory_path.stat().st_mtime
+    captured_at = str(snapshot.get("captured_at") or "")
+    try:
+        captured_ts = time.mktime(time.strptime(captured_at, "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        pass
+    from touken.telemetry import get_telemetry_store
+    try:
+        summary = get_telemetry_store().attach_inventory_snapshot(
+            run_id, snapshot, captured_ts=captured_ts)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "run": summary}
+
+
+@app.get("/api/data/human-reports")
+async def api_human_reports(limit: int = 200):
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    store = get_telemetry_store()
+    return {"schema_version": TELEMETRY_SCHEMA_VERSION,
+            "items": store.human_reports(limit=limit),
+            "inventory_gaps": store.inventory_gaps(limit=50)}
+
+
+@app.post("/api/data/human-reports")
+async def api_add_human_report(request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        item = get_telemetry_store().add_human_report(
+            occurred_at=float(body.get("occurred_at") or time.time()),
+            activities=body.get("activities") or [], note=body.get("note", ""),
+            source=body.get("source", "proactive"), gap_key=body.get("gap_key"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "item": item}
+
+
+@app.delete("/api/data/human-reports/{report_id}")
+async def api_delete_human_report(report_id: int):
+    from touken.telemetry import get_telemetry_store
+    if not get_telemetry_store().delete_human_report(report_id):
+        return JSONResponse({"ok": False, "reason": "找不到这条审神者报备"}, status_code=404)
+    return {"ok": True}
+
+
 @app.get("/api/data/ocr")
 async def api_data_ocr(limit: int = 100, script: str = "",
                        matched: bool | None = None):

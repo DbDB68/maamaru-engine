@@ -500,7 +500,11 @@ class SortieMixin:
         return self.maa.template_match(template, roi)
 
     def _return_home_from_march(self, cfg) -> bool:
-        """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。"""
+        """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。
+
+        长时间挂机后游戏回本丸偶尔会卡在加载过渡几十秒。这里必须等到本丸
+        标志实际出现，不能只因点击了确认按钮就把后续盘点放出去。
+        """
         stop_btn = None
         for _ in range(6):
             self.maa.screenshot(force=True)
@@ -517,7 +521,8 @@ class SortieMixin:
         if yes:
             self.maa.click(yes)
         time.sleep(2.0)
-        for _ in range(15):
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
             self.maa.screenshot(force=True)
             if self.maa.template_match(cfg["home_ui"]["template"]):
                 return True

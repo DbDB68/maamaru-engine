@@ -85,6 +85,7 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["loops"], 3)
         self.assertEqual(result["average_loop_seconds"], 100)
         self.assertEqual(result["estimated_6h_loops"], 216)
+        self.assertEqual(result["play_duration_seconds"], 220)
         self.assertEqual(result["repair_sessions"], 1)
         self.assertEqual(result["repaired_swords"], 2)
         self.assertEqual(result["speedups"], 2)
@@ -102,6 +103,77 @@ class TelemetryStoreTests(unittest.TestCase):
         result = self.store.run_summary("run-1")
         self.assertEqual(result["repair_sessions"], 0)
         self.assertEqual(result["repaired_swords"], 0)
+
+    def test_manual_inventory_snapshot_completes_run_comparison(self):
+        self.store.start_run("run-1", "osaka", started_at=100)
+        conn = self.store._conn()
+        conn.execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (110, 'run-1', 'osaka', 'inventory.captured', ?)",
+            (__import__('json').dumps({"phase": "before", "resources": {"小判": 1000}}),),
+        )
+        conn.commit()
+        self.store.finish_run("run-1", "completed", ended_at=200)
+
+        result = self.store.attach_inventory_snapshot(
+            "run-1", {"resources": {"小判": 1300}}, captured_ts=220)
+
+        self.assertTrue(result["has_resource_comparison"])
+        self.assertEqual(result["resource_delta"], {"小判": 300})
+        event = self.store.recent_events(event_type="inventory.captured")[0]
+        self.assertEqual(event["run_id"], "run-1")
+        self.assertEqual(event["payload"]["source"], "manual_attach")
+
+    def test_manual_inventory_snapshot_rejects_stale_data(self):
+        self.store.start_run("run-1", "osaka", started_at=100)
+        self.store.finish_run("run-1", "completed", ended_at=200)
+
+        with self.assertRaisesRegex(ValueError, "早于这轮收工"):
+            self.store.attach_inventory_snapshot(
+                "run-1", {"resources": {"小判": 1300}}, captured_ts=190)
+
+    def test_manual_inventory_snapshot_rejects_older_run(self):
+        conn = self.store._conn()
+        for run_id, started_at, ended_at in (("old", 100, 150), ("latest", 200, 250)):
+            self.store.start_run(run_id, "osaka", started_at=started_at)
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, ?, 'osaka', 'inventory.captured', ?)",
+                (started_at + 1, run_id,
+                 __import__('json').dumps({"phase": "before", "resources": {"小判": 1000}})),
+            )
+            conn.commit()
+            self.store.finish_run(run_id, "completed", ended_at=ended_at)
+
+        with self.assertRaisesRegex(ValueError, "只能给最近一条"):
+            self.store.attach_inventory_snapshot(
+                "old", {"resources": {"小判": 1300}}, captured_ts=300)
+
+    def test_inventory_gap_can_be_explained_without_changing_run_delta(self):
+        self.store.start_run("first", "osaka", started_at=100)
+        self.store.start_run("second", "osaka", started_at=300)
+        conn = self.store._conn()
+        samples = [
+            (200, "first", {"phase": "after", "resources": {"小判": 1000, "木炭": 500}}),
+            (310, "second", {"phase": "before", "resources": {"小判": 1200, "木炭": 480}}),
+        ]
+        for ts, run_id, payload in samples:
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, ?, 'osaka', 'inventory.captured', ?)",
+                (ts, run_id, __import__('json').dumps(payload)),
+            )
+        conn.commit()
+
+        gap = self.store.inventory_gaps()[0]
+        self.assertEqual(gap["resource_delta"], {"小判": 200, "木炭": -20})
+        self.assertFalse(gap["reported"])
+        report = self.store.add_human_report(
+            occurred_at=300, activities=["领邮箱"], source="gap",
+            gap_key=gap["gap_key"])
+        self.assertEqual(report["activities"], ["领邮箱"])
+        self.assertTrue(self.store.inventory_gaps()[0]["reported"])
+        self.assertEqual(self.store.recent_events(event_type="human.report"), [])
 
     def test_prune_only_removes_expired_observations_and_events(self):
         self.store.record_event("keep", {})

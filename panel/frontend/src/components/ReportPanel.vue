@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
-const days = ref(7), summary = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), summary = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const unreportedGaps = computed(() => inventoryGaps.value.filter(item => !item.reported))
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
   'osaka.floor_completed': '大阪城完成一圈', 'sortie.completed': '出阵完成',
@@ -21,7 +22,9 @@ const rewardClaims = computed(() => countEvents('task_rewards.claimed'))
 const sortieCount = computed(() => countEvents('sortie.completed', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed'))
 const expeditions = computed(() => countEvents('expedition.dispatched'))
 const practiceWins = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isWin(item.payload)).length)
+const practiceLosses = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isLoss(item.payload)).length)
 const practiceTotal = computed(() => countEvents('practice.result'))
+const practiceUnknown = computed(() => Math.max(0, practiceTotal.value - practiceWins.value - practiceLosses.value))
 const pumpkinBoards = computed(() => countEvents('pumpkin.board_completed'))
 const pumpkinTokens = computed(() => countEvents('pumpkin.token_used'))
 const estimateHours = ref(6), customHours = ref(6), customEstimate = ref(false)
@@ -85,7 +88,20 @@ const sortieGroups = computed(() => {
 })
 function isWin(payload: any) {
   const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
-  return value.includes('胜') || value === 'win' || value === 'won'
+  return value.includes('胜') || value.startsWith('win') || value === 'won'
+}
+function isLoss(payload: any) {
+  const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
+  return value.includes('败') || value.startsWith('lose') || value === 'lost'
+}
+function practiceHeadline() {
+  if (!practiceTotal.value) return '—'
+  if (practiceUnknown.value === practiceTotal.value) return `${practiceTotal.value} 场待确认`
+  return `${practiceWins.value} 胜 / ${practiceLosses.value} 负`
+}
+function practiceCaption() {
+  if (!practiceTotal.value) return '还没有可确认的演练记录'
+  return practiceUnknown.value ? `另有 ${practiceUnknown.value} 场结果未识别` : `已确认 ${practiceTotal.value} 场结果`
 }
 function repairCount(payload: any) {
   const queued = payload?.queued || []
@@ -132,6 +148,18 @@ function loopTime(seconds: number | null) {
   const value = Math.round(seconds)
   return `${Math.floor(value / 60)}分${String(value % 60).padStart(2, '0')}秒/圈`
 }
+function elapsedTime(seconds: number | null) {
+  if (seconds == null || seconds < 0) return '用时未记录'
+  const minutes = Math.max(0, Math.round(seconds / 60))
+  const hours = Math.floor(minutes / 60), rest = minutes % 60
+  return hours ? `${hours}小时${rest ? `${rest}分` : ''}` : `${rest}分钟`
+}
+function runElapsedSeconds(run: any) {
+  const precise = Number(run.play_duration_seconds)
+  if (Number.isFinite(precise) && precise >= 0) return precise
+  const fallback = Number(run.duration_seconds)
+  return Number.isFinite(fallback) && fallback >= 0 ? fallback : null
+}
 function runTitle(run: any) { return run.selected_floor == null ? `未指定层数 · ${run.loops} 圈` : `${run.selected_floor}F · ${run.loops} 圈` }
 function chooseHours(value: number) { estimateHours.value = value; customHours.value = value; customEstimate.value = false }
 function chooseCustom() { customEstimate.value = true; estimateHours.value = Math.max(.5, Number(customHours.value) || 1) }
@@ -147,13 +175,107 @@ function deltaStats(run: any) {
   const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
   return order.filter(name => run.resource_delta?.[name]).map(name => `${name} ${run.resource_delta[name] > 0 ? '+' : ''}${run.resource_delta[name].toLocaleString()}`).join(' · ')
 }
+function kobanPerHour(run: any) {
+  const koban = Number(run.resource_delta?.['小判'])
+  const seconds = Number(runElapsedSeconds(run))
+  return Number.isFinite(koban) && seconds > 0 ? Math.round(koban * 3600 / seconds) : null
+}
+function kobanPerHourLabel(run: any) {
+  const value = kobanPerHour(run)
+  return value == null ? '' : value.toLocaleString()
+}
+const attachingRun = ref('')
+const inventoryNotice = ref<Record<string, string>>({})
+const latestInventoriedRun = computed(() => runs.value.find(run => run.has_before_snapshot))
+function canAttachInventory(run: any) {
+  return latestInventoriedRun.value?.run_id === run.run_id && !run.has_after_snapshot
+}
+async function attachInventory(run: any) {
+  const confirmed = window.confirm(
+    '补盘会把“最近库存快照”当作这轮的收工数据。\n\n'
+    + '只有在挂机结束后没有领邮件、领奖、锻刀、手入、购买或其他人工操作时，差值才可信。\n\n'
+    + '确定这份快照没有被其他操作污染吗？',
+  )
+  if (!confirmed) return
+  attachingRun.value = run.run_id
+  inventoryNotice.value = { ...inventoryNotice.value, [run.run_id]: '' }
+  try {
+    await api.attachRunInventory(run.run_id)
+    await load(days.value)
+  } catch (cause) {
+    inventoryNotice.value = { ...inventoryNotice.value, [run.run_id]: cause instanceof Error ? cause.message : '补盘失败' }
+  } finally { attachingRun.value = '' }
+}
+const reportMode = ref('')
+const reportGap = ref<any>(null)
+const reportSaving = ref(false)
+const reportForm = ref<{ activities: string[]; note: string; occurred_at: string }>({ activities: [], note: '', occurred_at: '' })
+const humanActivities = ['领邮箱', '手动领奖', '手动出阵', '锻刀', '手入', '万屋购买', '其他操作']
+function localDateTime(timestamp = Date.now()) {
+  const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
+  return date.toISOString().slice(0, 16)
+}
+function openProactiveReport() {
+  reportMode.value = reportMode.value === 'proactive' ? '' : 'proactive'
+  reportGap.value = null
+  reportForm.value = { activities: [], note: '', occurred_at: localDateTime() }
+}
+function openGapReport(gap: any) {
+  reportMode.value = `gap:${gap.gap_key}`
+  reportGap.value = gap
+  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(gap.ended_at * 1000) }
+}
+function toggleReportActivity(value: string) {
+  const clean = '没有其他操作'
+  const current = reportForm.value.activities
+  if (current.includes(value)) reportForm.value.activities = current.filter(item => item !== value)
+  else if (value === clean) reportForm.value.activities = [clean]
+  else reportForm.value.activities = [...current.filter(item => item !== clean), value]
+}
+async function refreshHumanReports() {
+  const result = await api.humanReports()
+  humanReports.value = result.items
+  inventoryGaps.value = result.inventory_gaps
+}
+async function saveHumanReport(skip = false) {
+  reportSaving.value = true
+  try {
+    const activities = skip ? ['暂不说明'] : reportForm.value.activities
+    await api.addHumanReport({
+      occurred_at: new Date(reportForm.value.occurred_at).getTime() / 1000,
+      activities,
+      note: reportForm.value.note,
+      source: reportGap.value ? 'gap' : 'proactive',
+      gap_key: reportGap.value?.gap_key || null,
+    })
+    await refreshHumanReports()
+    reportMode.value = ''; reportGap.value = null
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
+  finally { reportSaving.value = false }
+}
+async function skipGap(gap: any) {
+  openGapReport(gap)
+  await saveHumanReport(true)
+}
+async function removeHumanReport(item: any) {
+  if (!window.confirm('确定删除这条审神者报备吗？狐狸账和库存账不会受影响。')) return
+  try {
+    await api.deleteHumanReport(item.id); await refreshHumanReports()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备删除失败' }
+}
+function gapDelta(gap: any) {
+  const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
+  return order.filter(name => gap.resource_delta?.[name]).map(name => `${name} ${gap.resource_delta[name] > 0 ? '+' : ''}${gap.resource_delta[name].toLocaleString()}`).join(' · ')
+}
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextEvents, nextRuns] = await Promise.all([api.dataSummary(nextDays), api.dataEvents(500), api.dataRuns(30)])
+    const [nextSummary, nextEvents, nextRuns, nextHuman] = await Promise.all([api.dataSummary(nextDays), api.dataEvents(500), api.dataRuns(30), api.humanReports()])
     summary.value = nextSummary
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.script === 'osaka' && item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
+    humanReports.value = nextHuman.items
+    inventoryGaps.value = nextHuman.inventory_gaps
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
   finally { loading.value = false }
@@ -172,8 +294,27 @@ onMounted(() => load())
       <article><small>领取任务奖励</small><strong>{{ rewardClaims }} 次</strong><span>确认领取后按钮变灰才计数</span></article>
       <article><small>出阵完成</small><strong>{{ sortieCount }} 次</strong><span>按确认完成的圈数计数</span></article>
       <article><small>派遣远征</small><strong>{{ expeditions }} 次</strong><span>确认“远征中”后记录</span></article>
-      <article><small>演练战绩</small><strong>{{ practiceWins }} / {{ practiceTotal }}</strong><span>胜场 / 已记录场次</span></article>
+      <article><small>演练战绩</small><strong>{{ practiceHeadline() }}</strong><span>{{ practiceCaption() }}</span></article>
     </div>
+    <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值提醒">
+      <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
+      <form v-if="reportGap" @submit.prevent="saveHumanReport(false)">
+        <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
+        <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
+        <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" placeholder="可选，不用写具体资源数字"></label>
+        <p>说明只给这段差值加一个上下文，不会改写狐狸账或库存账。</p><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button>
+      </form>
+    </section>
+    <section class="human-report-panel">
+      <header><div><h3>📝 审神者报备</h3><small>你只说做过什么，具体数字交给库存盘点。</small></div><button type="button" class="secondary" @click="openProactiveReport">{{ reportMode === 'proactive' ? '收起' : '主动报备一下' }}</button></header>
+      <form v-if="reportMode === 'proactive'" @submit.prevent="saveHumanReport(false)">
+        <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
+        <fieldset><legend>想给まあ丸报备什么？</legend><button v-for="value in humanActivities" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
+        <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" placeholder="可选，不用写具体资源数字"></label>
+        <p>报备只作为差值的上下文，不会改写狐狸账或库存账。</p><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button>
+      </form>
+      <details v-if="humanReports.length"><summary>查看已有报备（{{ humanReports.length }}）</summary><ul><li v-for="item in humanReports.slice(0, 20)" :key="item.id"><time>{{ eventTime(item.occurred_at) }}</time><span><b>{{ item.activities.join('、') }}</b>{{ item.note }}</span><button type="button" aria-label="删除这条报备" @click="removeHumanReport(item)">×</button></li></ul></details>
+    </section>
     <div class="report-body">
       <div>
         <section v-if="runs.length" class="report-runs">
@@ -181,6 +322,7 @@ onMounted(() => load())
           <article v-for="(run, index) in runs.slice(0, 5)" :key="run.run_id" :class="{ featured: index === 0 }">
             <time>{{ eventTime(run.started_at) }}</time>
             <div><strong>{{ runTitle(run) }}</strong>
+              <p class="run-duration">出阵用时 <b>{{ elapsedTime(runElapsedSeconds(run)) }}</b><small>{{ run.play_duration_seconds != null ? '从开工到最后一圈完成' : '旧记录按整轮任务用时估算' }}</small></p>
               <div v-if="index === 0 && run.average_loop_seconds" class="run-estimator">
                 <div><small>平均速度</small><b>{{ loopTime(run.average_loop_seconds) }}</b></div>
                 <div class="estimate-result"><small>预计完成</small><b>≈ {{ estimatedLoops(run) }} 圈</b></div>
@@ -188,8 +330,16 @@ onMounted(() => load())
                 <nav aria-label="预计挂机时间"><button v-for="hour in [1, 6, 8]" :key="hour" type="button" :class="{ active: !customEstimate && estimateHours === hour }" @click="chooseHours(hour)">{{ hour }}小时</button><button type="button" :class="{ active: customEstimate }" @click="chooseCustom">自定义</button></nav>
               </div>
               <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
-              <div class="run-upkeep" aria-label="本轮养护"><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
-              <p v-if="deltaStats(run)" class="run-delta"><small>家底变化</small>{{ deltaStats(run) }}</p><small v-else-if="!run.has_resource_comparison">这轮没有完整的前后库存快照</small></div>
+              <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
+              <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存账 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span></p>
+              <div v-else-if="!run.has_resource_comparison" class="run-inventory-missing">
+                <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>
+                <small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填，以免把中间的变化算错轮次。</small>
+                <small v-else>这轮没有完整的前后库存快照，无法计算变化。</small>
+                <button v-if="canAttachInventory(run)" type="button" class="secondary" :disabled="attachingRun === run.run_id" @click="attachInventory(run)">{{ attachingRun === run.run_id ? '正在补盘……' : '补上最近盘点' }}</button>
+                <em v-if="inventoryNotice[run.run_id]">{{ inventoryNotice[run.run_id] }}</em>
+              </div>
+            </div>
           </article>
         </section>
         <section class="report-sorties">

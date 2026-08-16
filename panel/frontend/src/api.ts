@@ -3,7 +3,7 @@ import type { ScriptParams, ScriptsResponse } from './types'
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
   const body = await response.json()
-  if (!response.ok) throw new Error(body.detail || body.error || `请求失败（${response.status}）`)
+  if (!response.ok) throw new Error(body.detail || body.error || body.reason || `请求失败（${response.status}）`)
   return body as T
 }
 
@@ -28,6 +28,12 @@ export const api = {
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
   dataEvents: (limit = 100) => request<{ schema_version: number; items: any[] }>(`/api/data/events?limit=${limit}`),
   dataRuns: (limit = 20) => request<{ schema_version: number; items: any[] }>(`/api/data/runs?limit=${limit}`),
+  attachRunInventory: (runId: string) => request<{ ok: boolean; run: any }>(`/api/data/runs/${encodeURIComponent(runId)}/attach-inventory`, { method: 'POST' }),
+  humanReports: () => request<{ schema_version: number; items: any[]; inventory_gaps: any[] }>('/api/data/human-reports?limit=500'),
+  addHumanReport: (value: any) => request<{ ok: boolean; item: any }>('/api/data/human-reports', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  deleteHumanReport: (id: number) => request<{ ok: boolean }>(`/api/data/human-reports/${id}`, { method: 'DELETE' }),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {

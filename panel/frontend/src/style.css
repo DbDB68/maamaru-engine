@@ -1266,6 +1266,39 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .report-stats article { display: grid; gap: 6px; min-height: 104px; padding: 15px; align-content: center; }
 .report-stats small, .report-stats span, .report-observation small { color: var(--ink-dim); font-size: 12px; line-height: 1.5; }
 .report-stats strong { font-size: 26px; line-height: 1.2; }
+.human-report-panel, .inventory-gap-panel { margin-bottom: 14px; padding: 13px 14px; background: var(--paper-card); border: 1px solid var(--paper-line); }
+.human-report-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.human-report-panel h3 { margin: 0 0 3px; }
+.human-report-panel header small { color: var(--ink-dim); }
+.inventory-gap-alert { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; margin-top: 10px; padding: 10px; background: var(--fox-gold-pale); border-left: 3px solid var(--fox-gold); }
+.inventory-gap-alert p { margin: 3px 0; color: var(--accent); }
+.inventory-gap-alert small { color: var(--ink-dim); }
+.inventory-gap-alert button { min-height: 32px; padding: 5px 9px; }
+.human-report-panel > form { display: grid; grid-template-columns: minmax(180px, .35fr) minmax(0, 1fr) auto; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--paper-line); }
+.human-report-panel form label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 11px; }
+.human-report-panel form input { width: 100%; min-height: 34px; color: var(--ink); background: var(--paper-panel); border: 1px solid var(--paper-line); }
+.human-report-panel form fieldset { grid-column: 2 / -1; display: flex; align-content: start; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; border: 0; }
+.human-report-panel form legend { width: 100%; margin-bottom: 4px; color: var(--ink-dim); font-size: 11px; }
+.human-report-panel form fieldset button { min-height: 31px; padding: 4px 8px; color: var(--ink-dim); background: var(--paper-panel); border: 1px solid var(--paper-line); }
+.human-report-panel form fieldset button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); }
+.human-report-panel form .human-report-note { grid-column: 1 / -1; }
+.human-report-panel form p { grid-column: 1 / -2; margin: 0; color: var(--ink-dim); font-size: 11px; }
+.human-report-panel form > button { justify-self: end; min-height: 34px; }
+.inventory-gap-panel > form { display: grid; grid-template-columns: minmax(180px, .35fr) minmax(0, 1fr) auto; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--paper-line); }
+.inventory-gap-panel form label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 11px; }
+.inventory-gap-panel form input { width: 100%; min-height: 34px; color: var(--ink); background: var(--paper-panel); border: 1px solid var(--paper-line); }
+.inventory-gap-panel form fieldset { grid-column: 2 / -1; display: flex; align-content: start; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; border: 0; }
+.inventory-gap-panel form legend { width: 100%; margin-bottom: 4px; color: var(--ink-dim); font-size: 11px; }
+.inventory-gap-panel form fieldset button { min-height: 31px; padding: 4px 8px; color: var(--ink-dim); background: var(--paper-panel); border: 1px solid var(--paper-line); }
+.inventory-gap-panel form fieldset button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); }
+.inventory-gap-panel form .human-report-note { grid-column: 1 / -1; }
+.inventory-gap-panel form p { grid-column: 1 / -2; margin: 0; color: var(--ink-dim); font-size: 11px; }
+.inventory-gap-panel form > button { justify-self: end; min-height: 34px; }
+.human-report-panel details { margin-top: 9px; color: var(--ink-dim); font-size: 12px; }
+.human-report-panel details ul { display: grid; gap: 4px; margin: 7px 0 0; padding: 0; list-style: none; }
+.human-report-panel details li { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 8px; padding: 5px 7px; background: var(--paper-panel); }
+.human-report-panel details li span { display: flex; flex-wrap: wrap; gap: 6px; }
+.human-report-panel details li button { color: var(--danger); background: transparent; border: 0; }
 .report-body { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }
 .report-events, .report-sorties, .report-runs, .report-observation { padding: 14px; }
 .report-sorties, .report-runs { margin-bottom: 12px; }
@@ -1278,8 +1311,18 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .report-runs article div { display: grid; gap: 4px; }
 .report-runs article > div > strong { font-size: 17px; }
 .report-runs article p { font-size: 13px; line-height: 1.6; }
+.report-runs .run-duration { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; color: var(--ink-dim); }
+.report-runs .run-duration b { color: var(--ink); font-size: 14px; }
+.report-runs .run-duration small { margin-left: 3px; }
 .report-runs .run-delta { display: grid; gap: 3px; margin-top: 5px; padding: 8px 10px; color: var(--accent); background: var(--paper-panel); border-left: 3px solid var(--fox-gold); }
 .report-runs .run-delta small { color: var(--ink-dim); }
+.report-runs .run-delta small em { margin-left: 5px; padding: 1px 4px; color: var(--accent); border: 1px solid var(--paper-line); font-style: normal; }
+.report-runs .run-delta span { color: var(--ink-dim); font-size: 11px; }
+.run-inventory-missing { display: flex !important; align-items: center; flex-wrap: wrap; gap: 8px !important; margin-top: 5px; padding: 8px 10px; background: var(--paper-panel); border-left: 3px solid var(--paper-line); }
+.run-inventory-missing small { flex: 1 1 360px; line-height: 1.55; }
+.run-inventory-missing small strong { display: block; margin-top: 3px; color: var(--danger); }
+.run-inventory-missing button { min-height: 32px; padding: 5px 10px; white-space: nowrap; }
+.run-inventory-missing em { flex-basis: 100%; color: var(--danger); font-size: 11px; font-style: normal; }
 .run-estimator { grid-template-columns: minmax(145px, 1fr) minmax(145px, 1fr); gap: 12px 20px !important; margin: 8px 0; padding: 14px; background: var(--paper-panel); border: 1px solid var(--paper-line); }
 .run-estimator > div { gap: 2px !important; }
 .run-estimator .estimate-control { align-content: center; }
@@ -1292,6 +1335,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .run-estimator button { padding: 5px 8px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); font-size: 11px; }
 .run-estimator button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); }
 .run-upkeep { display: flex !important; grid-template-columns: none !important; flex-wrap: wrap; gap: 7px !important; margin-top: 3px; }
+.run-upkeep .ledger-label { flex-basis: 100%; color: var(--ink-dim); }
 .run-upkeep span { padding: 6px 9px; color: var(--ink-dim); background: var(--paper-panel); border: 1px solid var(--paper-line); font-size: 12px; }
 .run-upkeep b { color: var(--ink); font-size: 14px; }
 .report-sorties h3, .report-sorties p { margin: 0; }
@@ -1322,6 +1366,8 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
   .report-body { grid-template-columns: 1fr; }
   .sortie-list { grid-template-columns: 1fr; }
   .run-estimator { grid-template-columns: 1fr 1fr; }
+  .inventory-gap-alert { grid-template-columns: 1fr auto; }
+  .inventory-gap-alert > div { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
   .report-panel { padding: 12px; }
@@ -1331,6 +1377,13 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
   .report-runs article { grid-template-columns: 1fr; }
   .run-estimator { grid-template-columns: 1fr; }
   .run-estimator nav { justify-content: flex-start; flex-wrap: wrap; }
+  .human-report-panel > header { align-items: stretch; flex-direction: column; }
+  .human-report-panel > form { grid-template-columns: 1fr; }
+  .human-report-panel form fieldset, .human-report-panel form .human-report-note, .human-report-panel form p { grid-column: 1; }
+  .inventory-gap-panel > form { grid-template-columns: 1fr; }
+  .inventory-gap-panel form fieldset, .inventory-gap-panel form .human-report-note, .inventory-gap-panel form p { grid-column: 1; }
+  .human-report-panel details li { grid-template-columns: 1fr auto; }
+  .human-report-panel details time { grid-column: 1 / -1; }
 }
 
 .immediate-expedition {

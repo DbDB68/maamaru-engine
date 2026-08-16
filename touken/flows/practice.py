@@ -81,6 +81,19 @@ class PracticeMixin:
         time.sleep(1.0)
         self.maa.screenshot(force=True)
 
+        # 游戏会把本轮已经打过的结果章一直留在五名对手的行末。它比本地
+        # 时间/进程记录更可靠：3 点、15 点换一批对手时，章也会自然清空。
+        # 先把已有胜场算进去，避免同一刷新周期内二次触发又从 0 开始打。
+        existing_results = self._scan_existing_results()
+        existing_wins = sum(result.startswith("win")
+                            for result in existing_results.values())
+        if existing_results:
+            yield (f"[演练] 当前刷新场已打 {len(existing_results)} 场，"
+                   f"其中胜利 {existing_wins} 场")
+        if not dry_run and existing_wins >= max_wins:
+            yield f"[演练] 已有胜场 {existing_wins}/{max_wins}，无需重复挑战，收工"
+            return
+
         # ========== 2. 列表扫描：樱花标记的队长靠后看 ==========
         order = self._scan_list_order()
         yield f"[演练] 扫描顺序（普刀队长优先）: {[i + 1 for i in order]}"
@@ -119,7 +132,8 @@ class PracticeMixin:
             yield f"[演练] 收工：候选 {len(candidates)} 队（演习模式，未真打）"
             return
 
-        wins = 0
+        wins = existing_wins
+        new_wins = 0
         for _, row_idx, _ in candidates:
             if wins >= max_wins:
                 break
@@ -135,6 +149,7 @@ class PracticeMixin:
                                   target=max_wins, dry_run=dry_run)
             if won:
                 wins += 1
+                new_wins += 1
                 yield f"[演练] 胜场 {wins}/{max_wins}（{result}）"
             else:
                 yield f"[演练] 这场结果: {result}"
@@ -145,9 +160,26 @@ class PracticeMixin:
                     yield nav_msg
                 time.sleep(1.0)
 
-        yield f"[演练] 收工：赢 {wins} 场" + ("（演习模式，未真打）" if dry_run else "")
+        yield (f"[演练] 收工：本次新赢 {new_wins} 场，当前刷新场累计 {wins} 场"
+               + ("（演习模式，未真打）" if dry_run else ""))
 
     # ========== 列表层 ==========
+
+    def _scan_existing_results(self):
+        """读取五行现存结算章，返回 ``{行号: win/lose}``。
+
+        这里只认明确的“胜利/败北”文字；OCR 不清时宁可不计，不能把一个
+        仍可挑战的对手误当成已经获胜。
+        """
+        results = {}
+        for i, cy in enumerate(_LIST_CY):
+            tokens = self.maa.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
+            text = "".join(t for t, _ in tokens)
+            if "胜利" in text:
+                results[i] = "win"
+            elif "败北" in text:
+                results[i] = "lose"
+        return results
 
     def _scan_list_order(self):
         """返回扫描顺序（行号列表）：没打过的行才扫，队长没樱花的优先"""
