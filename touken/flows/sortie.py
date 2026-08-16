@@ -135,6 +135,22 @@ class SortieMixin:
                     yield "[异去] 没能从过去切换到异去，停止"
                     return
 
+                # 每日首次进异去会渐入剧情演出：进场前右下角“决定”按钮还看得见，
+                # 动画一盖上来就被挡住，脚本在动画里乱点会彻底打乱卡死。
+                # 只点安全区把动画跳完，直到“决定”按钮完整出现，再走章节选择。
+                if cfg_key == "yosari":
+                    decide_ok = False
+                    for _ in range(30):
+                        self.maa.screenshot(force=True)
+                        if self.maa.template_match(cfg["decide_button"]["template"]):
+                            decide_ok = True
+                            break
+                        self._click_point(cfg["skip_tap"])
+                        time.sleep(0.8)
+                    if not decide_ok:
+                        yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
+                        return
+
                 # ========== 2. 选章节 → 决定 ==========
                 self._click_point(map_cfg["chapters"][str(chapter)])
                 time.sleep(0.5)
@@ -410,7 +426,9 @@ class SortieMixin:
         if self.maa.ocr(expected, roi):
             return True
         self._click_point(entry.get("target", [978, 93]))
-        time.sleep(1.2)
+        # 异去是渐入进场的动画演出：进场途中归城提灯会被盖住/误认，
+        # 先等 2 秒让页面稳定再认，别在动画里乱判
+        time.sleep(2.0)
         for _ in range(6):
             self.maa.screenshot(force=True)
             if self.maa.ocr(expected, roi):
