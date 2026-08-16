@@ -396,7 +396,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .resources-card { grid-column: auto; }
   .resource-grid { grid-template-columns: 1fr 1fr; }
-  .log-panel { min-height: 520px; }
+  .log-panel { height: 520px; }
   .single-layout { height: calc(100vh - 70px); padding: 12px; }
   .candidate-grid { grid-template-columns: 1fr 1fr; }
   .drawer-candidates { grid-template-columns: 1fr 1fr; }
@@ -419,6 +419,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 @media (min-width: 721px) and (max-width: 1100px) {
   .overview-layout { grid-template-columns: 170px minmax(0, 1fr); height: auto; overflow: visible; }
+  .home-center .log-panel { height: 520px; }
   .home-dashboard { grid-column: 1 / -1; overflow: visible; }
   .home-dashboard .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
   .home-dashboard .resources-card { grid-column: 1 / -1; }

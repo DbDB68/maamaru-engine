@@ -17,6 +17,10 @@ const eventNames: Record<string, string> = {
   'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
   'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
 }
+const scriptNames: Record<string, string> = {
+  osaka: '大阪城', sortie: '合战场', yosari: '异去', raid: '联队战',
+  pumpkin: '南瓜大作战', daily: '一键日课',
+}
 function countEvents(...types: string[]) { return events.value.filter(item => types.includes(item.event_type)).length }
 const rewardClaims = computed(() => countEvents('task_rewards.claimed'))
 const sortieCount = computed(() => countEvents('sortie.completed', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed'))
@@ -160,7 +164,11 @@ function runElapsedSeconds(run: any) {
   const fallback = Number(run.duration_seconds)
   return Number.isFinite(fallback) && fallback >= 0 ? fallback : null
 }
-function runTitle(run: any) { return run.selected_floor == null ? `未指定层数 · ${run.loops} 圈` : `${run.selected_floor}F · ${run.loops} 圈` }
+function runTitle(run: any) {
+  const name = scriptNames[run.script] || '挂机任务'
+  if (run.script === 'osaka' && run.selected_floor != null) return `大阪城 ${run.selected_floor}F · ${run.loops} 圈`
+  return `${name} · ${run.loops} 圈`
+}
 function chooseHours(value: number) { estimateHours.value = value; customHours.value = value; customEstimate.value = false }
 function chooseCustom() { customEstimate.value = true; estimateHours.value = Math.max(.5, Number(customHours.value) || 1) }
 function updateCustom() { estimateHours.value = Math.max(.5, Number(customHours.value) || 1) }
@@ -273,7 +281,7 @@ async function load(nextDays = days.value) {
     const [nextSummary, nextEvents, nextRuns, nextHuman] = await Promise.all([api.dataSummary(nextDays), api.dataEvents(500), api.dataRuns(30), api.humanReports()])
     summary.value = nextSummary
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
-    runs.value = nextRuns.items.filter(item => item.script === 'osaka' && item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
+    runs.value = nextRuns.items.filter(item => item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
     humanReports.value = nextHuman.items
     inventoryGaps.value = nextHuman.inventory_gaps
     error.value = ''
@@ -332,7 +340,8 @@ onMounted(() => load())
               <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
               <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
               <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存账 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span></p>
-              <div v-else-if="!run.has_resource_comparison" class="run-inventory-missing">
+              <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span></p>
+              <div v-else class="run-inventory-missing">
                 <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>
                 <small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填，以免把中间的变化算错轮次。</small>
                 <small v-else>这轮没有完整的前后库存快照，无法计算变化。</small>
