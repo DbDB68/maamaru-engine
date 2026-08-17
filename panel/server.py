@@ -321,6 +321,17 @@ def _build_daily(agent, config_path, params):
         expedition_override=expedition_plan)
 
 
+def _build_daily_standalone(config_path, params):
+    """一键日课独立入口：不套 run 级开工/收工盘点（_wrap_inventory）。
+
+    盘点时机由 daily_stream 自己管：登录落本丸后拍 before、⑫ 步骤拍 after。
+    之前套 wrapper 时，开工盘点在打开游戏/登录之前就触发，游戏没开只能
+    盲点模拟器桌面，把冷启动登录搞挂。
+    """
+    agent = _make_agent(config_path)
+    yield from _build_daily(agent, config_path, params)
+
+
 def _build_raid(agent, config_path, params):
     runs = _run_count(params, 3, "rounds")
     yield from agent.raid_stream(
@@ -533,7 +544,7 @@ def _build_simple(stream_method_name):
 
 
 register_script("daily", "一键日课", "",
-                 _wrap_inventory("日课", _build_daily),
+                 _build_daily_standalone,
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
                           "options": _DAILY_STEPS, "default": _DAILY_STEPS,
                            "help": "这里的出阵安排是日课专用配置，不会修改各玩法的单独配置。"},

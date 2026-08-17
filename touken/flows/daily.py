@@ -138,6 +138,29 @@ class DailyMixin:
             self._flush_report(report, finished=False)
             time.sleep(1.0)
 
+        # ========== ①.5 开工盘点（登录落本丸后、正式开工前拍一张家底）==========
+        # 断点续跑可能没勾「登录」：先探测本丸真的可操作才拍，绝不盲拍。
+        # （血泪：套在日课外面的 run 级开工盘点会在打开游戏之前触发，游戏没开
+        #   只能盲点模拟器桌面，把冷启动登录搞挂。）
+        if _w("库存快照"):
+            yield "========== 开工盘点 =========="
+            try:
+                ready = False
+                for _ in range(5):
+                    self.maa.screenshot(force=True)
+                    if (self.maa.exists("menu/ui目录.png")
+                            or self.maa.exists("目录.png", threshold=0.7)):
+                        ready = True
+                        break
+                    time.sleep(1.0)
+                if not ready:
+                    yield "[日课] 游戏不在本丸（登录没落地？），跳过开工盘点"
+                else:
+                    for msg in self.status_snapshot_stream(phase="before"):
+                        yield msg
+            except Exception as exc:
+                yield f"[日课] 开工盘点翻车（不影响跑）: {exc}"
+
         # ========== ②~⑧ 各步 ==========
         steps = [
             ("签到", lambda: self.signin_stream()),
@@ -156,7 +179,7 @@ class DailyMixin:
             ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),
-            ("库存快照", lambda: self.status_snapshot_stream()),
+            ("库存快照", lambda: self.status_snapshot_stream(phase="after")),
         ]
         titles = {
             "签到": "② 签到",
