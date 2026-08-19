@@ -52,7 +52,9 @@ def _masks(img):
 
 
 def _outline_ratio(img, x, y, w, h, band=6):
-    """外圈暗像素占比：真节点有一圈黑描边，白墙/白建筑碎片没有。"""
+    """外圈暗像素占比：真节点有一圈黑描边，白墙/白建筑碎片没有。
+    band 是像素宽度，调用方按图像缩放比例传（放大3倍就传18），
+    保证量的是同样物理宽度的外圈。"""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     v = hsv[:, :, 2]
     H, W = v.shape
@@ -97,8 +99,10 @@ def detect(img, roi=None, scale=1):
             solidity = area / max(w * h, 1)
             if not (1.1 < aspect < 3.5 and solidity > 0.55):
                 continue
-            # 真节点有一圈黑描边（占比≈0.6），白墙碎片只有≈0.18——0.35 卡中间
-            if _outline_ratio(sub, x, y, w, h) < 0.35:
+            # 真节点有一圈黑描边（占比≈0.6），白墙碎片只有≈0.18，
+            # 带4条粗连线的枢纽点会稀释到≈0.33——阈值 0.28 卡中间。
+            # band 固定 6px：胖外圈在放大图上会稀释占比，别跟着 scale 走。
+            if _outline_ratio(sub, x, y, w, h, band=6) < 0.28:
                 continue
             nodes.append({
                 "name": rule["name"], "label": rule["label"],
