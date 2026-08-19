@@ -121,6 +121,28 @@ def build_graph(img, roi=None, scale=1, edge_threshold=0.75,
                 break
         if not blocked:
             edges.append((i, j, round(score, 2)))
+
+    # 绕路规则：若 i→k、k→j 两条边都在，且 ik+kj 几乎等于 ij
+    # （比值<1.18，说明 k 就躺在 i-j 之间），那 i→j 是蹭线假边，砍。
+    # ——5-4 实测：节点11 离线段5-1 仅 13.4px，逃出"边上躺"12px 规则。
+    def _dist(a, b):
+        return float(np.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]))
+    edge_set = {(i, j) for i, j, _ in edges} | {(j, i) for i, j, _ in edges}
+    pruned = []
+    for i, j, s in edges:
+        dij = _dist(i, j)
+        fake = False
+        for k in range(len(nodes)):
+            if k in (i, j):
+                continue
+            if (i, k) in edge_set and (k, j) in edge_set:
+                if (_dist(i, k) + _dist(k, j)) < dij * 1.18:
+                    fake = True
+                    break
+        if not fake:
+            pruned.append((i, j, s))
+    edges = pruned
+
     if drop_isolated and edges:
         keep = sorted({i for i, _, _ in edges} | {j for _, j, _ in edges})
         remap = {old: new for new, old in enumerate(keep)}
