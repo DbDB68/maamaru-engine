@@ -201,9 +201,7 @@ class PumpkinMixin:
                 else:
                     yield "[南瓜] 获得动画没 OCR 出名字（继续）"
                 # 点掉获得动画
-                for _ in range(3):
-                    self._click_point(cfg["skip_tap"])
-                    time.sleep(0.8)
+                self.skip_safe(3, point=cfg["skip_tap"])
                 boards_done += 1
                 if hasattr(self, "record_event"):
                     self.record_event("pumpkin.board_completed",
@@ -300,9 +298,7 @@ class PumpkinMixin:
                 yield f"[南瓜] 第 {battles_total} 次出阵回来，格子 +1"
                 _bump_progress()
                 # 回来后可能有"获得刀剑男士"动画，点几下安全区
-                for _ in range(3):
-                    self._click_point(cfg["skip_tap"])
-                    time.sleep(0.8)
+                self.skip_safe(3, point=cfg["skip_tap"])
                 if debug_dir:
                     self._ensure_on_board(cfg)
                     self.maa.save_screenshot(f"{debug_dir}/board_after_b{battles_total:02d}.png")
@@ -314,9 +310,7 @@ class PumpkinMixin:
                 yield "[南瓜] 板子没满但战斗开不起来，弹窗驱散了也没用，你去看看卡哪了，停"
                 return
             yield "[南瓜] 战斗没开起来，点点安全区驱散弹窗再试..."
-            for _ in range(3):
-                self._click_point(cfg["skip_tap"])
-                time.sleep(0.8)
+            self.skip_safe(3, point=cfg["skip_tap"])
 
         got = f"，拿到 {len(got_names)} 把刀：{'、'.join(got_names)}" if got_names else ""
         yield f"[南瓜] 收工，刷了 {boards_done} 块板子，共出阵 {battles_total} 次，烧令牌 {skips}/{max_skips} 枚{got}"
@@ -424,13 +418,10 @@ class PumpkinMixin:
 
     def _ensure_on_board(self, cfg: dict) -> bool:
         """在活动界面返回 True；被动画/弹窗盖着就点安全区扒拉，扒拉不回来返回 False。"""
-        for _ in range(8):
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["ui_title"]["template"]):
-                return True
-            self._click_point(cfg["skip_tap"])
-            time.sleep(1.0)
-        return False
+        return self.wait_landmark_skipping(
+            template=cfg["ui_title"]["template"],
+            skip_point=cfg["skip_tap"],
+            timeout_s=8, stable_hits=1, interval=1.0)
 
     # ---------- 内部：开一场战斗 ----------
 
@@ -530,9 +521,7 @@ class PumpkinMixin:
             if attempt:
                 yield f"[南瓜] 剪影更新第 {attempt + 1} 次尝试..."
             # 先驱散可能挡路的狐狸对话（每点一下翻一页，没弹窗时点的是安全区，无害）
-            for _ in range(2):
-                self._click_point(cfg["skip_tap"])
-                time.sleep(0.8)
+            self.skip_safe(2, point=cfg["skip_tap"])
 
             self.maa.screenshot(force=True)
             refresh = self.maa.template_match(cfg["refresh_button"]["template"])
@@ -575,9 +564,7 @@ class PumpkinMixin:
                 break
             # 确认没出来 → 狐狸对话之类挡路，翻页驱散后重试
             yield "[南瓜] 确认弹窗没出来，可能有狐狸里程碑对话挡路，翻页驱散后重试..."
-            for _ in range(3):
-                self._click_point(cfg["skip_tap"])
-                time.sleep(0.8)
+            self.skip_safe(3, point=cfg["skip_tap"])
         else:
             yield "[南瓜] 剪影更新的确认弹窗一直没出来（令牌烧完了，或者弹窗没驱散掉）"
             return
@@ -586,9 +573,7 @@ class PumpkinMixin:
         time.sleep(2.0)
 
         # 可能有"新剪影出现了"之类的动画，点掉
-        for _ in range(3):
-            self._click_point(cfg["skip_tap"])
-            time.sleep(0.8)
+        self.skip_safe(3, point=cfg["skip_tap"])
 
         # 校验：回活动界面 + 部队选择按钮回来了 = 更新成功
         if not self._ensure_on_board(cfg):

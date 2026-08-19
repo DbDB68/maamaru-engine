@@ -139,15 +139,13 @@ class SortieMixin:
                 # 动画一盖上来就被挡住，脚本在动画里乱点会彻底打乱卡死。
                 # 只点安全区把动画跳完，直到“决定”按钮完整出现，再走章节选择。
                 if cfg_key == "yosari":
-                    decide_ok = False
-                    for _ in range(30):
-                        self.maa.screenshot(force=True)
-                        if self.maa.template_match(cfg["decide_button"]["template"]):
-                            decide_ok = True
-                            break
-                        self._click_point(cfg["skip_tap"])
-                        time.sleep(0.8)
-                    if not decide_ok:
+                    # 火车切渐入演出会让"决定"按钮先露脸再被盖住、说完才回来，
+                    # 必须连续命中才算真就绪；章节页点安全区验证过无害，边等边点加速推对话。
+                    if not self.wait_landmark_skipping(
+                            template=cfg["decide_button"]["template"],
+                            skip_point=cfg.get("skip_tap"),
+                            timeout_s=90, stable_hits=3,
+                            tap_even_when_found=True):
                         yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
                         return
 

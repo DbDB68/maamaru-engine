@@ -84,6 +84,66 @@ class NavigationMixin:
         point = Point(target[0], target[1])
         return self.maa.click(point)
 
+    # ==================== 安全区跳过（公共层） ====================
+    # 所有"点安全区跳动画/对话"都走这里，别在流程里自己写 for 循环了。
+    # 默认安全点是右下角 (775,695)，全游戏通用；各流程配置里的 skip_tap 优先。
+
+    DEFAULT_SKIP_POINT = (775, 695)
+
+    def _skip_point(self, point=None) -> tuple:
+        """安全点优先级：显式传 > 顶层配置 skip_tap > 全局默认"""
+        if point is None:
+            point = self.config.get("skip_tap") or self.DEFAULT_SKIP_POINT
+        return (point[0], point[1])
+
+    def skip_safe(self, times: int = 3, interval: float = 0.8, point=None):
+        """点安全区跳动画/对话。多页对话一页一下，几页就点几下。"""
+        pt = self._skip_point(point)
+        for _ in range(max(1, int(times))):
+            self._click_point(pt)
+            time.sleep(interval)
+
+    def wait_landmark_skipping(self, template: str = None,
+                               ocr_expected: str = None, roi=None,
+                               timeout_s: float = 60.0, stable_hits: int = 3,
+                               skip_point=None, interval: float = 0.8,
+                               tap_even_when_found: bool = False) -> bool:
+        """
+        边点安全区边等地标出现，地标要连续 stable_hits 次都在才算就绪。
+
+        为什么要连续命中：渐入式剧情演出会"先露脸再被盖住"——异去的火车切
+        进场说话前，"决定"按钮会先短暂可见，看一眼就动手会正好点进动画里
+        卡死（2026-08-19 实测翻车）。每一轮没找到地标就点安全区，顺便把
+        挡路的对话往前推。
+
+        template / ocr_expected 至少给一个；roi 同时约束两者。
+        tap_even_when_found=True 时找到地标也照点（仅限安全点被验证过
+        安全的画面，比如异去章节页），推对话更快。
+        """
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        hits = 0
+        need = max(1, int(stable_hits))
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            found = False
+            if template and self.maa.template_match(template, roi=roi):
+                found = True
+            if not found and ocr_expected \
+                    and self.maa.ocr(expected=ocr_expected, roi=roi):
+                found = True
+            if found:
+                hits += 1
+                if hits >= need:
+                    return True
+                if not tap_even_when_found:
+                    time.sleep(interval)
+                    continue
+            else:
+                hits = 0
+            self._click_point(self._skip_point(skip_point))
+            time.sleep(interval)
+        return False
+
     def _click_template_config(self, config: dict) -> bool:
         """根据模板配置点击"""
         if "target" in config:
