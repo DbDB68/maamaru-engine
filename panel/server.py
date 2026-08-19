@@ -778,8 +778,10 @@ register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过�
                 hidden=True)
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
                 _wrap_inventory("炼糖", _build_simple("sugar_stream")))
-register_script("snapshot", "库存快照", "刷新看板库存数据",
-                _build_simple("status_snapshot_stream"))
+register_script("snapshot", "库存快照",
+                "手动拍一次完整家底（含小判）刷新看板；日常已由锻刀收工顺手拍+顶栏顺路更新覆盖，想立刻刷新看板才用",
+                _wrap_inventory("库存", _build_simple("status_snapshot_stream"),
+                                inventory=False))
 
 
 # ── 服务端启动 ──

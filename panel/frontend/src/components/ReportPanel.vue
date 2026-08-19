@@ -192,6 +192,13 @@ function kobanPerHourLabel(run: any) {
   const value = kobanPerHour(run)
   return value == null ? '' : value.toLocaleString()
 }
+function kobanPerFloorLabel(run: any) {
+  const ks = run.koban_session
+  if (!ks || !ks.floors) return ''
+  const delta = Number(ks.after) - Number(ks.before)
+  if (!Number.isFinite(delta)) return ''
+  return `${(delta / ks.floors).toFixed(1)} 小判`
+}
 const attachingRun = ref('')
 const inventoryNotice = ref<Record<string, string>>({})
 const latestInventoriedRun = computed(() => runs.value.find(run => run.has_before_snapshot))
@@ -326,7 +333,7 @@ onMounted(() => load())
     <div class="report-body">
       <div>
         <section v-if="runs.length" class="report-runs">
-          <header><h3>⛏️ 挂机成绩单</h3><small>圈速不含开工与收工盘点</small></header>
+          <header><h3>⛏️ 挂机成绩单</h3><small>圈速按相邻出阵间隔计算</small></header>
           <article v-for="(run, index) in runs.slice(0, 5)" :key="run.run_id" :class="{ featured: index === 0 }">
             <time>{{ eventTime(run.started_at) }}</time>
             <div><strong>{{ runTitle(run) }}</strong>
@@ -339,8 +346,8 @@ onMounted(() => load())
               </div>
               <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
               <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
-              <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存账 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span></p>
-              <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span></p>
+              <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存账 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em><em v-else-if="run.after_snapshot_source === 'auto_science'">🧪小判实验</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span><span v-if="kobanPerFloorLabel(run)">· 平均每层 {{ kobanPerFloorLabel(run) }}</span></p>
+              <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span><span v-else-if="run.after_snapshot_source === 'auto_science'">（🧪小判实验）</span></p>
               <div v-else class="run-inventory-missing">
                 <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>
                 <small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填，以免把中间的变化算错轮次。</small>
