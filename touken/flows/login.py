@@ -16,6 +16,142 @@ class LoginMixin:
     UPDATE_CONFIRM_ROI = roi_4to4(430, 400, 850, 560)
     UPDATE_LINE_ROI = roi_4to4(160, 240, 1120, 650)
 
+    # 「网络请求超时,请重试!」弹窗：正文和按钮区域（弹窗居中，位置固定）
+    NET_TIMEOUT_TEXT_ROI = roi_4to4(300, 180, 980, 420)
+    NET_CONFIRM_ROI = roi_4to4(430, 400, 850, 560)
+    # 「连接中断。是否要从中断处重新开始？」弹窗的【是】按钮（1280x720 固定坐标）
+    NET_RESUME_YES_POINT = (505, 467)
+
+    def _ocr_text(self, roi) -> str:
+        """把 roi 里 OCR 出的所有文字拼成一串（判断弹窗正文用）"""
+        results = self.maa.ocr_all(roi)
+        return "".join(str(item[0]) for item in results if item)
+
+    def _network_timeout_visible(self) -> bool:
+        """只在超时正文明确出现时才动手，避免误点普通「确定」。"""
+        return "网络请求超时" in self._ocr_text(self.NET_TIMEOUT_TEXT_ROI)
+
+    def _network_resume_visible(self) -> bool:
+        """「连接中断…从中断处重新开始？」续打弹窗。"""
+        text = self._ocr_text(self.NET_TIMEOUT_TEXT_ROI)
+        return "中断" in text and "重新开始" in text
+
+    def recover_network_stream(self):
+        """处理运行途中的「网络请求超时」弹窗（MuMu 模拟器断网）。
+
+        返回 False 表示当前没有超时弹窗；
+        "resumed" 表示恢复成功且游戏回到了中断前的画面（调用方继续巡逻即可）；
+        "home" 表示恢复成功但落在了本丸（原战斗状态作废，调用方必须从入口重来）；
+        None 表示恢复失败，调用方应安全停止。
+
+        原理：MuMu 断网时弹窗上的「确定」点了会原地复活（重试也连不上），
+        必须重启模拟器。游戏重登后会问「是否从中断处重新开始」，点【是】
+        就能接着断点继续打。单次任务最多重启 network.max_restarts 次，
+        防止模拟器抽风时整夜反复重启。
+        """
+        if not self._network_timeout_visible():
+            return False
+
+        net_cfg = self.config.get("network", {})
+        max_restarts = int(net_cfg.get("max_restarts", 2))
+        restarts = getattr(self, "_net_restart_count", 0)
+
+        yield "[断网] 检测到「网络请求超时」弹窗，先点确定试试水..."
+        confirm = self.maa.template_match(
+            "通用_确定.png", roi=self.NET_CONFIRM_ROI, threshold=0.7)
+        if not confirm:
+            confirm = self.maa.ocr("确定", self.NET_CONFIRM_ROI,
+                                   match_mode="exact")
+        if confirm:
+            self.maa.click(confirm)
+            time.sleep(10.0)
+            self.maa.screenshot(force=True)
+            if not self._network_timeout_visible():
+                yield "[断网] 虚惊一场，点确定重连上了，继续"
+                return "resumed"
+
+        if restarts >= max_restarts:
+            yield (f"[断网] ⚠️ 本次任务已经重启过 {restarts} 回模拟器了，"
+                   "网络还在断，摆烂收工——天亮了你看看家里网咋回事")
+            return None
+
+        self._net_restart_count = restarts + 1
+        if hasattr(self, "record_event"):
+            self.record_event("network.outage_detected",
+                              restart_count=self._net_restart_count)
+        yield (f"[断网] 点了确定也没用，是模拟器网络断死，"
+               f"开始重启模拟器（本次任务第 {self._net_restart_count}/{max_restarts} 回）...")
+
+        from ..emulator import shutdown_emulator, ensure_emulator
+        adb_path = self.config.get("adb_path")
+        address = self.config.get("adb_address")
+        manager = self.config.get("emulator_manager")
+        instance = int(self.config.get("emulator_instance", 0))
+        boot_wait = int(net_cfg.get("boot_wait_s", 360))
+        if not manager:
+            yield "[断网] 没配 emulator_manager，没法重启模拟器，停"
+            return None
+
+        msgs = []
+        emit = msgs.append
+        shutdown_emulator(manager, instance=instance, emit=emit)
+        for m in msgs:
+            yield f"[断网] {m}" if not str(m).startswith("[") else m
+        msgs.clear()
+        time.sleep(8.0)
+
+        yield "[断网] 模拟器已关闭，重新开机（实测冷启动约 4 分钟）..."
+        if not ensure_emulator(adb_path, address, manager_path=manager,
+                               instance=instance, emit=emit,
+                               max_wait_s=boot_wait):
+            for m in msgs:
+                yield str(m) if str(m).startswith("[") else f"[断网] {m}"
+            yield "[断网] ⚠️ 模拟器重启失败，停"
+            return None
+        for m in msgs:
+            yield str(m) if str(m).startswith("[") else f"[断网] {m}"
+        yield "[断网] 模拟器回来了，启动游戏..."
+        time.sleep(5.0)
+
+        # 冷启动点图标（带 OCR 广告担保）→ 登录
+        for msg in self._ensure_game_started():
+            yield msg
+        self.login()
+        time.sleep(3.0)
+
+        # 登录后两种情况：弹出「从中断处重新开始」→ 点【是】续打；
+        # 或者直接被清回本丸（中断数据没保住/当时不在出阵）。
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            self.maa.screenshot(force=True)
+            if self._network_resume_visible():
+                yield "[断网] 游戏问要不要续打，点【是】从中断处继续"
+                self._click_point(self.NET_RESUME_YES_POINT)
+                time.sleep(3.0)
+                self.maa.screenshot(force=True)
+                if not self._network_resume_visible():
+                    yield "[断网] ✓ 续打成功，战斗画面接回来了"
+                    if hasattr(self, "record_event"):
+                        self.record_event("network.recovered", mode="resumed")
+                    return "resumed"
+                yield "[断网] 点了【是】弹窗还在，不再盲点，停"
+                return None
+            if self.maa.exists("目录.png", threshold=0.7):
+                yield "[断网] 重登后落在本丸，没有续打弹窗（原战斗状态作废）"
+                self.current_location = "本丸"
+                if hasattr(self, "record_event"):
+                    self.record_event("network.recovered", mode="home")
+                return "home"
+            # 登录页可能迟到，看到了就再点一次
+            login = self.maa.template_match("登录.png", threshold=0.7)
+            if login:
+                self.maa.click(login)
+                time.sleep(2.0)
+            time.sleep(3.0)
+
+        yield "[断网] ⚠️ 重登后 3 分钟内既没续打弹窗也没回本丸，停"
+        return None
+
     def _game_update_prompt_visible(self) -> bool:
         """只在更新正文明确出现时才允许点弹窗，避免把普通「确定」误点掉。"""
         results = self.maa.ocr_all(self.UPDATE_TEXT_ROI)

@@ -262,6 +262,18 @@ class RaidMixin:
                 debug_idx += 1
                 self.maa.save_screenshot(f"{debug_dir}/f{debug_idx:03d}.png", force=False)
 
+            # 网络超时弹窗（MuMu 断网）：点确定没用就重启模拟器续打
+            net = yield from self.recover_network_stream()
+            if net is None:
+                yield f"{tag} ⚠️ 断网恢复失败，战斗循环安全停止（已打 {battles} 场）"
+                break
+            if net == "home":
+                yield f"{tag} ⚠️ 断网恢复后落在本丸，这一圈打到哪不明，安全停止（已打 {battles} 场）"
+                break
+            if net == "resumed":
+                battle_loop_start = time.time()  # 续打回来重新给冷静期
+                continue
+
             # 继续下一场？（右下角"战斗"按钮）
             battle_btn = self.maa.ocr(expected=battle_cfg["expected"], roi=battle_roi)
             if battle_btn:

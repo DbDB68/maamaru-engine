@@ -177,6 +177,40 @@ class OsakaMixin:
                 )
                 return
 
+            # 网络超时弹窗（MuMu 断网）。续打成功画面会回到断点（比如阵形选择），
+            # 下面的巡逻判定会自然接上；落在本丸则跟更新恢复一样从入口重开。
+            net_recovered = yield from self.recover_network_stream()
+            if net_recovered is None:
+                return
+            if net_recovered == "home":
+                total_completed = _completed_floors + floors
+                remaining = _target_floors - total_completed
+                yield (f"[挖地] 断网恢复后落在本丸，原战斗已被重置；保留进度 "
+                       f"{total_completed}/{_target_floors}，重新进场继续剩余 {remaining} 层")
+                yield from self.osaka_stream(
+                    max_floors=remaining,
+                    team_no=team_no,
+                    select_floor=select_floor,
+                    target_floor=target_floor,
+                    formation_mode=formation_mode,
+                    formation_strategy=formation_strategy,
+                    formation=formation,
+                    repair_threshold=repair_threshold,
+                    injury_action=injury_action,
+                    auto_equip=auto_equip,
+                    _target_floors=_target_floors,
+                    _completed_floors=total_completed,
+                    _repair_count=_repair_count,
+                    _speedups_used=_speedups_used,
+                    _team_record_saved=_team_record_saved,
+                    _auto_equip_active=_auto_equip_active,
+                )
+                return
+            if net_recovered == "resumed":
+                idle_checks = 0
+                yield "[挖地] 断网续打成功，接着巡逻"
+                continue
+
             # 道中和层末都有“部队恢复 / 返回本丸 / 行军”，三者全部是常驻操作，
             # 不能参与层末判断。只认结算页专有的“当前层数 + 传送凭证”。
             if self._osaka_floor_done(cfg):

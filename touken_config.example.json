@@ -6,6 +6,10 @@
   "adb_address": "127.0.0.1:16384",
   "emulator_manager": "",
   "emulator_instance": 0,
+  "network": {
+    "max_restarts": 2,
+    "boot_wait_s": 360
+  },
   "login": {
     "点击登录": {
       "template": "登录.png",
