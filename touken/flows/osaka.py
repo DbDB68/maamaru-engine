@@ -23,6 +23,73 @@ class OsakaMixin:
                      _repair_count: int = 0,
                      _speedups_used: int = 0,
                      _team_record_saved: bool = False,
+                     _auto_equip_active: bool = None,
+                     koban_science: bool = True):
+        """挖地外套：小判掉落率实验记账（开工/收场各读一次小判，差值≈掉落）。
+
+        递归续跑会再次经过这里，用 _osaka_koban_open 保证只有最外层记账。
+        finally 里只用 print 不用 yield（用户中途停止时生成器被 close，
+        finally 里 yield 会炸 RuntimeError）；print 走 stdout 一样进日志。
+        koban_science=False 时完全不读不写（面板「小判掉落率实验」开关）。
+        """
+        outermost = not getattr(self, "_osaka_koban_open", False)
+        if outermost:
+            # 不管测不测都先插旗：不然递归续跑会误以为自己是外层，重复记账
+            self._osaka_koban_open = True
+        measure = outermost and koban_science
+        if measure:
+            self._osaka_floors_total = 0
+            self._osaka_koban_before = self._read_koban()
+            if self._osaka_koban_before is not None:
+                yield f"[挖地] 🧪 掉落率实验开测：开工小判 {self._osaka_koban_before}"
+            else:
+                yield "[挖地] 🧪 开工小判没读到（不在本丸？），收场再补"
+        try:
+            yield from self._osaka_stream_impl(
+                max_floors=max_floors, team_no=team_no,
+                select_floor=select_floor, target_floor=target_floor,
+                formation_mode=formation_mode,
+                formation_strategy=formation_strategy, formation=formation,
+                repair_threshold=repair_threshold, injury_action=injury_action,
+                auto_equip=auto_equip,
+                _target_floors=_target_floors, _completed_floors=_completed_floors,
+                _repair_count=_repair_count, _speedups_used=_speedups_used,
+                _team_record_saved=_team_record_saved,
+                _auto_equip_active=_auto_equip_active)
+        finally:
+            if outermost:
+                self._osaka_koban_open = False
+            if measure:
+                before = getattr(self, "_osaka_koban_before", None)
+                after = self._read_koban()
+                floors_done = getattr(self, "_osaka_floors_total", 0)
+                if before is not None and after is not None:
+                    delta = after - before
+                    per = f"，平均每层 {delta / floors_done:.1f}" if floors_done else ""
+                    print(f"[挖地] 🧪 收场小判 {after}，这趟变化 {delta:+d}"
+                          f"（挖了 {floors_done} 层{per}）")
+                    if hasattr(self, "record_event"):
+                        self.record_event("osaka.koban_session",
+                                          before=before, after=after,
+                                          delta=delta, floors=floors_done,
+                                          target_floor=target_floor)
+                else:
+                    print(f"[挖地] 🧪 小判记账不全（前{before}/后{after}），"
+                          "这趟掉落率没记上")
+
+    def _osaka_stream_impl(self, max_floors: int = 1, team_no: int = 3,
+                     select_floor: bool = False, target_floor: int = 81,
+                     formation_mode: str = "manual",
+                     formation_strategy: str = "fixed",
+                     formation: str = "鱼鳞阵",
+                     repair_threshold: str = "light",
+                     injury_action: str = "continue",
+                     auto_equip: bool = True,
+                     _target_floors: int = None,
+                     _completed_floors: int = 0,
+                     _repair_count: int = 0,
+                     _speedups_used: int = 0,
+                     _team_record_saved: bool = False,
                      _auto_equip_active: bool = None):
         if _target_floors is None:
             _target_floors = max_floors
@@ -217,6 +284,7 @@ class OsakaMixin:
                 idle_checks = 0
                 floors += 1
                 total_completed = _completed_floors + floors
+                self._osaka_floors_total = total_completed  # 喂给外套的小判实验
                 if hasattr(self, "record_event"):
                     self.record_event(
                         "osaka.floor_completed",
@@ -393,6 +461,7 @@ class OsakaMixin:
 
             # 狐之助对话和战斗过场都用右下安全区驱散；没有目标时绝不盲点按钮区。
             self._click_point(cfg.get("skip_tap", [775, 695]))
+            self.quick_peek(tag="osaka")  # 顺路拍顶栏家底，零导航（60s 节流）
             idle_checks += 1
             time.sleep(0.8)
 

@@ -138,30 +138,9 @@ class DailyMixin:
             self._flush_report(report, finished=False)
             time.sleep(1.0)
 
-        # ========== ①.5 开工盘点（登录落本丸后、正式开工前拍一张家底）==========
-        # 断点续跑可能没勾「登录」：先探测本丸真的可操作才拍，绝不盲拍。
-        # （血泪：套在日课外面的 run 级开工盘点会在打开游戏之前触发，游戏没开
-        #   只能盲点模拟器桌面，把冷启动登录搞挂。）
-        if _w("库存快照"):
-            yield "========== 开工盘点 =========="
-            try:
-                ready = False
-                for _ in range(5):
-                    self.maa.screenshot(force=True)
-                    if (self.maa.exists("menu/ui目录.png")
-                            or self.maa.exists("目录.png", threshold=0.7)):
-                        ready = True
-                        break
-                    time.sleep(1.0)
-                if not ready:
-                    yield "[日课] 游戏不在本丸（登录没落地？），跳过开工盘点"
-                else:
-                    for msg in self.status_snapshot_stream(phase="before"):
-                        yield msg
-            except Exception as exc:
-                yield f"[日课] 开工盘点翻车（不影响跑）: {exc}"
-
         # ========== ②~⑧ 各步 ==========
+        # （开工/收工的例行盘点已砍掉：完整快照融进锻刀收工顺手拍，
+        #   顶栏五资源靠各循环的 quick_peek 顺路更新，不再专程跑腿）
         steps = [
             ("签到", lambda: self.signin_stream()),
             ("万屋", lambda: self.claim_free_gift_stream()),
@@ -179,7 +158,7 @@ class DailyMixin:
             ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),
-            ("库存快照", lambda: self.status_snapshot_stream(phase="after")),
+            ("库存快照", lambda: self._closing_snapshot_stream(_w("锻刀"))),
         ]
         titles = {
             "签到": "② 签到",
@@ -476,6 +455,17 @@ class DailyMixin:
         except Exception as exc:
             report.append(("出阵", f"✗ {exc}"))
             yield f"[日课] 出阵翻车: {exc}"
+
+    # ========== 收工盘点（锻刀拍过就不重复跑腿） ==========
+
+    def _closing_snapshot_stream(self, forge_ran: bool):
+        """日课收尾的家底盘点：锻刀步骤收工时已经顺手拍过完整快照（含小判），
+        跑了锻刀就跳过；锻刀被跳过的话才专程导航拍一次。"""
+        if forge_ran:
+            yield "[日课] 锻刀收工时已顺手盘点过家底（含小判），收工快照不再专程跑腿"
+            return
+        for msg in self.status_snapshot_stream(phase="after"):
+            yield msg
 
     # ========== 冷启动：游戏没开就先点图标 ==========
 

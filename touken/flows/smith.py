@@ -163,6 +163,10 @@ class SmithMixin:
                 continue
 
         yield f"[锻刀] 收工：点了 {forged} 炉"
+        # 人已经在锻刀页面了，顺手把家底拍了（完整快照含小判，零额外导航）。
+        # 拍歪了也不耽误正事：顶栏数字不够 4 个 _capture_inventory 自己会吱声。
+        for msg in self._capture_inventory(phase="forge"):
+            yield msg
 
     def _scan_slots(self):
         """扫三炉状态，返回 (状态, y心)。优先收完成，其次点空闲。

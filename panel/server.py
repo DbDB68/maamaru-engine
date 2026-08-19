@@ -203,15 +203,18 @@ def _sword_names(raw) -> list[str]:
 # 玩法脚本统一由 _wrap_inventory 包一层：开工前/收工后各拍一次库存（run 级
 # 整体归因）。builder 本体签名统一：(agent, config_path, params) -> generator。
 
-def _wrap_inventory(tag: str, runner, inventory=True):
-    """给玩法脚本套开工前/收工后库存盘点（run 级整体归因）。
+def _wrap_inventory(tag: str, runner, inventory=False):
+    """（2026-08 起退役为默认关闭）给玩法脚本套开工前/收工后库存盘点。
+
+    为什么默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
+    各循环 quick_peek 顺路更新（60s 节流），挖地小判差值由 osaka_stream
+    自带的掉落率实验记账。专程跑腿盘点太磨叽（7-27 日课超时两次的教训）。
+    想给某个任务恢复 run 级盘点就显式传 inventory=True。
 
     - before：任务开始前拍一张；after：任务结束后拍一张（含自然失败——异常
       会穿过 try/finally，finally 里照样补拍；紧急停止/看门狗是 kill，子进程
       没机会，由面板 has_after_snapshot=False 提示缺收工快照）。
     - 盘点失败绝不拖垮任务：before/after 各自 try，坏了只打日志继续。
-    - inventory 可为 bool，或 callable(params)->bool（大阪城沿用面板的
-      compare_resources 开关）；默认全拍，想关某个任务就传 False。
     """
     def _fn(config_path, params):
         agent = _make_agent(config_path)
@@ -387,7 +390,7 @@ def _build_yosari(agent, config_path, params):
 
 
 def _build_osaka(agent, config_path, params):
-    # 库存盘点由 _wrap_inventory 统一包（开关沿用面板 compare_resources）
+    # 小判掉落率实验由 osaka_stream 自带记账（开关沿用面板 compare_resources）
     yield from agent.osaka_stream(
         max_floors=_run_count(params, 1, "floors"),
         team_no=_i(params, "team_no", 3),
@@ -398,7 +401,8 @@ def _build_osaka(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
-        auto_equip=_bool(params.get("auto_equip", True)))
+        auto_equip=_bool(params.get("auto_equip", True)),
+        koban_science=_bool(params.get("compare_resources", True)))
 
 
 def _build_sakura(agent, config_path, params):
@@ -652,13 +656,12 @@ register_script("yosari", "异去", "",
                         *_march_and_injury_fields(),
                         ])
 register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动行军，也不会消耗手形",
-                _wrap_inventory("挖地", _build_osaka,
-                                inventory=lambda p: _bool(p.get("compare_resources", True))),
+                _wrap_inventory("挖地", _build_osaka),
                 params=[_team_field("3"),
                         {**_run_count_field(), "label": "出阵次数"},
                         {"key": "compare_resources", "type": "toggle",
-                         "label": "开工和收工时盘点库存", "default": True,
-                         "help": "各盘点一次小判、资源和符；识别失败不会影响挖地。"},
+                         "label": "小判掉落率实验", "default": True,
+                         "help": "开工和收场时各读一次小判，差值和层数记进日志（测掉落概率用）；识别失败不影响挖地。"},
                         {"key": "select_floor", "type": "toggle",
                          "label": "指定挂机层数", "default": False},
                         {"key": "target_floor", "type": "number",

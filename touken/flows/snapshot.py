@@ -74,6 +74,14 @@ class SnapshotMixin:
         if self.current_location != "锻刀":
             yield "[快照] 到达锻刀失败"
             return
+        for msg in self._capture_inventory(phase):
+            yield msg
+
+    def _capture_inventory(self, phase=None):
+        """
+        家底拍摄核心：人已经站在锻刀页面上时直接调（零导航）。
+        锻刀步骤收工时被顺手调用，免了专程跑一趟（7-27 日课超时两次的教训）。
+        """
         time.sleep(1.5)
         self.maa.screenshot(force=True)
 
@@ -176,3 +184,56 @@ class SnapshotMixin:
         except Exception as e:  # noqa: BLE001 - 快照兜底，任何错都不许炸日课
             print(f"[快照] 小判读取异常: {e}")
             return None
+
+    # ---------- 顺路顶栏快照（零导航） ----------
+
+    PEEK_INTERVAL_S = 60  # 节流：一分钟最多拍一次
+
+    def quick_peek(self, tag: str = "") -> bool:
+        """
+        顺路顶栏快照：游戏几乎每个画面顶部都挂着四大资源+甲州金，
+        循环巡逻时顺手 OCR 一下，零导航、不打印日志，拍完合并进
+        status/inventory.json（只更新顶栏五资源，保留完整快照的其它字段）。
+
+        60 秒节流；顶栏数字读出少于 4 个就当这帧不算数。
+        永不抛异常——顺手活绝不能耽误正事。
+        """
+        try:
+            now = time.monotonic()
+            if now - getattr(self, "_last_peek", 0.0) < self.PEEK_INTERVAL_S:
+                return False
+            tokens = self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+            nums = sorted(
+                ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
+                key=lambda p: p[1])
+            if len(nums) < 4:
+                return False
+            self._last_peek = now
+
+            peeked = {}
+            for i, name in enumerate(_RES_NAMES):
+                if i < len(nums):
+                    v = _to_int(nums[i][0])
+                    if v is not None:
+                        peeked[name] = v
+            if not peeked:
+                return False
+
+            path = _STATUS_DIR / "inventory.json"
+            try:
+                old = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                old = {}
+            resources = dict(old.get("resources") or {})
+            resources.update(peeked)
+            payload = dict(old)
+            payload["resources"] = resources
+            payload["peek_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            _STATUS_DIR.mkdir(exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+            if hasattr(self, "record_event"):
+                self.record_event("inventory.peek", tag=tag, **peeked)
+            return True
+        except Exception:
+            return False

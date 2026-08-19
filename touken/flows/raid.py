@@ -256,6 +256,7 @@ class RaidMixin:
             if _i % 5 == 0:
                 shown = fought if fought is not None else battles
                 yield f"{tag} 战斗循环心跳 {_i}/300（已打 {shown} 场）"
+                self.quick_peek(tag=cfg_key)  # 顺路拍顶栏家底，零导航（60s 节流）
             self.maa.screenshot(force=True)
 
             if debug_dir:
