@@ -278,5 +278,18 @@ class RewardsMixin:
                         stage="before_click")
                 yield f"[TASK] {tab_name} 未确认一键领取按钮状态，本次不点击也不计成绩"
 
+        # 3. 关掉任务列表窗口（✕ 右上），别把弹窗留给下一个流程。
+        #    中间步骤不点它是怕误关，收尾时必须关——日课就卡在这过。
+        close_config = task_config.get("popup_close")
+        if close_config:
+            for _ in range(3):
+                self.maa.screenshot(force=True)
+                if self.maa.exists(close_config.get("template")):
+                    self._click_template_config(close_config)
+                    yield "[TASK] 已关闭任务列表"
+                    time.sleep(0.8)
+                else:
+                    break
+
         yield "[TASK] 所有任务奖励领取完毕"
         return
