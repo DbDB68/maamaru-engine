@@ -415,11 +415,12 @@ class PracticeMixin:
                 yield "[演练] 阵形选择失败，等待游戏状态变化"
             yield "[演练] 阵形已确认，战斗中..."
 
-        # ---- 等战斗播完回列表（途中每3秒点一下屏幕中央，翻结算页/跳动画）----
+        # ---- 等战斗播完回列表（途中每3秒点一下安全区，翻结算页/跳动画）----
+        # 别点屏幕中央：万一列表检测慢半拍，中心点会戳到对手行误开下一场。
         for _ in range(60):  # 最多 180s
             if self._on_list():
                 break
-            self.maa.click(Point(640, 400))
+            self._click_point(self._skip_point(cfg.get("skip_tap")))
             time.sleep(3.0)
         else:
             yield "[演练] 等战斗结束超时"
