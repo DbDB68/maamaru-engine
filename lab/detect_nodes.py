@@ -26,10 +26,12 @@ OUT = ROOT / "lab" / "out"
 #   白点  当前/起点 低饱和高亮 S<60，V>180   （采样 HSV 0,0,211）
 # 山影 V 只有 40 几、木盘 H=15、草地 H≈34，都被阈值天然挡掉。
 # 黄点（资源）等见到真图再加，草地的色相正好撞黄区，别 preemptively 加。
+#   绿点  资源/恢复 H45-75，S>120，V>80    （采样 HSV 55,159,146；草地 H≈34 不撞）
 NODE_RULES = [
     {"name": "boss",   "label": "BOSS", "color": (0, 0, 255)},
     {"name": "battle", "label": "紫点", "color": (255, 0, 255)},
     {"name": "white",  "label": "白点", "color": (255, 255, 0)},
+    {"name": "green",  "label": "绿点", "color": (0, 255, 0)},
 ]
 
 
@@ -39,12 +41,13 @@ def _masks(img):
     red = (((h > 165) | (h < 10)) & (s > 150) & (v > 120))
     purple = ((h > 110) & (h < 160) & (s > 100) & (v > 60))
     white = ((s < 60) & (v > 180))
+    green = ((h > 45) & (h < 75) & (s > 120) & (v > 80))
     # 开运算：核比连线粗（连线约6-8px），细线消失，节点填充留下
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     return {
         name: cv2.morphologyEx(mask.astype(np.uint8) * 255, cv2.MORPH_OPEN, k)
         for name, mask in (("boss", red), ("battle", purple),
-                           ("white", white))
+                           ("white", white), ("green", green))
     }
 
 
