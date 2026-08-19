@@ -21,6 +21,7 @@
 import time
 
 from ..maa_adapter import roi_4to4
+from ..map_read import CV2_AVAILABLE, boss_distance_from_image
 
 
 class SortieMixin:
@@ -33,7 +34,8 @@ class SortieMixin:
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
                       injury_action: str = "continue",
-                      auto_equip: bool = True):
+                      auto_equip: bool = True,
+                      retreat_before_boss: bool = False):
         yield from self._map_sortie_stream(
             chapter=chapter, map_no=map_no, team_no=team_no,
             auto_march=auto_march, max_loops=max_loops,
@@ -41,6 +43,7 @@ class SortieMixin:
             formation_strategy=formation_strategy, formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
             auto_equip=auto_equip,
+            retreat_before_boss=retreat_before_boss,
         )
 
     def yosari_stream(self, map_no: int, team_no: int = 3,
@@ -73,6 +76,7 @@ class SortieMixin:
                            injury_action: str = "continue",
                            auto_equip: bool = True,
                            auto_refill: bool = False,
+                           retreat_before_boss: bool = False,
                            map_type: str = "合战场",
                            cfg_key: str = "sortie"):
         """
@@ -308,6 +312,7 @@ class SortieMixin:
             # ========== 8. 行军监控：打完自动回本丸 / 中断则返回本丸 ==========
             march_done = False
             interrupted = False
+            retreated = False
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
 
@@ -382,6 +387,27 @@ class SortieMixin:
                             return
                         interrupted = True
                         break
+                    # 王点前撤退（仅合战场 + 脚本手动行军）：决策屏右上小地图
+                    # 永远干净完整，距王点 1 步 = 下一脚就是王点，撤。
+                    # 认不出来（None）绝不是撤退信号，继续正常行军。
+                    if retreat_before_boss and cfg_key == "sortie":
+                        if not CV2_AVAILABLE:
+                            yield "[出阵] 🗺️ 王点前撤退需要 opencv，当前环境没装，本圈按普通行军跑"
+                            retreat_before_boss = False
+                        else:
+                            boss_dist = boss_distance_from_image(
+                                self.maa.screenshot())
+                            if boss_dist == 1:
+                                yield "[出阵] 🏳️ 小地图看明白了：下一脚就是王点，按约定撤退回本丸"
+                                if not self._return_home_from_march(cfg):
+                                    yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                                    return
+                                retreated = True
+                                break
+                            if boss_dist is None:
+                                yield "[出阵] 🗺️ 小地图这帧没认明白，这步先照常走"
+                            else:
+                                yield f"[出阵] 🗺️ 距王点还有 {boss_dist} 步，继续行军"
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
                     self.maa.click(march_button)
                     time.sleep(1.0)
@@ -408,6 +434,17 @@ class SortieMixin:
                 yield "[出阵] ⚠️ 行军因伤势中断，已返回本丸；重新检查轻/中/重伤"
                 self.current_location = "本丸"
                 continue
+            elif retreated:
+                # 王点前主动撤退算完成一圈（练级打法），回满状态接着进下一圈
+                yield f"[出阵] ✓ 第 {loop_no} 圈王点前撤退完成，已回本丸"
+                self.current_location = "本丸"
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "sortie.retreated_before_boss", mode=cfg_key,
+                        chapter=chapter, map_no=map_no, team_no=team_no,
+                        sequence=loop_no)
+                repair_attempts = 0
+                loop_no += 1
             else:
                 yield "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了"
                 return

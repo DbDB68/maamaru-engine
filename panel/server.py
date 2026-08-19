@@ -371,7 +371,8 @@ def _build_sortie(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
-        auto_equip=_bool(params.get("auto_equip", True)))
+        auto_equip=_bool(params.get("auto_equip", True)),
+        retreat_before_boss=_bool(params.get("retreat_before_boss", False)))
 
 
 def _build_yosari(agent, config_path, params):
@@ -642,7 +643,11 @@ register_script("sortie", "合战场", "普通合战场：选择章节和小图�
                          "options": [[str(i), f"{i}图"] for i in range(1, 5)], "default": "1"},
                         _team_field("3"),
                         _run_count_field(),
-                        *_march_and_injury_fields()])
+                        *_march_and_injury_fields(),
+                        {"key": "retreat_before_boss", "type": "toggle",
+                         "label": "王点前撤退", "default": False,
+                         "help": "脚本手动行军时，看小地图算步数：距王点一步就主动返回本丸，反复进图练级。认不出地图时会照常行军，不会乱撤。需要安装 opencv。",
+                         "visibleWhen": {"key": "auto_march", "is": "false"}}])
 register_script("yosari", "异去", "",
                 _wrap_inventory("异去", _build_yosari),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
