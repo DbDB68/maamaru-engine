@@ -111,11 +111,12 @@ def detect(img, roi=None, scale=1):
                 "w": int(w / scale), "h": int(h / scale),
                 "area": int(area / (scale * scale)),
             })
-    # 不同颜色的掩码可能圈到同一个点（白点里的阴影等），中心太近的去重
+    # 不同颜色的掩码可能圈到同一个点（白点里的阴影等），中心太近的去重。
+    # 半径 15px：8-4 市街图有相距仅 24px 的真实相邻节点，30px 会误杀真王点。
     nodes.sort(key=lambda n: -n["area"])
     deduped = []
     for n in nodes:
-        if all((n["cx"] - m["cx"]) ** 2 + (n["cy"] - m["cy"]) ** 2 > 30 ** 2
+        if all((n["cx"] - m["cx"]) ** 2 + (n["cy"] - m["cy"]) ** 2 > 15 ** 2
                for m in deduped):
             deduped.append(n)
     return deduped

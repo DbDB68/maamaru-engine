@@ -34,7 +34,11 @@ FLAG_DX, FLAG_DY_MIN, FLAG_DY_MAX = 12, 6, 22
 
 
 def find_flag(img, roi=MINIMAP_ROI, scale=FLAG_SCALE):
-    """返回旗子中心（原图坐标）或 None"""
+    """返回"底下有节点"的旗子中心（原图坐标）或 None。
+
+    8-4 市街图白天的云/河面会贡献比真旗还高的假竖白块，
+    不能只挑最高的——遍历全部候选，用"旗底下 6-22px 内必有节点"
+    的几何闸门筛，第一个过闸的才是真旗。"""
     x0, y0, x1, y1 = roi
     sub = img[y0:y1, x0:x1]
     work = cv2.resize(sub, None, fx=scale, fy=scale,
@@ -43,7 +47,7 @@ def find_flag(img, roi=MINIMAP_ROI, scale=FLAG_SCALE):
     white = ((hsv[:, :, 1] < 60) & (hsv[:, :, 2] > 180)).astype(np.uint8) * 255
     contours, _ = cv2.findContours(white, cv2.RETR_EXTERNAL,
                                    cv2.CHAIN_APPROX_SIMPLE)
-    best = None
+    cands = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         w0, h0 = w / scale, h / scale
@@ -54,9 +58,15 @@ def find_flag(img, roi=MINIMAP_ROI, scale=FLAG_SCALE):
             continue
         cx = x0 + (x + w / 2) / scale
         cy = y0 + (y + h / 2) / scale
-        if best is None or h0 > best[2]:
-            best = (cx, cy, h0)
-    return (best[0], best[1]) if best else None
+        cands.append((cx, cy, h0))
+    cands.sort(key=lambda c: -c[2])
+    nodes = detect(img, roi=roi, scale=scale)
+    for cx, cy, _ in cands:
+        for n in nodes:
+            if (abs(n["cx"] - cx) <= FLAG_DX
+                    and FLAG_DY_MIN <= n["cy"] - cy <= FLAG_DY_MAX):
+                return (cx, cy)
+    return None
 
 
 def current_node(img, roi=MINIMAP_ROI, scale=FLAG_SCALE):

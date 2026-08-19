@@ -98,11 +98,14 @@ def _detect_nodes(img, roi, scale):
                 "w": int(w / scale), "h": int(h / scale),
                 "area": int(area / (scale * scale)),
             })
-    # 不同颜色掩码可能圈到同一个点，中心太近的去重（留面积大的）
+    # 不同颜色掩码可能圈到同一个点，中心太近的去重（留面积大的）。
+    # 半径定 15px：同点双色误检的中心几乎重合（<5px）；
+    # 8-4 市街图有相距仅 24px 的真实相邻节点（紫点贴着王点），
+    # 原来的 30px 会把真王点当重影误杀。
     nodes.sort(key=lambda n: -n["area"])
     deduped = []
     for n in nodes:
-        if all((n["cx"] - m["cx"]) ** 2 + (n["cy"] - m["cy"]) ** 2 > 30 ** 2
+        if all((n["cx"] - m["cx"]) ** 2 + (n["cy"] - m["cy"]) ** 2 > 15 ** 2
                for m in deduped):
             deduped.append(n)
     return deduped
@@ -193,8 +196,12 @@ def _build_graph(img, roi, scale, edge_threshold=0.7):
     return nodes, edges
 
 
-def _find_flag(img, roi, scale):
-    """白色小旗 = 竖直白色小块，返回旗子中心（原图坐标）或 None。"""
+def _find_flag_candidates(img, roi, scale):
+    """白色小旗 = 竖直白色小块。返回所有候选中心（原图坐标），高的在前。
+
+    市街图白天背景下，云/河面/建筑会贡献假的竖白块，而且可能比真旗还高，
+    只返回"最高的一个"会被假旗抢走——所以全部返回，
+    由调用方用"旗底下必须有节点"的几何闸门来筛。"""
     x0, y0, x1, y1 = roi
     sub = img[y0:y1, x0:x1]
     work = cv2.resize(sub, None, fx=scale, fy=scale,
@@ -203,7 +210,7 @@ def _find_flag(img, roi, scale):
     white = ((hsv[:, :, 1] < 60) & (hsv[:, :, 2] > 180)).astype(np.uint8) * 255
     contours, _ = cv2.findContours(white, cv2.RETR_EXTERNAL,
                                    cv2.CHAIN_APPROX_SIMPLE)
-    best = None
+    cands = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         w0, h0 = w / scale, h / scale
@@ -214,9 +221,19 @@ def _find_flag(img, roi, scale):
             continue
         cx = x0 + (x + w / 2) / scale
         cy = y0 + (y + h / 2) / scale
-        if best is None or h0 > best[2]:
-            best = (cx, cy, h0)
-    return (best[0], best[1]) if best else None
+        cands.append((cx, cy, h0))
+    cands.sort(key=lambda c: -c[2])
+    return [(cx, cy) for cx, cy, _ in cands]
+
+
+def _node_under_flag(nodes, flag):
+    """旗底下 6-22px、左右 ±12px 内的节点下标；没有就 None。"""
+    fx, fy = flag
+    for i, n in enumerate(nodes):
+        if (abs(n["cx"] - fx) <= _FLAG_DX
+                and _FLAG_DY_MIN <= n["cy"] - fy <= _FLAG_DY_MAX):
+            return i
+    return None
 
 
 def boss_distance_from_image(img):
@@ -237,16 +254,14 @@ def boss_distance_from_image(img):
                                     edge_threshold=0.7)
         boss = next((i for i, n in enumerate(nodes) if n["name"] == "boss"),
                     None)
-        # _build_graph 丢孤立点会重排下标，拿旗标坐标回认当前节点最稳
-        flag = _find_flag(img, roi=MINIMAP_ROI, scale=MINIMAP_SCALE)
+        # _build_graph 丢孤立点会重排下标，拿旗标坐标回认当前节点最稳。
+        # 旗标候选按几何闸门筛：底下有节点的才算真旗（挡市街图的假旗）。
         cur = None
-        if flag is not None:
-            fx, fy = flag
-            for i, n in enumerate(nodes):
-                if (abs(n["cx"] - fx) <= _FLAG_DX
-                        and _FLAG_DY_MIN <= n["cy"] - fy <= _FLAG_DY_MAX):
-                    cur = i
-                    break
+        for flag in _find_flag_candidates(img, roi=MINIMAP_ROI,
+                                          scale=MINIMAP_SCALE):
+            cur = _node_under_flag(nodes, flag)
+            if cur is not None:
+                break
         if cur is None or boss is None:
             return None
 
