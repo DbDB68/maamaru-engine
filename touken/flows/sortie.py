@@ -123,6 +123,7 @@ class SortieMixin:
         repair_attempts = 0
         map_page_ready = False
         record_saved = False
+        self._map_miss_count = 0
         auto_equip_active = bool(
             auto_equip and str(injury_action or "continue") == "continue")
         while loop_no <= max_loops:
@@ -406,6 +407,7 @@ class SortieMixin:
                                 break
                             if boss_dist is None:
                                 yield "[出阵] 🗺️ 小地图这帧没认明白，这步先照常走"
+                                self._save_map_miss(chapter, map_no, loop_no)
                             else:
                                 yield f"[出阵] 🗺️ 距王点还有 {boss_dist} 步，继续行军"
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
@@ -544,6 +546,23 @@ class SortieMixin:
         deploy_cfg = cfg.get("deploy_button", {})
         template = deploy_cfg.get("template")
         return bool(template and self.maa.template_match(template))
+
+    def _save_map_miss(self, chapter: int, map_no: int, loop_no: int):
+        """小地图没认出来时留一张决策屏截图（每轮任务最多 5 张），
+        攒起来给地图实验室调阈值用——市街图这类白黄底色的图很可能撞色。"""
+        count = getattr(self, "_map_miss_count", 0)
+        if count >= 5:
+            return
+        try:
+            from ..runtime_paths import STATUS_DIR
+            folder = STATUS_DIR / "map_miss"
+            folder.mkdir(parents=True, exist_ok=True)
+            name = (f"miss_{chapter}-{map_no}_loop{loop_no}_"
+                    f"{time.strftime('%H%M%S')}.png")
+            if self.maa.save_screenshot(str(folder / name), force=False):
+                self._map_miss_count = count + 1
+        except Exception:
+            pass
 
     def _find_march_continue(self, cfg: dict):
         """只在右下角按钮区寻找完整“行军”按钮，避免命中自动行军横幅。"""
