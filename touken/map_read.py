@@ -152,7 +152,20 @@ def _build_graph(img, roi, scale, edge_threshold=0.7):
     nodes = _detect_nodes(img, roi=roi, scale=scale)
     dark = _dark_mask(work)
     pts = [((n["cx"] - x0) * scale, (n["cy"] - y0) * scale) for n in nodes]
-    max_edge_len = work.shape[1] * 0.45  # 不可能有横跨半张图的边
+    # 自适应边长上限（原图 px）：密集图（8-4 市街，节点间距≈26）里
+    # 长边基本是沿建筑群蹭出来的假边（实测假边 94/140px，真边≤78）；
+    # 稀疏图（1-1 只有 5 个节点，真边≈100px）上限必须跟着放宽。
+    # 规则：最近邻距离中位 ×2.8，地板 75（保住 8-4 绕城堡的 67px 曲线真边），
+    # 天花板 200。
+    if len(pts) >= 3:
+        pa = np.array(pts) / scale
+        nn = sorted(min(float(np.hypot(*(pa[i] - pa[j])))
+                        for j in range(len(pa)) if j != i)
+                    for i in range(len(pa)))
+        cap_orig = min(max(float(np.median(nn)) * 2.8, 75.0), 200.0)
+    else:
+        cap_orig = 200.0
+    max_edge_len = cap_orig * scale
     edges = []
     for i, j in combinations(range(len(nodes)), 2):
         dist = float(np.hypot(pts[i][0] - pts[j][0], pts[i][1] - pts[j][1]))

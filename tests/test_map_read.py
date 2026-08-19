@@ -33,9 +33,9 @@ EXPECTED = {
     "5-4_after_dice.png": None,
     "5-4_home.png": None,
     # 8-4 市街图（白天）：节点密集（相邻仅 24px）+ 云/河面假旗干扰
-    "8-4_step1.png": 5,
-    "8-4_step3.png": 3,
-    "8-4_step5.png": 5,   # 岔路骰子带离王点，距离回涨是正常的
+    "8-4_step1.png": 8,
+    "8-4_step3.png": 6,
+    "8-4_step5.png": 8,   # 岔路骰子带离王点，距离回涨是正常的
 }
 
 
