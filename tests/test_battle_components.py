@@ -267,11 +267,12 @@ class BattleComponentTests(unittest.TestCase):
             "auto_mode": {"toggle": [910, 32]},
             "formations": {"逆行阵": [1034, 420]},
             "double_click": True,
+            "confirm_offset": [-115, 13],
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
                 formation_name="逆行阵", enable_auto=False), "fixed")
-        self.assertEqual(flow.points, [[910, 32], [1034, 420], [1034, 420]])
+        self.assertEqual(flow.points, [[910, 32], [1034, 420], [919, 433]])
 
     def test_auto_formation_switches_from_manual_without_clicking_fixed(self):
         flow = Flow(FakeMaa(templates={
@@ -298,13 +299,14 @@ class BattleComponentTests(unittest.TestCase):
             "auto_mode": {"toggle": [910, 32]},
             "formations": {"逆行阵": [1034, 420]},
             "double_click": True,
+            "confirm_offset": [-115, 13],
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
                 strategy="advantage", formation_name="逆行阵",
                 enable_auto=True), "fixed")
         # 没有有利标（夜图），直接点兜底阵形卡；没有去拨自动/手动开关
-        self.assertEqual(flow.points, [[1034, 420], [1034, 420]])
+        self.assertEqual(flow.points, [[1034, 420], [919, 433]])
 
 
     def test_formation_status_alone_during_battle_is_not_a_selection_screen(self):

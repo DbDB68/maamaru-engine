@@ -818,7 +818,8 @@
         420
       ]
     },
-    "double_click": true
+    "double_click": true,
+    "confirm_offset": [-115, 13]
   },
   "shop": {
     "free_gift": {

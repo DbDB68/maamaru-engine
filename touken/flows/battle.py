@@ -564,7 +564,7 @@ class BattleMixin:
                 return "advantage"
 
         return ("fixed" if self.select_formation(
-            self._formation_name(formation_name)) else "failed")
+            self._formation_name(formation_name), verified=True) else "failed")
 
     def _formation_mode_state(self, allow_auto_without_title: bool = False):
         """先确认阵形选择页，再读取右上角当前模式。"""
@@ -592,7 +592,7 @@ class BattleMixin:
             return "manual"
         return None
 
-    def select_formation(self, formation_name: str) -> bool:
+    def select_formation(self, formation_name: str, verified: bool = False) -> bool:
         """
         选择阵形
 
@@ -606,19 +606,21 @@ class BattleMixin:
         formation_config = self.config.get("formation", {})
 
         # 必须同时看到顶部阵形页标题和右上角模式状态。
-        if self._formation_mode_state() is None:
+        if not verified and self._formation_mode_state() is None:
             print("[ERROR] 不在阵形选择界面")
             return False
 
         # 选择阵形
         formations = formation_config.get("formations", {})
         if formation_name in formations:
-            self._click_point(formations[formation_name])
+            target = formations[formation_name]
+            self._click_point(target)
             time.sleep(0.3)
 
-            # 如果需要双击
+            # 第一击选中阵形卡；确认热点随后出现在卡内左下，不是原地双击。
             if formation_config.get("double_click"):
-                self._click_point(formations[formation_name])
+                dx, dy = formation_config.get("confirm_offset", [-115, 13])
+                self._click_point([target[0] + dx, target[1] + dy])
 
             return True
 

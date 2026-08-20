@@ -412,7 +412,19 @@ class PracticeMixin:
             elif result == "fixed":
                 yield f"[演练] 选择固定/兜底阵形：{formation}"
             else:
-                yield "[演练] 阵形选择失败，等待游戏状态变化"
+                yield "[演练] 阵形选择失败，停止这场，避免在选择页误点"
+                return "unknown"
+
+            formation_left = False
+            for _ in range(8):
+                time.sleep(0.5)
+                self.maa.screenshot(force=True)
+                if self._formation_mode_state() is None:
+                    formation_left = True
+                    break
+            if not formation_left:
+                yield "[演练] 阵形仍未确认，停止这场，避免在选择页误点"
+                return "unknown"
             yield "[演练] 阵形已确认，战斗中..."
 
         # ---- 等战斗播完回列表（途中每3秒点一下安全区，翻结算页/跳动画）----
