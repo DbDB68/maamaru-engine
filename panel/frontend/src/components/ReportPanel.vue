@@ -66,6 +66,29 @@ const selectedAttributions = computed(() => (ledger.value?.attributions || [])
   .filter((item: any) => item.resource === selectedResource.value))
 const hasChartData = computed(() => chartBars.value.some((bar: any) => bar.value != null))
 const unreportedGaps = computed(() => inventoryGaps.value.filter(item => !item.reported))
+const reportedGapEntries = computed(() => {
+  const cutoff = Date.now() / 1000 - days.value * 86400
+  return inventoryGaps.value.filter(gap => gap.reported && gap.ended_at >= cutoff).map(gap => ({
+    ...gap,
+    reports: humanReports.value.filter(report => report.gap_key === gap.gap_key),
+  }))
+})
+const attributedRows = computed(() => resourceRows.value.filter(row => row.attributed).map(row => `${row.name} ${signed(row.attributed)}`))
+const humanPeriodTotals = computed(() => {
+  const totals: Record<string, number> = {}
+  for (const gap of reportedGapEntries.value) for (const [name, value] of Object.entries(gap.resource_delta || {})) totals[name] = (totals[name] || 0) + Number(value || 0)
+  return totals
+})
+const humanPeriodRows = computed(() => resourceNames.filter(name => humanPeriodTotals.value[name]).map(name => `${name} ${signed(humanPeriodTotals.value[name])}`))
+const unexplainedRows = computed(() => resourceRows.value.flatMap(row => {
+  if (row.unattributed == null) return []
+  const value = row.unattributed - (humanPeriodTotals.value[row.name] || 0)
+  return value ? [`${row.name} ${signed(value)}`] : []
+}))
+const proactiveReports = computed(() => {
+  const cutoff = Date.now() / 1000 - days.value * 86400
+  return humanReports.value.filter(item => !item.gap_key && item.occurred_at >= cutoff)
+})
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
   'osaka.floor_completed': '大阪城完成一圈', 'sortie.completed': '出阵完成',
@@ -461,6 +484,9 @@ function gapDelta(gap: any) {
   const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
   return order.filter(name => gap.resource_delta?.[name]).map(name => `${name} ${gap.resource_delta[name] > 0 ? '+' : ''}${gap.resource_delta[name].toLocaleString()}`).join(' · ')
 }
+function humanReportLabel(report: any) {
+  return [...(report.activities || []), report.note].filter(Boolean).join(' · ') || '已报备，未填写说明'
+}
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
@@ -530,6 +556,18 @@ onMounted(() => load())
       </div>
       <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
     </section>
+    <section v-if="reportView === 'ledger'" class="ledger-attribution">
+      <header><div><h3>这笔账是怎么组成的</h3><p>库存净变化按证据拆开看；人工时段只说明上下文，不冒充狐狸收益。</p></div><small>{{ rangeLabel }}</small></header>
+      <div class="ledger-attribution-grid">
+        <article class="confirmed"><span>🦊 狐狸确认</span><strong>{{ attributedRows.length ? attributedRows.join(' · ') : '暂无确认收支' }}</strong><p>来自玩法结算、配方消耗或界面读数，可以算进脚本成绩。</p></article>
+        <article class="human"><span>📝 审神者操作时段</span><strong>{{ humanPeriodRows.length ? humanPeriodRows.join(' · ') : '暂无可对应的库存差值' }}</strong><p v-if="reportedGapEntries.length">{{ reportedGapEntries.length }} 段差值已有报备，数字已包含在上方库存总变化中。</p><p v-else>报备某段人工操作后，对应库存差值会显示在这里。</p></article>
+        <article class="unknown"><span>？ 仍未说明</span><strong>{{ unexplainedRows.length ? unexplainedRows.join(' · ') : '其余变化均已有上下文' }}</strong><p>库存里真实发生、但脚本证据和人工报备都还覆盖不到的部分。</p></article>
+      </div>
+      <div v-if="reportedGapEntries.length || proactiveReports.length" class="human-context-list">
+        <article v-for="gap in reportedGapEntries" :key="gap.gap_key"><time>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}</time><span><b>{{ gap.reports.map(humanReportLabel).join('；') || '已报备' }}</b><small>{{ gapDelta(gap) }}</small></span></article>
+        <article v-for="item in proactiveReports" :key="`proactive:${item.id}`"><time>{{ eventTime(item.occurred_at) }}</time><span><b>{{ humanReportLabel(item) }}</b><small>主动报备 · 暂无可对应的库存差值</small></span></article>
+      </div>
+    </section>
     <section v-if="reportView === 'ledger'" class="resource-trend">
       <header><div><h3>本丸收支</h3><p>柱高是当日库存净变化，柱内颜色表示能够确认的来源</p></div><nav aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="selectedResource = name">{{ name }}</button></nav></header>
       <div class="chart-legend"><span><i class="attributed"></i>已确认来源</span><span><i class="unattributed"></i>尚未归因</span><small v-if="!selectedAttributions.length">当前范围没有已确认的{{ selectedResource }}来源</small></div>
@@ -557,7 +595,7 @@ onMounted(() => load())
       </form>
     </section>
     <section v-if="reportView === 'ledger'" class="human-report-panel">
-      <header><div><h3>📝 审神者报备</h3><small>你只说做过什么，具体数字交给库存盘点。</small></div><button type="button" class="secondary" @click="openProactiveReport">{{ reportMode === 'proactive' ? '收起' : '主动报备一下' }}</button></header>
+      <header><div><h3>📝 补充人工操作</h3><small>报备会回到上方“账目构成”中，与对应库存差值放在一起看。</small></div><button type="button" class="secondary" @click="openProactiveReport">{{ reportMode === 'proactive' ? '收起' : '主动报备一下' }}</button></header>
       <form v-if="reportMode === 'proactive'" @submit.prevent="saveHumanReport(false)">
         <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
         <fieldset><legend>想给まあ丸报备什么？</legend><button v-for="value in humanActivities" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
