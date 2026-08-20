@@ -1278,9 +1278,10 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .ledger-confidence.fair b { border-color: var(--fox-gold); }
 .ledger-confidence.rough b { border-color: #b77b43; }
 .ledger-confidence.empty b { border-color: var(--ink-dim); }
-.resource-ledger-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--paper-line); }
+.resource-ledger-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--paper-line); }
 .resource-ledger-grid article { display: grid; min-width: 0; padding: 13px 14px; border-left: 1px solid var(--paper-line); }
-.resource-ledger-grid article:first-child { border-left: 0; }
+.resource-ledger-grid article:nth-child(4n+1) { border-left: 0; }
+.resource-ledger-grid article:nth-child(n+5) { border-top: 1px solid var(--paper-line); }
 .resource-ledger-grid small, .resource-ledger-grid span { color: var(--ink-dim); font-size: 11px; }
 .resource-ledger-grid strong { margin: 5px 0 3px; font-size: clamp(20px, 2vw, 27px); line-height: 1; }
 .resource-ledger-grid .gain strong { color: #47734f; }
@@ -1409,7 +1410,8 @@ body[data-theme='pixel'] .resource-ledger, body[data-theme='pixel'] .resource-tr
 body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-upkeep span) { letter-spacing: .01em; }
 @media (max-width: 900px) {
   .resource-ledger-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .resource-ledger-grid article:nth-child(4) { border-left: 0; }
+  .resource-ledger-grid article { border-left: 1px solid var(--paper-line); border-top: 0; }
+  .resource-ledger-grid article:nth-child(3n+1) { border-left: 0; }
   .resource-ledger-grid article:nth-child(n+4) { border-top: 1px solid var(--paper-line); }
   .report-stats { grid-template-columns: repeat(2, 1fr); }
   .report-body { grid-template-columns: 1fr; }
@@ -1424,6 +1426,7 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
   .resource-ledger > header, .resource-trend > header { align-items: stretch; flex-direction: column; }
   .ledger-confidence { justify-items: start; max-width: none; text-align: left; }
   .resource-ledger-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resource-ledger-grid article { border-left: 1px solid var(--paper-line); border-top: 0; }
   .resource-ledger-grid article:nth-child(odd) { border-left: 0; }
   .resource-ledger-grid article:nth-child(n+3) { border-top: 1px solid var(--paper-line); }
   .fox-summary { grid-template-columns: 1fr; gap: 3px; }

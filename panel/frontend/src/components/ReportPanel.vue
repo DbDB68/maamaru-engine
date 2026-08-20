@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
 const days = ref(7), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
-const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石']
+const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
 const resourceRows = computed(() => resourceNames.map(name => {

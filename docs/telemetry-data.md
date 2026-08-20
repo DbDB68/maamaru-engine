@@ -142,9 +142,19 @@
 窗口内每条可确认资源变化一条记录。当前 confirmed 来源：
 
 - `osaka.koban_session`：小判 `delta`（读数差值）。
-- `repair.session_completed`：加速符 `−speedups`。
+- `repair.session_completed`：加速符 `−speedups`。**加速符去重**：同一 run 内
+  已存在 `repair.confirm_screen` 的加速符逐笔 `resource.change` 时，此汇总归因
+  让位（逐笔粒度更细更准，事件本身保留在事件流）；没有逐笔记录的老数据照常
+  计入。run_id 缺失时按窗口内是否存在逐笔记录兜底。
 - `resource.change` / `yosari.ticket_refill`：补充归城提灯时，以购买页前后余额确认小判支出。
 - `resource.change` / `expedition.settlement`：远征结算页 OCR 确认的四项基础资源收益。
+- `resource.change` / `forge.started`：锻刀点火按配置 `forge.recipe` 负扣
+  木炭/玉钢/冷却材/砥石 + 委托符 −1（evidence `known_recipe`，机制已知值，不 OCR）。
+- `resource.change` / `repair.confirm_screen`：手入确认界面 OCR 的四资源成本
+  （evidence `repair_confirm_ocr`）；勾了加速符的修理另记加速符 −1
+  （evidence `known_recipe`，勾是我们亲手勾的，确定事实）。
+- `resource.change` / `task_rewards.reward_popup`：任务「报酬一览」弹窗按格
+  图标模板匹配 + 数量 OCR 确认的收益（evidence `reward_popup_ocr`）。
 
 **双写兼容**：未来玩法流程可发射 `resource.change` 事件；payload 带
 `source_event_id` 指向旧事件 id 时，聚合层跳过旧事件那一份，不重复聚合。
@@ -154,9 +164,20 @@
  "resource": "小判", "delta": 42850, "before": 745656, "after": 788506,
  "source": "osaka.koban_session", "source_event_id": 123,
  "attribution": "confirmed|observed|estimated|unknown",
- "evidence": "direct_before_after|settlement_ocr|rule_estimate|...",
+ "evidence": "direct_before_after|settlement_ocr|rule_estimate|known_recipe|repair_confirm_ocr|reward_popup_ocr|...",
  "note": "可选"}
 ```
+
+**delta 允许 null**（仅 `attribution="unknown"` 时）：资源确实发生了变化但数值
+读取失败（如 OCR 翻车），用 null 保留「发生过」的事实，聚合层不进 attributions、
+不影响 attributed_delta，note 里必须写明原因。
+
+新增配置键：
+
+- `forge.recipe`：锻刀点火配方 `[木炭, 玉钢, 冷却材, 砥石]`，缺省 `[700,700,700,700]`；
+  点火记账按此配置负扣，改配方账自动跟着变。
+- `repair.cost_rois`：手入选人界面左面板「所需资源」四行成本数字的黑框 ROI
+  （顺序同上），修复开始前 OCR 记账用；不配则手入不记成本账。
 
 ### 缺口（gaps）与置信度
 

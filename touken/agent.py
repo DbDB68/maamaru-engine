@@ -46,9 +46,13 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
             pass
 
     def record_event(self, event_type: str, **payload):
-        """记录稳定的机器事件；展示文案变化不会影响统计和智能建议。"""
+        """记录稳定的机器事件；展示文案变化不会影响统计和智能建议。
+
+        返回事件 id（写失败或异常返回 None），供 resource.change 的
+        source_event_id 双写关联用。
+        """
         try:
             from .telemetry import record_event
-            record_event(event_type, payload)
+            return record_event(event_type, payload)
         except Exception:
-            pass
+            return None

@@ -178,17 +178,22 @@ class TelemetryStore:
         except Exception:
             pass
 
-    def record_event(self, event_type: str, payload: dict | None = None) -> None:
+    def record_event(self, event_type: str, payload: dict | None = None) -> int | None:
+        """写入一条事件并返回事件 id（供 resource.change 的 source_event_id 关联）。
+
+        写失败返回 None——telemetry 丢了不许拖垮玩法流程。
+        """
         try:
             run_id, script = self.runtime_context()
-            self._conn().execute(
+            cursor = self._conn().execute(
                 "INSERT INTO events(ts, run_id, script, event_type, payload) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (time.time(), run_id, script, event_type, _json(payload or {})),
             )
             self._conn().commit()
+            return cursor.lastrowid
         except Exception:
-            pass
+            return None
 
     def attach_inventory_snapshot(self, run_id: str, snapshot: dict,
                                   captured_ts: float | None = None) -> dict:
@@ -395,11 +400,22 @@ class TelemetryStore:
 
         # ── 归因：resource.change 双写去重（source_event_id 指向旧事件时跳过旧的那份）──
         shadowed = set()
+        # 加速符去重：同 run 已有 repair.confirm_screen 的逐笔记账时，
+        # repair.session_completed 的 speedups 汇总让位（逐笔粒度更细更准）；
+        # 没有逐笔记录的老数据照常靠 session_completed 归因
+        per_repair_runs: set = set()
+        per_repair_any = False
         for row in rows:
             if row["event_type"] == "resource.change":
-                source_event_id = _loads(row["payload"], {}).get("source_event_id")
+                rc_payload = _loads(row["payload"], {})
+                source_event_id = rc_payload.get("source_event_id")
                 if isinstance(source_event_id, (int, float)):
                     shadowed.add(int(source_event_id))
+                if (rc_payload.get("source") == "repair.confirm_screen"
+                        and rc_payload.get("resource") == "加速符"):
+                    per_repair_any = True
+                    if row["run_id"]:
+                        per_repair_runs.add(row["run_id"])
         attributions: list[dict] = []
         for row in rows:
             payload = _loads(row["payload"], {})
@@ -411,8 +427,12 @@ class TelemetryStore:
                     item = {"resource": "小判", "delta": delta, "source": event_type,
                             "label": f"挖地小判 {int(delta):+d}", "confidence": "confirmed"}
             elif event_type == "repair.session_completed" and row["id"] not in shadowed:
+                # run_id 优先配对；run_id 缺失时按窗内是否有逐笔记录兜底
+                has_per_repair = (row["run_id"] in per_repair_runs
+                                  if row["run_id"] else per_repair_any)
                 speedups = payload.get("speedups")
-                if isinstance(speedups, (int, float)) and speedups:
+                if (not has_per_repair
+                        and isinstance(speedups, (int, float)) and speedups):
                     item = {"resource": "加速符", "delta": -int(speedups),
                             "source": event_type,
                             "label": f"手入加速符 {-int(speedups):+d}",
@@ -783,5 +803,6 @@ def get_telemetry_store() -> TelemetryStore:
     return _store
 
 
-def record_event(event_type: str, payload: dict | None = None) -> None:
-    get_telemetry_store().record_event(event_type, payload)
+def record_event(event_type: str, payload: dict | None = None) -> int | None:
+    """记录事件，返回事件 id（失败返回 None）。"""
+    return get_telemetry_store().record_event(event_type, payload)

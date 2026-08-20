@@ -4,9 +4,25 @@
 （从 touken_agent_engine_v2.py 原样搬家，逻辑未改）
 """
 
+import re
 import time
 
 from ..maa_adapter import roi_4to4
+
+# 「任务达成报酬一览」弹窗格子几何（1280×720 实测，证据 tmp/task_probe_2.png）：
+# 标题顶部正中；物品格横排，首格 x=311、格距 110、格宽 104；
+# 图标行 y≈150~256，数量黑框行 y≈260~296（数量带千分位逗号，要洗掉）。
+# 物品种类和数量随标签页变，不能写死格子数，按格扫到空格为止。
+_POPUP_TITLE_ROI = (500, 55, 780, 85)
+_POPUP_CELL_X = 311
+_POPUP_CELL_PITCH = 110
+_POPUP_CELL_W = 104
+_POPUP_ICON_Y = (150, 256)
+_POPUP_QTY_Y = (260, 296)
+_POPUP_MAX_CELLS = 8
+_POPUP_ICONS = (("资源/icon木炭.png", "木炭"), ("资源/icon玉钢.png", "玉钢"),
+                ("资源/icon冷却材.png", "冷却材"), ("资源/icon砥石.png", "砥石"),
+                ("资源/icon委托符.png", "委托符"), ("资源/icon小判.png", "小判"))
 
 
 class RewardsMixin:
@@ -222,6 +238,16 @@ class RewardsMixin:
                 # 等待领取动画/弹窗
                 time.sleep(1.5)
 
+                # 弹窗还在的窗口期读报酬明细；读失败不阻断领取流程
+                popup = None
+                try:
+                    popup = self._read_reward_popup()
+                except Exception:
+                    popup = None
+                if popup and popup[1]:
+                    for note in popup[1]:
+                        yield f"[TASK] {tab_name} 报酬弹窗：{note}"
+
                 # 关闭可能的奖励弹窗
                 # 判定：必须同时有 通用_关闭.png 和 ui完成任务.png
                 # 防止误关任务界面本身
@@ -259,7 +285,10 @@ class RewardsMixin:
                     template=inactive_template, roi=None, threshold=0.7)
                 if now_inactive and not still_active:
                     if hasattr(self, "record_event"):
-                        self.record_event("task_rewards.claimed", tab=tab_name)
+                        claimed_id = self.record_event("task_rewards.claimed",
+                                                       tab=tab_name)
+                        if popup and popup[0]:
+                            self._emit_reward_popup_changes(popup[0], claimed_id)
                     yield f"[TASK] {tab_name} 领取成功，已确认按钮变灰"
                 else:
                     if hasattr(self, "record_event"):
@@ -293,3 +322,60 @@ class RewardsMixin:
 
         yield "[TASK] 所有任务奖励领取完毕"
         return
+
+    def _read_reward_popup(self):
+        """读「任务达成报酬一览」弹窗：图标模板匹配认资源，数量黑框 OCR 认数量。
+
+        Returns:
+            (items, notes) — items: [(资源名, 数量)]；notes: 被跳过格子的说明。
+            标题识别不到 = 弹窗没弹（没领到），返回 None。
+        """
+        self.maa.screenshot(force=True)
+        if not self.maa.ocr("报酬一览", roi_4to4(*_POPUP_TITLE_ROI),
+                            match_mode="contains"):
+            return None
+        items, notes = [], []
+        for i in range(_POPUP_MAX_CELLS):
+            x = _POPUP_CELL_X + i * _POPUP_CELL_PITCH
+            icon_roi = roi_4to4(x, _POPUP_ICON_Y[0],
+                                x + _POPUP_CELL_W, _POPUP_ICON_Y[1])
+            resource = None
+            for template, name in _POPUP_ICONS:
+                if self.maa.template_match(template, roi=icon_roi, threshold=0.8):
+                    resource = name
+                    break
+            qty = self._read_popup_qty(roi_4to4(
+                x, _POPUP_QTY_Y[0], x + _POPUP_CELL_W, _POPUP_QTY_Y[1]))
+            if resource is None and qty is None:
+                break  # 空格 = 这一页奖励到此为止
+            if resource is None:
+                notes.append(f"第{i + 1}格图标不认识（数量 {qty}），跳过")
+                continue
+            if qty is None:
+                notes.append(f"第{i + 1}格 {resource} 数量读取失败，跳过")
+                continue
+            items.append((resource, qty))
+        return items, notes
+
+    def _read_popup_qty(self, roi):
+        """数量黑框 OCR：洗掉千分位逗号，读不出返回 None"""
+        try:
+            tokens = self.maa.ocr_all(roi)
+            m = re.search(r"[\d,]+", "".join(t for t, _ in tokens))
+            if m:
+                return int(m.group(0).replace(",", ""))
+        except Exception:
+            pass
+        return None
+
+    def _emit_reward_popup_changes(self, items, claimed_event_id):
+        """报酬弹窗识别成功的物品各记一条 resource.change（正 delta）"""
+        if not hasattr(self, "record_event"):
+            return
+        for resource, qty in items:
+            payload = {"resource": resource, "delta": qty,
+                       "source": "task_rewards.reward_popup", "script": "task",
+                       "attribution": "confirmed", "evidence": "reward_popup_ocr"}
+            if isinstance(claimed_event_id, int):
+                payload["source_event_id"] = claimed_event_id
+            self.record_event("resource.change", **payload)

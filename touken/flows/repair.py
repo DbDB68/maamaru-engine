@@ -20,6 +20,9 @@ from .. import sword_db
 
 _TEAM_NUMERAL = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 
+# 选人界面左面板「所需资源」四行（顺序固定），对应配置 repair.cost_rois
+_REPAIR_RES = ("木炭", "玉钢", "冷却材", "砥石")
+
 
 class RepairMixin:
     """手入。依赖宿主类的 navigate_to_stream、_click_point。"""
@@ -282,6 +285,8 @@ class RepairMixin:
             time.sleep(0.5)
 
         self.maa.screenshot(force=True)
+        # 修复开始之前，先把左面板「所需资源」的真实成本读下来（记账用）
+        costs = self._read_repair_costs(cfg)
         start = self.maa.template_match(cfg["start_button"]["template"])
         if not start:
             yield "[手入] 找不到修复开始按钮"
@@ -298,4 +303,53 @@ class RepairMixin:
                 time.sleep(1.0)
                 break
 
+        self._emit_repair_costs(costs, need_speed)
         yield "[手入] 已开工"
+
+    def _read_repair_costs(self, cfg):
+        """OCR 选人界面左面板「所需资源」四个成本数字（黑框，顺序固定）。
+
+        返回 [木炭, 玉钢, 冷却材, 砥石]，读不到的行是 None；
+        没配 cost_rois 返回 None（不记账）。
+        """
+        rois = cfg.get("cost_rois")
+        if not rois:
+            return None
+        costs = []
+        for roi in rois[:4]:
+            value = None
+            try:
+                tokens = self.maa.ocr_all(roi_4to4(*roi))
+                m = re.search(r"[\d,]+", "".join(t for t, _ in tokens))
+                if m:
+                    value = int(m.group(0).replace(",", ""))
+            except Exception:
+                value = None
+            costs.append(value)
+        return costs
+
+    def _emit_repair_costs(self, costs, need_speed: bool):
+        """手入开工的资源记账：四资源按确认界面 OCR 负扣（confirmed）。
+
+        读不到的资源记 attribution=unknown、delta=null，保留「修过了」的事实。
+        need_speed 时加速符 -1 是确定事实（复选框是我们亲手勾的）。
+        """
+        if costs is None or not hasattr(self, "record_event"):
+            return
+        for name, cost in zip(_REPAIR_RES, costs):
+            if cost is None:
+                self.record_event(
+                    "resource.change", resource=name, delta=None,
+                    source="repair.confirm_screen", script="repair",
+                    attribution="unknown", evidence="repair_confirm_ocr",
+                    note="发生了修理消耗但数值读取失败")
+            else:
+                self.record_event(
+                    "resource.change", resource=name, delta=-cost,
+                    source="repair.confirm_screen", script="repair",
+                    attribution="confirmed", evidence="repair_confirm_ocr")
+        if need_speed:
+            self.record_event(
+                "resource.change", resource="加速符", delta=-1,
+                source="repair.confirm_screen", script="repair",
+                attribution="confirmed", evidence="known_recipe")

@@ -3,7 +3,8 @@
 上层业务：锻刀 + 刀解（俩界面挨着，互相救场，放一起）
 
 锻刀规矩（用户亲授）：
-  1. 配比不用调，默认 700×4，点锻刀即可，加速符不勾（省着）
+  1. 配比不用调，默认 700×4（配置 forge.recipe 可改，账目跟着配置走），
+     点锻刀即可，加速符不勾（省着）
   2. 有"完成"的炉子顺手收刀；刀位满了会蹦氪金弹窗——
      关掉，去刀解一把白名单腾出位置，再回来收
   3. 每日锻 3 次做日课
@@ -42,6 +43,10 @@ _NAME_ROI_DY2 = 98
 
 _STATUS_DIR = STATUS_DIR
 _FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
+
+# 点火配方四资源的名称（顺序固定，对应配置 forge.recipe 的四个数）
+_FORGE_RES = ("木炭", "玉钢", "冷却材", "砥石")
+_DEFAULT_RECIPE = [700, 700, 700, 700]
 
 
 def _mark_dismantled_today():
@@ -145,9 +150,10 @@ class SmithMixin:
                     forged += 1
                     hit = self._check_watch(cy, watch_secs)
                     if hasattr(self, "record_event"):
-                        self.record_event("forge.started",
-                                          slot=_SLOT_CY.index(cy) + 1,
-                                          sequence=forged, target_hit=hit)
+                        started_id = self.record_event("forge.started",
+                                                       slot=_SLOT_CY.index(cy) + 1,
+                                                       sequence=forged, target_hit=hit)
+                        self._emit_forge_costs(started_id)
                     if hit:
                         yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
                         try:
@@ -219,6 +225,29 @@ class SmithMixin:
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 return True
         return False
+
+    def _forge_recipe(self) -> list:
+        """点火配方：读配置 forge.recipe（顺序 木炭/玉钢/冷却材/砥石），
+        缺省/配置坏了回落 700×4"""
+        recipe = (self.config.get("forge") or {}).get("recipe")
+        if (isinstance(recipe, list) and len(recipe) == 4
+                and all(isinstance(v, (int, float)) and v > 0 for v in recipe)):
+            return [int(v) for v in recipe]
+        return list(_DEFAULT_RECIPE)
+
+    def _emit_forge_costs(self, started_event_id):
+        """点火成功的资源记账：四资源按配方负扣 + 委托符 -1。
+
+        配方是配置已知值（不勾加速符是流程定死的），不用 OCR，
+        attribution=confirmed / evidence=known_recipe。
+        """
+        payload = {"source": "forge.started", "attribution": "confirmed",
+                   "evidence": "known_recipe", "script": "forge"}
+        if isinstance(started_event_id, int):
+            payload["source_event_id"] = started_event_id
+        for name, cost in zip(_FORGE_RES, self._forge_recipe()):
+            self.record_event("resource.change", resource=name, delta=-cost, **payload)
+        self.record_event("resource.change", resource="委托符", delta=-1, **payload)
 
     def _check_watch(self, cy: int, watch_secs: set):
         """点火后读这炉的倒计时，命中目标时长（倒计时走字，容忍少 90 秒）就报"""
