@@ -18,6 +18,7 @@
 备注：章节/小图坐标是老配置里估的，首次用新章节前要实测校准。
 """
 
+import re
 import time
 
 from ..maa_adapter import roi_4to4
@@ -539,13 +540,14 @@ class SortieMixin:
             yield "[异去] 归城提灯不足；自动补充已关闭，不消耗小判，收工"
             return False
 
+        purchase_ledger = self._read_yosari_koban_purchase(purchase_screen)
         yield "[异去] 归城提灯不足，开始四段确认中的补充步骤"
         self._click_point(purchase_screen.get("confirm_target", [638, 611]))
         time.sleep(1.2)
 
         spend_confirm = refill.get("spend_confirm", {})
         if not _wait_text(spend_confirm, "是否消耗", [300, 80, 1010, 560]):
-            yield "[异去] 没看到消耗500小判的确认页，停止点击"
+            yield "[异去] 没看到消耗小判的确认页，停止点击"
             return False
         self._click_point(spend_confirm.get("confirm_target", [784, 604]))
         time.sleep(1.2)
@@ -554,10 +556,55 @@ class SortieMixin:
         if not _wait_text(completed, "补充了归城提灯", [330, 120, 950, 460]):
             yield "[异去] 没看到归城提灯补充完成页，停止点击"
             return False
+        event_payload = {
+            "item": "归城提灯一",
+            "source": "yosari.ticket_refill",
+            "evidence": "purchase_completed",
+        }
+        if purchase_ledger:
+            event_payload.update(purchase_ledger)
+            self.record_event(
+                "resource.change",
+                resource="小判",
+                delta=purchase_ledger["delta"],
+                before=purchase_ledger["before"],
+                after=purchase_ledger["after"],
+                source="yosari.ticket_refill",
+                attribution="confirmed",
+                evidence="purchase_preview_balances",
+                note="异去归城提灯补充",
+            )
+        self.record_event("yosari.ticket_refilled", **event_payload)
         self._click_point(completed.get("confirm_target", [638, 511]))
         time.sleep(1.2)
-        yield "[异去] 归城提灯补充完成，已回到部队选择"
+        if purchase_ledger:
+            yield (f"[异去] 归城提灯补充完成，小判 "
+                   f"{purchase_ledger['delta']:+d}，已回到部队选择")
+        else:
+            yield "[异去] 归城提灯补充完成；小判金额未识别，已回到部队选择"
         return "refilled"
+
+    def _read_yosari_koban_purchase(self, purchase_screen: dict):
+        """读取购买页展示的购买前/后小判；读不全时不猜金额。"""
+        ocr_all = getattr(self.maa, "ocr_all", None)
+        if not callable(ocr_all):
+            return None
+
+        def _read_one(key: str, fallback: list):
+            try:
+                rows = ocr_all(roi_4to4(*purchase_screen.get(key, fallback)))
+            except Exception:
+                return None
+            ordered = sorted(rows or [], key=lambda row: getattr(row[1], "x", 0))
+            digits = "".join(re.sub(r"\D", "", str(text))
+                             for text, _point in ordered)
+            return int(digits) if digits else None
+
+        before = _read_one("balance_before_roi", [465, 345, 625, 410])
+        after = _read_one("balance_after_roi", [675, 345, 835, 410])
+        if before is None or after is None or after >= before:
+            return None
+        return {"before": before, "after": after, "delta": after - before}
 
     def _yosari_round_done(self, cfg: dict) -> bool:
         """归城提灯标题与部队选择同时出现，才算确实回到异去小图页。"""

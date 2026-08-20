@@ -68,7 +68,8 @@
 - `expedition.dispatched`、`expedition.settled`
 - `task_rewards.claimed`
 - `inventory.captured`、`inventory.peek`、`osaka.koban_session`
-- `resource.change`（预留契约，见下文；当前流程尚未发射，聚合层已兼容）
+- `resource.change`（通用资源流水，见下文）
+- `yosari.ticket_refilled`（归城提灯补充完成；金额识别失败时仍保留事实）
 
 新增事件应使用 `领域.过去式动作`，payload 只放数据，不放展示文案。事件和 OCR 默认保留
 90 天；当前状态 JSON 仍保留原有接口，便于旧前端渐进迁移。
@@ -142,6 +143,7 @@
 
 - `osaka.koban_session`：小判 `delta`（读数差值）。
 - `repair.session_completed`：加速符 `−speedups`。
+- `resource.change` / `yosari.ticket_refill`：补充归城提灯时，以购买页前后余额确认小判支出。
 
 **双写兼容**：未来玩法流程可发射 `resource.change` 事件；payload 带
 `source_event_id` 指向旧事件 id 时，聚合层跳过旧事件那一份，不重复聚合。

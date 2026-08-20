@@ -433,13 +433,28 @@ class YosariRouteTests(unittest.TestCase):
         self.assertEqual(flow._find_march_continue({}), button)
 
     def test_yosari_new_refill_flow_confirms_four_dialogs(self):
+        class Maa(FakeMaa):
+            def __init__(self):
+                super().__init__(ocr_results=[True, True, True, True])
+                self.balance_reads = iter([
+                    [("788", Point(520, 380)), ("956 枚", Point(570, 380))],
+                    [("788,456 枚", Point(750, 380))],
+                ])
+
+            def ocr_all(self, roi):
+                return next(self.balance_reads, [])
+
         class Route(SortieMixin):
             def __init__(self):
-                self.maa = FakeMaa(ocr_results=[True, True, True, True])
+                self.maa = Maa()
                 self.points = []
+                self.events = []
 
             def _click_point(self, point):
                 self.points.append(point)
+
+            def record_event(self, event_type, **payload):
+                self.events.append((event_type, payload))
 
         flow = Route()
         with patch("touken.flows.sortie.time.sleep"):
@@ -447,7 +462,35 @@ class YosariRouteTests(unittest.TestCase):
                 {"departure_confirm": {}}, auto_refill=True))
         self.assertEqual(result, "refilled")
         self.assertEqual(flow.points, [[640, 603], [638, 611], [784, 604], [638, 511]])
-        self.assertIn("[异去] 归城提灯补充完成，已回到部队选择", messages)
+        self.assertIn("[异去] 归城提灯补充完成，小判 -500，已回到部队选择", messages)
+        resource_event = next(payload for name, payload in flow.events
+                              if name == "resource.change")
+        self.assertEqual(resource_event["delta"], -500)
+        self.assertEqual(resource_event["before"], 788956)
+        self.assertEqual(resource_event["after"], 788456)
+        self.assertEqual(resource_event["attribution"], "confirmed")
+
+    def test_yosari_refill_records_fact_without_guessing_unreadable_koban(self):
+        class Route(SortieMixin):
+            def __init__(self):
+                self.maa = FakeMaa(ocr_results=[True, True, True, True])
+                self.points = []
+                self.events = []
+
+            def _click_point(self, point):
+                self.points.append(point)
+
+            def record_event(self, event_type, **payload):
+                self.events.append((event_type, payload))
+
+        flow = Route()
+        with patch("touken.flows.sortie.time.sleep"):
+            messages, result = self._drain(flow._confirm_yosari_departure(
+                {"departure_confirm": {}}, auto_refill=True))
+        self.assertEqual(result, "refilled")
+        self.assertFalse(any(name == "resource.change" for name, _ in flow.events))
+        self.assertTrue(any(name == "yosari.ticket_refilled" for name, _ in flow.events))
+        self.assertIn("[异去] 归城提灯补充完成；小判金额未识别，已回到部队选择", messages)
 
     def test_yosari_refill_off_closes_before_spending_koban(self):
         class Route(SortieMixin):

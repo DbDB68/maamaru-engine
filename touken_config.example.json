@@ -1274,6 +1274,8 @@
       "purchase_screen": {
         "expected": "补充所需",
         "roi": [270, 75, 1010, 555],
+        "balance_before_roi": [465, 345, 625, 410],
+        "balance_after_roi": [675, 345, 835, 410],
         "confirm_target": [638, 611],
         "close_target": [1040, 48]
       },
