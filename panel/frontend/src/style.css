@@ -344,18 +344,24 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .embedded-head p, .system-toolbar p { margin: 0; color: #75695d; font-size: 13px; }
 .embedded-head button, .system-toolbar button { padding: 7px 12px; }
 .system-toolbar { background: #f4ecdd; }
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; flex: 0 0 64px; padding: 9px 18px; background: var(--paper-card); border-bottom: 1px solid var(--paper-line); }
+.page-toolbar > div:first-child { display: grid; gap: 2px; }
+.page-toolbar h2 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 17px; line-height: 1.25; }
+.page-toolbar h2::before { content: ''; width: 20px; height: 20px; flex: 0 0 20px; background: var(--fox-gold-deep); -webkit-mask: var(--section-icon) center / contain no-repeat; mask: var(--section-icon) center / contain no-repeat; }
+.page-toolbar p { margin: 0; color: var(--ink-dim); font-size: 12px; }
+.page-toolbar > button { min-height: 38px; padding: 7px 12px; }
 .system-panel { font-size: 14px; }
-.system-panel .system-layout { min-height: 0; height: calc(100% - 66px); }
+.system-panel .system-layout { min-height: 0; height: calc(100% - 64px); }
 .system-panel .system-form { padding: 20px 24px; }
 .system-panel .system-form h3 { font-size: 18px; }
 .system-panel .system-form label:not(.check-label) { margin-bottom: 12px; font-size: 14px; }
 .system-panel .system-form input, .system-panel .system-form select, .system-panel .system-form textarea { padding: 9px 10px; font-size: 14px; font-weight: 400; }
 .system-panel .system-form textarea { min-height: 150px; }
 .system-panel .system-nav button { font-size: 14px; }
-.chat-page, .system-page { padding: 0; }
+.chat-page, .system-page, .report-page { padding: 0; }
 .chat-page > .maamaru-surface > .chat-panel,
 .system-page > .maamaru-surface > .system-panel { border: 0; border-radius: 0; box-shadow: none; }
-.chat-page .section-head, .system-page .system-toolbar { flex: 0 0 auto; }
+.chat-page .page-toolbar, .system-page .page-toolbar { flex: 0 0 64px; }
 .chat-page .messages { padding-inline: clamp(22px, 4vw, 58px); }
 .chat-page .message p { max-width: min(72%, 820px); }
 .system-page .system-layout { grid-template-columns: 210px minmax(0, 1fr); }
@@ -788,6 +794,17 @@ body[data-theme='pixel'] .single-frame > .maamaru-surface {
   padding: 12px;
   overflow: auto;
 }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar {
+  min-height: 52px;
+  flex: 0 0 52px;
+  padding: 7px 4px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #c8bea5;
+}
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar h2 { font-size: 14px; }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar p { font-size: 12px; }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar h2::before { background: #c9a227; }
 
 /* 近侍：米色工作台承载标题，只有消息记录本身是一张白纸，不套整页白卡。 */
 body[data-theme='pixel'] .chat-page > .maamaru-surface { overflow: hidden; }
@@ -1255,7 +1272,8 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .report-link { width: 100%; padding: 7px 9px; color: var(--fox-gold-deep); background: var(--fox-gold-pale); border: 1px solid var(--fox-gold); }
 
 .report-page { overflow: auto; }
-.report-panel { min-height: 100%; padding: 18px; color: var(--ink); background: var(--paper-panel); }
+.report-panel { --section-icon: url('/static/img/ui/menuList.png'); min-height: 100%; color: var(--ink); background: var(--paper-panel); }
+.report-content { padding: 10px 18px 18px; }
 .report-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .report-head h2, .report-head p, .report-events h3, .report-observation h3 { margin: 0; }
 .report-head p, .report-events header small { margin-top: 4px; color: var(--ink-dim); font-size: 12px; }
@@ -1547,7 +1565,7 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
   .inventory-gap-alert > div { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
-  .report-panel { padding: 12px; }
+  .report-content { padding: 10px 12px 12px; }
   .report-head { align-items: stretch; flex-direction: column; }
   .report-head .segmented-control { align-self: flex-start; }
   .report-views button { justify-content: center; padding-inline: 7px; text-align: center; }

@@ -4,7 +4,7 @@ import { computed } from 'vue'
 const props = withDefaults(defineProps<{
   title: string
   subtitle?: string
-  variant?: 'section' | 'embedded' | 'system'
+  variant?: 'section' | 'embedded' | 'system' | 'page'
   titleClass?: string
 }>(), { subtitle: '', variant: 'section', titleClass: '' })
 
@@ -12,6 +12,7 @@ const variantClass = computed(() => ({
   section: 'section-head',
   embedded: 'embedded-head',
   system: 'system-toolbar',
+  page: 'page-toolbar',
 })[props.variant])
 </script>
 

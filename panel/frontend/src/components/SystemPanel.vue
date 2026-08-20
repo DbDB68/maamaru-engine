@@ -33,7 +33,7 @@ onMounted(async () => { await load(); if (bot.value.telegram.enabled == null) bo
 
 <template>
   <section v-if="ai && bot" class="system-panel">
-    <PanelHeader variant="system" title="系统设置" subtitle="近侍、协议端与播报"><template #actions><button class="primary" @click="save">保存设置</button></template></PanelHeader>
+    <PanelHeader variant="page" title="系统设置" subtitle="近侍、协议端与播报"><template #actions><button class="primary" @click="save">保存设置</button></template></PanelHeader>
     <div class="system-layout"><nav class="system-nav"><SideNavItem :active="selected === 'ai'" @click="selected = 'ai'">近侍 AI</SideNavItem><SideNavItem :active="selected === 'qq'" @click="selected = 'qq'">QQ</SideNavItem><SideNavItem :active="selected === 'telegram'" @click="selected = 'telegram'">Telegram</SideNavItem><SideNavItem :active="selected === 'broadcast'" @click="selected = 'broadcast'">播报</SideNavItem></nav>
       <div class="system-form" :class="`${selected}-form`">
         <template v-if="selected === 'ai'"><h3>近侍 AI</h3><label>API Key<PixelControl v-model="apiKey" type="password" :placeholder="ai.has_key ? `已配置（${ai.api_key_masked}），留空不改` : '输入 API Key'" /></label><label>API 地址<PixelControl v-model="ai.base_url" /></label><label>模型<PixelControl v-model="ai.model" /></label><label>角色设定<PixelControl v-model="ai.system_prompt" as="textarea" /></label><p>保存后立即生效，不需要重启。</p></template>

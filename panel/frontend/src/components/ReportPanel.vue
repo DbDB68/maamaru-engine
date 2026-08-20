@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
+import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 
 const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), timelineKind = ref<'activity' | 'system'>('activity'), timelineLimit = ref(20), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
@@ -479,10 +480,8 @@ onMounted(() => load())
 
 <template>
   <section class="report-panel">
-    <header class="report-head">
-      <div><h2>📜 本丸成绩单</h2><p>只统计小狐狸帮你完成的事</p></div>
-      <SegmentedControl :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
-    </header>
+    <PanelHeader variant="page" title="本丸成绩单" subtitle="只统计小狐狸帮你完成的事"><template #actions><SegmentedControl :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" /></template></PanelHeader>
+    <div class="report-content">
     <SegmentedControl class="report-views" :model-value="reportView" :items="reportViewItems" label="成绩单视图" variant="wide" @update:model-value="chooseReportView" />
     <p v-if="error" class="report-error">{{ error }}</p>
     <template v-if="reportView === 'battle'">
@@ -601,5 +600,6 @@ onMounted(() => load())
         </section>
       </div>
     </template>
+    </div>
   </section>
 </template>

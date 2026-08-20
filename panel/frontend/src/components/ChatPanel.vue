@@ -35,7 +35,7 @@ onMounted(load)
 
 <template>
   <section class="chat-panel">
-    <PanelHeader title="狐之助" subtitle="本丸近侍"><template #actions><button class="secondary" @click="clearLocal">清屏</button></template></PanelHeader>
+    <PanelHeader variant="page" title="狐之助" subtitle="本丸近侍"><template #actions><button class="secondary" @click="clearLocal">清屏</button></template></PanelHeader>
     <div ref="container" class="messages">
       <div v-if="!messages.length" class="message assistant"><i>🦊</i><p>主君，您来了！有什么需要我帮忙的吗？</p></div>
       <div v-for="(message, index) in messages" :key="index" class="message" :class="message.role === 'user' ? 'user' : 'assistant'">
