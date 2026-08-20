@@ -183,9 +183,9 @@ const topSorties = computed(() => sortieGroups.value.slice(0, 3))
 const kobanRow = computed(() => resourceRows.value.find(row => row.name === '小判'))
 const battleSummary = computed(() => {
   if (loading.value) return '狐之助正在整理这段时间的战报……'
-  if (!sortieCount.value && !summary.value?.runs?.total) return `${rangeLabel.value}还没有足够的成绩，先让小狐狸跑起来吧。`
+  if (!sortieCount.value && !summary.value?.runs?.total) return '还没有足够的成绩，先让小狐狸跑起来吧。'
   const lead = topSorties.value[0]
-  return `${rangeLabel.value}，まあ丸完成了 ${sortieCount.value.toLocaleString()} 次出阵${lead ? `，主要在 ${lead.label} 工作` : ''}。`
+  return `まあ丸完成了 ${sortieCount.value.toLocaleString()} 次出阵${lead ? `，主要在 ${lead.label} 工作` : ''}。`
 })
 function isWin(payload: any) {
   const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
@@ -473,8 +473,8 @@ onMounted(() => load())
     <p v-if="error" class="report-error">{{ error }}</p>
     <template v-if="reportView === 'battle'">
       <section class="battle-intro">
-        <div><span>{{ rangeLabel }}</span><h3>{{ battleSummary }}</h3><p>成绩、最近表现和需要你留意的事情都收在这里。</p></div>
-        <aside><b>🦊 近侍观察</b><small v-if="summary?.runs?.total">执行 {{ summary.runs.total }} 次任务 · 留下 {{ summary.events.total }} 条玩法记录</small><small v-else>只说能够确认的事，不把猜测当成绩。</small></aside>
+        <div><span>{{ rangeLabel }}</span><h3>{{ battleSummary }}</h3></div>
+        <aside v-if="summary?.runs?.total"><b>🦊 {{ summary.runs.total }} 次任务</b><small>{{ summary.events.total }} 条玩法记录</small></aside><aside v-else><b>🦊 近侍观察</b><small>只记录确认完成的事</small></aside>
       </section>
       <section class="battle-kpis" :class="{ loading }">
         <article><small>⚔️ 出阵完成</small><strong>{{ sortieCount.toLocaleString() }}</strong><span>圈</span><p>{{ topSorties[0]?.label || '等待第一份战绩' }}</p></article>
