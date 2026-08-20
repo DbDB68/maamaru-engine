@@ -287,6 +287,26 @@ class BattleComponentTests(unittest.TestCase):
                 formation_name="逆行阵", enable_auto=True), "auto")
         self.assertEqual(flow.points, [[910, 32]])
 
+    def test_auto_formation_stuck_on_selection_page_falls_back_to_fixed(self):
+        """夜战图敌方阵形「不明」：游戏自动阵形没东西可选，页面挂着不动，
+        已经是自动模式时脚本必须兜底手动点兜底阵形（6-2 实战卡死修复）。"""
+        flow = Flow(FakeMaa(templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择自动.png": Point(910, 32),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                strategy="advantage", formation_name="逆行阵",
+                enable_auto=True), "fixed")
+        # 没有有利标（夜图），直接点兜底阵形卡；没有去拨自动/手动开关
+        self.assertEqual(flow.points, [[1034, 420], [1034, 420]])
+
+
     def test_formation_status_alone_during_battle_is_not_a_selection_screen(self):
         flow = Flow(FakeMaa(templates={
             "battle/阵形选择手动.png": Point(910, 32),

@@ -314,6 +314,9 @@ class SortieMixin:
             march_done = False
             interrupted = False
             retreated = False
+            # 王点航位推算状态：(上次认出的距王点步数, 此后盲走的步数)。
+            # None = 还没有可信读数。每圈出阵重置。
+            boss_track = None
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
 
@@ -365,7 +368,8 @@ class SortieMixin:
                         formation_name=formation,
                         enable_auto=formation_mode == "auto",
                     )
-                    chosen = "有利阵形" if result == "advantage" else formation
+                    chosen = {"advantage": "有利阵形", "auto": "游戏自动阵形"}.get(
+                        result, formation)
                     yield f"[出阵] 🛡️ 已选择「{chosen}」继续"
                     # 阵形确认后的转场略慢；等页面真正消失，避免下一轮重复点阵。
                     for _ in range(8):
@@ -390,7 +394,9 @@ class SortieMixin:
                         break
                     # 王点前撤退（仅合战场 + 脚本手动行军）：决策屏右上小地图
                     # 永远干净完整，距王点 1 步 = 下一脚就是王点，撤。
-                    # 认不出来（None）绝不是撤退信号，继续正常行军。
+                    # 认不出来（None）本身不是撤退信号——但允许一次航位推算：
+                    # 上次明确读到 2 步、此后只盲走了 1 步，估算 == 1 才敢撤。
+                    # 盲走更多不猜：岔路骰子可能把距离带涨，估错就是半路白回家。
                     if retreat_before_boss and cfg_key == "sortie":
                         if not CV2_AVAILABLE:
                             yield "[出阵] 🗺️ 王点前撤退需要 opencv，当前环境没装，本圈按普通行军跑"
@@ -399,6 +405,8 @@ class SortieMixin:
                             boss_dist = boss_distance_from_image(
                                 self.maa.screenshot())
                             if boss_dist == 1:
+                                self._save_map_frame(chapter, map_no, loop_no,
+                                                     kind="retreat")
                                 yield "[出阵] 🏳️ 小地图看明白了：下一脚就是王点，按约定撤退回本丸"
                                 if not self._return_home_from_march(cfg):
                                     yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
@@ -406,12 +414,27 @@ class SortieMixin:
                                 retreated = True
                                 break
                             if boss_dist is None:
+                                self._save_map_frame(chapter, map_no, loop_no,
+                                                     kind="miss")
+                                if boss_track == (2, 1):
+                                    yield ("[出阵] 🏳️ 这帧小地图没认明白，但上次明确读到距王点 2 步、"
+                                           "此后只走了 1 步——航位推算下一脚就是王点，按约定撤退。"
+                                           "要是估错了（岔路骰子搞事）算我的，map_miss 里有现场")
+                                    if not self._return_home_from_march(cfg):
+                                        yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                                        return
+                                    retreated = True
+                                    break
                                 yield "[出阵] 🗺️ 小地图这帧没认明白，这步先照常走"
-                                self._save_map_miss(chapter, map_no, loop_no)
                             else:
+                                boss_track = (boss_dist, 0)
+                                self._save_map_frame(chapter, map_no, loop_no,
+                                                     kind="ok")
                                 yield f"[出阵] 🗺️ 距王点还有 {boss_dist} 步，继续行军"
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
                     self.maa.click(march_button)
+                    if boss_track is not None:
+                        boss_track = (boss_track[0], boss_track[1] + 1)
                     time.sleep(1.0)
                     continue
 
@@ -547,20 +570,27 @@ class SortieMixin:
         template = deploy_cfg.get("template")
         return bool(template and self.maa.template_match(template))
 
-    def _save_map_miss(self, chapter: int, map_no: int, loop_no: int):
-        """小地图没认出来时留一张决策屏截图（每轮任务最多 5 张），
-        攒起来给地图实验室调阈值用——市街图这类白黄底色的图很可能撞色。"""
-        count = getattr(self, "_map_miss_count", 0)
-        if count >= 5:
+    def _save_map_frame(self, chapter: int, map_no: int, loop_no: int,
+                        kind: str):
+        """小地图判读帧存档，攒起来给地图实验室对账。
+        kind: miss=没认出来 / ok=认出来了 / retreat=撤退扳机帧。
+        7-1 的教训：认得"不对"比认不出来更隐蔽，只存 miss 帧会漏掉
+        整个错误类别——所以认出结果的帧也要留（ok 上限放宽到 40）。"""
+        caps = {"miss": 5, "ok": 40, "retreat": 5}
+        counts = getattr(self, "_map_frame_counts", None)
+        if counts is None:
+            counts = self._map_frame_counts = {}
+        count = counts.get(kind, 0)
+        if count >= caps.get(kind, 5):
             return
         try:
             from ..runtime_paths import STATUS_DIR
             folder = STATUS_DIR / "map_miss"
             folder.mkdir(parents=True, exist_ok=True)
-            name = (f"miss_{chapter}-{map_no}_loop{loop_no}_"
+            name = (f"{kind}_{chapter}-{map_no}_loop{loop_no}_"
                     f"{time.strftime('%H%M%S')}.png")
             if self.maa.save_screenshot(str(folder / name), force=False):
-                self._map_miss_count = count + 1
+                counts[kind] = count + 1
         except Exception:
             pass
 

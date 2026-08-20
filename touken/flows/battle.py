@@ -533,11 +533,24 @@ class BattleMixin:
         if current is None:
             return "failed"
         wanted = "auto" if enable_auto else "manual"
+        toggled = False
         if current != wanted:
             self._click_point(mode.get("toggle", [910, 32]))
             time.sleep(0.6)
+            toggled = True
         if enable_auto:
-            return "auto"
+            if toggled:
+                # 刚拨成自动，剩下的交给游戏，不插手。
+                return "auto"
+            # 已经是自动、选择页却还挂着：游戏自动阵形 = 优先选有利，
+            # 夜战图敌方阵形「不明」时游戏没东西可选，会卡在页面上等手动。
+            # 这时脚本兜底按策略手动点（夜图没有有利标，自然落到兜底阵形）。
+            verify = cfg.get("verify", {})
+            title_visible = bool(self.maa.template_match(
+                verify.get("template", "battle/ui阵形选择.png"),
+                roi_4to4(*verify.get("roi", [571, 5, 707, 44]))))
+            if not title_visible:
+                return "auto"
 
         if strategy == "advantage":
             point = self.maa.template_match(
