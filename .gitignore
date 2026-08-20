@@ -79,3 +79,4 @@ _trash/
 
 # 地图实验室素材（本地大图，不进仓库）
 lab/samples/
+lab/out/
