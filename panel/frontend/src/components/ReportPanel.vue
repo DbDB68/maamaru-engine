@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
-const days = ref(7), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
@@ -172,6 +172,15 @@ const sortieGroups = computed(() => {
     } else if (item.event_type === 'pumpkin.sortie_completed') add('pumpkin', '南瓜大作战')
   }
   return [...groups.values()].sort((a, b) => b.count - a.count)
+})
+const latestRun = computed(() => runs.value[0] || null)
+const topSorties = computed(() => sortieGroups.value.slice(0, 3))
+const kobanRow = computed(() => resourceRows.value.find(row => row.name === '小判'))
+const battleSummary = computed(() => {
+  if (loading.value) return '狐之助正在整理这段时间的战报……'
+  if (!sortieCount.value && !summary.value?.runs?.total) return `${rangeLabel.value}还没有足够的成绩，先让小狐狸跑起来吧。`
+  const lead = topSorties.value[0]
+  return `${rangeLabel.value}，まあ丸完成了 ${sortieCount.value.toLocaleString()} 次出阵${lead ? `，主要在 ${lead.label} 工作` : ''}。`
 })
 function isWin(payload: any) {
   const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
@@ -451,8 +460,50 @@ onMounted(() => load())
       <div><h2>📜 本丸成绩单</h2><p>只统计小狐狸帮你完成的事</p></div>
       <div class="report-ranges" aria-label="统计时间范围"><button v-for="value in [1, 7, 30]" :key="value" type="button" :class="{ active: days === value }" @click="load(value)">{{ value === 1 ? '24 小时' : `${value} 天` }}</button></div>
     </header>
+    <nav class="report-views" aria-label="成绩单视图">
+      <button type="button" :class="{ active: reportView === 'battle' }" @click="reportView = 'battle'"><b>战报</b><small>成绩与最近表现</small></button>
+      <button type="button" :class="{ active: reportView === 'ledger' }" @click="reportView = 'ledger'"><b>资源账</b><small>库存、收支与报备</small></button>
+      <button type="button" :class="{ active: reportView === 'records' }" @click="reportView = 'records'"><b>全部记录</b><small>每轮任务与时间线</small></button>
+    </nav>
     <p v-if="error" class="report-error">{{ error }}</p>
-    <section class="resource-ledger" :class="{ loading }">
+    <template v-if="reportView === 'battle'">
+      <section class="battle-intro">
+        <div><span>{{ rangeLabel }}</span><h3>{{ battleSummary }}</h3><p>成绩、最近表现和需要你留意的事情都收在这里。</p></div>
+        <aside><b>🦊 近侍观察</b><small v-if="summary?.runs?.total">执行 {{ summary.runs.total }} 次任务 · 留下 {{ summary.events.total }} 条玩法记录</small><small v-else>只说能够确认的事，不把猜测当成绩。</small></aside>
+      </section>
+      <section class="battle-kpis" :class="{ loading }">
+        <article><small>⚔️ 出阵完成</small><strong>{{ sortieCount.toLocaleString() }}</strong><span>圈</span><p>{{ topSorties[0]?.label || '等待第一份战绩' }}</p></article>
+        <article><small>📋 执行任务</small><strong>{{ summary?.runs?.total || 0 }}</strong><span>次</span><p>狐狸确认完成的任务轮次</p></article>
+        <article><small>🎌 演练战绩</small><strong>{{ practiceTotal ? `${practiceWins}胜` : '—' }}</strong><span v-if="practiceTotal">{{ practiceLosses }}负</span><p>{{ practiceCaption() }}</p></article>
+        <article :class="{ gain: kobanRow?.delta != null && kobanRow.delta > 0, loss: kobanRow?.delta != null && kobanRow.delta < 0 }"><small>💰 小判变化</small><strong>{{ signed(kobanRow?.delta ?? null) }}</strong><span>枚</span><p>已确认来源 {{ signed(kobanRow?.attributed ?? 0) }}</p></article>
+      </section>
+      <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="reportView = 'ledger'">
+        <span><b>🦊 有 {{ unreportedGaps.length }} 段库存差值等你说明</b><small>它们没有算进任何一轮挂机收益，处理后提醒会消失。</small></span><em>去看看 →</em>
+      </button>
+      <div class="battle-grid">
+        <section class="latest-battle">
+          <header><div><span>最近一轮</span><h3>{{ latestRun ? runTitle(latestRun) : '还没有挂机记录' }}</h3></div><button v-if="latestRun" type="button" class="secondary" @click="reportView = 'records'">查看本轮明细</button></header>
+          <template v-if="latestRun">
+            <time>{{ eventTime(latestRun.started_at) }}</time>
+            <div class="latest-metrics"><p><small>出阵用时</small><strong>{{ elapsedTime(runElapsedSeconds(latestRun)) }}</strong></p><p><small>平均速度</small><strong>{{ loopTime(latestRun.average_loop_seconds) }}</strong></p><p><small>养护</small><strong>{{ latestRun.repair_sessions }} 次手入</strong></p></div>
+            <p class="latest-upkeep">加速符 {{ latestRun.speedups }} 枚 · 补刀装 {{ latestRun.equipment_restores }} 次<span v-if="attributedStats(latestRun)"> · 已确认 {{ attributedStats(latestRun) }}</span></p>
+            <details v-if="latestRun.average_loop_seconds" class="latest-estimator"><summary>估算挂机收益</summary><div class="run-estimator"><div><small>平均速度</small><b>{{ loopTime(latestRun.average_loop_seconds) }}</b></div><div class="estimate-result"><small>预计完成</small><b>≈ {{ estimatedLoops(latestRun) }} 圈</b></div><div class="estimate-control"><small>预计收益</small><label>挂机时间 <span v-if="!customEstimate">{{ estimateHours }} 小时</span><input v-else v-model.number="customHours" type="number" min="0.5" step="0.5" aria-label="自定义挂机小时数" @input="updateCustom"></label></div><nav aria-label="预计挂机时间"><button v-for="hour in [1, 6, 8]" :key="hour" type="button" :class="{ active: !customEstimate && estimateHours === hour }" @click="chooseHours(hour)">{{ hour }}小时</button><button type="button" :class="{ active: customEstimate }" @click="chooseCustom">自定义</button></nav></div></details>
+          </template>
+          <p v-else class="report-empty">完成一轮挂机后，这里会展示用时、圈速和养护。</p>
+        </section>
+        <section class="top-sorties">
+          <header><div><span>主力玩法</span><h3>{{ rangeLabel }}出阵排行</h3></div><button type="button" class="secondary" @click="reportView = 'records'">查看全部</button></header>
+          <ol v-if="topSorties.length"><li v-for="(item, index) in topSorties" :key="item.label"><i>{{ index + 1 }}</i><span><b>{{ item.label }}</b><small>{{ item.detail || '确认完成' }}</small></span><strong>{{ item.count.toLocaleString() }} 圈</strong></li></ol>
+          <p v-else class="report-empty">这段时间还没有完成的出阵。</p>
+        </section>
+      </div>
+      <section class="battle-recent">
+        <header><div><span>最新动态</span><h3>最近发生</h3></div><button type="button" class="secondary" @click="reportView = 'records'">打开完整时间线</button></header>
+        <div v-if="groupedActivityEvents.length" class="recent-strip"><article v-for="item in groupedActivityEvents.slice(0, 4)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p></article></div>
+        <p v-else class="report-empty">这个时间段还没有完成的主要活动。</p>
+      </section>
+    </template>
+    <section v-if="reportView === 'ledger'" class="resource-ledger" :class="{ loading }">
       <header><div><h3>这段时间家底变了多少</h3><p>按时间范围内第一次和最后一次库存读数计算</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span></header>
       <div class="resource-ledger-grid">
         <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
@@ -461,7 +512,7 @@ onMounted(() => load())
       </div>
       <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
     </section>
-    <section class="resource-trend">
+    <section v-if="reportView === 'ledger'" class="resource-trend">
       <header><div><h3>本丸收支</h3><p>柱高是当日库存净变化，柱内颜色表示能够确认的来源</p></div><nav aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="selectedResource = name">{{ name }}</button></nav></header>
       <div class="chart-legend"><span><i class="attributed"></i>已确认来源</span><span><i class="unattributed"></i>尚未归因</span><small v-if="!selectedAttributions.length">当前范围没有已确认的{{ selectedResource }}来源</small></div>
       <div class="resource-chart" :class="{ empty: !hasChartData }" :style="{ gridTemplateColumns: `repeat(${chartBars.length}, minmax(34px, 1fr))` }">
@@ -478,13 +529,7 @@ onMounted(() => load())
         <p v-else-if="!hasChartData">同一时间段至少需要两次读数，狐之助再攒一会儿账。</p>
       </div>
     </section>
-    <section class="weekly-activity"><header><h3>活动小结</h3><small>{{ rangeLabel }}</small></header><div class="report-stats" :class="{ loading }">
-      <article><small>领取任务奖励</small><strong>{{ rewardClaims }} 次</strong><span>确认领取后按钮变灰才计数</span></article>
-      <article><small>出阵完成</small><strong>{{ sortieCount }} 次</strong><span>按确认完成的圈数计数</span></article>
-      <article><small>派遣远征</small><strong>{{ expeditions }} 次</strong><span>确认“远征中”后记录</span></article>
-      <article><small>演练战绩</small><strong>{{ practiceHeadline() }}</strong><span>{{ practiceCaption() }}</span></article>
-    </div></section>
-    <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值提醒">
+    <section v-if="reportView === 'ledger' && unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值提醒">
       <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
       <form v-if="reportGap" @submit.prevent="saveHumanReport(false)">
         <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
@@ -493,7 +538,7 @@ onMounted(() => load())
         <p>说明只给这段差值加一个上下文，不会改写狐狸账或库存账。</p><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button>
       </form>
     </section>
-    <section class="human-report-panel">
+    <section v-if="reportView === 'ledger'" class="human-report-panel">
       <header><div><h3>📝 审神者报备</h3><small>你只说做过什么，具体数字交给库存盘点。</small></div><button type="button" class="secondary" @click="openProactiveReport">{{ reportMode === 'proactive' ? '收起' : '主动报备一下' }}</button></header>
       <form v-if="reportMode === 'proactive'" @submit.prevent="saveHumanReport(false)">
         <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
@@ -503,7 +548,7 @@ onMounted(() => load())
       </form>
       <details v-if="humanReports.length"><summary>查看已有报备（{{ humanReports.length }}）</summary><ul><li v-for="item in humanReports.slice(0, 20)" :key="item.id"><time>{{ eventTime(item.occurred_at) }}</time><span><b>{{ item.activities.join('、') }}</b>{{ item.note }}</span><button type="button" aria-label="删除这条报备" @click="removeHumanReport(item)">×</button></li></ul></details>
     </section>
-    <div class="report-body">
+    <div v-if="reportView === 'records'" class="report-body">
       <div>
         <section v-if="runs.length" class="report-runs">
           <header><h3>⛏️ 挂机成绩单</h3><small>圈速按相邻出阵间隔计算</small></header>
