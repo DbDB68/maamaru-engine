@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
-const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), timelineKind = ref<'activity' | 'system'>('activity'), timelineLimit = ref(20), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
@@ -150,6 +150,11 @@ const groupedSystemEvents = computed(() => {
   }
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
+const activeTimeline = computed(() => timelineKind.value === 'activity' ? groupedActivityEvents.value : groupedSystemEvents.value)
+function chooseTimelineKind(value: 'activity' | 'system') {
+  timelineKind.value = value
+  timelineLimit.value = 20
+}
 const sortieGroups = computed(() => {
   const groups = new Map<string, { label: string; count: number; detail: string }>()
   const add = (key: string, label: string, detail = '') => {
@@ -572,7 +577,14 @@ onMounted(() => load())
       </section>
       <div v-else class="records-timeline">
         <aside class="records-sorties"><header><h3>⚔️ 出阵分布</h3><small>{{ sortieCount.toLocaleString() }} 圈</small></header><div v-if="sortieGroups.length"><p v-for="item in sortieGroups" :key="`${item.label}:${item.detail}`"><span><b>{{ item.label }}</b><small>{{ item.detail || '确认完成' }}</small></span><strong>{{ item.count }} 圈</strong></p></div><p v-else class="report-empty">暂无出阵。</p></aside>
-        <section class="report-events"><header><div><h3>活动时间线</h3><small>相邻的同类活动已经合并，仍可展开原始明细</small></div><span>{{ groupedActivityEvents.length }} 组活动</span></header><div v-if="groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div><p v-else class="report-empty">这个时间段还没有完成的主要活动。</p><details v-if="groupedSystemEvents.length" class="system-feed"><summary>{{ groupedSystemEvents.length }} 组系统观察</summary><div><article v-for="item in groupedSystemEvents" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div></details></section>
+        <section class="report-events timeline-panel">
+          <header><div><h3>{{ timelineKind === 'activity' ? '玩家活动' : '系统观察' }}</h3><small>{{ timelineKind === 'activity' ? '相邻的同类活动已经合并，仍可展开原始明细' : '库存读数、未确认状态与恢复记录，不混入成绩' }}</small></div><span>最近 {{ Math.min(timelineLimit, activeTimeline.length) }} / {{ activeTimeline.length }} 组</span></header>
+          <nav class="timeline-kinds" aria-label="时间线内容"><button type="button" :class="{ active: timelineKind === 'activity' }" @click="chooseTimelineKind('activity')"><b>玩家活动</b><small>{{ groupedActivityEvents.length }}</small></button><button type="button" :class="{ active: timelineKind === 'system' }" @click="chooseTimelineKind('system')"><b>系统观察</b><small>{{ groupedSystemEvents.length }}</small></button></nav>
+          <div v-if="timelineKind === 'activity' && groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
+          <div v-else-if="timelineKind === 'system' && groupedSystemEvents.length" class="system-timeline"><article v-for="item in groupedSystemEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div>
+          <p v-else class="report-empty">这个时间段还没有{{ timelineKind === 'activity' ? '完成的主要活动' : '系统观察' }}。</p>
+          <button v-if="activeTimeline.length > timelineLimit" type="button" class="timeline-more secondary" @click="timelineLimit += 20">再看 20 组较早记录</button>
+        </section>
       </div>
     </template>
   </section>

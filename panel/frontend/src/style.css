@@ -1355,6 +1355,18 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .records-sorties p > strong { font-size: 12px; }
 .records-timeline .report-events { margin: 0; }
 .records-timeline .report-events > header > span { color: var(--ink-dim); font-size: 11px; }
+.timeline-kinds { display: flex; margin: 0 0 14px; padding: 2px; background: var(--paper-panel); border: 1px solid var(--paper-line); }
+.timeline-kinds button { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 6px 11px; color: var(--ink-dim); background: transparent; border: 0; }
+.timeline-kinds button.active { color: var(--ink); background: var(--fox-gold-pale); }
+.timeline-kinds small { display: grid; place-items: center; min-width: 21px; height: 18px; padding: 0 5px; color: var(--ink-dim); background: var(--paper-card); font-size: 10px; }
+.system-timeline { display: grid; }
+.system-timeline article { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 14px; padding: 10px 0; border-top: 1px solid var(--paper-line); }
+.system-timeline article:first-child { border-top: 0; }
+.system-timeline time { color: var(--ink-dim); font-size: 11px; }
+.system-timeline span { display: grid; gap: 3px; }
+.system-timeline strong { font-size: 13px; }
+.system-timeline small { color: var(--ink-dim); font-size: 11px; }
+.timeline-more { display: block; min-height: 34px; margin: 12px auto 0; padding: 6px 14px; }
 .report-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .report-stats article, .report-events, .report-sorties, .report-runs, .report-observation { background: var(--paper-card); border: 1px solid var(--paper-line); }
 .report-stats article { display: grid; gap: 6px; min-height: 104px; padding: 15px; align-content: center; }
@@ -1552,6 +1564,8 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
   .run-history-list summary > span { grid-column: 1; }
   .run-history-list summary > em { grid-column: 1; }
   .run-history-list summary::after { grid-column: 2; grid-row: 1 / 4; }
+  .timeline-panel > header { align-items: flex-start; flex-direction: column; }
+  .system-timeline article { grid-template-columns: 76px minmax(0, 1fr); }
   .battle-intro aside { max-width: none; padding: 10px 0 0; border-top: 1px solid var(--paper-line); border-left: 0; }
   .battle-kpis { grid-template-columns: 1fr 1fr; }
   .battle-kpis article { padding: 11px; }
