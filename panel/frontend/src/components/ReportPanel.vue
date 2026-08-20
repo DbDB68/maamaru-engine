@@ -10,7 +10,7 @@ const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天'
 const reportViewItems = [
   { value: 'battle', label: '战报', caption: '成绩与最近表现' },
   { value: 'ledger', label: '资源账', caption: '库存、收支与报备' },
-  { value: 'records', label: '全部记录', caption: '每轮任务与时间线' },
+  { value: 'records', label: '近期记录', caption: '最近挂机与时间线' },
 ]
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
@@ -51,15 +51,16 @@ const foxSummary = computed(() => {
 const chartBars = computed(() => {
   const bars: any[] = (ledger.value?.daily_series || [])
     .filter((item: any) => item.resource === selectedResource.value)
-    .map((item: any) => ({
-      label: String(item.date || '').slice(5).replace('-', '/'), value: item.total_delta,
-      observations: item.observation_count || 0, attributed: item.attributed_delta || 0,
-      unattributed: item.unattributed_delta, confidence: item.confidence,
-      attributionIds: item.attribution_ids || [], gapIds: item.gap_ids || [],
-    }))
+    .map((item: any) => {
+      const reported = reportedDailyTotals.value[item.date]?.[selectedResource.value] || 0
+      return { label: String(item.date || '').slice(5).replace('-', '/'), value: item.total_delta,
+        observations: item.observation_count || 0, attributed: item.attributed_delta || 0, reported,
+        unattributed: item.unattributed_delta == null ? null : item.unattributed_delta - reported, confidence: item.confidence,
+        attributionIds: item.attribution_ids || [], gapIds: item.gap_ids || [] }
+    })
   const max = Math.max(1, ...bars.map(bar => Math.abs(bar.value || 0)))
   return bars.map(bar => ({ ...bar,
-    mixed: Boolean(bar.attributed && bar.unattributed && Math.sign(bar.attributed) !== Math.sign(bar.unattributed)),
+    mixed: new Set([bar.attributed, bar.reported, bar.unattributed].filter(Boolean).map(Math.sign)).size > 1,
     height: bar.value == null ? 0 : Math.max(4, Math.round(Math.abs(bar.value) / max * 60)) }))
 })
 const selectedAttributions = computed(() => (ledger.value?.attributions || [])
@@ -73,18 +74,36 @@ const reportedGapEntries = computed(() => {
     reports: humanReports.value.filter(report => report.gap_key === gap.gap_key),
   }))
 })
+function reportExplainsGap(report: any) {
+  const nonAnswers = new Set(['暂不说明', '记不清了', '没有其他操作'])
+  return Boolean(String(report.note || '').trim()) || (report.activities || []).some((value: string) => !nonAnswers.has(value))
+}
+const explainedGapEntries = computed(() => reportedGapEntries.value.filter(gap => gap.reports.some(reportExplainsGap)))
+const acknowledgedGapEntries = computed(() => reportedGapEntries.value.filter(gap => !gap.reports.some(reportExplainsGap)))
 const attributedRows = computed(() => resourceRows.value.filter(row => row.attributed).map(row => `${row.name} ${signed(row.attributed)}`))
-const humanPeriodTotals = computed(() => {
+function sumGapResources(gaps: any[]) {
   const totals: Record<string, number> = {}
-  for (const gap of reportedGapEntries.value) for (const [name, value] of Object.entries(gap.resource_delta || {})) totals[name] = (totals[name] || 0) + Number(value || 0)
+  for (const gap of gaps) for (const [name, value] of Object.entries(gap.resource_delta || {})) totals[name] = (totals[name] || 0) + Number(value || 0)
   return totals
-})
+}
+const humanPeriodTotals = computed(() => sumGapResources(explainedGapEntries.value))
+const acknowledgedTotals = computed(() => sumGapResources(acknowledgedGapEntries.value))
 const humanPeriodRows = computed(() => resourceNames.filter(name => humanPeriodTotals.value[name]).map(name => `${name} ${signed(humanPeriodTotals.value[name])}`))
+const acknowledgedRows = computed(() => resourceNames.filter(name => acknowledgedTotals.value[name]).map(name => `${name} ${signed(acknowledgedTotals.value[name])}`))
 const unexplainedRows = computed(() => resourceRows.value.flatMap(row => {
   if (row.unattributed == null) return []
-  const value = row.unattributed - (humanPeriodTotals.value[row.name] || 0)
+  const value = row.unattributed - (humanPeriodTotals.value[row.name] || 0) - (acknowledgedTotals.value[row.name] || 0)
   return value ? [`${row.name} ${signed(value)}`] : []
 }))
+const reportedDailyTotals = computed(() => {
+  const totals: Record<string, Record<string, number>> = {}
+  for (const gap of explainedGapEntries.value) {
+    const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date(gap.ended_at * 1000))
+    totals[date] ||= {}
+    for (const [name, value] of Object.entries(gap.resource_delta || {})) totals[date][name] = (totals[date][name] || 0) + Number(value || 0)
+  }
+  return totals
+})
 const proactiveReports = computed(() => {
   const cutoff = Date.now() / 1000 - days.value * 86400
   return humanReports.value.filter(item => !item.gap_key && item.occurred_at >= cutoff)
@@ -182,7 +201,7 @@ const groupedSystemEvents = computed(() => {
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
 const recordViewItems = computed(() => [
-  { value: 'runs', label: '任务轮次', badge: runs.value.length },
+  { value: 'runs', label: '挂机轮次', badge: runs.value.length },
   { value: 'timeline', label: '活动时间线', badge: groupedActivityEvents.value.length },
 ])
 const timelineKindItems = computed(() => [
@@ -519,7 +538,7 @@ onMounted(() => load())
         <article><small>⚔️ 出阵完成</small><strong>{{ sortieCount.toLocaleString() }}</strong><span>圈</span><p>{{ topSorties[0]?.label || '等待第一份战绩' }}</p></article>
         <article><small>📋 执行任务</small><strong>{{ summary?.runs?.total || 0 }}</strong><span>次</span><p>狐狸确认完成的任务轮次</p></article>
         <article><small>🎌 演练战绩</small><strong>{{ practiceTotal ? `${practiceWins}胜` : '—' }}</strong><span v-if="practiceTotal">{{ practiceLosses }}负</span><p>{{ practiceCaption() }}</p></article>
-        <article :class="{ gain: kobanRow?.delta != null && kobanRow.delta > 0, loss: kobanRow?.delta != null && kobanRow.delta < 0 }"><small>💰 小判变化</small><strong>{{ signed(kobanRow?.delta ?? null) }}</strong><span>枚</span><p>已确认来源 {{ signed(kobanRow?.attributed ?? 0) }}</p></article>
+        <article :class="{ gain: kobanRow?.attributed != null && kobanRow.attributed > 0, loss: kobanRow?.attributed != null && kobanRow.attributed < 0 }"><small>💰 狐狸确认小判</small><strong>{{ signed(kobanRow?.attributed ?? null) }}</strong><span>枚</span><p>库存净变化 {{ signed(kobanRow?.delta ?? null) }}</p></article>
       </section>
       <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="reportView = 'ledger'">
         <span><b>🦊 有 {{ unreportedGaps.length }} 段库存差值等你说明</b><small>它们没有算进任何一轮挂机收益，处理后提醒会消失。</small></span><em>去看看 →</em>
@@ -560,7 +579,8 @@ onMounted(() => load())
       <header><div><h3>这笔账是怎么组成的</h3><p>库存净变化按证据拆开看；人工时段只说明上下文，不冒充狐狸收益。</p></div><small>{{ rangeLabel }}</small></header>
       <div class="ledger-attribution-grid">
         <article class="confirmed"><span>🦊 狐狸确认</span><strong>{{ attributedRows.length ? attributedRows.join(' · ') : '暂无确认收支' }}</strong><p>来自玩法结算、配方消耗或界面读数，可以算进脚本成绩。</p></article>
-        <article class="human"><span>📝 审神者操作时段</span><strong>{{ humanPeriodRows.length ? humanPeriodRows.join(' · ') : '暂无可对应的库存差值' }}</strong><p v-if="reportedGapEntries.length">{{ reportedGapEntries.length }} 段差值已有报备，数字已包含在上方库存总变化中。</p><p v-else>报备某段人工操作后，对应库存差值会显示在这里。</p></article>
+        <article class="human"><span>📝 审神者已说明</span><strong>{{ humanPeriodRows.length ? humanPeriodRows.join(' · ') : '暂无可对应的库存差值' }}</strong><p v-if="explainedGapEntries.length">{{ explainedGapEntries.length }} 段差值已有具体说明，数字已包含在库存总变化中。</p><p v-else>说明某段人工操作后，对应库存差值会显示在这里。</p></article>
+        <article class="acknowledged"><span>👀 看过但未说明</span><strong>{{ acknowledgedRows.length ? acknowledgedRows.join(' · ') : '暂无' }}</strong><p>{{ acknowledgedGapEntries.length ? `${acknowledgedGapEntries.length} 段选择了暂不说明、记不清或没有其他操作。` : '没有仅留档、未提供原因的差值。' }}</p></article>
         <article class="unknown"><span>？ 仍未说明</span><strong>{{ unexplainedRows.length ? unexplainedRows.join(' · ') : '其余变化均已有上下文' }}</strong><p>库存里真实发生、但脚本证据和人工报备都还覆盖不到的部分。</p></article>
       </div>
       <div v-if="reportedGapEntries.length || proactiveReports.length" class="human-context-list">
@@ -570,13 +590,14 @@ onMounted(() => load())
     </section>
     <section v-if="reportView === 'ledger'" class="resource-trend">
       <header><div><h3>本丸收支</h3><p>柱高是当日库存净变化，柱内颜色表示能够确认的来源</p></div><nav aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="selectedResource = name">{{ name }}</button></nav></header>
-      <div class="chart-legend"><span><i class="attributed"></i>已确认来源</span><span><i class="unattributed"></i>尚未归因</span><small v-if="!selectedAttributions.length">当前范围没有已确认的{{ selectedResource }}来源</small></div>
+      <div class="chart-legend"><span><i class="attributed"></i>狐狸确认</span><span><i class="reported"></i>审神者已说明</span><span><i class="unattributed"></i>仍未说明</span><small v-if="!selectedAttributions.length">当前范围没有已确认的{{ selectedResource }}来源</small></div>
       <div class="resource-chart" :class="{ empty: !hasChartData }" :style="{ gridTemplateColumns: `repeat(${chartBars.length}, minmax(34px, 1fr))` }">
         <div class="chart-zero" aria-hidden="true"></div>
-        <div v-for="bar in chartBars" :key="bar.label" class="chart-column" :title="bar.value == null ? `${bar.label}：读数不足` : `${bar.label}：${selectedResource} ${signed(bar.value)}；已归因 ${signed(bar.attributed)}；未归因 ${signed(bar.unattributed)}；${bar.observations} 次观察`">
+        <div v-for="bar in chartBars" :key="bar.label" class="chart-column" :title="bar.value == null ? `${bar.label}：读数不足` : `${bar.label}：${selectedResource} ${signed(bar.value)}；狐狸确认 ${signed(bar.attributed)}；审神者已说明 ${signed(bar.reported)}；仍未说明 ${signed(bar.unattributed)}；${bar.observations} 次观察`">
           <span class="chart-value">{{ bar.value == null ? '' : signed(bar.value) }}</span>
           <span v-if="bar.value != null" class="chart-stack" :class="[bar.value >= 0 ? 'positive' : 'negative', { mixed: bar.mixed }]" :style="{ height: `${bar.height}px` }">
             <i v-if="bar.attributed" class="attributed" :style="{ flexGrow: Math.abs(bar.attributed) }"></i>
+            <i v-if="bar.reported" class="reported" :style="{ flexGrow: Math.abs(bar.reported) }"></i>
             <i v-if="bar.unattributed" class="unattributed" :style="{ flexGrow: Math.abs(bar.unattributed) }"></i>
           </span>
           <small>{{ bar.label }}</small>
@@ -606,11 +627,11 @@ onMounted(() => load())
     </section>
     <template v-if="reportView === 'records'">
       <section class="records-head">
-        <div><span>{{ rangeLabel }}</span><h3>每一轮任务，都能往下追到发生了什么</h3><p>先看任务轮次；需要按时间查某件事时，再切到活动时间线。</p></div>
+        <div><span>{{ rangeLabel }}</span><h3>最近的挂机与活动，都能往下追到发生了什么</h3><p>这里最多展示 30 轮挂机和 1000 条事件；更早记录不会在本页无限累积。</p></div>
         <SegmentedControl :model-value="recordView" :items="recordViewItems" label="记录类型" @update:model-value="chooseRecordView" />
       </section>
       <section v-if="recordView === 'runs'" class="run-history">
-        <header><div><h3>⛏️ 任务轮次</h3><small>点击任意一轮查看养护、资源与库存证据</small></div><span>圈速按相邻出阵间隔计算</span></header>
+        <header><div><h3>⛏️ 挂机轮次</h3><small>只列有出阵圈数的任务；其他日课步骤请看活动时间线</small></div><span>最近 {{ runs.length }} / 最多 30 轮</span></header>
         <div v-if="runs.length" class="run-history-list">
           <details v-for="(run, index) in runs" :key="run.run_id" :open="index === 0">
             <summary><time>{{ eventTime(run.started_at) }}</time><span><b>{{ runTitle(run) }}</b><small>{{ elapsedTime(runElapsedSeconds(run)) }} · {{ loopTime(run.average_loop_seconds) }}</small></span><span class="run-cost">手入 {{ run.repair_sessions }} · 符 {{ run.speedups }} · 刀装 {{ run.equipment_restores }}</span><em>{{ attributedStats(run) || deltaStats(run) || '查看详情' }}</em></summary>

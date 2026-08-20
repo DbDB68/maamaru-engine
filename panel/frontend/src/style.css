@@ -1412,12 +1412,13 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .ledger-attribution > header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 11px; }
 .ledger-attribution h3, .ledger-attribution p { margin: 0; }
 .ledger-attribution header p, .ledger-attribution header small { margin-top: 3px; color: var(--ink-dim); font-size: 11px; }
-.ledger-attribution-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--paper-line); }
+.ledger-attribution-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--paper-line); }
 .ledger-attribution-grid article { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 12px 13px; border-left: 1px solid var(--paper-line); }
 .ledger-attribution-grid article:first-child { border-left: 0; }
 .ledger-attribution-grid article > span { color: var(--ink-dim); font-size: 11px; font-weight: 700; }
 .ledger-attribution-grid article > strong { color: var(--accent); font-size: 14px; line-height: 1.6; }
 .ledger-attribution-grid .confirmed > strong { color: #47734f; }
+.ledger-attribution-grid .acknowledged > strong { color: var(--ink-dim); }
 .ledger-attribution-grid .unknown > strong { color: #8b6544; }
 .ledger-attribution-grid article > p { color: var(--ink-dim); font-size: 10px; line-height: 1.5; }
 .human-context-list { display: grid; margin-top: 10px; border-top: 1px solid var(--paper-line); }
@@ -1433,6 +1434,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .chart-legend span { display: flex; align-items: center; gap: 4px; }
 .chart-legend i { width: 10px; height: 10px; border: 1px solid #3f6848; }
 .chart-legend i.attributed { background: #47734f; }
+.chart-legend i.reported { background: #c9992f; border-color: #8b6c26; }
 .chart-legend i.unattributed { background: #a8b9a8; }
 .chart-legend small { margin-left: auto; color: var(--ink-dim); }
 .resource-chart { position: relative; display: grid; min-height: 174px; padding: 8px 8px 0; overflow-x: auto; overflow-y: hidden; background: var(--paper-panel); border: 1px solid var(--paper-line); }
@@ -1444,8 +1446,10 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .chart-stack.mixed { outline: 1px dashed var(--fox-gold); outline-offset: 2px; }
 .chart-stack i { display: block; min-height: 2px; }
 .chart-stack .attributed { background: #47734f; }
+.chart-stack .reported { background: #c9992f; }
 .chart-stack .unattributed { background: #a8b9a8; }
 .chart-stack.negative .attributed { background: #954d49; }
+.chart-stack.negative .reported { background: #b88148; }
 .chart-stack.negative .unattributed { background: #c9a09d; }
 .chart-column small { align-self: end; color: var(--ink-dim); font-size: 10px; }
 .resource-chart > p { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; color: var(--ink-dim); font-size: 12px; text-align: center; }
@@ -1562,9 +1566,9 @@ body[data-theme='pixel'] .resource-ledger, body[data-theme='pixel'] .resource-tr
 body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-upkeep span) { letter-spacing: .01em; }
 @media (max-width: 900px) {
   .battle-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ledger-attribution-grid { grid-template-columns: 1fr; }
-  .ledger-attribution-grid article { border-top: 1px solid var(--paper-line); border-left: 0; }
-  .ledger-attribution-grid article:first-child { border-top: 0; }
+  .ledger-attribution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ledger-attribution-grid article:nth-child(odd) { border-left: 0; }
+  .ledger-attribution-grid article:nth-child(n+3) { border-top: 1px solid var(--paper-line); }
   .battle-kpis article:nth-child(3) { border-left: 0; }
   .battle-kpis article:nth-child(n+3) { border-top: 1px solid var(--paper-line); }
   .battle-grid { grid-template-columns: 1fr; }
@@ -1588,6 +1592,9 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
 }
 @media (max-width: 520px) {
   .report-content { padding: 10px 12px 12px; }
+  .ledger-attribution-grid { grid-template-columns: 1fr; }
+  .ledger-attribution-grid article { border-top: 1px solid var(--paper-line); border-left: 0; }
+  .ledger-attribution-grid article:first-child { border-top: 0; }
   .human-context-list article { grid-template-columns: 1fr; gap: 3px; }
   .report-head { align-items: stretch; flex-direction: column; }
   .report-head .segmented-control { align-self: flex-start; }
