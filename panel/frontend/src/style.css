@@ -1402,6 +1402,17 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .event-list summary { width: max-content; cursor: pointer; color: var(--accent); }
 .event-list details p { display: grid; grid-template-columns: 105px 1fr; gap: 8px; margin-top: 3px; }
 .event-list details time { font-size: 10px; }
+.activity-feed strong { font-size: 15px; }
+.activity-feed article > div > p { margin-top: 3px; }
+.system-feed { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--paper-line); color: var(--ink-dim); }
+.system-feed > summary { width: max-content; cursor: pointer; font-size: 12px; }
+.system-feed > div { display: grid; gap: 0; margin-top: 8px; }
+.system-feed article { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 14px; padding: 7px 0; border-top: 1px solid var(--paper-line); }
+.system-feed article:first-child { border-top: 0; }
+.system-feed article time { color: var(--ink-dim); font-size: 11px; }
+.system-feed article span { display: grid; gap: 2px; }
+.system-feed article strong { color: var(--ink-dim); font-size: 12px; font-weight: 600; }
+.system-feed article small { color: var(--ink-dim); font-size: 11px; }
 .report-observation { align-self: start; line-height: 1.7; }
 .report-observation small { display: block; margin-top: 12px; }
 .report-empty, .report-error { color: var(--ink-dim); }

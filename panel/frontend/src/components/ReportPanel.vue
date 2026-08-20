@@ -90,7 +90,7 @@ const estimateHours = ref(6), customHours = ref(6), customEstimate = ref(false)
 const timelineEvents = computed(() => {
   const visible: any[] = []
   const repairs = new Map<string, any>()
-  const hidden = new Set(['team_record.saved', 'equipment.restored', 'inventory.peek'])
+  const hidden = new Set(['team_record.saved', 'inventory.peek', 'osaka.koban_session'])
   for (const item of events.value) {
     if (hidden.has(item.event_type)) continue
     if (!item.event_type.startsWith('repair.')) {
@@ -114,12 +114,38 @@ const timelineEvents = computed(() => {
   }
   return [...visible, ...repairs.values()].sort((a, b) => b.ts - a.ts)
 })
-const groupedTimelineEvents = computed(() => {
+const systemEventTypes = new Set([
+  'inventory.captured', 'inventory.peek', 'task_rewards.unconfirmed',
+  'game_update.detected', 'game_update.recovered', 'resource.change',
+])
+function activityGroupKey(item: any) {
+  const p = item.payload || {}, run = item.run_id || `minute:${Math.floor(item.ts / 300)}`
+  if (item.event_type === 'sortie.completed') return `${run}:sortie:${p.mode}:${p.chapter}:${p.map_no}`
+  if (item.event_type === 'sortie.retreated_before_boss') return `${run}:retreat:${p.chapter}:${p.map_no}`
+  if (item.event_type === 'osaka.floor_completed') return `${run}:osaka:${p.selected_floor}`
+  if (item.event_type === 'practice.result') return `${run}:practice`
+  if (item.event_type.startsWith('task_rewards.')) return `${run}:${item.event_type}`
+  if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${run}:${item.event_type}`
+  return `${run}:${item.event_type}:${eventDetail(item)}`
+}
+const groupedActivityEvents = computed(() => {
   const groups = new Map<string, any>()
   for (const item of timelineEvents.value) {
-    const key = `${item.run_id || 'standalone'}:${item.event_type}:${eventDetail(item)}`
+    if (systemEventTypes.has(item.event_type)) continue
+    const key = activityGroupKey(item)
     const found = groups.get(key)
-    if (found) found.items.push(item)
+    if (found) { found.items.push(item); found.ts = Math.max(found.ts, item.ts) }
+    else groups.set(key, { ...item, items: [item] })
+  }
+  return [...groups.values()].sort((a, b) => b.ts - a.ts)
+})
+const groupedSystemEvents = computed(() => {
+  const groups = new Map<string, any>()
+  for (const item of events.value) {
+    if (!systemEventTypes.has(item.event_type) || item.event_type === 'resource.change') continue
+    const key = `${item.run_id || `minute:${Math.floor(item.ts / 300)}`}:${item.event_type}`
+    const found = groups.get(key)
+    if (found) { found.items.push(item); found.ts = Math.max(found.ts, item.ts) }
     else groups.set(key, { ...item, items: [item] })
   }
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
@@ -172,6 +198,57 @@ function eventTitle(item: any) {
   return item.event_type === 'repair.summary' && repairCount(item.payload) === 0
     ? '手入误报'
     : (eventNames[item.event_type] || '本丸记录')
+}
+function activityTitle(item: any) {
+  const count = item.items?.length || 1
+  if (item.event_type === 'sortie.completed') return `完成出阵 ${count} 次`
+  if (item.event_type === 'sortie.retreated_before_boss') return `王点前撤退 ${count} 次`
+  if (item.event_type === 'osaka.floor_completed') return `大阪城完成 ${count} 圈`
+  if (item.event_type === 'raid.round_completed') return `联队战完成 ${count} 圈`
+  if (item.event_type === 'practice.result') return `完成演练 ${count} 场`
+  if (item.event_type === 'forge.collected') return `领取锻刀结果 ${count} 次`
+  if (item.event_type === 'forge.started') return `开始锻刀 ${count} 炉`
+  if (item.event_type === 'expedition.dispatched') return `派遣远征 ${count} 队`
+  if (item.event_type === 'expedition.settled') return `领取远征奖励 ${count} 份`
+  if (item.event_type === 'task_rewards.claimed') return `领取任务奖励 ${count} 类`
+  if (item.event_type === 'task_rewards.none') return `检查任务奖励 ${count} 类`
+  if (item.event_type === 'repair.summary') return repairCount(item.payload) ? `手入 ${repairCount(item.payload)} 振` : '检查手入名单'
+  if (item.event_type === 'equipment.restored') return `恢复刀装 ${count} 次`
+  return eventTitle(item)
+}
+function activityDetail(item: any) {
+  const items = item.items || [item], p = item.payload || {}
+  if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 共 ${items.length} 圈`
+  if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 均在王点前返回`
+  if (item.event_type === 'osaka.floor_completed') {
+    const koban = events.value.find((entry: any) => entry.run_id === item.run_id && entry.event_type === 'osaka.koban_session')?.payload?.delta
+    return `${p.selected_floor ?? '？'}F · 共 ${items.length} 圈${Number.isFinite(Number(koban)) ? ` · 小判 ${Number(koban) > 0 ? '+' : ''}${Number(koban).toLocaleString()}` : ''}`
+  }
+  if (item.event_type === 'practice.result') {
+    const wins = items.filter((entry: any) => isWin(entry.payload)).length
+    const losses = items.filter((entry: any) => isLoss(entry.payload)).length
+    return `${wins} 胜${losses ? ` · ${losses} 负` : ''} · ${items.map((entry: any) => entry.payload?.result).filter(Boolean).join(' / ')}`
+  }
+  if (item.event_type === 'forge.collected') return `炉位 ${items.map((entry: any) => entry.payload?.slot).filter(Boolean).join('、')}`
+  if (item.event_type === 'forge.started') return `已确认点火 · ${items.length} 炉`
+  if (item.event_type === 'expedition.dispatched') return items.map((entry: any) => `部队${entry.payload?.team_no ?? '？'} ${entry.payload?.map_name || entry.payload?.map_code || ''}`).join(' · ')
+  if (item.event_type === 'expedition.settled') return items.map((entry: any) => entry.payload?.map_name || entry.payload?.header).filter(Boolean).join(' · ') || '奖励已领取'
+  if (item.event_type === 'task_rewards.claimed' || item.event_type === 'task_rewards.none') return items.map((entry: any) => entry.payload?.tab || '当前页').join(' / ')
+  return eventDetail(item)
+}
+function systemTitle(item: any) {
+  const count = item.items?.length || 1
+  if (item.event_type === 'task_rewards.unconfirmed') return `任务奖励检查存在 ${count} 条未确认项`
+  if (item.event_type === 'inventory.captured' || item.event_type === 'inventory.peek') return `库存观察已更新${count > 1 ? ` ${count} 次` : ''}`
+  if (item.event_type === 'game_update.detected') return '检测到游戏更新'
+  if (item.event_type === 'game_update.recovered') return '游戏更新后已恢复'
+  return eventTitle(item)
+}
+function systemDetail(item: any) {
+  const items = item.items || [item]
+  if (item.event_type === 'task_rewards.unconfirmed') return items.map((entry: any) => entry.payload?.tab || '当前页').join(' / ')
+  if (item.event_type === 'inventory.captured' || item.event_type === 'inventory.peek') return '供库存净变化与可信度计算使用'
+  return items.map((entry: any) => eventDetail(entry)).join(' · ')
 }
 function eventDetail(item: any) {
   const p = item.payload || {}
@@ -463,9 +540,10 @@ onMounted(() => load())
           <p v-else class="report-empty">这个时间段还没有完成的出阵。</p>
         </section>
         <section class="report-events">
-          <header><h3>最近发生</h3><small>只展示结构化玩法记录</small></header>
-          <div v-if="groupedTimelineEvents.length" class="event-list"><article v-for="item in groupedTimelineEvents.slice(0, 60)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ eventTitle(item) }}<em v-if="item.items.length > 1">× {{ item.items.length }}</em></strong><p>{{ eventDetail(item) }}</p><details v-if="item.items.length > 1"><summary>展开 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
-          <p v-else class="report-empty">这个时间段还没有玩法记录。新任务运行后，就会从这里开始积累。</p>
+          <header><h3>最近发生</h3><small>麻麻露这段时间完成的事</small></header>
+          <div v-if="groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents.slice(0, 20)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
+          <p v-else class="report-empty">这个时间段还没有完成的主要活动。</p>
+          <details v-if="groupedSystemEvents.length" class="system-feed"><summary>{{ groupedSystemEvents.length }} 条系统观察</summary><div><article v-for="item in groupedSystemEvents.slice(0, 30)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div></details>
         </section>
       </div>
       <aside class="report-observation">
