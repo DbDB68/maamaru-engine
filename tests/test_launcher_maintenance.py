@@ -35,8 +35,10 @@ class LauncherMaintenanceTests(unittest.TestCase):
             app.main()
 
         kwargs = create_window.call_args.kwargs
-        self.assertEqual((kwargs["width"], kwargs["height"]), (1360, 900))
+        self.assertEqual((kwargs["width"], kwargs["height"]), (1080, 720))
+        self.assertEqual(kwargs["min_size"], (860, 640))
         self.assertIn(f"v{app.CURRENT_VERSION}", kwargs["html"])
+        self.assertIn("data:image/png;base64,", kwargs["html"])
         self.assertEqual(
             Path(start.call_args.kwargs["icon"]).name,
             "maamaru-launcher.ico",

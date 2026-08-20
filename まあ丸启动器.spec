@@ -12,6 +12,8 @@ datas = [
     ('touken_config.example.json', '.'),
     ('manifest.json', '.'),
     ('launcher/assets/maamaru-launcher.ico', 'launcher/assets'),
+    ('launcher/assets/maamaru-launcher.png', 'launcher/assets'),
+    ('launcher/assets/maamaru-launcher-header.png', 'launcher/assets'),
     ('touken/data', 'touken/data'),
     ('resource', 'resource'),
     ('profiles', 'profiles'),
