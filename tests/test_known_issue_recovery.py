@@ -245,6 +245,18 @@ class TaskRewardTests(unittest.TestCase):
         self.assertEqual(flow.events, [("task_rewards.none", {"tab": "日常"})])
         self.assertTrue(any("已确认没有可领奖励" in msg for msg in messages))
 
+    def test_reward_popup_confirms_claim_when_gray_button_is_late(self):
+        flow = self._flow(self.Maa(active_first=True, inactive=False))
+        flow._read_reward_popup = lambda: ([("木炭", 1050)], [])
+        flow._emit_reward_popup_changes = lambda items, event_id: flow.events.append(
+            ("popup.resources", {"items": items}))
+        with patch("touken.flows.rewards.time.sleep"):
+            messages = list(flow.claim_task_rewards_stream())
+
+        self.assertIn(("task_rewards.claimed", {"tab": "日常"}), flow.events)
+        self.assertIn(("popup.resources", {"items": [("木炭", 1050)]}), flow.events)
+        self.assertTrue(any("已确认报酬弹窗" in msg for msg in messages))
+
     def test_unknown_button_state_is_not_clicked_or_counted(self):
         maa = self.Maa()
         flow = self._flow(maa)

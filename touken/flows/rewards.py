@@ -277,19 +277,28 @@ class RewardsMixin:
                     yield "[TASK] 任务信息已失效，刷新"
                     time.sleep(0.5)
 
-                # 点击不算成绩；必须确认橙色消失且灰色空状态出现。
-                self.maa.screenshot(force=True)
-                still_active = self.maa.template_match(
-                    template=claim_config["template"], roi=None, threshold=0.7)
-                now_inactive = self.maa.template_match(
-                    template=inactive_template, roi=None, threshold=0.7)
-                if now_inactive and not still_active:
+                # 优先等按钮刷新为灰态；报酬一览弹窗本身也是领取成功的直接证据。
+                # 两者都没有才算未确认，避免“刚关奖励弹窗却说没领到”的假阴性。
+                button_confirmed = False
+                for _ in range(6):
+                    self.maa.screenshot(force=True)
+                    still_active = self.maa.template_match(
+                        template=claim_config["template"], roi=None, threshold=0.7)
+                    now_inactive = self.maa.template_match(
+                        template=inactive_template, roi=None, threshold=0.7)
+                    if now_inactive and not still_active:
+                        button_confirmed = True
+                        break
+                    time.sleep(0.5)
+                popup_confirmed = popup is not None
+                if button_confirmed or popup_confirmed:
                     if hasattr(self, "record_event"):
                         claimed_id = self.record_event("task_rewards.claimed",
                                                        tab=tab_name)
                         if popup and popup[0]:
                             self._emit_reward_popup_changes(popup[0], claimed_id)
-                    yield f"[TASK] {tab_name} 领取成功，已确认按钮变灰"
+                    evidence = "按钮变灰" if button_confirmed else "报酬弹窗"
+                    yield f"[TASK] {tab_name} 领取成功，已确认{evidence}"
                 else:
                     if hasattr(self, "record_event"):
                         self.record_event(
