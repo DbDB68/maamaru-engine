@@ -292,9 +292,24 @@ class ExpeditionMixin:
             if self.maa.ocr(expected=title_ocr["expected"], roi=title_roi):
                 collected += 1
                 info = self._read_settlement_info(cfg)
+                rewards, result = self._read_settlement_rewards(cfg)
                 if hasattr(self, "record_event"):
                     self.record_event("expedition.settled", sequence=collected,
-                                      **info)
+                                      result=result, rewards=rewards, **info)
+                    for resource, amount in rewards.items():
+                        self.record_event(
+                            "resource.change",
+                            resource=resource,
+                            delta=amount,
+                            source="expedition.settlement",
+                            attribution="confirmed",
+                            evidence="settlement_ocr",
+                            note=(info["header"] or info["map_name"]
+                                  or f"第{collected}份远征结算"),
+                            settlement_sequence=collected,
+                            team_no=info["team_no"],
+                            result=result,
+                        )
                 if info["team_no"]:
                     settlements.append(info)
                     # 这支队回来了，派遣记录销掉
@@ -380,6 +395,46 @@ class ExpeditionMixin:
         return
 
     # ==================== 收菜辅助 ====================
+
+    def _read_settlement_rewards(self, cfg) -> tuple[dict, str | None]:
+        """读取结算页四行基础资源；任何一行没读清就只跳过该行。"""
+        reward_cfg = cfg.get("settlement_rewards", {})
+        resources = ("木炭", "玉钢", "冷却材", "砥石")
+        fallback_rois = (
+            [875, 470, 920, 525], [875, 520, 920, 575],
+            [875, 570, 920, 625], [875, 620, 920, 680],
+        )
+        rewards = {}
+        ocr_all = getattr(self.maa, "ocr_all", None)
+        if callable(ocr_all):
+            for resource, fallback in zip(resources, fallback_rois):
+                roi = reward_cfg.get("resource_rois", {}).get(resource, fallback)
+                try:
+                    rows = ocr_all(roi_4to4(*roi)) or []
+                except Exception:
+                    continue
+                ordered = sorted(rows, key=lambda row: getattr(row[1], "x", 0))
+                digits = "".join(re.sub(r"\D", "", str(text))
+                                 for text, _point in ordered)
+                if digits:
+                    amount = int(digits)
+                    if amount > 0:
+                        rewards[resource] = amount
+
+        result = None
+        result_cfg = reward_cfg.get("result", {})
+        if callable(ocr_all):
+            try:
+                rows = ocr_all(roi_4to4(*result_cfg.get(
+                    "roi", [680, 35, 940, 150]))) or []
+                result_text = "".join(str(text) for text, _point in rows)
+                if "大成功" in result_text:
+                    result = "大成功"
+                elif "成功" in result_text:
+                    result = "成功"
+            except Exception:
+                pass
+        return rewards, result
 
     def _read_settlement_info(self, cfg) -> dict:
         """

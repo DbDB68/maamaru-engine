@@ -144,6 +144,7 @@
 - `osaka.koban_session`：小判 `delta`（读数差值）。
 - `repair.session_completed`：加速符 `−speedups`。
 - `resource.change` / `yosari.ticket_refill`：补充归城提灯时，以购买页前后余额确认小判支出。
+- `resource.change` / `expedition.settlement`：远征结算页 OCR 确认的四项基础资源收益。
 
 **双写兼容**：未来玩法流程可发射 `resource.change` 事件；payload 带
 `source_event_id` 指向旧事件 id 时，聚合层跳过旧事件那一份，不重复聚合。
