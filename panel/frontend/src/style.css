@@ -94,6 +94,7 @@ button { cursor: pointer; }
 .home-functions, .home-dashboard, .home-center { min-width: 0; min-height: 0; }
 .home-functions { overflow: auto; padding: 0; background: transparent; border: 0; }
 .home-functions h2 { margin: 0 8px 10px; font-size: 15px; }
+.home-functions-head > span, .home-functions-arrow { display: none; }
 .home-functions nav { display: grid; gap: 6px; }
 .home-functions button { display: flex; justify-content: space-between; width: 100%; min-height: 46px; margin-bottom: 5px; padding: 6px 10px; color: #51453b; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 9px; text-align: left; font-size: 12px; }
 .home-functions button:hover { background: #ebe0cc; }
@@ -396,8 +397,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .topnav a { display: none; }
   .overview-layout { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 70px); padding: 12px; overflow: visible; }
   .home-functions { overflow: visible; }
-  .home-functions nav { display: flex; overflow-x: auto; }
+  .home-functions-head { display: flex; align-items: center; justify-content: space-between; }
+  .home-functions-head > span { display: block; margin: 0 7px 9px; color: var(--ink-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .home-functions-carousel { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: stretch; gap: 7px; }
+  .home-functions nav { display: flex; min-width: 0; overflow-x: auto; scroll-snap-type: x proximity; scroll-behavior: smooth; }
   .home-functions button { width: auto; min-width: 110px; }
+  .home-functions nav > button { scroll-snap-align: center; }
+  .home-functions .home-functions-arrow { display: grid; min-width: 0; width: 34px; margin: 0; padding: 0; place-items: center; color: var(--fox-gold-deep); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; font-size: 25px; line-height: 1; }
+  .home-functions .home-functions-arrow:disabled { color: var(--ink-dim); background: color-mix(in srgb, var(--paper-card) 72%, transparent); opacity: .45; }
   .home-center { min-height: 720px; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .resources-card { grid-column: auto; }

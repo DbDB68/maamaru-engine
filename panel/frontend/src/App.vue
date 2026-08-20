@@ -32,6 +32,7 @@ let pollTimer = 0
 let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
+const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const clock = ref(Date.now())
 
@@ -47,6 +48,15 @@ const homeScriptOrder = ['daily', 'sortie', 'yosari', 'osaka', 'expedition', 'sm
 const homeScripts = computed(() => homeScriptOrder
   .filter(key => scripts.value[key])
   .map(key => [key, scripts.value[key]] as const))
+const homeScriptIndex = computed(() => homeScripts.value.findIndex(([key]) => key === selected.value))
+async function chooseAdjacentHome(direction: -1 | 1) {
+  const next = homeScriptIndex.value + direction
+  if (next < 0 || next >= homeScripts.value.length) return
+  selected.value = homeScripts.value[next][0]
+  await nextTick()
+  homeFunctionsNav.value?.querySelector<HTMLElement>(`[data-script="${selected.value}"]`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+}
 const scriptGroups = computed(() => {
   const entries = Object.entries(scripts.value)
   const take = (...keys: string[]) => entries.filter(([key]) => keys.includes(key))
@@ -280,17 +290,22 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="overview" page-class="overview-layout">
       <aside class="home-functions">
-        <h2>常用功能</h2>
-        <nav>
+        <div class="home-functions-head"><h2>常用功能</h2><span v-if="homeScriptIndex >= 0">{{ homeScriptIndex + 1 }} / {{ homeScripts.length }}</span></div>
+        <div class="home-functions-carousel">
+          <button type="button" class="home-functions-arrow previous" aria-label="上一个常用功能" :disabled="homeScriptIndex <= 0" @click="chooseAdjacentHome(-1)">‹</button>
+        <nav ref="homeFunctionsNav">
           <button
             v-for="([key, info]) in homeScripts"
             :key="key"
+            :data-script="key"
             :class="{ active: selected === key, running: running && current === key }"
             @click="selected = String(key)"
           >
             <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
           </button>
         </nav>
+          <button type="button" class="home-functions-arrow next" aria-label="下一个常用功能" :disabled="homeScriptIndex < 0 || homeScriptIndex >= homeScripts.length - 1" @click="chooseAdjacentHome(1)">›</button>
+        </div>
       </aside>
       <section class="home-center">
         <OverviewTaskCard
