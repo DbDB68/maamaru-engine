@@ -19,7 +19,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 3
+TELEMETRY_SCHEMA_VERSION = 4
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -589,7 +589,8 @@ class TelemetryStore:
         }
 
     def recent_events(self, limit: int = 100, event_type: str | None = None,
-                      script: str | None = None) -> list[dict]:
+                      script: str | None = None,
+                      before_id: int | None = None) -> list[dict]:
         clauses, args = [], []
         if event_type:
             clauses.append("event_type = ?")
@@ -597,8 +598,11 @@ class TelemetryStore:
         if script:
             clauses.append("script = ?")
             args.append(script)
+        if before_id is not None:
+            clauses.append("id < ?")
+            args.append(max(1, int(before_id)))
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        args.append(max(1, min(int(limit), 1000)))
+        args.append(max(1, min(int(limit), 1001)))
         rows = self._conn().execute(
             "SELECT id, ts, run_id, script, event_type, payload FROM events" +
             where + " ORDER BY id DESC LIMIT ?", args,
@@ -703,12 +707,16 @@ class TelemetryStore:
             "koban_session": koban_science,
         }
 
-    def recent_run_summaries(self, limit: int = 20, script: str | None = None) -> list[dict]:
+    def recent_run_summaries(self, limit: int = 20, script: str | None = None,
+                             before_started_at: float | None = None) -> list[dict]:
         clauses, args = ["status != 'running'"], []
         if script:
             clauses.append("script = ?")
             args.append(script)
-        args.append(max(1, min(int(limit), 100)))
+        if before_started_at is not None:
+            clauses.append("started_at < ?")
+            args.append(float(before_started_at))
+        args.append(max(1, min(int(limit), 101)))
         rows = self._conn().execute(
             "SELECT run_id FROM runs WHERE " + " AND ".join(clauses) +
             " ORDER BY started_at DESC LIMIT ?", args,
@@ -767,12 +775,54 @@ class TelemetryStore:
             "SELECT event_type, COUNT(*) count FROM events WHERE ts >= ? "
             "GROUP BY event_type ORDER BY count DESC", (since,),
         ).fetchall()
+        activity_rows = conn.execute(
+            "SELECT event_type, payload FROM events WHERE ts >= ? AND event_type IN "
+            "('sortie.completed', 'sortie.retreated_before_boss', "
+            "'osaka.floor_completed', 'raid.round_completed', "
+            "'pumpkin.sortie_completed', 'practice.result')",
+            (since,),
+        ).fetchall()
+        activity = {"sorties": 0, "practice": {"total": 0, "wins": 0,
+                                                "losses": 0, "unknown": 0},
+                    "sortie_groups": []}
+        sortie_groups: dict[tuple, dict] = {}
+        for row in activity_rows:
+            event_type = row["event_type"]
+            payload = _loads(row["payload"], {})
+            if event_type == "practice.result":
+                activity["practice"]["total"] += 1
+                result = str(payload.get("result") or payload.get("outcome") or "").lower()
+                if "胜" in result or result.startswith("win") or result == "won":
+                    activity["practice"]["wins"] += 1
+                elif "败" in result or result.startswith("lose") or result == "lost":
+                    activity["practice"]["losses"] += 1
+                else:
+                    activity["practice"]["unknown"] += 1
+                continue
+            activity["sorties"] += 1
+            if event_type == "osaka.floor_completed":
+                key = ("osaka", payload.get("selected_floor"))
+            elif event_type in {"sortie.completed", "sortie.retreated_before_boss"}:
+                key = (event_type, payload.get("mode"), payload.get("chapter"),
+                       payload.get("map_no"))
+            elif event_type == "raid.round_completed":
+                key = ("raid", payload.get("difficulty"), bool(payload.get("triple")))
+            else:
+                key = ("pumpkin",)
+            group = sortie_groups.setdefault(key, {
+                "event_type": event_type, "payload": payload, "count": 0,
+            })
+            group["count"] += 1
+        activity["sortie_groups"] = sorted(
+            sortie_groups.values(), key=lambda item: item["count"], reverse=True)
         matched_total = int(ocr["hits"] or 0) + int(ocr["misses"] or 0)
         return {
             "schema_version": TELEMETRY_SCHEMA_VERSION,
             "generated_at": time.time(),
             "window": {"days": days, "since": since,
-                       "retention_days": DEFAULT_RETENTION_DAYS},
+                       "retention_days": DEFAULT_RETENTION_DAYS,
+                       "detail_retention_days": DEFAULT_RETENTION_DAYS,
+                       "history_retention_days": None},
             "runs": {"total": sum(run_by_status.values()),
                      "by_script": run_by_script, "by_status": run_by_status},
             "ocr": {
@@ -790,15 +840,19 @@ class TelemetryStore:
             },
             "events": {"total": sum(r["count"] for r in event_rows),
                        "by_type": {r["event_type"]: r["count"] for r in event_rows}},
+            "activity": activity,
         }
 
-    def prune(self, retention_days: int = DEFAULT_RETENTION_DAYS) -> None:
-        cutoff = time.time() - max(1, int(retention_days)) * 86400
+    def prune(self, retention_days: int | None = None) -> None:
+        """Trim bulky OCR detail; explicit retention keeps the legacy full trim."""
+        days = DEFAULT_RETENTION_DAYS if retention_days is None else retention_days
+        cutoff = time.time() - max(1, int(days)) * 86400
         try:
             conn = self._conn()
             conn.execute("DELETE FROM observations WHERE ts < ?", (cutoff,))
-            conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
-            conn.execute("DELETE FROM human_reports WHERE occurred_at < ?", (cutoff,))
+            if retention_days is not None:
+                conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+                conn.execute("DELETE FROM human_reports WHERE occurred_at < ?", (cutoff,))
             conn.commit()
         except Exception:
             pass

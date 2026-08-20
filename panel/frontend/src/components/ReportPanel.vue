@@ -4,16 +4,17 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 
-const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), timelineKind = ref<'activity' | 'system'>('activity'), timelineLimit = ref(20), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), timelineKind = ref<'activity' | 'system'>('activity'), timelineLimit = ref(20), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), loadingOlder = ref(false), error = ref('')
+const hasMoreEvents = ref(false), hasMoreRuns = ref(false), eventCursor = ref<number | null>(null), runCursor = ref<number | null>(null)
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
-const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
+const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }, { value: 365, label: '1 年' }]
 const reportViewItems = [
   { value: 'battle', label: '战报', caption: '成绩与最近表现' },
   { value: 'ledger', label: '资源账', caption: '库存、收支与报备' },
-  { value: 'records', label: '近期记录', caption: '最近挂机与时间线' },
+  { value: 'records', label: '全部记录', caption: '按需翻阅长期档案' },
 ]
 const selectedResource = ref('小判')
-const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
+const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 const resourceRows = computed(() => resourceNames.map(name => {
   const row = (ledger.value?.per_resource || []).find((item: any) => item.resource === name)
   return { name, before: row?.opening ?? null, current: row?.closing ?? null,
@@ -127,15 +128,16 @@ const scriptNames: Record<string, string> = {
   pumpkin: '南瓜大作战', daily: '一键日课',
 }
 function countEvents(...types: string[]) { return events.value.filter(item => types.includes(item.event_type)).length }
-const rewardClaims = computed(() => countEvents('task_rewards.claimed'))
-const sortieCount = computed(() => countEvents('sortie.completed', 'sortie.retreated_before_boss', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed'))
-const expeditions = computed(() => countEvents('expedition.dispatched'))
-const practiceWins = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isWin(item.payload)).length)
-const practiceLosses = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isLoss(item.payload)).length)
-const practiceTotal = computed(() => countEvents('practice.result'))
+function summaryEventCount(...types: string[]) { return types.reduce((total, type) => total + Number(summary.value?.events?.by_type?.[type] || 0), 0) }
+const rewardClaims = computed(() => summaryEventCount('task_rewards.claimed'))
+const sortieCount = computed(() => Number(summary.value?.activity?.sorties ?? countEvents('sortie.completed', 'sortie.retreated_before_boss', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed')))
+const expeditions = computed(() => summaryEventCount('expedition.dispatched'))
+const practiceWins = computed(() => Number(summary.value?.activity?.practice?.wins ?? events.value.filter(item => item.event_type === 'practice.result' && isWin(item.payload)).length))
+const practiceLosses = computed(() => Number(summary.value?.activity?.practice?.losses ?? events.value.filter(item => item.event_type === 'practice.result' && isLoss(item.payload)).length))
+const practiceTotal = computed(() => Number(summary.value?.activity?.practice?.total ?? countEvents('practice.result')))
 const practiceUnknown = computed(() => Math.max(0, practiceTotal.value - practiceWins.value - practiceLosses.value))
-const pumpkinBoards = computed(() => countEvents('pumpkin.board_completed'))
-const pumpkinTokens = computed(() => countEvents('pumpkin.token_used'))
+const pumpkinBoards = computed(() => summaryEventCount('pumpkin.board_completed'))
+const pumpkinTokens = computed(() => summaryEventCount('pumpkin.token_used'))
 const estimateHours = ref(6), customHours = ref(6), customEstimate = ref(false)
 const timelineEvents = computed(() => {
   const visible: any[] = []
@@ -218,24 +220,26 @@ function chooseRecordView(value: string | number) { recordView.value = value as 
 function chooseTimelineSegment(value: string | number) { chooseTimelineKind(value as typeof timelineKind.value) }
 const sortieGroups = computed(() => {
   const groups = new Map<string, { label: string; count: number; detail: string }>()
-  const add = (key: string, label: string, detail = '') => {
+  const add = (key: string, label: string, detail = '', amount = 1) => {
     const found = groups.get(key)
-    if (found) found.count += 1
-    else groups.set(key, { label, count: 1, detail })
+    if (found) found.count += amount
+    else groups.set(key, { label, count: amount, detail })
   }
-  for (const item of events.value) {
+  const source = summary.value?.activity?.sortie_groups || events.value
+  for (const item of source) {
+    const amount = Number(item.count || 1)
     const p = item.payload || {}
     if (item.event_type === 'osaka.floor_completed') {
       const floor = p.selected_floor == null ? '未指定层数' : `${p.selected_floor}F`
-      add(`osaka:${floor}`, `大阪城 ${floor}`)
+      add(`osaka:${floor}`, `大阪城 ${floor}`, '', amount)
     } else if (item.event_type === 'sortie.completed') {
       const place = p.mode === 'yosari' ? `异去 ${p.chapter}-${p.map_no}` : `合战场 ${p.chapter}-${p.map_no}`
-      add(`sortie:${p.mode}:${p.chapter}:${p.map_no}`, place)
+      add(`sortie:${p.mode}:${p.chapter}:${p.map_no}`, place, '', amount)
     } else if (item.event_type === 'sortie.retreated_before_boss') {
-      add(`sortie-retreat:${p.chapter}:${p.map_no}`, `合战场 ${p.chapter}-${p.map_no}`, '王点前撤退')
+      add(`sortie-retreat:${p.chapter}:${p.map_no}`, `合战场 ${p.chapter}-${p.map_no}`, '王点前撤退', amount)
     } else if (item.event_type === 'raid.round_completed') {
-      add(`raid:${p.difficulty}`, `联队战 ${p.difficulty || '未指定难度'}`, p.triple ? '使用三倍枡' : '')
-    } else if (item.event_type === 'pumpkin.sortie_completed') add('pumpkin', '南瓜大作战')
+      add(`raid:${p.difficulty}`, `联队战 ${p.difficulty || '未指定难度'}`, p.triple ? '使用三倍枡' : '', amount)
+    } else if (item.event_type === 'pumpkin.sortie_completed') add('pumpkin', '南瓜大作战', '', amount)
   }
   return [...groups.values()].sort((a, b) => b.count - a.count)
 })
@@ -514,11 +518,39 @@ async function load(nextDays = days.value) {
     ledger.value = nextLedger
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
+    hasMoreEvents.value = nextEvents.has_more
+    hasMoreRuns.value = nextRuns.has_more
+    eventCursor.value = nextEvents.next_cursor
+    runCursor.value = nextRuns.next_cursor
+    timelineLimit.value = 20
     humanReports.value = nextHuman.items
     inventoryGaps.value = nextHuman.inventory_gaps
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
   finally { loading.value = false }
+}
+async function loadOlder(kind: 'events' | 'runs') {
+  loadingOlder.value = true
+  try {
+    const cutoff = Date.now() / 1000 - days.value * 86400
+    if (kind === 'events') {
+      const next = await api.dataEvents(1000, eventCursor.value ?? undefined)
+      events.value.push(...next.items.filter(item => item.ts >= cutoff))
+      eventCursor.value = next.next_cursor
+      hasMoreEvents.value = next.has_more && next.items.some(item => item.ts >= cutoff)
+      timelineLimit.value += 20
+    } else {
+      const next = await api.dataRuns(30, runCursor.value ?? undefined)
+      runs.value.push(...next.items.filter(item => item.loops && item.started_at >= cutoff))
+      runCursor.value = next.next_cursor
+      hasMoreRuns.value = next.has_more && next.items.some(item => item.started_at >= cutoff)
+    }
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '较早记录读取失败' }
+  finally { loadingOlder.value = false }
+}
+function showMoreTimeline() {
+  if (activeTimeline.value.length > timelineLimit.value) timelineLimit.value += 20
+  else if (hasMoreEvents.value) void loadOlder('events')
 }
 onMounted(() => load())
 </script>
@@ -627,11 +659,11 @@ onMounted(() => load())
     </section>
     <template v-if="reportView === 'records'">
       <section class="records-head">
-        <div><span>{{ rangeLabel }}</span><h3>最近的挂机与活动，都能往下追到发生了什么</h3><p>这里最多展示 30 轮挂机和 1000 条事件；更早记录不会在本页无限累积。</p></div>
+        <div><span>{{ rangeLabel }}</span><h3>本丸做过的事，按年份也能慢慢翻回来</h3><p>先呈现最近一页，较早档案需要时再载入；全年成绩数字会直接从完整汇总计算。</p></div>
         <SegmentedControl :model-value="recordView" :items="recordViewItems" label="记录类型" @update:model-value="chooseRecordView" />
       </section>
       <section v-if="recordView === 'runs'" class="run-history">
-        <header><div><h3>⛏️ 挂机轮次</h3><small>只列有出阵圈数的任务；其他日课步骤请看活动时间线</small></div><span>最近 {{ runs.length }} / 最多 30 轮</span></header>
+        <header><div><h3>⛏️ 挂机轮次</h3><small>只列有出阵圈数的任务；其他日课步骤请看活动时间线</small></div><span>已载入 {{ runs.length }} 轮</span></header>
         <div v-if="runs.length" class="run-history-list">
           <details v-for="(run, index) in runs" :key="run.run_id" :open="index === 0">
             <summary><time>{{ eventTime(run.started_at) }}</time><span><b>{{ runTitle(run) }}</b><small>{{ elapsedTime(runElapsedSeconds(run)) }} · {{ loopTime(run.average_loop_seconds) }}</small></span><span class="run-cost">手入 {{ run.repair_sessions }} · 符 {{ run.speedups }} · 刀装 {{ run.equipment_restores }}</span><em>{{ attributedStats(run) || deltaStats(run) || '查看详情' }}</em></summary>
@@ -646,16 +678,17 @@ onMounted(() => load())
           </details>
         </div>
         <p v-else class="report-empty">这个时间段还没有挂机记录。</p>
+        <button v-if="hasMoreRuns" type="button" class="timeline-more secondary" :disabled="loadingOlder" @click="loadOlder('runs')">{{ loadingOlder ? '正在翻档案……' : '载入更早的 30 轮' }}</button>
       </section>
       <div v-else class="records-timeline">
         <aside class="records-sorties"><header><h3>⚔️ 出阵分布</h3><small>{{ sortieCount.toLocaleString() }} 圈</small></header><div v-if="sortieGroups.length"><p v-for="item in sortieGroups" :key="`${item.label}:${item.detail}`"><span><b>{{ item.label }}</b><small>{{ item.detail || '确认完成' }}</small></span><strong>{{ item.count }} 圈</strong></p></div><p v-else class="report-empty">暂无出阵。</p></aside>
         <section class="report-events timeline-panel">
-          <header><div><h3>{{ timelineKind === 'activity' ? '玩家活动' : '系统观察' }}</h3><small>{{ timelineKind === 'activity' ? '相邻的同类活动已经合并，仍可展开原始明细' : '库存读数、未确认状态与恢复记录，不混入成绩' }}</small></div><span>最近 {{ Math.min(timelineLimit, activeTimeline.length) }} / {{ activeTimeline.length }} 组</span></header>
+          <header><div><h3>{{ timelineKind === 'activity' ? '玩家活动' : '系统观察' }}</h3><small>{{ timelineKind === 'activity' ? '相邻的同类活动已经合并，仍可展开原始明细' : '库存读数、未确认状态与恢复记录，不混入成绩' }}</small></div><span>已显示 {{ Math.min(timelineLimit, activeTimeline.length) }} / 已载入 {{ activeTimeline.length }} 组</span></header>
           <SegmentedControl class="timeline-kinds" :model-value="timelineKind" :items="timelineKindItems" label="时间线内容" @update:model-value="chooseTimelineSegment" />
           <div v-if="timelineKind === 'activity' && groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
           <div v-else-if="timelineKind === 'system' && groupedSystemEvents.length" class="system-timeline"><article v-for="item in groupedSystemEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div>
           <p v-else class="report-empty">这个时间段还没有{{ timelineKind === 'activity' ? '完成的主要活动' : '系统观察' }}。</p>
-          <button v-if="activeTimeline.length > timelineLimit" type="button" class="timeline-more secondary" @click="timelineLimit += 20">再看 20 组较早记录</button>
+          <button v-if="activeTimeline.length > timelineLimit || hasMoreEvents" type="button" class="timeline-more secondary" :disabled="loadingOlder" @click="showMoreTimeline">{{ loadingOlder ? '正在翻档案……' : activeTimeline.length > timelineLimit ? '再看 20 组较早记录' : '载入更早记录' }}</button>
         </section>
       </div>
     </template>

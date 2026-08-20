@@ -229,6 +229,59 @@ class TelemetryStoreTests(unittest.TestCase):
 
         self.assertEqual([e["event_type"] for e in self.store.recent_events()], ["keep"])
 
+    def test_default_prune_keeps_long_term_results_but_removes_old_ocr(self):
+        old = time.time() - 100 * 86400
+        conn = self.store._conn()
+        conn.execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (?, NULL, NULL, 'old.result', '{}')", (old,),
+        )
+        conn.execute(
+            "INSERT INTO observations(ts, run_id, script, kind, roi, tokens) "
+            "VALUES (?, NULL, NULL, 'match', '[]', '[]')", (old,),
+        )
+        conn.execute(
+            "INSERT INTO human_reports(created_at, occurred_at, source, activities, note) "
+            "VALUES (?, ?, 'manual', '[]', 'old report')", (old, old),
+        )
+        conn.commit()
+
+        self.store.prune()
+
+        self.assertEqual(self.store.recent_events()[0]["event_type"], "old.result")
+        self.assertEqual(self.store.recent_observations(), [])
+        self.assertEqual(self.store.human_reports()[0]["note"], "old report")
+
+    def test_summary_aggregates_full_activity_without_recent_page_limit(self):
+        conn = self.store._conn()
+        now = time.time()
+        for index in range(1005):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, NULL, 'osaka', 'osaka.floor_completed', ?)",
+                (now - index, __import__('json').dumps({"selected_floor": 88})),
+            )
+        conn.execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (?, NULL, 'practice', 'practice.result', ?)",
+            (now, __import__('json').dumps({"result": "胜利"})),
+        )
+        conn.commit()
+
+        summary = self.store.summary(days=365)
+
+        self.assertEqual(len(self.store.recent_events(limit=1000)), 1000)
+        self.assertEqual(summary["activity"]["sorties"], 1005)
+        self.assertEqual(summary["activity"]["practice"]["wins"], 1)
+        self.assertEqual(summary["activity"]["sortie_groups"][0]["count"], 1005)
+
+    def test_record_pages_accept_stable_cursors(self):
+        first = self.store.record_event("first", {})
+        second = self.store.record_event("second", {})
+
+        self.assertEqual(self.store.recent_events(limit=1)[0]["id"], second)
+        self.assertEqual(self.store.recent_events(limit=1, before_id=second)[0]["id"], first)
+
     def test_public_api_contract_uses_versioned_store(self):
         from panel.server import api_data_events, api_data_ocr, api_data_summary
 
