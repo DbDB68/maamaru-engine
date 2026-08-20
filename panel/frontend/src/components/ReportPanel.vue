@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
-const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
@@ -548,55 +548,32 @@ onMounted(() => load())
       </form>
       <details v-if="humanReports.length"><summary>查看已有报备（{{ humanReports.length }}）</summary><ul><li v-for="item in humanReports.slice(0, 20)" :key="item.id"><time>{{ eventTime(item.occurred_at) }}</time><span><b>{{ item.activities.join('、') }}</b>{{ item.note }}</span><button type="button" aria-label="删除这条报备" @click="removeHumanReport(item)">×</button></li></ul></details>
     </section>
-    <div v-if="reportView === 'records'" class="report-body">
-      <div>
-        <section v-if="runs.length" class="report-runs">
-          <header><h3>⛏️ 挂机成绩单</h3><small>圈速按相邻出阵间隔计算</small></header>
-          <article v-for="(run, index) in runs.slice(0, 5)" :key="run.run_id" :class="{ featured: index === 0 }">
-            <time>{{ eventTime(run.started_at) }}</time>
-            <div><strong>{{ runTitle(run) }}</strong>
-              <p class="run-duration">出阵用时 <b>{{ elapsedTime(runElapsedSeconds(run)) }}</b><small>{{ run.play_duration_seconds != null ? '从开工到最后一圈完成' : '旧记录按整轮任务用时估算' }}</small></p>
-              <div v-if="index === 0 && run.average_loop_seconds" class="run-estimator">
-                <div><small>平均速度</small><b>{{ loopTime(run.average_loop_seconds) }}</b></div>
-                <div class="estimate-result"><small>预计完成</small><b>≈ {{ estimatedLoops(run) }} 圈</b></div>
-                <div class="estimate-control"><small>预计收益</small><label>挂机时间 <span v-if="!customEstimate">{{ estimateHours }} 小时</span><input v-else v-model.number="customHours" type="number" min="0.5" step="0.5" aria-label="自定义挂机小时数" @input="updateCustom"></label></div>
-                <nav aria-label="预计挂机时间"><button v-for="hour in [1, 6, 8]" :key="hour" type="button" :class="{ active: !customEstimate && estimateHours === hour }" @click="chooseHours(hour)">{{ hour }}小时</button><button type="button" :class="{ active: customEstimate }" @click="chooseCustom">自定义</button></nav>
-              </div>
-              <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
+    <template v-if="reportView === 'records'">
+      <section class="records-head">
+        <div><span>{{ rangeLabel }}</span><h3>每一轮任务，都能往下追到发生了什么</h3><p>先看任务轮次；需要按时间查某件事时，再切到活动时间线。</p></div>
+        <nav aria-label="记录类型"><button type="button" :class="{ active: recordView === 'runs' }" @click="recordView = 'runs'"><b>任务轮次</b><small>{{ runs.length }} 轮</small></button><button type="button" :class="{ active: recordView === 'timeline' }" @click="recordView = 'timeline'"><b>活动时间线</b><small>{{ groupedActivityEvents.length }} 组</small></button></nav>
+      </section>
+      <section v-if="recordView === 'runs'" class="run-history">
+        <header><div><h3>⛏️ 任务轮次</h3><small>点击任意一轮查看养护、资源与库存证据</small></div><span>圈速按相邻出阵间隔计算</span></header>
+        <div v-if="runs.length" class="run-history-list">
+          <details v-for="(run, index) in runs" :key="run.run_id" :open="index === 0">
+            <summary><time>{{ eventTime(run.started_at) }}</time><span><b>{{ runTitle(run) }}</b><small>{{ elapsedTime(runElapsedSeconds(run)) }} · {{ loopTime(run.average_loop_seconds) }}</small></span><span class="run-cost">手入 {{ run.repair_sessions }} · 符 {{ run.speedups }} · 刀装 {{ run.equipment_restores }}</span><em>{{ attributedStats(run) || deltaStats(run) || '查看详情' }}</em></summary>
+            <div class="run-evidence">
               <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
               <p v-if="attributedStats(run)" class="run-delta"><small>🦊 已确认收支 <em>{{ run.resource_change_count }} 笔</em></small>{{ attributedStats(run) }}<span>来自本轮玩法的逐项记录，不依赖库存快照</span></p>
               <p v-if="observedInventory(run)" class="run-delta"><small>👀 途中看到的库存 <em>{{ run.inventory_observation_count }} 次观察</em></small>{{ observedInventory(run) }}<span>只表示最后一次读数，不作为本轮收益</span></p>
               <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存变化 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em><em v-else-if="run.after_snapshot_source === 'auto_science'">🧪小判实验估算</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span><span v-if="kobanPerFloorLabel(run)">· 平均每层 {{ kobanPerFloorLabel(run) }}</span></p>
-              <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span><span v-else-if="run.after_snapshot_source === 'auto_science'">（🧪小判实验）</span></p>
-              <div v-else class="run-inventory-missing">
-                <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>
-                <small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填，以免把中间的变化算错轮次。</small>
-                <small v-else-if="attributedStats(run)">这轮没有完整的库存净变化；上方已确认收支仍然有效。</small>
-                <small v-else>这轮没有完整库存净变化，也没有记录到资源流水。</small>
-                <button v-if="canAttachInventory(run)" type="button" class="secondary" :disabled="attachingRun === run.run_id" @click="attachInventory(run)">{{ attachingRun === run.run_id ? '正在补盘……' : '补上最近盘点' }}</button>
-                <em v-if="inventoryNotice[run.run_id]">{{ inventoryNotice[run.run_id] }}</em>
-              </div>
+              <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化</p>
+              <div v-else class="run-inventory-missing"><small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small><small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填。</small><small v-else-if="attributedStats(run)">这轮没有完整的库存净变化；上方已确认收支仍然有效。</small><small v-else>这轮没有完整库存净变化，也没有记录到资源流水。</small><button v-if="canAttachInventory(run)" type="button" class="secondary" :disabled="attachingRun === run.run_id" @click="attachInventory(run)">{{ attachingRun === run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[run.run_id]">{{ inventoryNotice[run.run_id] }}</em></div>
             </div>
-          </article>
-        </section>
-        <section class="report-sorties">
-          <header><h3>⚔️ 出阵小结</h3><small v-if="pumpkinBoards || pumpkinTokens">南瓜：{{ pumpkinBoards }} 块板子 · {{ pumpkinTokens }} 枚令牌</small></header>
-          <div v-if="sortieGroups.length" class="sortie-list"><p v-for="item in sortieGroups" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.count }} 圈</strong><small v-if="item.detail">{{ item.detail }}</small></p></div>
-          <p v-else class="report-empty">这个时间段还没有完成的出阵。</p>
-        </section>
-        <section class="report-events">
-          <header><h3>最近发生</h3><small>麻麻露这段时间完成的事</small></header>
-          <div v-if="groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents.slice(0, 20)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
-          <p v-else class="report-empty">这个时间段还没有完成的主要活动。</p>
-          <details v-if="groupedSystemEvents.length" class="system-feed"><summary>{{ groupedSystemEvents.length }} 条系统观察</summary><div><article v-for="item in groupedSystemEvents.slice(0, 30)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div></details>
-        </section>
+          </details>
+        </div>
+        <p v-else class="report-empty">这个时间段还没有挂机记录。</p>
+      </section>
+      <div v-else class="records-timeline">
+        <aside class="records-sorties"><header><h3>⚔️ 出阵分布</h3><small>{{ sortieCount.toLocaleString() }} 圈</small></header><div v-if="sortieGroups.length"><p v-for="item in sortieGroups" :key="`${item.label}:${item.detail}`"><span><b>{{ item.label }}</b><small>{{ item.detail || '确认完成' }}</small></span><strong>{{ item.count }} 圈</strong></p></div><p v-else class="report-empty">暂无出阵。</p></aside>
+        <section class="report-events"><header><div><h3>活动时间线</h3><small>相邻的同类活动已经合并，仍可展开原始明细</small></div><span>{{ groupedActivityEvents.length }} 组活动</span></header><div v-if="groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div><p v-else class="report-empty">这个时间段还没有完成的主要活动。</p><details v-if="groupedSystemEvents.length" class="system-feed"><summary>{{ groupedSystemEvents.length }} 组系统观察</summary><div><article v-for="item in groupedSystemEvents" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div></details></section>
       </div>
-      <aside class="report-observation">
-        <h3>🦊 近侍观察</h3>
-        <p v-if="summary?.runs?.total">这段时间共执行 {{ summary.runs.total }} 次任务，留下 {{ summary.events.total }} 条玩法记录。只说能够确认的事，不把猜测当成绩。</p>
-        <p v-else>还没有足够数据。小狐狸先认真记账，积累一阵再来写周报。</p>
-        <small>智能建议将在数据积累稳定后开放，并始终注明依据。</small>
-      </aside>
-    </div>
+    </template>
   </section>
 </template>
