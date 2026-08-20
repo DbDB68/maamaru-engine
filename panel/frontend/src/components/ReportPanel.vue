@@ -7,6 +7,7 @@ const unreportedGaps = computed(() => inventoryGaps.value.filter(item => !item.r
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
   'osaka.floor_completed': '大阪城完成一圈', 'sortie.completed': '出阵完成',
+  'sortie.retreated_before_boss': '王点前撤退完成',
   'raid.round_completed': '联队战完成一圈', 'pumpkin.sortie_completed': '南瓜活动出阵完成',
   'pumpkin.board_completed': '南瓜活动完成一块板子', 'pumpkin.token_used': '南瓜活动使用更新令牌',
   'repair.queued': '刀剑进入手入', 'repair.skipped': '跳过手入', 'repair.session_completed': '手入完成',
@@ -23,7 +24,7 @@ const scriptNames: Record<string, string> = {
 }
 function countEvents(...types: string[]) { return events.value.filter(item => types.includes(item.event_type)).length }
 const rewardClaims = computed(() => countEvents('task_rewards.claimed'))
-const sortieCount = computed(() => countEvents('sortie.completed', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed'))
+const sortieCount = computed(() => countEvents('sortie.completed', 'sortie.retreated_before_boss', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed'))
 const expeditions = computed(() => countEvents('expedition.dispatched'))
 const practiceWins = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isWin(item.payload)).length)
 const practiceLosses = computed(() => events.value.filter(item => item.event_type === 'practice.result' && isLoss(item.payload)).length)
@@ -35,7 +36,7 @@ const estimateHours = ref(6), customHours = ref(6), customEstimate = ref(false)
 const timelineEvents = computed(() => {
   const visible: any[] = []
   const repairs = new Map<string, any>()
-  const hidden = new Set(['team_record.saved', 'equipment.restored'])
+  const hidden = new Set(['team_record.saved', 'equipment.restored', 'inventory.peek'])
   for (const item of events.value) {
     if (hidden.has(item.event_type)) continue
     if (!item.event_type.startsWith('repair.')) {
@@ -84,6 +85,8 @@ const sortieGroups = computed(() => {
     } else if (item.event_type === 'sortie.completed') {
       const place = p.mode === 'yosari' ? `异去 ${p.chapter}-${p.map_no}` : `合战场 ${p.chapter}-${p.map_no}`
       add(`sortie:${p.mode}:${p.chapter}:${p.map_no}`, place)
+    } else if (item.event_type === 'sortie.retreated_before_boss') {
+      add(`sortie-retreat:${p.chapter}:${p.map_no}`, `合战场 ${p.chapter}-${p.map_no}`, '王点前撤退')
     } else if (item.event_type === 'raid.round_completed') {
       add(`raid:${p.difficulty}`, `联队战 ${p.difficulty || '未指定难度'}`, p.triple ? '使用三倍枡' : '')
     } else if (item.event_type === 'pumpkin.sortie_completed') add('pumpkin', '南瓜大作战')
@@ -120,6 +123,7 @@ function eventDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed') return p.selected_floor == null ? '未指定层数 · 完成 1 圈' : `${p.selected_floor}F · 完成 1 圈`
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
+  if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
   if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
   if (item.event_type === 'pumpkin.sortie_completed') return `第 ${p.sequence ?? '？'} 次出阵`
   if (item.event_type === 'pumpkin.board_completed') return `完成第 ${p.sequence ?? '？'} 块板子`
@@ -182,6 +186,12 @@ function instanceDetail(item: any) {
 function deltaStats(run: any) {
   const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
   return order.filter(name => run.resource_delta?.[name]).map(name => `${name} ${run.resource_delta[name] > 0 ? '+' : ''}${run.resource_delta[name].toLocaleString()}`).join(' · ')
+}
+function observedInventory(run: any) {
+  const order = ['木炭', '玉钢', '冷却材', '砥石', '小判']
+  const observed = run.inventory_observation || {}
+  return order.filter(name => Number.isFinite(Number(observed[name])))
+    .map(name => `${name} ${Number(observed[name]).toLocaleString()}`).join(' · ')
 }
 function kobanPerHour(run: any) {
   const koban = Number(run.resource_delta?.['小判'])
@@ -346,7 +356,8 @@ onMounted(() => load())
               </div>
               <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
               <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
-              <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存账 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em><em v-else-if="run.after_snapshot_source === 'auto_science'">🧪小判实验</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span><span v-if="kobanPerFloorLabel(run)">· 平均每层 {{ kobanPerFloorLabel(run) }}</span></p>
+              <p v-if="observedInventory(run)" class="run-delta"><small>👀 途中看到的库存 <em>{{ run.inventory_observation_count }} 次观察</em></small>{{ observedInventory(run) }}<span>只表示最后一次读数，不作为本轮收益</span></p>
+              <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存变化 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em><em v-else-if="run.after_snapshot_source === 'auto_science'">🧪小判实验估算</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span><span v-if="kobanPerFloorLabel(run)">· 平均每层 {{ kobanPerFloorLabel(run) }}</span></p>
               <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span><span v-else-if="run.after_snapshot_source === 'auto_science'">（🧪小判实验）</span></p>
               <div v-else class="run-inventory-missing">
                 <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>

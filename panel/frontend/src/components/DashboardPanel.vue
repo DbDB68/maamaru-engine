@@ -88,7 +88,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <div class="activity-summary">
           <template v-if="activity">
             <span><strong>{{ eventCount('task_rewards.claimed') }}</strong>次领奖</span>
-            <span><strong>{{ eventCount('sortie.completed', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed') }}</strong>次出阵</span>
+            <span><strong>{{ eventCount('sortie.completed', 'sortie.retreated_before_boss', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed') }}</strong>次出阵</span>
             <span><strong>{{ eventCount('expedition.dispatched') }}</strong>次派遣</span>
           </template>
           <span v-else class="activity-waiting">新任务运行后开始记录</span>

@@ -326,7 +326,7 @@ class TelemetryStore:
                    "payload": _loads(r["payload"], {})} for r in rows]
         loop_events = [e for e in events if e["event_type"] in {
             "osaka.floor_completed", "sortie.completed", "raid.round_completed",
-            "pumpkin.sortie_completed",
+            "pumpkin.sortie_completed", "sortie.retreated_before_boss",
         }]
         osaka = [e for e in loop_events if e["event_type"] == "osaka.floor_completed"]
         intervals = [b["ts"] - a["ts"] for a, b in zip(loop_events, loop_events[1:])
@@ -340,6 +340,7 @@ class TelemetryStore:
                              if int(e["payload"].get("repaired") or
                                     e["payload"].get("count") or 0) > 0]
         snapshots = [e for e in events if e["event_type"] == "inventory.captured"]
+        peeks = [e for e in events if e["event_type"] == "inventory.peek"]
         before = next((e for e in snapshots if e["payload"].get("phase") == "before"), None)
         after = next((e for e in reversed(snapshots)
                       if e["payload"].get("phase") == "after"), None)
@@ -381,6 +382,8 @@ class TelemetryStore:
             "equipment_restores": sum(1 for e in events
                                       if e["event_type"] == "equipment.restored"),
             "resource_delta": deltas,
+            "inventory_observation": (peeks[-1]["payload"] if peeks else None),
+            "inventory_observation_count": len(peeks),
             "has_resource_comparison": bool(before and after) or bool(koban_science),
             "has_before_snapshot": bool(before) or bool(koban_science),
             "has_after_snapshot": bool(after) or bool(koban_science),

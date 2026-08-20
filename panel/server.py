@@ -283,7 +283,10 @@ def _build_daily(agent, config_path, params):
                        "formation": saved_sortie.get("formation") or "鱼鳞阵",
                        "repair_threshold": saved_sortie.get("repair_threshold") or "light",
                        "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(saved_sortie.get("auto_equip", True))}
+                       "auto_equip": _bool(saved_sortie.get("auto_equip", True)),
+                       "retreat_before_boss": _bool(params.get(
+                           "retreat_before_boss",
+                           saved_sortie.get("retreat_before_boss", False)))}
     elif mode == "osaka":
         # 楼层、部队和圈数由日课决定；阵形、伤势与刀装恢复沿用独立大阪城配置。
         saved_osaka = (_load_panel_settings().get("params", {}).get("osaka", {}) or {})
@@ -610,6 +613,10 @@ register_script("daily", "一键日课", "",
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
                         {"key": "loops", "type": "number", "label": "连打几圈",
                          "default": 1, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
+                        {"key": "retreat_before_boss", "type": "toggle",
+                         "label": "王点前撤退", "default": False,
+                         "help": "关闭自动行军后生效：下一步将进入王点时主动返回本丸，适合反复进图练级。小地图无法确认时会继续行军。",
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],

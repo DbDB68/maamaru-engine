@@ -104,6 +104,23 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["repair_sessions"], 0)
         self.assertEqual(result["repaired_swords"], 0)
 
+    def test_run_summary_counts_boss_retreat_and_keeps_latest_inventory_peek(self):
+        self.store.start_run("run-1", "sortie", started_at=100)
+        self.store.record_event("inventory.peek", {
+            "tag": "sortie", "木炭": 100, "玉钢": 200,
+            "冷却材": 300, "砥石": 400, "小判": 500,
+        })
+        self.store.record_event("sortie.retreated_before_boss", {
+            "chapter": 5, "map_no": 4, "sequence": 1,
+        })
+        self.store.finish_run("run-1", "completed", ended_at=200)
+
+        result = self.store.run_summary("run-1")
+        self.assertEqual(result["loops"], 1)
+        self.assertEqual(result["inventory_observation_count"], 1)
+        self.assertEqual(result["inventory_observation"]["小判"], 500)
+        self.assertFalse(result["has_resource_comparison"])
+
     def test_manual_inventory_snapshot_completes_run_comparison(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         conn = self.store._conn()

@@ -164,6 +164,23 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertFalse(plan["auto_march"])
         self.assertEqual(plan["repair_threshold"], "medium")
 
+    def test_daily_sortie_can_retreat_before_boss(self):
+        agent = FakeAgent()
+        params = {"sortie_mode": "sortie", "chapter": "5", "map_no": "4",
+                  "loops": "3", "team_no": "2", "retreat_before_boss": True}
+        saved = {"params": {"sortie": {"auto_march": False}}}
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value=saved
+        ):
+            list(wrap(_build_daily)("config.json", params))
+
+        plan = agent.daily_args["sortie_override"]
+        self.assertTrue(plan["retreat_before_boss"])
+        self.assertFalse(plan["auto_march"])
+        field = next(field for field in list_scripts()["daily"]["params"]
+                     if field.get("key") == "retreat_before_boss")
+        self.assertEqual(field["visibleWhen"], {"key": "sortie_mode", "is": "sortie"})
+
     def test_daily_can_schedule_osaka_with_shared_battle_strategy(self):
         agent = FakeAgent()
         params = {"sortie_mode": "osaka", "team_no": "4",
