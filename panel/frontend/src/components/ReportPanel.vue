@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
+import SegmentedControl from './SegmentedControl.vue'
 
 const days = ref(7), reportView = ref<'battle' | 'ledger' | 'records'>('battle'), recordView = ref<'runs' | 'timeline'>('runs'), timelineKind = ref<'activity' | 'system'>('activity'), timelineLimit = ref(20), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
+const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
+const reportViewItems = [
+  { value: 'battle', label: '战报', caption: '成绩与最近表现' },
+  { value: 'ledger', label: '资源账', caption: '库存、收支与报备' },
+  { value: 'records', label: '全部记录', caption: '每轮任务与时间线' },
+]
 const selectedResource = ref('小判')
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
 const resourceRows = computed(() => resourceNames.map(name => {
@@ -150,11 +157,22 @@ const groupedSystemEvents = computed(() => {
   }
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
+const recordViewItems = computed(() => [
+  { value: 'runs', label: '任务轮次', badge: runs.value.length },
+  { value: 'timeline', label: '活动时间线', badge: groupedActivityEvents.value.length },
+])
+const timelineKindItems = computed(() => [
+  { value: 'activity', label: '玩家活动', badge: groupedActivityEvents.value.length },
+  { value: 'system', label: '系统观察', badge: groupedSystemEvents.value.length },
+])
 const activeTimeline = computed(() => timelineKind.value === 'activity' ? groupedActivityEvents.value : groupedSystemEvents.value)
 function chooseTimelineKind(value: 'activity' | 'system') {
   timelineKind.value = value
   timelineLimit.value = 20
 }
+function chooseReportView(value: string | number) { reportView.value = value as typeof reportView.value }
+function chooseRecordView(value: string | number) { recordView.value = value as typeof recordView.value }
+function chooseTimelineSegment(value: string | number) { chooseTimelineKind(value as typeof timelineKind.value) }
 const sortieGroups = computed(() => {
   const groups = new Map<string, { label: string; count: number; detail: string }>()
   const add = (key: string, label: string, detail = '') => {
@@ -463,13 +481,9 @@ onMounted(() => load())
   <section class="report-panel">
     <header class="report-head">
       <div><h2>📜 本丸成绩单</h2><p>只统计小狐狸帮你完成的事</p></div>
-      <div class="report-ranges" aria-label="统计时间范围"><button v-for="value in [1, 7, 30]" :key="value" type="button" :class="{ active: days === value }" @click="load(value)">{{ value === 1 ? '24 小时' : `${value} 天` }}</button></div>
+      <SegmentedControl :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
     </header>
-    <nav class="report-views" aria-label="成绩单视图">
-      <button type="button" :class="{ active: reportView === 'battle' }" @click="reportView = 'battle'"><b>战报</b><small>成绩与最近表现</small></button>
-      <button type="button" :class="{ active: reportView === 'ledger' }" @click="reportView = 'ledger'"><b>资源账</b><small>库存、收支与报备</small></button>
-      <button type="button" :class="{ active: reportView === 'records' }" @click="reportView = 'records'"><b>全部记录</b><small>每轮任务与时间线</small></button>
-    </nav>
+    <SegmentedControl class="report-views" :model-value="reportView" :items="reportViewItems" label="成绩单视图" variant="wide" @update:model-value="chooseReportView" />
     <p v-if="error" class="report-error">{{ error }}</p>
     <template v-if="reportView === 'battle'">
       <section class="battle-intro">
@@ -556,7 +570,7 @@ onMounted(() => load())
     <template v-if="reportView === 'records'">
       <section class="records-head">
         <div><span>{{ rangeLabel }}</span><h3>每一轮任务，都能往下追到发生了什么</h3><p>先看任务轮次；需要按时间查某件事时，再切到活动时间线。</p></div>
-        <nav aria-label="记录类型"><button type="button" :class="{ active: recordView === 'runs' }" @click="recordView = 'runs'"><b>任务轮次</b><small>{{ runs.length }} 轮</small></button><button type="button" :class="{ active: recordView === 'timeline' }" @click="recordView = 'timeline'"><b>活动时间线</b><small>{{ groupedActivityEvents.length }} 组</small></button></nav>
+        <SegmentedControl :model-value="recordView" :items="recordViewItems" label="记录类型" @update:model-value="chooseRecordView" />
       </section>
       <section v-if="recordView === 'runs'" class="run-history">
         <header><div><h3>⛏️ 任务轮次</h3><small>点击任意一轮查看养护、资源与库存证据</small></div><span>圈速按相邻出阵间隔计算</span></header>
@@ -579,7 +593,7 @@ onMounted(() => load())
         <aside class="records-sorties"><header><h3>⚔️ 出阵分布</h3><small>{{ sortieCount.toLocaleString() }} 圈</small></header><div v-if="sortieGroups.length"><p v-for="item in sortieGroups" :key="`${item.label}:${item.detail}`"><span><b>{{ item.label }}</b><small>{{ item.detail || '确认完成' }}</small></span><strong>{{ item.count }} 圈</strong></p></div><p v-else class="report-empty">暂无出阵。</p></aside>
         <section class="report-events timeline-panel">
           <header><div><h3>{{ timelineKind === 'activity' ? '玩家活动' : '系统观察' }}</h3><small>{{ timelineKind === 'activity' ? '相邻的同类活动已经合并，仍可展开原始明细' : '库存读数、未确认状态与恢复记录，不混入成绩' }}</small></div><span>最近 {{ Math.min(timelineLimit, activeTimeline.length) }} / {{ activeTimeline.length }} 组</span></header>
-          <nav class="timeline-kinds" aria-label="时间线内容"><button type="button" :class="{ active: timelineKind === 'activity' }" @click="chooseTimelineKind('activity')"><b>玩家活动</b><small>{{ groupedActivityEvents.length }}</small></button><button type="button" :class="{ active: timelineKind === 'system' }" @click="chooseTimelineKind('system')"><b>系统观察</b><small>{{ groupedSystemEvents.length }}</small></button></nav>
+          <SegmentedControl class="timeline-kinds" :model-value="timelineKind" :items="timelineKindItems" label="时间线内容" @update:model-value="chooseTimelineSegment" />
           <div v-if="timelineKind === 'activity' && groupedActivityEvents.length" class="event-list activity-feed"><article v-for="item in groupedActivityEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><i aria-hidden="true"></i><div><strong>{{ activityTitle(item) }}</strong><p>{{ activityDetail(item) }}</p><details v-if="item.items.length > 1"><summary>查看 {{ item.items.length }} 条明细</summary><p v-for="child in item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></div></article></div>
           <div v-else-if="timelineKind === 'system' && groupedSystemEvents.length" class="system-timeline"><article v-for="item in groupedSystemEvents.slice(0, timelineLimit)" :key="item.id"><time>{{ eventTime(item.ts) }}</time><span><strong>{{ systemTitle(item) }}</strong><small>{{ systemDetail(item) }}</small></span></article></div>
           <p v-else class="report-empty">这个时间段还没有{{ timelineKind === 'activity' ? '完成的主要活动' : '系统观察' }}。</p>
