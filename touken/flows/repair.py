@@ -10,6 +10,9 @@
   3. speedup_teams 里的部队（默认部队三=挖地队）：
      行首编号是"三之x"的，修的时候勾加速符秒修，修完继续打；
      其他队的就慢慢修，加速符省着
+  4. 加速符只给带伤势章（轻伤/中伤/重伤）的刀：擦伤刀血条没满
+     但没章，修一下十几个资源几分钟的事，哪怕在加速部队也慢修
+     （2026-08-20 实战血泪：擦伤刀白吃了三张加速符）
 """
 
 import re
@@ -22,6 +25,11 @@ _TEAM_NUMERAL = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 
 # 选人界面左面板「所需资源」四行（顺序固定），对应配置 repair.cost_rois
 _REPAIR_RES = ("木炭", "玉钢", "冷却材", "砥石")
+
+# 伤势章文字（混在名字列 OCR 里）；加速符只给带章的刀
+_INJURY_STAMPS = ("轻伤", "中伤", "重伤")
+# 章和名字的 y 配对容差（章压在头像上，比名字文字带略高）
+_INJURY_PAIR_DY = 45
 
 
 class RepairMixin:
@@ -92,6 +100,7 @@ class RepairMixin:
                 yield f"[手入] （本页过滤掉的乱码/伤势章：{junk}）"
             for row in rows:
                 prefix, name, name_y = row["prefix"], row["name"], row["y"]
+                injury = row.get("injury")
 
                 key = f"{prefix}|{name}"
                 if key in seen:
@@ -104,7 +113,10 @@ class RepairMixin:
                 sid = hit[0] if hit else None
                 std_name = hit[1]["name_zh"] if hit else name
                 is_black = (sid in bl_ids) or any(b in name for b in blacklist)
-                need_speed = any(mark in prefix for mark in speedup_marks)
+                # 加速符只给带伤势章的刀：加速部队的擦伤刀也老实慢修，
+                # 十几个资源几分钟的事，不配烧一张符（老大原话精神）
+                in_speed_team = any(mark in prefix for mark in speedup_marks)
+                need_speed = in_speed_team and bool(injury)
 
                 if is_black:
                     skipped += 1
@@ -116,7 +128,12 @@ class RepairMixin:
                     yield f"[手入] {prefix} {std_name} → 黑名单（碰瓷队带伤上班），跳过"
                     continue
 
-                tag = "修+加速符" if need_speed else "修（不用加速符）"
+                if need_speed:
+                    tag = f"修+加速符（{injury}）"
+                elif in_speed_team:
+                    tag = "修（擦伤没到轻伤，省一张加速符）"
+                else:
+                    tag = "修（不用加速符）"
                 if dry_run:
                     yield f"[手入] {prefix} {std_name} → {tag} [演习]"
                     continue
@@ -136,7 +153,7 @@ class RepairMixin:
                     if hasattr(self, "record_event"):
                         self.record_event("repair.queued", name=std_name,
                                           sword_id=sid, team_mark=prefix,
-                                          speedup=need_speed)
+                                          speedup=need_speed, injury=injury)
                     if need_speed:
                         # 游戏的奇怪缓存：加速手入已经完成，但如果立刻去编队，
                         # 伤势章仍可能残留。必须离开手入再重新进入一次，等价于
@@ -224,12 +241,15 @@ class RepairMixin:
         翻页后行位置不对齐固定网格，所以不用固定行位，
         OCR 结果自带的中心点 y 就是行的位置。
 
-        列里会混进伤势章文字（中伤/重伤）和乱码，
+        列里会混进伤势章文字（轻伤/中伤/重伤）和乱码，
         名字必须过 sword_db 字典验证才算数，编号必须
         符合"三之x"格式才保留——认不出的宁可跳过不乱修。
+        伤势章单独收集，按 y 跟行配对进 row["injury"]
+        （加速符只给带章的刀，擦伤不配吃）。
 
         Returns:
-            (rows, junk) — rows: [{"prefix","name","y"}]；junk: 被过滤的文本
+            (rows, junk) — rows: [{"prefix","name","y","injury"}]；
+            junk: 被过滤的文本（伤势章不再算 junk）
         """
         # 翻页后画面变了，必须强制截图，不然 OCR 读的是旧缓存图
         self.maa.screenshot(force=True)
@@ -242,9 +262,17 @@ class RepairMixin:
             if re.match(r"^[一二三四五]之[一二三四五六]$", p.strip())
         ]
 
-        rows, junk = [], []
+        # 先收章再配行：OCR token 顺序不保证，章可能排在它所属名字的后面
+        stamps, sword_names = [], []
         for name, pt in names:
             name = name.strip()
+            if name in _INJURY_STAMPS:
+                stamps.append((name, pt.y))
+            else:
+                sword_names.append((name, pt))
+
+        rows, junk = [], []
+        for name, pt in sword_names:
             # 名字至少 2 个汉字，且必须在刀剑字典里查得到
             if len(name) < 2 or not sword_db.find_by_name(name):
                 junk.append(name)
@@ -254,7 +282,13 @@ class RepairMixin:
                 dy = abs(ppt.y - pt.y)
                 if dy < best_dy:
                     best_prefix, best_dy = pfx, dy
-            rows.append({"prefix": best_prefix, "name": name, "y": pt.y})
+            injury, injury_dy = None, _INJURY_PAIR_DY
+            for stamp, sy in stamps:
+                dy = abs(sy - pt.y)
+                if dy < injury_dy:
+                    injury, injury_dy = stamp, dy
+            rows.append({"prefix": best_prefix, "name": name, "y": pt.y,
+                         "injury": injury})
         return rows, junk
 
     def _scroll_list(self, cfg):
@@ -310,7 +344,7 @@ class RepairMixin:
         """OCR 选人界面左面板「所需资源」四个成本数字（黑框，顺序固定）。
 
         返回 [木炭, 玉钢, 冷却材, 砥石]，读不到的行是 None；
-        没配 cost_rois 返回 None（不记账）。
+        没配 cost_rois 返回 None（由 _emit_repair_costs 记 unknown 兜底）。
         """
         rois = cfg.get("cost_rois")
         if not rois:
@@ -332,10 +366,15 @@ class RepairMixin:
         """手入开工的资源记账：四资源按确认界面 OCR 负扣（confirmed）。
 
         读不到的资源记 attribution=unknown、delta=null，保留「修过了」的事实。
+        cost_rois 没配 / 整面读崩（costs is None）也按四条 unknown 兜底——
+        静默漏账违反契约（2026-08-20 日课血泪：queued 4 条 change 0 条，
+        运行中面板还没加载新配置，cost_rois 不存在）。
         need_speed 时加速符 -1 是确定事实（复选框是我们亲手勾的）。
         """
-        if costs is None or not hasattr(self, "record_event"):
+        if not hasattr(self, "record_event"):
             return
+        if costs is None:
+            costs = [None] * len(_REPAIR_RES)
         for name, cost in zip(_REPAIR_RES, costs):
             if cost is None:
                 self.record_event(

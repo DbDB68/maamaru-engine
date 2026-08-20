@@ -239,43 +239,43 @@ class RewardsMixin:
                 time.sleep(1.5)
 
                 # 弹窗还在的窗口期读报酬明细；读失败不阻断领取流程
-                popup = None
-                try:
-                    popup = self._read_reward_popup()
-                except Exception:
-                    popup = None
-                if popup and popup[1]:
-                    for note in popup[1]:
-                        yield f"[TASK] {tab_name} 报酬弹窗：{note}"
+                popup, notes = self._read_popup_guarded(tab_name)
+                for note in notes:
+                    yield note
 
-                # 关闭可能的奖励弹窗
-                # 判定：必须同时有 通用_关闭.png 和 ui完成任务.png
-                # 防止误关任务界面本身
                 close_config = task_config.get("popup_close")
                 if close_config:
-                    for _ in range(5):
-                        self.maa.screenshot(force=True)
-                        has_close = self.maa.exists(close_config.get("template"))
-                        has_complete = self.maa.exists("ui完成任务.png")
+                    _, close_msgs = self._close_reward_popup(close_config)
+                    for msg in close_msgs:
+                        yield msg
 
-                        if has_close and has_complete:
-                            # 是奖励弹窗，关闭
-                            self._click_template_config(close_config)
-                            yield "[TASK] 关闭奖励弹窗"
-                            time.sleep(0.5)
-                        elif has_close and not has_complete:
-                            # 是任务界面本身的关闭按钮，不点
-                            yield "[TASK] 检测到任务界面关闭按钮，跳过"
-                            break
-                        else:
-                            break
-
-                # 处理"任务信息已失效"弹窗
+                # 处理"任务信息已失效"弹窗。它会吞掉那次领取点击（手动实测），
+                # 确认后必须补点一次一键领取，否则三次领取全丢
+                # （2026-08-20 日课血泪：日常/月常/活动全部 unconfirmed）。
                 confirm_point = self.maa.template_match("通用_确定.png", None)
                 if confirm_point:
                     self.maa.click(confirm_point)
                     yield "[TASK] 任务信息已失效，刷新"
                     time.sleep(0.5)
+                    self.maa.screenshot(force=True)
+                    retry = self.maa.template_match(
+                        template=claim_config["template"], roi=None,
+                        threshold=0.7)
+                    if retry:
+                        yield f"[TASK] {tab_name} 补点一键领取..."
+                        self.maa.click(retry)
+                        time.sleep(1.5)
+                        # 补点后重新走一遍报酬弹窗读取（首点被吞时没弹过）
+                        if popup is None:
+                            popup, notes = self._read_popup_guarded(tab_name)
+                            for note in notes:
+                                yield note
+                        if close_config:
+                            _, close_msgs = self._close_reward_popup(close_config)
+                            for msg in close_msgs:
+                                yield msg
+                    else:
+                        yield f"[TASK] {tab_name} 失效弹窗后没找到一键领取按钮，无法补点"
 
                 # 优先等按钮刷新为灰态；报酬一览弹窗本身也是领取成功的直接证据。
                 # 两者都没有才算未确认，避免“刚关奖励弹窗却说没领到”的假阴性。
@@ -331,6 +331,48 @@ class RewardsMixin:
 
         yield "[TASK] 所有任务奖励领取完毕"
         return
+
+    def _read_popup_guarded(self, tab_name):
+        """读报酬弹窗（带护法）：读崩/没弹都不阻断领取流程。
+
+        Returns:
+            (popup, [日志消息]) — popup 为 _read_reward_popup 的返回值或 None。
+        """
+        try:
+            popup = self._read_reward_popup()
+        except Exception:
+            popup = None
+        notes = [f"[TASK] {tab_name} 报酬弹窗：{note}"
+                 for note in (popup[1] if popup else [])]
+        return popup, notes
+
+    def _close_reward_popup(self, close_config):
+        """关闭奖励弹窗。判定：必须同时有 通用_关闭.png 和 ui完成任务.png，
+        防止误关任务界面本身。
+
+        Returns:
+            (是否关过弹窗, [日志消息])
+        """
+        messages = []
+        closed = False
+        for _ in range(5):
+            self.maa.screenshot(force=True)
+            has_close = self.maa.exists(close_config.get("template"))
+            has_complete = self.maa.exists("ui完成任务.png")
+
+            if has_close and has_complete:
+                # 是奖励弹窗，关闭
+                self._click_template_config(close_config)
+                messages.append("[TASK] 关闭奖励弹窗")
+                closed = True
+                time.sleep(0.5)
+            elif has_close and not has_complete:
+                # 是任务界面本身的关闭按钮，不点
+                messages.append("[TASK] 检测到任务界面关闭按钮，跳过")
+                break
+            else:
+                break
+        return closed, messages
 
     def _read_reward_popup(self):
         """读「任务达成报酬一览」弹窗：图标模板匹配认资源，数量黑框 OCR 认数量。

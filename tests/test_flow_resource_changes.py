@@ -176,13 +176,23 @@ class RepairResourceChangeTests(unittest.TestCase):
             self.assertIn("读取失败", by_res[name]["note"])
         self.assertNotIn("加速符", by_res)
 
-    def test_no_cost_rois_no_bookkeeping(self):
+    def test_no_cost_rois_falls_back_to_unknown(self):
+        # cost_rois 缺失（运行中配置没加载新键）也按四条 unknown/null 兜底，
+        # 不静默漏账；need_speed 的加速符 -1 照发（确定事实）
         cfg = {k: v for k, v in _REPAIR_CFG.items() if k != "cost_rois"}
         host = _Host({"repair": cfg})
         host.maa = _RepairFakeMaa({})
-        messages = list(host._repair_one(cfg, name_y=200, need_speed=False))
+        messages = list(host._repair_one(cfg, name_y=200, need_speed=True))
         self.assertIn("[手入] 已开工", messages)
-        self.assertEqual(host.events, [])
+        changes = [p for t, p in host.events if t == "resource.change"]
+        self.assertEqual(len(changes), 5)
+        by_res = {p["resource"]: p for p in changes}
+        for name in ("木炭", "玉钢", "冷却材", "砥石"):
+            self.assertIsNone(by_res[name]["delta"])
+            self.assertEqual(by_res[name]["attribution"], "unknown")
+            self.assertIn("读取失败", by_res[name]["note"])
+        self.assertEqual(by_res["加速符"]["delta"], -1)
+        self.assertEqual(by_res["加速符"]["attribution"], "confirmed")
 
     def test_start_button_missing_no_bookkeeping(self):
         host = _Host({"repair": _REPAIR_CFG})
@@ -385,6 +395,220 @@ class SpeedupDedupTests(unittest.TestCase):
 
         self.assertEqual(len(attrs), 1)
         self.assertEqual(attrs[0]["source"], "repair.confirm_screen")
+
+
+_FLOW_REPAIR_CFG = {
+    "blacklist": [],
+    "speedup_teams": [3],
+    "name_col_roi": [490, 100, 720, 660],
+    "prefix_col_roi": [445, 100, 505, 660],
+    "scroll_from": [640, 480],
+    "scroll_to": [640, 240],
+}
+
+
+class _ScanFakeMaa:
+    """repair_stream 全流用：按列 ROI 出名字/编号 token，滑动空转"""
+
+    def __init__(self, names, prefixes):
+        self.names = names      # [(text, y)]，可混伤势章和乱码
+        self.prefixes = prefixes
+
+    def screenshot(self, force=False):
+        return None
+
+    def ocr_all(self, roi):
+        lst = roi.to_list()
+        if lst == [490, 100, 230, 560]:
+            return [(t, Point(580, y)) for t, y in self.names]
+        if lst == [445, 100, 60, 560]:
+            return [(t, Point(475, y)) for t, y in self.prefixes]
+        return []
+
+    def swipe(self, *a, **k):
+        return True
+
+
+class _FlowHost(RepairMixin):
+    """repair_stream 最小宿主：导航瞬移、选人界面必开、_repair_one 记决策"""
+
+    def __init__(self, names, prefixes):
+        self.config = {"repair": dict(_FLOW_REPAIR_CFG)}
+        self.maa = _ScanFakeMaa(names, prefixes)
+        self.current_location = "修复"
+        self.speed_calls = []
+        self.events = []
+
+    def navigate_to_stream(self, dest):
+        self.current_location = dest
+        yield f"nav {dest}"
+
+    def _open_select_screen(self, cfg):
+        return True
+
+    def record_event(self, event_type, **payload):
+        self.events.append((event_type, payload))
+        return len(self.events)
+
+    def _repair_one(self, cfg, name_y, need_speed):
+        self.speed_calls.append(need_speed)
+        yield "[手入] 已开工"
+
+
+class SpeedupDecisionTests(unittest.TestCase):
+    """加速符只给带伤势章（轻伤/中伤/重伤）的刀"""
+
+    def _run(self, names, prefixes):
+        host = _FlowHost(names, prefixes)
+        messages = list(host.repair_stream())
+        return host, messages
+
+    def test_stamped_speed_team_uses_speedup(self):
+        host, _ = self._run([("五虎退", 200), ("中伤", 195)],
+                            [("三之一", 200)])
+        self.assertEqual(host.speed_calls, [True])
+        queued = next(p for t, p in host.events if t == "repair.queued")
+        self.assertEqual(queued["injury"], "中伤")
+        self.assertTrue(queued["speedup"])
+
+    def test_unstamped_speed_team_saves_speedup(self):
+        host, messages = self._run([("小夜左文字", 200)], [("三之二", 200)])
+        self.assertEqual(host.speed_calls, [False])
+        self.assertTrue(any("省一张加速符" in m for m in messages))
+        queued = next(p for t, p in host.events if t == "repair.queued")
+        self.assertIsNone(queued["injury"])
+        self.assertFalse(queued["speedup"])
+
+    def test_stamped_non_speed_team_no_speedup(self):
+        host, _ = self._run([("今剑", 200), ("轻伤", 198)],
+                            [("一之一", 200)])
+        self.assertEqual(host.speed_calls, [False])
+
+    def test_stamp_paired_to_row_by_y(self):
+        # 重伤章配给 y 最近的五虎退；远处的轻伤章谁也不配
+        host, _ = self._run(
+            [("五虎退", 200), ("小夜左文字", 300),
+             ("重伤", 205), ("轻伤", 600)],
+            [("三之一", 200), ("三之二", 300)])
+        self.assertEqual(host.speed_calls, [True, False])
+        injuries = [p["injury"] for t, p in host.events
+                    if t == "repair.queued"]
+        self.assertEqual(injuries, ["重伤", None])
+
+    def test_stamp_no_longer_junk(self):
+        host = _FlowHost([("五虎退", 200), ("中伤", 195), ("乱码@#", 250)],
+                         [("三之一", 200)])
+        rows, junk = host._scan_page(_FLOW_REPAIR_CFG)
+        self.assertNotIn("中伤", junk)
+        self.assertIn("乱码@#", junk)
+        self.assertEqual(rows[0]["injury"], "中伤")
+
+
+class _ClaimFakeMaa:
+    """一键领取全流程假 maa：首点被「任务信息已失效」吞掉，补点后才真领到"""
+
+    def __init__(self):
+        self.claim_clicks = 0
+        self.claimed = False          # 领取真正生效（按钮变灰）
+        self.stale_dismissed = False  # 失效弹窗已确认
+        self.popup_shown = False      # 报酬弹窗已弹（补点后）
+        self.popup_closed = False
+
+    def screenshot(self, force=False):
+        return None
+
+    def click(self, pt):
+        if (pt.x, pt.y) == (1130, 480):      # 一键领取按钮
+            self.claim_clicks += 1
+            if self.claim_clicks > 1:        # 首点被失效弹窗吞掉
+                self.claimed = True
+                self.popup_shown = True
+        elif (pt.x, pt.y) == (640, 580):     # 失效弹窗的确定
+            self.stale_dismissed = True
+        return True
+
+    def template_match(self, template, roi=None, threshold=0.8):
+        if template == "一键领取.png":
+            return None if self.claimed else Point(1130, 480)
+        if template == "一键领取_灰.png":
+            return Point(1130, 480) if self.claimed else None
+        if template == "通用_确定.png":
+            if self.claim_clicks == 1 and not self.stale_dismissed:
+                return Point(640, 580)
+            return None
+        if (template == "资源/icon木炭.png"
+                and self.popup_shown and not self.popup_closed):
+            return Point(360, 200)
+        return None
+
+    def exists(self, template, roi=None, threshold=0.8):
+        if template in ("通用_关闭.png", "ui完成任务.png"):
+            return self.popup_shown and not self.popup_closed
+        return False
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if (expected == "报酬一览"
+                and self.popup_shown and not self.popup_closed):
+            return Point(640, 70)
+        return None
+
+    def ocr_all(self, roi):
+        x1, y1 = roi.to_list()[:2]
+        if (self.popup_shown and not self.popup_closed
+                and y1 == 260 and x1 == 311):
+            return [("1,050", Point(360, 278))]
+        return []
+
+
+class _RewardsHost(RewardsMixin):
+    """claim_task_rewards_stream 最小宿主"""
+
+    def __init__(self, maa):
+        self.config = {"task_reward": {
+            "tabs": {"日常": [48, 204]},
+            "claim_button": {"template": "一键领取.png"},
+            "popup_close": {"template": "通用_关闭.png"}}}
+        self.maa = maa
+        self.current_location = "任务"
+        self.events = []
+
+    def navigate_to_stream(self, dest):
+        self.current_location = dest
+        yield f"nav {dest}"
+
+    def _click_point(self, coord):
+        pass
+
+    def _click_template_config(self, cfg):
+        self.maa.popup_closed = True
+
+    def record_event(self, event_type, **payload):
+        self.events.append((event_type, payload))
+        return len(self.events)
+
+
+class StalePopupRetryTests(unittest.TestCase):
+    """「任务信息已失效」吞掉领取点击：确认后必须补点，补点后的弹窗照记账"""
+
+    def test_stale_popup_then_retry_claim(self):
+        maa = _ClaimFakeMaa()
+        host = _RewardsHost(maa)
+        messages = list(host.claim_task_rewards_stream())
+
+        self.assertEqual(maa.claim_clicks, 2)  # 首点被吞 + 补点
+        self.assertTrue(any("任务信息已失效" in m for m in messages))
+        self.assertTrue(any("补点一键领取" in m for m in messages))
+        claimed = [p for t, p in host.events if t == "task_rewards.claimed"]
+        self.assertEqual(len(claimed), 1)
+        self.assertFalse(any(t == "task_rewards.unconfirmed"
+                             for t, _ in host.events))
+        changes = [p for t, p in host.events if t == "resource.change"]
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["resource"], "木炭")
+        self.assertEqual(changes[0]["delta"], 1050)
+        self.assertEqual(changes[0]["source"], "task_rewards.reward_popup")
+        # claimed 是宿主记录的第 1 条事件，source_event_id 应指向它
+        self.assertEqual(changes[0]["source_event_id"], 1)
 
 
 if __name__ == "__main__":
