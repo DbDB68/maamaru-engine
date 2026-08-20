@@ -14,7 +14,7 @@ from pathlib import Path
 # 确保能找到 touken 包（开发模式）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1567,6 +1567,21 @@ async def api_attach_run_inventory(run_id: str):
     except ValueError as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
     return {"ok": True, "run": summary}
+
+
+@app.get("/api/data/resource-ledger")
+async def api_data_resource_ledger(days: int = 7,
+                                   from_ts: float | None = Query(None, alias="from"),
+                                   to: float | None = None):
+    """资源总账：窗口内八资源的观察链/归因/缺口，聚合全部在服务端完成。
+
+    from/to（Unix 秒）优先于 days；days 默认 7。契约见 docs/telemetry-data.md。
+    """
+    from touken.telemetry import get_telemetry_store
+    to_ts = float(to) if to else time.time()
+    start = float(from_ts) if from_ts is not None \
+        else to_ts - max(1, min(int(days), 365)) * 86400
+    return get_telemetry_store().resource_ledger(start, to_ts)
 
 
 @app.get("/api/data/human-reports")

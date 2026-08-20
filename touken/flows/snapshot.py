@@ -85,7 +85,7 @@ class SnapshotMixin:
         time.sleep(1.5)
         self.maa.screenshot(force=True)
 
-        # ---- 顶栏五资源：整条 OCR，数字按 x 升序对应 木炭/玉钢/冷却材/砥石/小判 ----
+        # ---- 顶栏五资源：整条 OCR，数字按 x 升序对应 木炭/玉钢/冷却材/砥石/甲州金 ----
         tokens = self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
         nums = sorted(
             ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),

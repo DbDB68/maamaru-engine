@@ -12,6 +12,7 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,22 @@ from .runtime_paths import LOG_DIR
 
 TELEMETRY_SCHEMA_VERSION = 3
 DEFAULT_RETENTION_DAYS = 90
+
+# ── 资源总账（resource_ledger）契约常量 ──
+LEDGER_SCHEMA_VERSION = 1
+# 资源全集，顺序固定：顶栏四资源 + 真小判 + 甲州金 + 右栏两符
+LEDGER_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石", "小判", "甲州金", "委托符", "加速符")
+# peek 只有顶栏五资源（契约：永远不含小判/委托符/加速符），
+# 白名单过滤防脏 payload 污染小判观察链
+_LEDGER_PEEK_RESOURCES = frozenset(("木炭", "玉钢", "冷却材", "砥石", "甲州金"))
+_LEDGER_OBS_TYPES = ("inventory.captured", "inventory.peek", "osaka.koban_session")
+_LEDGER_MERGE_SECONDS = 5.0  # 同一时刻多来源同值观察的去重窗口
+
+try:
+    from zoneinfo import ZoneInfo
+    _LEDGER_TZ = ZoneInfo("Asia/Shanghai")
+except Exception:  # Windows 无 tzdata 时兜底：上海 1991 年后无夏令时，固定 +8 够用
+    _LEDGER_TZ = timezone(timedelta(hours=8))
 
 
 def _json(value: Any) -> str:
@@ -290,6 +307,266 @@ class TelemetryStore:
                          "ended_at": current["ts"], "resource_delta": delta,
                          "reported": gap_key in reported})
         return list(reversed(gaps[-max(1, min(int(limit), 200)):]))
+
+    def resource_ledger(self, from_ts: float, to_ts: float) -> dict:
+        """聚合时间窗口内八种资源的总账：观察链、已确认归因、缺口。
+
+        SQL 层按 ts 过滤，不走 recent_events 的 1000 条上限。
+        total_delta 保留符号、恒等于 attributed + unattributed（负残差不截断）；
+        观察不足形成不了 opening/closing 时 total_delta 为 None，
+        但 confirmed 明细仍保留在 attributions 里。
+        """
+        from_ts, to_ts = float(from_ts), float(to_ts)
+        if to_ts < from_ts:
+            from_ts, to_ts = to_ts, from_ts
+        conn = self._conn()
+        event_types = ("inventory.captured", "inventory.peek", "osaka.koban_session",
+                       "repair.session_completed", "resource.change")
+        marks = ",".join("?" * len(event_types))
+        rows = conn.execute(
+            "SELECT id, ts, run_id, script, event_type, payload FROM events "
+            f"WHERE ts >= ? AND ts <= ? AND event_type IN ({marks}) ORDER BY ts, id",
+            (from_ts, to_ts, *event_types)).fetchall()
+        # 窗前基线：三种观察来源各取窗口前最近一条，合成各资源的 opening
+        baseline_rows = []
+        for event_type in _LEDGER_OBS_TYPES:
+            row = conn.execute(
+                "SELECT id, ts, run_id, script, event_type, payload FROM events "
+                "WHERE ts < ? AND event_type = ? ORDER BY ts DESC, id DESC LIMIT 1",
+                (from_ts, event_type)).fetchone()
+            if row:
+                baseline_rows.append(row)
+        reports = conn.execute(
+            "SELECT id, occurred_at, gap_key FROM human_reports "
+            "WHERE occurred_at <= ? ORDER BY occurred_at, id", (to_ts,)).fetchall()
+
+        # ── 观察流：优先级 直读 before/after(3) > captured(2) > peek(1) ──
+        raw: list[dict] = []
+        for row in [*baseline_rows, *rows]:
+            payload = _loads(row["payload"], {})
+            event_type = row["event_type"]
+            if event_type == "osaka.koban_session":
+                # sub 区分同事件内 before/after 的先后顺序（事件只有一个 ts）
+                for sub, key in ((0, "before"), (1, "after")):
+                    value = payload.get(key)
+                    if isinstance(value, (int, float)):
+                        raw.append({"ts": row["ts"], "sub": sub, "resource": "小判",
+                                    "value": value, "priority": 3, "source": event_type,
+                                    "event_id": row["id"], "evidence": [row["id"]]})
+            elif event_type == "inventory.captured":
+                for name, value in (payload.get("resources") or {}).items():
+                    if isinstance(value, (int, float)):
+                        raw.append({"ts": row["ts"], "sub": 0, "resource": name,
+                                    "value": value, "priority": 2, "source": event_type,
+                                    "event_id": row["id"], "evidence": [row["id"]]})
+            elif event_type == "inventory.peek":
+                for name in _LEDGER_PEEK_RESOURCES:
+                    value = payload.get(name)
+                    if isinstance(value, (int, float)):
+                        raw.append({"ts": row["ts"], "sub": 0, "resource": name,
+                                    "value": value, "priority": 1, "source": event_type,
+                                    "event_id": row["id"], "evidence": [row["id"]]})
+
+        # 去重：时间贴脸（5 秒内）且数值一致 = 同一观察点，合并证据 event id，
+        # 来源升到最高优先级；数值不同 = 证据冲突，各算各的观察并记冲突缺口
+        observations: dict[str, list[dict]] = {}
+        conflicts: list[tuple] = []
+        by_resource: dict[str, list[dict]] = {}
+        for entry in raw:
+            by_resource.setdefault(entry["resource"], []).append(entry)
+        for name, entries in by_resource.items():
+            entries.sort(key=lambda e: (e["ts"], e["sub"], -e["priority"], e["event_id"]))
+            merged: list[dict] = []
+            for entry in entries:
+                if merged and entry["ts"] - merged[-1]["ts"] <= _LEDGER_MERGE_SECONDS:
+                    last = merged[-1]
+                    if entry["value"] == last["value"]:
+                        last["evidence"].append(entry["event_id"])
+                        if entry["priority"] > last["priority"]:
+                            last.update(priority=entry["priority"], source=entry["source"])
+                        continue
+                    # 同事件的 before/after 本来就不同值，不算冲突；
+                    # 不同来源贴脸读数不一致才是证据冲突
+                    if entry["event_id"] != last["event_id"]:
+                        conflicts.append((name, last["ts"], entry["ts"],
+                                          last["value"], entry["value"]))
+                merged.append(entry)
+            observations[name] = merged
+
+        # ── 归因：resource.change 双写去重（source_event_id 指向旧事件时跳过旧的那份）──
+        shadowed = set()
+        for row in rows:
+            if row["event_type"] == "resource.change":
+                source_event_id = _loads(row["payload"], {}).get("source_event_id")
+                if isinstance(source_event_id, (int, float)):
+                    shadowed.add(int(source_event_id))
+        attributions: list[dict] = []
+        for row in rows:
+            payload = _loads(row["payload"], {})
+            event_type = row["event_type"]
+            item = None
+            if event_type == "osaka.koban_session" and row["id"] not in shadowed:
+                delta = payload.get("delta")
+                if isinstance(delta, (int, float)) and delta:
+                    item = {"resource": "小判", "delta": delta, "source": event_type,
+                            "label": f"挖地小判 {int(delta):+d}", "confidence": "confirmed"}
+            elif event_type == "repair.session_completed" and row["id"] not in shadowed:
+                speedups = payload.get("speedups")
+                if isinstance(speedups, (int, float)) and speedups:
+                    item = {"resource": "加速符", "delta": -int(speedups),
+                            "source": event_type,
+                            "label": f"手入加速符 {-int(speedups):+d}",
+                            "confidence": "confirmed"}
+            elif event_type == "resource.change":
+                delta = payload.get("delta")
+                resource = str(payload.get("resource") or "")
+                if resource and isinstance(delta, (int, float)) and delta:
+                    item = {"resource": resource, "delta": delta,
+                            "source": str(payload.get("source") or event_type),
+                            "label": str(payload.get("note") or f"{resource} {int(delta):+d}"),
+                            "confidence": str(payload.get("attribution") or "confirmed")}
+            if item:
+                item.update({"id": f"a{len(attributions) + 1}", "ts": row["ts"],
+                             "script": row["script"], "run_id": row["run_id"],
+                             "event_id": row["id"]})
+                attributions.append(item)
+
+        # ── 缺口：跨 run 快照差值 + 人工报备 + 证据冲突 ──
+        gaps: list[dict] = []
+        report_list = [{"id": r["id"], "occurred_at": r["occurred_at"],
+                        "gap_key": r["gap_key"]} for r in reports]
+        captured = sorted((r for r in [*baseline_rows, *rows]
+                           if r["event_type"] == "inventory.captured"),
+                          key=lambda r: (r["ts"], r["id"]))
+        for prev, cur in zip(captured, captured[1:]):
+            prev_payload = _loads(prev["payload"], {})
+            cur_payload = _loads(cur["payload"], {})
+            if (cur_payload.get("phase") != "before"
+                    or prev_payload.get("phase") not in ("after", None)):
+                continue
+            if prev["run_id"] == cur["run_id"]:
+                continue
+            if cur["ts"] < from_ts or prev["ts"] > to_ts:
+                continue
+            left = prev_payload.get("resources") or {}
+            right = cur_payload.get("resources") or {}
+            delta = {name: right[name] - left[name] for name in left.keys() & right.keys()
+                     if isinstance(left.get(name), (int, float))
+                     and isinstance(right.get(name), (int, float))
+                     and right[name] != left[name]}
+            if not delta:
+                continue
+            gap_key = f'{prev["id"]}:{cur["id"]}'
+            linked = [r["id"] for r in report_list
+                      if r["gap_key"] == gap_key
+                      or (prev["ts"] < r["occurred_at"] <= cur["ts"])]
+            gaps.append({"id": f'gap-{int(prev["ts"])}-{int(cur["ts"])}',
+                         "from": prev["ts"], "to": cur["ts"], "resources": delta,
+                         "reason": "no_observation", "human_report_ids": linked})
+        linked_report_ids = {rid for gap in gaps for rid in gap["human_report_ids"]}
+        for report in report_list:
+            # 没挂上任何缺口的窗口内人工报备单独成条：只降置信度，不改写库存
+            if (report["id"] in linked_report_ids
+                    or not from_ts <= report["occurred_at"] <= to_ts):
+                continue
+            gaps.append({"id": f'gap-hr-{report["id"]}',
+                         "from": report["occurred_at"], "to": report["occurred_at"],
+                         "resources": {}, "reason": "human_reported",
+                         "human_report_ids": [report["id"]]})
+        for name, ts_a, ts_b, value_a, value_b in conflicts:
+            gaps.append({"id": f"gap-conflict-{int(ts_a)}-{int(ts_b)}",
+                         "from": ts_a, "to": ts_b,
+                         "resources": {name: value_b - value_a},
+                         "reason": "conflicting_evidence", "human_report_ids": []})
+        gaps.sort(key=lambda g: (g["from"], g["id"]))
+
+        def _gap_ids(start: float, end: float) -> list[str]:
+            return [g["id"] for g in gaps if g["from"] <= end and g["to"] >= start]
+
+        def _confidence(obs_count: int, attrs: list[dict], paired: bool,
+                        start: float, end: float) -> str:
+            # 观察缺失 / 有人工报备或缺口 / 证据冲突 = low；
+            # 观察链完整且有 confirmed 覆盖 = high；只有观察差值无归因 = medium
+            if obs_count == 0 or _gap_ids(start, end):
+                return "low"
+            if paired and any(a["confidence"] == "confirmed" for a in attrs):
+                return "high"
+            return "medium"
+
+        def _pair(all_obs: list[dict], start: float, end: float):
+            """opening = 窗前基线（没有则窗内首观察），closing = 窗内末观察。
+
+            只有孤零零一条观察时不构成 opening/closing 对，返回 paired=False。
+            """
+            before = [o for o in all_obs if o["ts"] < start]
+            within = [o for o in all_obs if start <= o["ts"] <= end]
+            opening = before[-1] if before else (within[0] if within else None)
+            closing = within[-1] if within else None
+            paired = bool(opening is not None and closing is not None
+                          and opening is not closing)
+            return opening, closing, within, paired
+
+        per_resource = []
+        for name in LEDGER_RESOURCES:
+            opening, closing, within, paired = _pair(
+                observations.get(name, []), from_ts, to_ts)
+            attrs = [a for a in attributions if a["resource"] == name]
+            attributed = sum(a["delta"] for a in attrs)
+            total = closing["value"] - opening["value"] if paired else None
+            per_resource.append({
+                "resource": name,
+                "opening": opening["value"] if opening else None,
+                "closing": closing["value"] if closing else None,
+                "total_delta": total,
+                "attributed_delta": attributed,
+                "unattributed_delta": (total - attributed) if total is not None else None,
+                "observation_count": len(within),
+                "confidence": _confidence(len(within), attrs, paired, from_ts, to_ts),
+            })
+
+        # ── 按 Asia/Shanghai 日期分桶：跨日 run 按观察发生日记账 ──
+        daily_series = []
+        day = datetime.fromtimestamp(from_ts, _LEDGER_TZ).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        last_day = datetime.fromtimestamp(to_ts, _LEDGER_TZ).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        while day <= last_day:
+            next_day = day + timedelta(days=1)
+            start_ts, end_ts = day.timestamp(), next_day.timestamp() - 1e-6
+            for name in LEDGER_RESOURCES:
+                opening, closing, within, paired = _pair(
+                    observations.get(name, []), start_ts, end_ts)
+                day_attrs = [a for a in attributions
+                             if a["resource"] == name and start_ts <= a["ts"] <= end_ts]
+                if not within and not day_attrs:
+                    continue
+                attributed = sum(a["delta"] for a in day_attrs)
+                total = closing["value"] - opening["value"] if paired else None
+                daily_series.append({
+                    "date": day.date().isoformat(), "resource": name,
+                    "opening": opening["value"] if opening else None,
+                    "closing": closing["value"] if closing else None,
+                    "total_delta": total,
+                    "attributed_delta": attributed,
+                    "unattributed_delta": (total - attributed) if total is not None else None,
+                    "observation_count": len(within),
+                    "confidence": _confidence(len(within), day_attrs, paired,
+                                              start_ts, end_ts),
+                    "gap_ids": _gap_ids(start_ts, end_ts),
+                    "attribution_ids": [a["id"] for a in day_attrs],
+                })
+            day = next_day
+
+        return {
+            "schema_version": LEDGER_SCHEMA_VERSION,
+            "generated_at": time.time(),
+            "window": {"from": from_ts, "to": to_ts, "timezone": "Asia/Shanghai",
+                       "days": round((to_ts - from_ts) / 86400, 2)},
+            "per_resource": per_resource,
+            "daily_series": daily_series,
+            "gaps": gaps,
+            "attributions": attributions,
+        }
 
     def recent_events(self, limit: int = 100, event_type: str | None = None,
                       script: str | None = None) -> list[dict]:

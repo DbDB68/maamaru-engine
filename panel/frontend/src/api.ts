@@ -26,6 +26,7 @@ export const api = {
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
+  resourceLedger: (days = 7) => request<any>(`/api/data/resource-ledger?days=${days}`),
   dataEvents: (limit = 100) => request<{ schema_version: number; items: any[] }>(`/api/data/events?limit=${limit}`),
   dataRuns: (limit = 20) => request<{ schema_version: number; items: any[] }>(`/api/data/runs?limit=${limit}`),
   attachRunInventory: (runId: string) => request<{ ok: boolean; run: any }>(`/api/data/runs/${encodeURIComponent(runId)}/attach-inventory`, { method: 'POST' }),

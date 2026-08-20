@@ -2,7 +2,61 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 
-const days = ref(7), summary = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const days = ref(7), summary = ref<any>(null), ledger = ref<any>(null), events = ref<any[]>([]), runs = ref<any[]>([]), humanReports = ref<any[]>([]), inventoryGaps = ref<any[]>([]), loading = ref(false), error = ref('')
+const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石']
+const selectedResource = ref('小判')
+const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : `近 ${days.value} 天`)
+const resourceRows = computed(() => resourceNames.map(name => {
+  const row = (ledger.value?.per_resource || []).find((item: any) => item.resource === name)
+  return { name, before: row?.opening ?? null, current: row?.closing ?? null,
+    delta: row?.total_delta ?? null, attributed: row?.attributed_delta ?? 0,
+    unattributed: row?.unattributed_delta ?? null, observations: row?.observation_count ?? 0,
+    confidence: row?.confidence || 'low' }
+}))
+function signed(value: number | null) {
+  if (value == null) return '—'
+  return `${value > 0 ? '+' : ''}${value.toLocaleString()}`
+}
+const confidence = computed(() => {
+  if (loading.value) return { level: 'empty', label: '正在对账', detail: '狐之助正在整理库存记录' }
+  const rows = resourceRows.value.filter(row => row.delta != null)
+  if (!rows.length) return { level: 'empty', label: '无法计算', detail: '这个时间段还没有可比较的库存读数' }
+  const levels = rows.map(row => row.confidence)
+  const count = Math.max(...rows.map(row => row.observations))
+  const gaps = ledger.value?.gaps?.length || 0
+  if (levels.every(level => level === 'high')) return { level: 'good', label: '账目完整', detail: `${count} 次库存观察，证据链完整` }
+  if (levels.some(level => level === 'low')) return { level: 'rough', label: '仅供参考', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段数据缺口` : ''}` }
+  return { level: 'fair', label: '基本可信', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段变化无法完整归因` : ''}` }
+})
+const foxSummary = computed(() => {
+  const changed = resourceRows.value.filter(row => row.delta != null && row.delta !== 0)
+  if (!changed.length) return `${rangeLabel.value}还没有足够的首末库存读数。狐之助会在挂机途中继续留意家底。`
+  const gains = changed.filter(row => row.delta! > 0).sort((a, b) => b.delta! - a.delta!)
+  const costs = changed.filter(row => row.delta! < 0).sort((a, b) => a.delta! - b.delta!)
+  const parts = [gains.length ? `资源总体有增长，${gains[0].name}${signed(gains[0].delta)}最多` : '资源总体没有增长']
+  if (costs.length) parts.push(`${costs[0].name}${signed(costs[0].delta)}是最明显的消耗`)
+  const attributed = resourceRows.value.filter(row => row.attributed)
+    .sort((a, b) => Math.abs(b.attributed) - Math.abs(a.attributed))[0]
+  if (attributed) parts.push(`已确认的${attributed.name}变化为${signed(attributed.attributed)}`)
+  return `${rangeLabel.value}观察到${parts.join('；')}。未标明来源的变化可能包含审神者自己的操作。`
+})
+const chartBars = computed(() => {
+  const bars: any[] = (ledger.value?.daily_series || [])
+    .filter((item: any) => item.resource === selectedResource.value)
+    .map((item: any) => ({
+      label: String(item.date || '').slice(5).replace('-', '/'), value: item.total_delta,
+      observations: item.observation_count || 0, attributed: item.attributed_delta || 0,
+      unattributed: item.unattributed_delta, confidence: item.confidence,
+      attributionIds: item.attribution_ids || [], gapIds: item.gap_ids || [],
+    }))
+  const max = Math.max(1, ...bars.map(bar => Math.abs(bar.value || 0)))
+  return bars.map(bar => ({ ...bar,
+    mixed: Boolean(bar.attributed && bar.unattributed && Math.sign(bar.attributed) !== Math.sign(bar.unattributed)),
+    height: bar.value == null ? 0 : Math.max(4, Math.round(Math.abs(bar.value) / max * 60)) }))
+})
+const selectedAttributions = computed(() => (ledger.value?.attributions || [])
+  .filter((item: any) => item.resource === selectedResource.value))
+const hasChartData = computed(() => chartBars.value.some((bar: any) => bar.value != null))
 const unreportedGaps = computed(() => inventoryGaps.value.filter(item => !item.reported))
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
@@ -295,8 +349,9 @@ function gapDelta(gap: any) {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextEvents, nextRuns, nextHuman] = await Promise.all([api.dataSummary(nextDays), api.dataEvents(500), api.dataRuns(30), api.humanReports()])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports()])
     summary.value = nextSummary
+    ledger.value = nextLedger
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
     humanReports.value = nextHuman.items
@@ -315,12 +370,38 @@ onMounted(() => load())
       <div class="report-ranges" aria-label="统计时间范围"><button v-for="value in [1, 7, 30]" :key="value" type="button" :class="{ active: days === value }" @click="load(value)">{{ value === 1 ? '24 小时' : `${value} 天` }}</button></div>
     </header>
     <p v-if="error" class="report-error">{{ error }}</p>
-    <div class="report-stats" :class="{ loading }">
+    <section class="resource-ledger" :class="{ loading }">
+      <header><div><h3>这段时间家底变了多少</h3><p>按时间范围内第一次和最后一次库存读数计算</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span></header>
+      <div class="resource-ledger-grid">
+        <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
+          <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
+        </article>
+      </div>
+      <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
+    </section>
+    <section class="resource-trend">
+      <header><div><h3>本丸收支</h3><p>柱高是当日库存净变化，柱内颜色表示能够确认的来源</p></div><nav aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="selectedResource = name">{{ name }}</button></nav></header>
+      <div class="chart-legend"><span><i class="attributed"></i>已确认来源</span><span><i class="unattributed"></i>尚未归因</span><small v-if="!selectedAttributions.length">当前范围没有已确认的{{ selectedResource }}来源</small></div>
+      <div class="resource-chart" :class="{ empty: !hasChartData }" :style="{ gridTemplateColumns: `repeat(${chartBars.length}, minmax(34px, 1fr))` }">
+        <div class="chart-zero" aria-hidden="true"></div>
+        <div v-for="bar in chartBars" :key="bar.label" class="chart-column" :title="bar.value == null ? `${bar.label}：读数不足` : `${bar.label}：${selectedResource} ${signed(bar.value)}；已归因 ${signed(bar.attributed)}；未归因 ${signed(bar.unattributed)}；${bar.observations} 次观察`">
+          <span class="chart-value">{{ bar.value == null ? '' : signed(bar.value) }}</span>
+          <span v-if="bar.value != null" class="chart-stack" :class="[bar.value >= 0 ? 'positive' : 'negative', { mixed: bar.mixed }]" :style="{ height: `${bar.height}px` }">
+            <i v-if="bar.attributed" class="attributed" :style="{ flexGrow: Math.abs(bar.attributed) }"></i>
+            <i v-if="bar.unattributed" class="unattributed" :style="{ flexGrow: Math.abs(bar.unattributed) }"></i>
+          </span>
+          <small>{{ bar.label }}</small>
+        </div>
+        <p v-if="loading">正在整理这段时间的收支……</p>
+        <p v-else-if="!hasChartData">同一时间段至少需要两次读数，狐之助再攒一会儿账。</p>
+      </div>
+    </section>
+    <section class="weekly-activity"><header><h3>活动小结</h3><small>{{ rangeLabel }}</small></header><div class="report-stats" :class="{ loading }">
       <article><small>领取任务奖励</small><strong>{{ rewardClaims }} 次</strong><span>确认领取后按钮变灰才计数</span></article>
       <article><small>出阵完成</small><strong>{{ sortieCount }} 次</strong><span>按确认完成的圈数计数</span></article>
       <article><small>派遣远征</small><strong>{{ expeditions }} 次</strong><span>确认“远征中”后记录</span></article>
       <article><small>演练战绩</small><strong>{{ practiceHeadline() }}</strong><span>{{ practiceCaption() }}</span></article>
-    </div>
+    </div></section>
     <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值提醒">
       <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
       <form v-if="reportGap" @submit.prevent="saveHumanReport(false)">
