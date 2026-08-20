@@ -11,6 +11,7 @@ datas = [
     ('panel/expedition_schedule.json', 'panel'),
     ('touken_config.example.json', '.'),
     ('manifest.json', '.'),
+    ('launcher/assets/maamaru-launcher.ico', 'launcher/assets'),
     ('touken/data', 'touken/data'),
     ('resource', 'resource'),
     ('profiles', 'profiles'),
@@ -73,4 +74,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='launcher/assets/maamaru-launcher.ico',
 )

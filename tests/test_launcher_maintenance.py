@@ -31,12 +31,17 @@ class LauncherMaintenanceTests(unittest.TestCase):
     def test_launcher_uses_panel_sized_window_without_maximizing(self):
         with patch.object(app, "ensure_runtime_data"), \
                 patch.object(app.webview, "create_window") as create_window, \
-                patch.object(app.webview, "start"):
+                patch.object(app.webview, "start") as start:
             app.main()
 
         kwargs = create_window.call_args.kwargs
         self.assertEqual((kwargs["width"], kwargs["height"]), (1360, 900))
         self.assertIn(f"v{app.CURRENT_VERSION}", kwargs["html"])
+        self.assertEqual(
+            Path(start.call_args.kwargs["icon"]).name,
+            "maamaru-launcher.ico",
+        )
+        self.assertTrue(app._launcher_icon_path().is_file())
 
 
 if __name__ == "__main__":

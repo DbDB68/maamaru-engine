@@ -241,7 +241,11 @@ def main():
     webview.create_window("まあ丸启动器", html=HTML.replace("__VERSION__", CURRENT_VERSION),
                           js_api=Api(), width=1360, height=900,
                           min_size=(900, 700), resizable=True)
-    webview.start(debug=False)
+    webview.start(debug=False, icon=str(_launcher_icon_path()))
+
+
+def _launcher_icon_path() -> Path:
+    return _project_root() / "launcher" / "assets" / "maamaru-launcher.ico"
 
 
 def _project_root() -> Path:

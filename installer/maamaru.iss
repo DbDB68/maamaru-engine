@@ -20,6 +20,7 @@ OutputBaseFilename=maamaru-setup-v{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\launcher\assets\maamaru-launcher.ico
 SetupLogging=yes
 CloseApplications=yes
 RestartApplications=no
