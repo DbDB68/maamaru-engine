@@ -638,6 +638,18 @@ class TelemetryStore:
                                     e["payload"].get("count") or 0) > 0]
         snapshots = [e for e in events if e["event_type"] == "inventory.captured"]
         peeks = [e for e in events if e["event_type"] == "inventory.peek"]
+        attributed_deltas: dict[str, int | float] = {}
+        resource_change_count = 0
+        for event in events:
+            if event["event_type"] != "resource.change":
+                continue
+            payload = event["payload"]
+            delta = payload.get("delta")
+            resource = payload.get("resource")
+            if not resource or not isinstance(delta, (int, float)) or not delta:
+                continue
+            resource_change_count += 1
+            attributed_deltas[resource] = attributed_deltas.get(resource, 0) + delta
         before = next((e for e in snapshots if e["payload"].get("phase") == "before"), None)
         after = next((e for e in reversed(snapshots)
                       if e["payload"].get("phase") == "after"), None)
@@ -679,6 +691,8 @@ class TelemetryStore:
             "equipment_restores": sum(1 for e in events
                                       if e["event_type"] == "equipment.restored"),
             "resource_delta": deltas,
+            "attributed_resource_delta": attributed_deltas,
+            "resource_change_count": resource_change_count,
             "inventory_observation": (peeks[-1]["payload"] if peeks else None),
             "inventory_observation_count": len(peeks),
             "has_resource_comparison": bool(before and after) or bool(koban_science),

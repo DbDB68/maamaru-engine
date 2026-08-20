@@ -104,6 +104,29 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["repair_sessions"], 0)
         self.assertEqual(result["repaired_swords"], 0)
 
+    def test_run_summary_exposes_confirmed_changes_without_snapshots(self):
+        self.store.start_run("run-1", "daily")
+        self.store.record_event("resource.change", {
+            "resource": "木炭", "delta": -700, "attribution": "confirmed",
+        })
+        self.store.record_event("resource.change", {
+            "resource": "木炭", "delta": 1050, "attribution": "confirmed",
+        })
+        self.store.record_event("resource.change", {
+            "resource": "委托符", "delta": -1, "attribution": "confirmed",
+        })
+        self.store.record_event("resource.change", {
+            "resource": "玉钢", "delta": None, "attribution": "unknown",
+        })
+        self.store.finish_run("run-1", "completed")
+
+        result = self.store.run_summary("run-1")
+        self.assertEqual(result["attributed_resource_delta"], {
+            "木炭": 350, "委托符": -1,
+        })
+        self.assertEqual(result["resource_change_count"], 3)
+        self.assertFalse(result["has_resource_comparison"])
+
     def test_run_summary_counts_boss_retreat_and_keeps_latest_inventory_peek(self):
         self.store.start_run("run-1", "sortie", started_at=100)
         self.store.record_event("inventory.peek", {

@@ -241,6 +241,11 @@ function deltaStats(run: any) {
   const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
   return order.filter(name => run.resource_delta?.[name]).map(name => `${name} ${run.resource_delta[name] > 0 ? '+' : ''}${run.resource_delta[name].toLocaleString()}`).join(' · ')
 }
+function attributedStats(run: any) {
+  const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
+  return order.filter(name => run.attributed_resource_delta?.[name])
+    .map(name => `${name} ${run.attributed_resource_delta[name] > 0 ? '+' : ''}${run.attributed_resource_delta[name].toLocaleString()}`).join(' · ')
+}
 function observedInventory(run: any) {
   const order = ['木炭', '玉钢', '冷却材', '砥石', '小判']
   const observed = run.inventory_observation || {}
@@ -437,13 +442,15 @@ onMounted(() => load())
               </div>
               <p v-else>{{ loopTime(run.average_loop_seconds) }}</p>
               <div class="run-upkeep" aria-label="本轮养护"><small class="ledger-label">🦊 狐狸账</small><span>🩹 手入 <b>{{ run.repair_sessions }}</b> 次</span><span>⚡ 加速符 <b>{{ run.speedups }}</b> 枚</span><span>🛡️ 补刀装 <b>{{ run.equipment_restores }}</b> 次</span></div>
+              <p v-if="attributedStats(run)" class="run-delta"><small>🦊 已确认收支 <em>{{ run.resource_change_count }} 笔</em></small>{{ attributedStats(run) }}<span>来自本轮玩法的逐项记录，不依赖库存快照</span></p>
               <p v-if="observedInventory(run)" class="run-delta"><small>👀 途中看到的库存 <em>{{ run.inventory_observation_count }} 次观察</em></small>{{ observedInventory(run) }}<span>只表示最后一次读数，不作为本轮收益</span></p>
               <p v-if="deltaStats(run)" class="run-delta"><small>📦 库存变化 <em v-if="run.after_snapshot_source === 'manual_attach'">手动补盘</em><em v-else-if="run.after_snapshot_source === 'auto_science'">🧪小判实验估算</em></small>{{ deltaStats(run) }}<span v-if="kobanPerHourLabel(run)">· 小判约 {{ kobanPerHourLabel(run) }} / 小时</span><span v-if="kobanPerFloorLabel(run)">· 平均每层 {{ kobanPerFloorLabel(run) }}</span></p>
               <p v-else-if="run.has_resource_comparison" class="run-delta"><small>📦 库存账</small>本轮资源无变化<span v-if="run.after_snapshot_source === 'manual_attach'">（手动补盘）</span><span v-else-if="run.after_snapshot_source === 'auto_science'">（🧪小判实验）</span></p>
               <div v-else class="run-inventory-missing">
                 <small v-if="canAttachInventory(run)">收工盘点没有完成。先在首页运行“库存快照”，再把最近结果补到这轮。<strong>仅适合挂机结束后没有其他操作污染的数据。</strong></small>
                 <small v-else-if="run.has_before_snapshot && !run.has_after_snapshot">这是较早的挂机记录，不能用现在的库存回填，以免把中间的变化算错轮次。</small>
-                <small v-else>这轮没有完整的前后库存快照，无法计算变化。</small>
+                <small v-else-if="attributedStats(run)">这轮没有完整的库存净变化；上方已确认收支仍然有效。</small>
+                <small v-else>这轮没有完整库存净变化，也没有记录到资源流水。</small>
                 <button v-if="canAttachInventory(run)" type="button" class="secondary" :disabled="attachingRun === run.run_id" @click="attachInventory(run)">{{ attachingRun === run.run_id ? '正在补盘……' : '补上最近盘点' }}</button>
                 <em v-if="inventoryNotice[run.run_id]">{{ inventoryNotice[run.run_id] }}</em>
               </div>
