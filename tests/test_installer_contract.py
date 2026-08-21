@@ -30,10 +30,24 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(r'Name: "{autodesktop}\まあ丸"; Filename: "{app}\まあ丸启动器.exe"', self.script)
         self.assertIn('Flags: unchecked', self.script)
 
-    def test_uninstall_cannot_delete_user_data(self):
+    def test_uninstall_only_deletes_user_data_after_explicit_guarded_choice(self):
         self.assertNotRegex(self.script, r"(?im)^\[UninstallDelete\]\s*$")
         self.assertNotRegex(self.script, r"(?im)^Type:\s*filesandordirs")
         self.assertNotRegex(self.script, r"(?im)^Name:\s*.*\\Maamaru(?:\\|\s*$)")
+        self.assertIn("AskUninstallPurpose", self.script)
+        self.assertIn("换盘、重装或稍后再用", self.script)
+        self.assertIn("不再使用まあ丸", self.script)
+        self.assertIn("DeleteUserData", self.script)
+        self.assertIn(".maamaru-relocation.json", self.script)
+        self.assertIn("IsSameOrParent", self.script)
+        self.assertIn("ExpandConstant('{userprofile}')", self.script)
+        self.assertIn("确定继续吗？", self.script)
+
+    def test_installer_uses_simplified_chinese_messages(self):
+        language = INSTALLER.with_name("ChineseSimplified.isl")
+        self.assertIn(r'MessagesFile: ".\ChineseSimplified.isl"', self.script)
+        self.assertTrue(language.is_file())
+        self.assertIn("LanguageName=简体中文", language.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

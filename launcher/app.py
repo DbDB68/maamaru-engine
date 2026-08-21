@@ -15,6 +15,13 @@ from pathlib import Path
 import webview
 
 from touken.diagnostics import create_diagnostic_bundle
+from touken.emulator_discovery import auto_configure_emulator, configure_mumu_from_folder
+from touken.data_relocation import (
+    cleanup_previous_data,
+    pending_relocation_cleanup,
+    relocate_user_data,
+    suggested_data_root,
+)
 from touken.runtime_paths import DATA_ROOT, LOG_DIR, UPDATES_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
 from .update_apply import consume_result, prepare_apply
@@ -43,7 +50,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:22px 0 18px}.hero
 <main>
 <section id="hero" class="hero"><div class="hero-state"><span id="stateMark" class="state-mark">…</span><div><span class="eyebrow">启动状态</span><h2 id="stateTitle">正在整理启动环境</h2><p id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</p></div></div><div class="hero-action"><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div></section>
 <section class="checks"><div class="checks-head"><div><h3>启动前检查</h3><p>只把需要你留意的事情摆在外面。</p></div><span id="checksCount" class="checks-count">正在检查…</span></div><div id="checks"><div class="loading">狐之助正在巡查……</div></div></section>
-<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="update()">⬆ 检查更新</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="openData()">📁 数据目录</button></div>
+<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="chooseEmulator(this)">🖥️ 选择模拟器</button><button onclick="update()">⬆ 检查更新</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="openData()">📁 数据目录</button><button id="migrateDataButton" onclick="migrateData(this)">🗂️ 迁移数据</button><button id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">🧹 清理旧副本</button></div>
 <p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p>
 </main>
 <script>
@@ -60,7 +67,7 @@ function renderChecks(items){
 }
 async function refresh(){
  setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
- const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}
+ const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'inline-block':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';
  const issues=renderChecks(data.items);const warnings=issues.filter(x=>x.state==='warn').length;
  if(data.blocked){setState('blocked','还差一步','先处理下方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
  else if(warnings){setState('ready','可以启动',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
@@ -73,6 +80,9 @@ async function update(){setState('','正在检查更新','正在向まあ丸的 
 async function exportFeedback(button){if(button.disabled)return;button.disabled=true;button.textContent='正在整理…';let r;try{r=await pywebview.api.export_diagnostics()}catch(_){r={ok:false}}if(r.ok){alert(r.message);feedbackFailures=0;document.querySelector('#issueButton').style.display='none';button.disabled=false;button.textContent='📦 反馈错误';return}feedbackFailures+=1;if(feedbackFailures===3){document.querySelector('#issueButton').style.display='inline-block'}else if(feedbackFailures>=11){button.textContent='狐之助已下班';clearTimeout(feedbackResetTimer);feedbackResetTimer=setTimeout(()=>{feedbackFailures=0;button.disabled=false;button.textContent='📦 反馈错误';document.querySelector('#issueButton').style.display='none'},3000);return}else{alert(feedbackLines[feedbackFailures]||'导出失败')}button.disabled=false;button.textContent='📦 反馈错误'}
 async function openIssue(){await pywebview.api.open_url(issueUrl)}
 async function openData(){await pywebview.api.open_data()}
+async function chooseEmulator(button){button.disabled=true;const r=await pywebview.api.choose_emulator();if(r.message)alert(r.message);button.disabled=false;if(r.ok)await refresh()}
+async function migrateData(button){button.disabled=true;let chosen;try{chosen=await pywebview.api.choose_data_location()}catch(_){chosen={ok:false,message:'没能打开目录选择器'}}if(!chosen.ok){button.disabled=false;if(chosen.message)alert(chosen.message);return}if(!confirm(`まあ丸会先完整复制并校验用户数据，再让下次启动改用：\n\n${chosen.target}\n\n原目录暂时保留，确认新目录可用后可在启动器清理。现在开始吗？`)){button.disabled=false;return}button.textContent='正在迁移…';const r=await pywebview.api.migrate_data(chosen.selected);alert(r.message);button.disabled=false;button.textContent='🗂️ 迁移数据';if(r.ok){alert('请关闭并重新打开まあ丸。新目录通过启动检查后，会出现“清理旧副本”按钮。')}}
+async function cleanupOldData(button){const source=button.dataset.source;if(!confirm(`新目录已经通过校验。确定永久删除旧数据副本吗？\n\n${source}\n\n此操作无法撤销。`))return;button.disabled=true;const r=await pywebview.api.cleanup_old_data(button.dataset.token);alert(r.message);if(r.ok){button.style.display='none'}else{button.disabled=false}}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
 """
@@ -84,11 +94,18 @@ class Api:
 
     def check(self):
         ensure_runtime_data()
+        auto_configure_emulator()
         checks = run_checks()
+        cleanup = pending_relocation_cleanup()
         return {
             "blocked": has_blocker(checks),
             "items": [item.__dict__ for item in checks],
             "update_result": consume_result(),
+            "data_root": str(DATA_ROOT),
+            "data_cleanup": ({
+                "token": cleanup["token"],
+                "source": cleanup["source"],
+            } if cleanup else None),
         }
 
     def start(self):
@@ -236,6 +253,69 @@ class Api:
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
         os.startfile(DATA_ROOT)
         return {"ok": True}
+
+    def choose_data_location(self):
+        try:
+            selected = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+            if not selected:
+                return {"ok": False, "message": ""}
+            folder = selected[0] if isinstance(selected, (list, tuple)) else selected
+            return {
+                "ok": True,
+                "selected": str(folder),
+                "target": str(suggested_data_root(folder)),
+            }
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"没能选择新目录：{exc}"}
+
+    def choose_emulator(self):
+        try:
+            selected = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+            if not selected:
+                return {"ok": False, "message": ""}
+            folder = selected[0] if isinstance(selected, (list, tuple)) else selected
+            found = configure_mumu_from_folder(folder)
+            if found is None:
+                return {
+                    "ok": False,
+                    "message": "这个目录里没有同时找到 MuMu 的 ADB 和管理器。\n"
+                               "请选择 MuMu 的安装目录，而不是桌面快捷方式所在的目录。",
+                }
+            return {
+                "ok": True,
+                "message": f"已设置 MuMu 模拟器：\n{found.manager_path}",
+            }
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"没能设置模拟器：{exc}"}
+
+    def migrate_data(self, selected_folder):
+        try:
+            result = relocate_user_data(selected_folder)
+            size_mb = result["bytes"] / (1024 * 1024)
+            return {
+                "ok": True,
+                "message": (
+                    f"用户数据已复制并校验完成：{result['files']} 个文件，"
+                    f"约 {size_mb:.1f} MB。\n\n新目录：{result['target']}\n"
+                    "原目录尚未删除，重新启动まあ丸后再确认清理。"
+                ),
+            }
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"迁移没有完成：{exc}\n原目录未删除。"}
+
+    def cleanup_old_data(self, confirmation_token):
+        try:
+            result = cleanup_previous_data(str(confirmation_token or ""))
+            return {
+                "ok": True,
+                "message": f"旧数据副本已清理：{result['source']}\n当前数据仍保存在：{result['target']}",
+            }
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"旧副本没有删除：{exc}"}
 
     def export_diagnostics(self):
         try:

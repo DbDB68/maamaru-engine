@@ -55,6 +55,15 @@ class LauncherMaintenanceTests(unittest.TestCase):
         self.assertIn(bundle.name, result["message"])
         self.assertEqual(popen.call_args.args[0], ["explorer.exe", "/select,", str(bundle)])
 
+    def test_launcher_exposes_verified_data_relocation_controls(self):
+        self.assertIn("迁移数据", app.HTML)
+        self.assertIn("清理旧副本", app.HTML)
+        self.assertIn("永久删除旧数据副本", app.HTML)
+
+    def test_launcher_offers_manual_emulator_selection(self):
+        self.assertIn("选择模拟器", app.HTML)
+        self.assertTrue(callable(getattr(app.Api(), "choose_emulator", None)))
+
 
 if __name__ == "__main__":
     unittest.main()

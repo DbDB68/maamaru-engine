@@ -13,15 +13,78 @@ from pathlib import Path
 
 DATA_SCHEMA_VERSION = 1
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent
+DATA_LOCATION_REGISTRY_KEY = r"Software\Maamaru"
+DATA_LOCATION_VALUE = "DataRoot"
+PREVIOUS_DATA_LOCATION_VALUE = "PreviousDataRoot"
+
+
+def _local_app_data() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+
+
+def _base_data_root() -> Path:
+    name = "Maamaru" if getattr(sys, "frozen", False) else "Maamaru-Dev"
+    return (_local_app_data() / name).resolve()
+
+
+DEFAULT_DATA_ROOT = _base_data_root()
+
+
+def _read_registry_path(value_name: str) -> Path | None:
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, DATA_LOCATION_REGISTRY_KEY) as key:
+            value, value_type = winreg.QueryValueEx(key, value_name)
+        if value_type not in (winreg.REG_SZ, winreg.REG_EXPAND_SZ):
+            return None
+        expanded = os.path.expandvars(str(value).strip())
+        path = Path(expanded).expanduser()
+        if not path.is_absolute() or path == Path(path.anchor):
+            return None
+        return path.resolve()
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def set_registered_data_root(data_root: Path, previous_root: Path) -> None:
+    """Persist a packaged-install data location after a verified copy."""
+    if os.name != "nt":
+        raise OSError("用户数据目录迁移目前只支持 Windows")
+    import winreg
+    with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, DATA_LOCATION_REGISTRY_KEY,
+            0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, DATA_LOCATION_VALUE, 0, winreg.REG_SZ,
+                          str(Path(data_root).resolve()))
+        winreg.SetValueEx(key, PREVIOUS_DATA_LOCATION_VALUE, 0, winreg.REG_SZ,
+                          str(Path(previous_root).resolve()))
+
+
+def clear_previous_data_root() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, DATA_LOCATION_REGISTRY_KEY,
+                0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, PREVIOUS_DATA_LOCATION_VALUE)
+    except OSError:
+        pass
+
+
+def registered_previous_data_root() -> Path | None:
+    return _read_registry_path(PREVIOUS_DATA_LOCATION_VALUE)
 
 
 def _default_data_root() -> Path:
     override = os.environ.get("MAAMARU_DATA_DIR", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    name = "Maamaru" if getattr(sys, "frozen", False) else "Maamaru-Dev"
-    return (local_app_data / name).resolve()
+    configured = _read_registry_path(DATA_LOCATION_VALUE)
+    return configured or DEFAULT_DATA_ROOT
 
 
 DATA_ROOT = _default_data_root()
