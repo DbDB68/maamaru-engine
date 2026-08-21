@@ -128,7 +128,7 @@ try {
 
     $launcherProcess = Start-Process -FilePath $launcher -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
     Wait-Until -TimeoutSeconds 30 -FailureMessage "首次启动没有建立完整的用户数据" -Condition {
-        ($expectedData | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0
+        @($expectedData | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0
     }
     if ($launcherProcess.HasExited) {
         throw "启动器在首次启动检查期间提前退出，错误码 $($launcherProcess.ExitCode)"
