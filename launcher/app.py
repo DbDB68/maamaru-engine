@@ -36,19 +36,20 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:22px 0 18px}.hero
 .launch-progress{display:none;margin-top:13px;grid-template-columns:repeat(3,1fr);gap:5px}.launch-progress.show{display:grid}.launch-progress span{padding-top:7px;color:#a49483;border-top:3px solid #ddcfb9;font-size:11px;text-align:center}.launch-progress span.active{color:var(--gold-deep);border-color:var(--gold);font-weight:700}.launch-progress span.done{color:var(--green);border-color:var(--green)}
 .checks{margin-top:18px;padding:18px 20px;background:var(--card);border:1px solid var(--line);border-radius:14px}.checks-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:12px}.checks-head h3{margin:0;font-size:18px}.checks-head p{margin:3px 0 0;color:var(--muted);font-size:12px}.checks-count{color:var(--muted);font-size:12px}.issues{display:grid;gap:8px}.issue{display:grid;grid-template-columns:28px 118px 1fr;gap:8px;align-items:center;padding:11px 12px;border:1px solid #ecd4a8;border-radius:9px;background:#fff8e7}.issue.error{border-color:#e5b6b2;background:#fff0ee}.issue .mark{display:grid;width:22px;height:22px;place-items:center;color:white;background:var(--orange);border-radius:50%;font-size:13px;font-weight:800}.issue.error .mark{background:var(--red)}.issue b{font-size:14px}.issue small{color:var(--muted);font-size:12px;line-height:1.45}
 .healthy{margin-top:9px;border-top:1px dashed #e2d7c5}.healthy summary{padding:11px 2px 3px;color:var(--green);cursor:pointer;font-size:12px;font-weight:700}.healthy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:7px}.healthy-row{display:grid;grid-template-columns:21px 96px 1fr;gap:5px;padding:8px 10px;background:#f7f2e8;border-radius:8px;font-size:12px}.healthy-row i{color:var(--green);font-style:normal;font-weight:800}.healthy-row span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.loading{padding:44px 0;color:var(--muted);text-align:center}.tools{display:flex;align-items:center;gap:8px;margin-top:14px}.tools-label{margin-right:auto;color:var(--muted);font-size:12px}.tools button{min-height:36px;padding:7px 12px;color:#554b40;background:transparent;border:1px solid #d3c5af;border-radius:8px}.tools button:hover{background:var(--card);border-color:#b99e72}.note{margin:12px 2px 0;color:#918579;font-size:11px}
+.loading{padding:44px 0;color:var(--muted);text-align:center}.tools{display:flex;align-items:center;gap:8px;margin-top:14px}.tools-label{margin-right:auto;color:var(--muted);font-size:12px}.tools button{min-height:36px;padding:7px 12px;color:#554b40;background:transparent;border:1px solid #d3c5af;border-radius:8px}.tools button:hover{background:var(--card);border-color:#b99e72}.tools button:disabled{cursor:not-allowed;opacity:.55}.note{margin:12px 2px 0;color:#918579;font-size:11px}
 @media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.hero{grid-template-columns:1fr}.hero-action{display:grid;grid-template-columns:minmax(230px,320px) 1fr;gap:14px;align-items:start}.launch-progress{margin-top:0}.healthy-grid{grid-template-columns:1fr}.tools{flex-wrap:wrap}.tools-label{width:100%;flex-basis:100%}}
 </style></head><body>
 <header><div class="brand"><img src="__ICON_URI__" alt=""><div class="brand-copy"><h1>まあ丸</h1><p>本丸近侍启动器 · 狐之助已经替你看过一遍</p></div><span class="version">v__VERSION__</span></div></header>
 <main>
 <section id="hero" class="hero"><div class="hero-state"><span id="stateMark" class="state-mark">…</span><div><span class="eyebrow">启动状态</span><h2 id="stateTitle">正在整理启动环境</h2><p id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</p></div></div><div class="hero-action"><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div></section>
 <section class="checks"><div class="checks-head"><div><h3>启动前检查</h3><p>只把需要你留意的事情摆在外面。</p></div><span id="checksCount" class="checks-count">正在检查…</span></div><div id="checks"><div class="loading">狐之助正在巡查……</div></div></section>
-<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="update()">⬆ 检查更新</button><button onclick="exportDiagnostics(this)">📦 导出排错包</button><button onclick="openData()">📁 数据目录</button></div>
+<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="update()">⬆ 检查更新</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="openData()">📁 数据目录</button></div>
 <p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p>
 </main>
 <script>
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stateIcon={error:'×',warn:'!',info:'i',ok:'✓'};
+const issueUrl='https://github.com/DbDB68/maamaru-engine/issues/new';let feedbackFailures=0;let feedbackResetTimer=0;const feedbackLines={1:'导出失败？问问上天',2:'还失败？去issue骂作者',4:'干嘛不去？',5:'你是不是想骂连错误处理系统都做不好？',6:'噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',7:'面包店里卖面包，蛋糕店里卖蛋糕。',8:'你还点',9:'？',10:'我没有日志，你也不去issue，你到底想让我怎样'};
 function setState(kind,title,copy,mark){const hero=document.querySelector('#hero');hero.className='hero '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').textContent=mark}
 function renderChecks(items){
  const issues=items.filter(x=>x.state==='error'||x.state==='warn');const healthy=items.filter(x=>x.state!=='error'&&x.state!=='warn');
@@ -69,7 +70,8 @@ function setLaunchStep(index){const steps=[...document.querySelectorAll('#launch
 async function startApp(){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start();clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
 async function update(){setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();if(r.update_available&&r.download_ready){if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){setState('','正在下载更新','安装包下载后还会校验大小和 SHA-256。','…');const d=await pywebview.api.download_update();alert(d.message);if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}}}else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}await refresh()}
-async function exportDiagnostics(button){const old=button.textContent;button.disabled=true;button.textContent='正在整理…';const r=await pywebview.api.export_diagnostics();alert(r.message);button.disabled=false;button.textContent=old}
+async function exportFeedback(button){if(button.disabled)return;button.disabled=true;button.textContent='正在整理…';let r;try{r=await pywebview.api.export_diagnostics()}catch(_){r={ok:false}}if(r.ok){alert(r.message);feedbackFailures=0;document.querySelector('#issueButton').style.display='none';button.disabled=false;button.textContent='📦 反馈错误';return}feedbackFailures+=1;if(feedbackFailures===3){document.querySelector('#issueButton').style.display='inline-block'}else if(feedbackFailures>=11){button.textContent='狐之助已下班';clearTimeout(feedbackResetTimer);feedbackResetTimer=setTimeout(()=>{feedbackFailures=0;button.disabled=false;button.textContent='📦 反馈错误';document.querySelector('#issueButton').style.display='none'},3000);return}else{alert(feedbackLines[feedbackFailures]||'导出失败')}button.disabled=false;button.textContent='📦 反馈错误'}
+async function openIssue(){await pywebview.api.open_url(issueUrl)}
 async function openData(){await pywebview.api.open_data()}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
@@ -245,10 +247,10 @@ class Api:
                 )
             except OSError:
                 os.startfile(path.parent)
-            return {"ok": True, "message": f"排错包已经生成，并在文件夹中替你选好了。\n\n{path.name}"}
+            return {"ok": True, "message": f"错误反馈包已经生成，并在文件夹中替你选好了。\n\n{path.name}"}
         except Exception as exc:
             _write_launcher_log(traceback.format_exc())
-            return {"ok": False, "message": f"暂时没能生成排错包：{exc}"}
+            return {"ok": False, "message": f"暂时没能生成错误反馈包：{exc}"}
 
 
 def main():

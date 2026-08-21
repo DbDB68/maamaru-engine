@@ -46,7 +46,7 @@ class LauncherMaintenanceTests(unittest.TestCase):
         self.assertTrue(app._launcher_icon_path().is_file())
 
     def test_launcher_exports_bundle_and_reveals_it_in_explorer(self):
-        bundle = Path(r"C:\Temp\maamaru-diagnostics-test.zip")
+        bundle = Path(r"C:\Temp\maamaru-feedback-test.zip")
         with patch.object(app, "create_diagnostic_bundle", return_value=bundle), \
                 patch.object(app.subprocess, "Popen") as popen:
             result = app.Api().export_diagnostics()

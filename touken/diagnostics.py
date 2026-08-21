@@ -127,7 +127,7 @@ def build_diagnostic_bundle(
     debug_dir = Path(debug_dir)
     bundle_root = Path(bundle_root)
     generated = time.strftime("%Y-%m-%d %H:%M:%S %z")
-    filename = f"maamaru-diagnostics-{time.strftime('%Y%m%d-%H%M%S')}.zip"
+    filename = f"maamaru-feedback-{time.strftime('%Y%m%d-%H%M%S')}.zip"
     packaged = getattr(sys, "frozen", False) if frozen is None else frozen
 
     files: list[tuple[str, str]] = []
@@ -143,7 +143,7 @@ def build_diagnostic_bundle(
     files.extend(_debug_logs(debug_dir))
 
     included = "\n".join(f"- {name}" for name, _ in files)
-    summary = f"""まあ丸诊断包
+    summary = f"""まあ丸错误反馈包
 
 Generated: {generated}
 Maamaru version: {version}

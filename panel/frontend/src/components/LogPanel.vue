@@ -5,12 +5,28 @@ import PanelHeader from './PanelHeader.vue'
 
 const entries = ref<any[]>([])
 const raw = ref(false)
-const showProcess = ref(false)
 const autoScroll = ref(true)
+const feedbackFailures = ref(0)
+const feedbackDisabled = ref(false)
+const showIssueButton = ref(false)
 const list = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
+let feedbackResetTimer = 0
 
-const visibleEntries = computed(() => entries.value.filter(entry => raw.value || showProcess.value || !/^\[(?:NAV|ADB|MAA)\]/.test(entry.message)))
+const visibleEntries = computed(() => entries.value.filter(entry => raw.value || !/^\[(?:NAV|ADB|MAA)\]/.test(entry.message)))
+const feedbackLabel = computed(() => feedbackDisabled.value ? '狐之助已下班' : '反馈错误')
+const issueUrl = 'https://github.com/DbDB68/maamaru-engine/issues/new'
+const feedbackLines: Record<number, string> = {
+  1: '导出失败？问问上天',
+  2: '还失败？去issue骂作者',
+  4: '干嘛不去？',
+  5: '你是不是想骂连错误处理系统都做不好？',
+  6: '噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',
+  7: '面包店里卖面包，蛋糕店里卖蛋糕。',
+  8: '你还点',
+  9: '？',
+  10: '我没有日志，你也不去issue，你到底想让我怎样',
+}
 
 const scriptNames: Record<string, string> = {
   daily: '一键日课', pumpkin: '南瓜', raid: '联队战', sortie: '合战场',
@@ -30,7 +46,36 @@ function level(message: string) {
   if (/✓|✅|完成|成功|已领/.test(message)) return 'ok'
   return ''
 }
-function exportDiagnostics() { window.location.assign('/api/diagnostics/export') }
+async function exportFeedback() {
+  if (feedbackDisabled.value) return
+  try {
+    const response = await fetch('/api/diagnostics/export')
+    if (!response.ok) throw new Error(`feedback export failed (${response.status})`)
+    // 先用 fetch 捕获“反馈系统自己出错”，再交给浏览器做原生下载。
+    // 某些 WebView 会拦截异步回调里临时创建的 blob 链接。
+    window.location.assign('/api/diagnostics/export')
+    feedbackFailures.value = 0
+    showIssueButton.value = false
+  } catch (_) {
+    feedbackFailures.value += 1
+    if (feedbackFailures.value === 3) {
+      showIssueButton.value = true
+      return
+    }
+    if (feedbackFailures.value >= 11) {
+      feedbackDisabled.value = true
+      window.clearTimeout(feedbackResetTimer)
+      feedbackResetTimer = window.setTimeout(() => {
+        feedbackDisabled.value = false
+        feedbackFailures.value = 0
+        showIssueButton.value = false
+      }, 3000)
+      return
+    }
+    window.alert(feedbackLines[feedbackFailures.value] || '导出失败')
+  }
+}
+function openIssue() { window.open(issueUrl, '_blank', 'noopener,noreferrer') }
 async function scrollEnd() { await nextTick(); if (autoScroll.value) list.value?.scrollTo({ top: list.value.scrollHeight }) }
 async function load() { entries.value = (await api.logs()).logs || []; scrollEnd() }
 function connect() {
@@ -50,7 +95,7 @@ function connect() {
   source.onerror = () => { source?.close(); source = null; window.setTimeout(connect, 3000) }
 }
 onMounted(() => { load(); connect() })
-onBeforeUnmount(() => source?.close())
+onBeforeUnmount(() => { source?.close(); window.clearTimeout(feedbackResetTimer) })
 </script>
 
 <template>
@@ -60,10 +105,10 @@ onBeforeUnmount(() => source?.close())
       <div class="head-actions">
         <button class="secondary" :class="{ active: !raw }" @click="raw = false">可视化</button>
         <button class="secondary" :class="{ active: raw }" @click="raw = true">源码日志</button>
-        <button v-if="!raw" class="secondary" :class="{ active: showProcess }" @click="showProcess = !showProcess">过程</button>
         <button class="secondary" @click="entries = []">清屏</button>
         <button class="secondary" :class="{ active: autoScroll }" @click="autoScroll = !autoScroll">自动滚动</button>
-        <button class="secondary" title="导出可直接附在 Issue 中的安全诊断包" @click="exportDiagnostics">排错包</button>
+        <button class="secondary" :disabled="feedbackDisabled" title="整理错误信息并下载可附在 Issue 中的 ZIP" @click="exportFeedback">{{ feedbackLabel }}</button>
+        <button v-if="showIssueButton" class="secondary issue-button" @click="openIssue">去 Issue</button>
       </div>
       </template>
     </PanelHeader>

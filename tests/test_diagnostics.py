@@ -89,7 +89,38 @@ class DiagnosticBundleTests(unittest.TestCase):
             )
             self.assertTrue(target.is_file())
             self.assertEqual(target.parent, root / "exports")
+            self.assertTrue(target.name.startswith("maamaru-feedback-"))
             self.assertTrue(zipfile.is_zipfile(target))
+
+
+class DiagnosticUiContractTests(unittest.TestCase):
+    def test_feedback_entry_and_failure_easter_eggs_stay_wired(self):
+        root = Path(__file__).resolve().parent.parent
+        launcher = (root / "launcher" / "app.py").read_text(encoding="utf-8")
+        log_panel = (root / "panel" / "frontend" / "src" / "components" / "LogPanel.vue").read_text(
+            encoding="utf-8"
+        )
+        combined = launcher + log_panel
+
+        self.assertNotIn(">过程</button>", log_panel)
+        self.assertIn("反馈错误", launcher)
+        self.assertIn("反馈错误", log_panel)
+        self.assertIn("https://github.com/DbDB68/maamaru-engine/issues/new", combined)
+        for line in (
+            "导出失败？问问上天",
+            "还失败？去issue骂作者",
+            "干嘛不去？",
+            "你是不是想骂连错误处理系统都做不好？",
+            "噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。",
+            "面包店里卖面包，蛋糕店里卖蛋糕。",
+            "你还点",
+            "我没有日志，你也不去issue，你到底想让我怎样",
+            "狐之助已下班",
+        ):
+            self.assertIn(line, launcher)
+            self.assertIn(line, log_panel)
+        self.assertIn("}, 3000)", log_panel)
+        self.assertIn("},3000)", launcher)
 
 
 if __name__ == "__main__":

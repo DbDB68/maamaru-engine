@@ -976,9 +976,10 @@ body[data-theme='pixel'] .log-panel .head-actions button.active { color: #6a560b
 body[data-theme='pixel'] .log-panel .head-actions button::before { display: inline-block; margin-right: 6px; font-size: 10px; }
 body[data-theme='pixel'] .log-panel .head-actions button:nth-child(1)::before { content: '▣'; }
 body[data-theme='pixel'] .log-panel .head-actions button:nth-child(2)::before { content: '☷'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(3)::before { content: '▤'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(4)::before { content: '■'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(5)::before { content: '●'; }
+body[data-theme='pixel'] .log-panel .head-actions button:nth-child(3)::before { content: '■'; }
+body[data-theme='pixel'] .log-panel .head-actions button:nth-child(4)::before { content: '●'; }
+body[data-theme='pixel'] .log-panel .head-actions button:nth-child(5)::before { content: '⇩'; }
+body[data-theme='pixel'] .log-panel .head-actions button:nth-child(6)::before { content: '↗'; }
 body[data-theme='pixel'] .log-status-bar {
   display: flex;
   height: 18px;
@@ -1180,15 +1181,17 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
   background: transparent;
   border: 0;
 }
-.log-panel .section-head h2 { margin: 0; font-size: 13px; }
+.log-panel .section-head h2 { margin: 0; font-size: 13px; white-space: nowrap; }
 .log-panel .section-head h2::before { width: 16px; height: 16px; flex-basis: 16px; }
 .log-panel .section-head p { display: none; }
-.log-panel .head-actions { height: 25.2px; gap: 5px; }
+.log-panel .head-actions { height: 25.2px; flex-wrap: nowrap; gap: 5px; }
 .log-panel .head-actions button {
+  flex: 0 0 auto;
   min-height: 25.2px;
   padding: 3px 8px;
   border-radius: 6px;
   font-size: 11px;
+  white-space: nowrap;
 }
 .home-center .log-list {
   margin: 8px 0;
@@ -1215,10 +1218,10 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .log-panel .head-actions button::before { display: inline-block; margin-right: 6px; font-size: 10px; }
 .log-panel .head-actions button:nth-child(1)::before { content: '▣'; }
 .log-panel .head-actions button:nth-child(2)::before { content: '☷'; }
-.log-panel .head-actions button:nth-child(3)::before { content: '▤'; }
-.log-panel .head-actions button:nth-child(4)::before { content: '■'; }
-.log-panel .head-actions button:nth-child(5)::before { content: '●'; }
-.log-panel .head-actions button:nth-child(6)::before { content: '⇩'; }
+.log-panel .head-actions button:nth-child(3)::before { content: '■'; }
+.log-panel .head-actions button:nth-child(4)::before { content: '●'; }
+.log-panel .head-actions button:nth-child(5)::before { content: '⇩'; }
+.log-panel .head-actions button:nth-child(6)::before { content: '↗'; }
 .log-status-bar {
   display: flex;
   height: 18px;
