@@ -13,8 +13,10 @@
     "check:py": "python -m unittest discover -s tests -p test_*.py"
   },
   "dependencies": {
+    "@primeuix/themes": "1.2.5",
     "@vitejs/plugin-vue": "latest",
     "echarts": "^6.1.0",
+    "primevue": "4.5.5",
     "typescript": "^5.9.3",
     "vite": "latest",
     "vue": "latest",

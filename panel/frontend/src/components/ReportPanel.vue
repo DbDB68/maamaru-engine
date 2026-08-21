@@ -7,7 +7,7 @@ import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
-import { categoryOf, dayRange, eventTime, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
+import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const days = ref(7)
@@ -23,6 +23,10 @@ const loadingOlder = ref(false)
 const error = ref('')
 const hasMoreEvents = ref(false), hasMoreRuns = ref(false)
 const eventCursor = ref<number | null>(null), runCursor = ref<number | null>(null)
+const recordDate = ref('')
+const recordLoading = ref(false)
+const recordHasMoreEvents = ref(false), recordHasMoreRuns = ref(false)
+const recordEventCursor = ref<number | null>(null), recordRunCursor = ref<number | null>(null)
 
 const mode = ref<'single' | 'compare'>('single')
 const selectedResource = ref('小判')
@@ -30,10 +34,10 @@ const compareResources = ref(['小判', '加速符'])
 const selectedDate = ref('')
 const highlightCategory = ref('')
 
-const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }, { value: 365, label: '1 年' }]
+const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const viewItems = [
-  { value: 'chart', label: '资源对账图', caption: '涨跌都归到干活的人头上' },
-  { value: 'records', label: '全部记录', caption: '按时间翻本丸档案' },
+  { value: 'chart', label: '资源对账图' },
+  { value: 'records', label: '全部记录' },
 ]
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 
@@ -60,11 +64,23 @@ const confidence = computed(() => {
 const foxSummary = computed(() => {
   const changed = resourceRows.value.filter(row => row.delta != null && row.delta !== 0)
   if (!changed.length) return `${rangeLabel.value}还没有足够的首末库存读数。狐之助会在挂机途中继续留意家底。`
-  const gains = changed.filter(row => row.delta! > 0).sort((a, b) => b.delta! - a.delta!)
-  const costs = changed.filter(row => row.delta! < 0).sort((a, b) => a.delta! - b.delta!)
-  const parts = [gains.length ? `资源总体有增长，${gains[0].name}${signed(gains[0].delta)}最多` : '资源总体没有增长']
-  if (costs.length) parts.push(`${costs[0].name}${signed(costs[0].delta)}是最明显的消耗`)
-  return `${rangeLabel.value}观察到${parts.join('；')}。点柱子可以看到每一笔是谁干的。`
+  const totals = new Map<string, { source: string; resource: string; delta: number }>()
+  for (const item of ledger.value?.attributions || []) {
+    const source = categoryOf(item.source)
+    if (source === 'unknown' || source === 'human') continue
+    const key = `${source}:${item.resource}`
+    const found = totals.get(key) || { source, resource: item.resource, delta: 0 }
+    found.delta += Number(item.delta || 0)
+    totals.set(key, found)
+  }
+  const entries = [...totals.values()].filter(item => item.delta)
+  const gain = entries.filter(item => item.delta > 0).sort((a, b) => b.delta - a.delta)[0]
+  const cost = entries.filter(item => item.delta < 0).sort((a, b) => a.delta - b.delta)[0]
+  if (!gain && !cost) return `${rangeLabel.value}还没有能确认玩法来源的资源变化。`
+  const parts: string[] = []
+  if (gain) parts.push(`从${categoryLabel(gain.source)}获得的${gain.resource}最多（${signed(gain.delta)}）`)
+  if (cost) parts.push(`${categoryLabel(cost.source)}消耗的${cost.resource}最多（${signed(cost.delta)}）`)
+  return `${rangeLabel.value}，${parts.join('；')}。`
 })
 
 // ---- 顶部小结：这段时间狐之助干啥了 ----
@@ -129,6 +145,14 @@ const chartDates = computed(() => {
     if (names.includes(attr.resource)) dates.add(shanghaiDate(attr.ts))
   }
   return [...dates].sort()
+})
+const ledgerDateRange = computed(() => {
+  if (!chartDates.value.length) return '暂无日期范围'
+  const label = (date: string) => {
+    const [, month, day] = date.split('-').map(Number)
+    return `${month}月${day}日`
+  }
+  return `${label(chartDates.value[0])}至${label(chartDates.value[chartDates.value.length - 1])}`
 })
 const chartSeries = computed<ChartSeries[]>(() => {
   const book = ledger.value
@@ -195,6 +219,59 @@ function onChartSelect({ date, key }: { date: string; key: string }) {
 function gapForDay(date: string) {
   const [start, end] = dayRange(date)
   return unreportedGaps.value.find(gap => gap.started_at < end && gap.ended_at >= start) || null
+}
+
+function latestRecordDate(): string {
+  const timestamps = [
+    ...runs.value.map(run => Number(run.started_at)),
+    ...events.value.map(event => Number(event.ts)),
+  ].filter(Number.isFinite)
+  return timestamps.length ? shanghaiDate(Math.max(...timestamps)) : shanghaiDate(Date.now() / 1000)
+}
+
+function mergeEvents(items: any[]) {
+  const merged = new Map(events.value.map(item => [item.id, item]))
+  for (const item of items) merged.set(item.id, item)
+  events.value = [...merged.values()].sort((a, b) => b.ts - a.ts)
+}
+
+function mergeRuns(items: any[]) {
+  const merged = new Map(runs.value.map(item => [item.run_id, item]))
+  for (const item of items.filter(run => run.loops)) merged.set(item.run_id, item)
+  runs.value = [...merged.values()].sort((a, b) => b.started_at - a.started_at)
+}
+
+async function loadRecordDay(date: string) {
+  recordLoading.value = true
+  try {
+    const [start, end] = dayRange(date)
+    const [nextEvents, nextRuns] = await Promise.all([
+      api.dataEvents(1000, undefined, start, end),
+      api.dataRuns(100, undefined, start, end),
+    ])
+    mergeEvents(nextEvents.items)
+    mergeRuns(nextRuns.items)
+    recordHasMoreEvents.value = nextEvents.has_more
+    recordHasMoreRuns.value = nextRuns.has_more
+    recordEventCursor.value = nextEvents.next_cursor
+    recordRunCursor.value = nextRuns.next_cursor
+    error.value = ''
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '当天记录读取失败' }
+  finally { recordLoading.value = false }
+}
+
+function selectRecordDate(date: string) {
+  recordDate.value = date
+  view.value = 'records'
+  void loadRecordDay(date)
+}
+
+function switchView(nextView: 'chart' | 'records') {
+  view.value = nextView
+  if (nextView !== 'records') return
+  const date = recordDate.value || latestRecordDate()
+  recordDate.value = date
+  void loadRecordDay(date)
 }
 const dayDetail = computed(() => {
   const date = selectedDate.value
@@ -293,6 +370,7 @@ async function load(nextDays = days.value) {
     runCursor.value = nextRuns.next_cursor
     humanReports.value = nextHuman.items
     inventoryGaps.value = nextHuman.inventory_gaps
+    if (!recordDate.value) recordDate.value = latestRecordDate()
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
   finally { loading.value = false }
@@ -301,6 +379,22 @@ async function loadOlder() {
   if (loadingOlder.value) return
   loadingOlder.value = true
   try {
+    if (view.value === 'records' && recordDate.value) {
+      const [start, end] = dayRange(recordDate.value)
+      const requests: Promise<any>[] = []
+      if (recordHasMoreEvents.value) requests.push(api.dataEvents(1000, recordEventCursor.value ?? undefined, start, end).then(next => {
+        mergeEvents(next.items)
+        recordEventCursor.value = next.next_cursor
+        recordHasMoreEvents.value = next.has_more
+      }))
+      if (recordHasMoreRuns.value) requests.push(api.dataRuns(100, recordRunCursor.value ?? undefined, start, end).then(next => {
+        mergeRuns(next.items)
+        recordRunCursor.value = next.next_cursor
+        recordHasMoreRuns.value = next.has_more
+      }))
+      await Promise.all(requests)
+      return
+    }
     const cutoff = Date.now() / 1000 - days.value * 86400
     const requests: Promise<any>[] = []
     if (hasMoreEvents.value) requests.push(api.dataEvents(1000, eventCursor.value ?? undefined).then(next => {
@@ -317,14 +411,25 @@ async function loadOlder() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '较早记录读取失败' }
   finally { loadingOlder.value = false }
 }
+
+async function refreshRecords() {
+  await load(days.value)
+  if (recordDate.value) await loadRecordDay(recordDate.value)
+}
 onMounted(() => load())
 </script>
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" title="本丸成绩单" subtitle="资源涨跌都归到干活的人头上"><template #actions><SegmentedControl :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" /></template></PanelHeader>
+    <PanelHeader variant="page" title="本丸成绩单" subtitle="资源涨跌都归到干活的人头上">
+      <template #actions>
+        <div class="report-toolbar-actions">
+          <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="成绩单视图" @update:model-value="switchView($event as 'chart' | 'records')" />
+          <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+        </div>
+      </template>
+    </PanelHeader>
     <div class="report-content">
-      <SegmentedControl class="report-views" :model-value="view" :items="viewItems" label="成绩单视图" variant="wide" @update:model-value="view = $event as 'chart' | 'records'" />
       <p v-if="error" class="report-error">{{ error }}</p>
 
       <template v-if="view === 'chart'">
@@ -341,13 +446,13 @@ onMounted(() => load())
 
         <section class="resource-trend">
           <header>
-            <div><h3>资源为什么增长或减少</h3><p>{{ mode === 'single' ? '柱子按来源染色，灰色是还没认领的；点一天看明细' : '对比模式：最多 4 种资源放一起，看谁涨谁跌' }}</p></div>
+            <div><h3>资源统计</h3></div>
             <nav v-if="mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
             <nav v-else aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
           <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(dayRange(dayDetail.date)[1] * 1000)" />
+          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(dayRange(dayDetail.date)[1] * 1000)" @open-records="selectRecordDate" />
           <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
             <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
             <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
@@ -357,7 +462,7 @@ onMounted(() => load())
         </section>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>这段时间家底变了多少</h3><p>按时间范围内第一次和最后一次库存读数计算</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span></header>
+          <header><div><h3>资源变化</h3><p>{{ ledgerDateRange }}</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span></header>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
@@ -372,7 +477,7 @@ onMounted(() => load())
         </section>
       </template>
 
-      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :days="days" :has-more-events="hasMoreEvents" :has-more-runs="hasMoreRuns" :loading-older="loadingOlder" @load-more="loadOlder" @refresh="load(days)" />
+      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
     </div>
   </section>
 </template>

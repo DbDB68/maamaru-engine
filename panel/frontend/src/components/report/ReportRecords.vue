@@ -1,19 +1,21 @@
 <script setup lang="ts">
-// 「全部记录」时间线：从旧 ReportPanel 原样迁来，行为保持不变
 import { computed, ref, watch } from 'vue'
+import DatePicker from 'primevue/datepicker'
+import Timeline from 'primevue/timeline'
 import { api } from '../../api'
-import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, runElapsedSeconds, runTitle } from './reportModel'
+import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, runElapsedSeconds, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
   events: any[]
   runs: any[]
-  days: number
+  selectedDate: string
   hasMoreEvents: boolean
   hasMoreRuns: boolean
+  loading: boolean
   loadingOlder: boolean
 }>()
 
-const emit = defineEmits<{ 'load-more': []; refresh: [] }>()
+const emit = defineEmits<{ 'load-more': []; refresh: []; 'select-date': [date: string] }>()
 
 const timelineLimit = ref(20)
 
@@ -176,27 +178,46 @@ const groupedActivityEvents = computed(() => {
   }
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
-const unifiedRecords = computed(() => {
+const allRecords = computed(() => {
   const visibleRunIds = new Set(props.runs.map(run => run.run_id).filter(Boolean))
-  const entries = [
+  return [
     ...props.runs.map(run => ({ kind: 'run' as const, ts: Number(run.started_at), run })),
     ...groupedActivityEvents.value
       .filter(item => !item.run_id || !visibleRunIds.has(item.run_id))
       .map(item => ({ kind: 'activity' as const, ts: Number(item.ts), item })),
   ].sort((a, b) => b.ts - a.ts)
-  const groups: Array<{ key: string; label: string; entries: typeof entries }> = []
-  for (const entry of entries.slice(0, timelineLimit.value)) {
-    const date = new Date(entry.ts * 1000)
-    const key = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(date)
-    let group = groups[groups.length - 1]
-    if (!group || group.key !== key) {
-      group = { key, label: new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short' }).format(date), entries: [] }
-      groups.push(group)
-    }
-    group.entries.push(entry)
-  }
-  return { total: entries.length, groups }
 })
+const selectedRecords = computed(() => allRecords.value.filter(entry => shanghaiDate(entry.ts) === props.selectedDate))
+const visibleRecords = computed(() => selectedRecords.value.slice(0, timelineLimit.value))
+const selectedRunCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'run').length)
+const selectedActivityCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'activity').length)
+const recordCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const entry of allRecords.value) {
+    const date = shanghaiDate(entry.ts)
+    counts.set(date, (counts.get(date) || 0) + 1)
+  }
+  return counts
+})
+const calendarDate = computed({
+  get: () => new Date(`${props.selectedDate}T12:00:00+08:00`),
+  set: (value: Date | null) => value && emit('select-date', shanghaiDate(value.getTime() / 1000)),
+})
+const minDate = computed(() => new Date((Date.now() / 1000 - 365 * 86400) * 1000))
+const maxDate = computed(() => new Date())
+const selectedDateLabel = computed(() => new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'long',
+}).format(new Date(`${props.selectedDate}T12:00:00+08:00`)))
+
+function calendarDayKey(date: { year: number; month: number; day: number }): string {
+  return `${date.year}-${String(date.month + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`
+}
+function recordKey(entry: any): string {
+  return entry.kind === 'run' ? `run:${entry.run.run_id}` : `event:${entry.item.id}`
+}
+function recordTime(timestamp: number): string {
+  return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
 function runActivities(run: any) { return groupedActivityEvents.value.filter(item => item.run_id && item.run_id === run.run_id) }
 function runRepairTotal(run: any) {
   const activityTotal = runActivities(run).filter(item => item.event_type === 'repair.summary')
@@ -241,41 +262,122 @@ async function attachInventory(run: any) {
 
 const pendingBump = ref(false)
 function showMoreRecords() {
-  if (unifiedRecords.value.total > timelineLimit.value) { timelineLimit.value += 20; return }
+  if (selectedRecords.value.length > timelineLimit.value) { timelineLimit.value += 20; return }
   pendingBump.value = true
   emit('load-more')
 }
 watch(() => [props.events.length, props.runs.length], () => {
   if (pendingBump.value) { timelineLimit.value += 20; pendingBump.value = false }
 })
-watch(() => props.days, () => { timelineLimit.value = 20 })
+watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
 </script>
 
 <template>
-  <section class="unified-history">
-    <p v-if="attachError" class="report-error">{{ attachError }}</p>
-    <template v-if="unifiedRecords.groups.length">
-      <section v-for="group in unifiedRecords.groups" :key="group.key" class="history-day">
-        <h3>{{ group.label }}</h3>
-        <div class="history-list">
-          <template v-for="entry in group.entries" :key="entry.kind === 'run' ? `run:${entry.run.run_id}` : `event:${entry.item.id}`">
-            <details v-if="entry.kind === 'run'" class="history-run">
-              <summary><time>{{ new Date(entry.ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</time><span><b>🦊 {{ runTitle(entry.run) }}</b><small>{{ elapsedTime(runElapsedSeconds(entry.run)) }}<template v-if="entry.run.average_loop_seconds"> · {{ loopTime(entry.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(entry.run) || deltaStats(entry.run) || '查看详情' }}</em></summary>
-              <div class="run-evidence">
-                <p v-if="!hasUpkeep(entry.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
-                <div v-else class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(entry.run)">🩹 手入 <b>{{ runRepairTotal(entry.run) }}</b> 振</span><span v-if="runSpeedupTotal(entry.run)">⚡ 加速符 <b>{{ runSpeedupTotal(entry.run) }}</b> 枚</span><span v-if="runEquipmentTotal(entry.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(entry.run) }}</b> 次</span></div>
-                <p v-if="attributedStats(entry.run)" class="run-delta"><small>🦊 已确认收支</small>{{ attributedStats(entry.run) }}</p>
-                <p v-if="deltaStats(entry.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(entry.run) }}<span v-if="kobanPerHourLabel(entry.run)">· 小判约 {{ kobanPerHourLabel(entry.run) }} / 小时</span><span v-if="kobanPerFloorLabel(entry.run)">· 平均每层 {{ kobanPerFloorLabel(entry.run) }}</span></p>
-                <div v-if="runActivities(entry.run).length" class="run-activities"><p v-for="item in runActivities(entry.run)" :key="item.id"><time>{{ new Date(item.ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
-                <div v-if="!entry.run.has_resource_comparison && canAttachInventory(entry.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === entry.run.run_id" @click="attachInventory(entry.run)">{{ attachingRun === entry.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[entry.run.run_id]">{{ inventoryNotice[entry.run.run_id] }}</em></div>
-              </div>
-            </details>
-            <article v-else class="history-activity"><time>{{ new Date(entry.ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</time><span><b>{{ activityTitle(entry.item) }}</b><small>{{ activityDetail(entry.item) }}</small></span><details v-if="entry.item.items.length > 1"><summary>查看 {{ entry.item.items.length }} 条明细</summary><p v-for="child in entry.item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></article>
-          </template>
-        </div>
-      </section>
-    </template>
-    <p v-else class="report-empty">这个时间段还没有完成的记录。</p>
-    <button v-if="unifiedRecords.total > timelineLimit || hasMoreRuns || hasMoreEvents" type="button" class="timeline-more secondary" :disabled="loadingOlder" @click="showMoreRecords">{{ loadingOlder ? '正在翻档案……' : '查看更早记录' }}</button>
+  <section class="records-browser">
+    <aside class="records-calendar-panel">
+      <header><h3>按日期查看</h3></header>
+      <DatePicker v-model="calendarDate" class="records-calendar" inline :min-date="minDate" :max-date="maxDate" :show-other-months="false">
+        <template #date="slotProps">
+          <span class="calendar-day" :class="{ recorded: recordCounts.has(calendarDayKey(slotProps.date)) }">
+            {{ slotProps.date.day }}<i v-if="recordCounts.has(calendarDayKey(slotProps.date))" aria-hidden="true" />
+          </span>
+        </template>
+      </DatePicker>
+      <DatePicker v-model="calendarDate" class="records-date-picker-mobile" :min-date="minDate" :max-date="maxDate" show-icon fluid date-format="yy年mm月dd日" />
+    </aside>
+
+    <section class="records-day">
+      <header class="records-day-header">
+        <div><small>{{ selectedDate }}</small><h3>{{ selectedDateLabel }}</h3></div>
+        <p><b>{{ selectedRunCount }}</b> 次任务<template v-if="selectedActivityCount"> · {{ selectedActivityCount }} 条单独记录</template></p>
+      </header>
+      <p v-if="attachError" class="report-error">{{ attachError }}</p>
+      <p v-if="loading" class="report-empty">狐之助正在翻这一天的档案……</p>
+      <Timeline v-else-if="visibleRecords.length" :value="visibleRecords" align="left" class="day-timeline">
+        <template #opposite="slotProps"><time>{{ recordTime(slotProps.item.ts) }}</time></template>
+        <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : '·' }}</span></template>
+        <template #content="slotProps">
+          <details v-if="slotProps.item.kind === 'run'" :key="recordKey(slotProps.item)" class="record-run">
+            <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
+            <div class="run-evidence">
+              <p v-if="!hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
+              <div v-else class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(slotProps.item.run)">🩹 手入 <b>{{ runRepairTotal(slotProps.item.run) }}</b> 振</span><span v-if="runSpeedupTotal(slotProps.item.run)">⚡ 加速符 <b>{{ runSpeedupTotal(slotProps.item.run) }}</b> 枚</span><span v-if="runEquipmentTotal(slotProps.item.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(slotProps.item.run) }}</b> 次</span></div>
+              <p v-if="attributedStats(slotProps.item.run)" class="run-delta"><small>🦊 已确认收支</small>{{ attributedStats(slotProps.item.run) }}</p>
+              <p v-if="deltaStats(slotProps.item.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(slotProps.item.run) }}<span v-if="kobanPerHourLabel(slotProps.item.run)">· 小判约 {{ kobanPerHourLabel(slotProps.item.run) }} / 小时</span><span v-if="kobanPerFloorLabel(slotProps.item.run)">· 平均每层 {{ kobanPerFloorLabel(slotProps.item.run) }}</span></p>
+              <div v-if="runActivities(slotProps.item.run).length" class="run-activities"><p v-for="item in runActivities(slotProps.item.run)" :key="item.id"><time>{{ recordTime(item.ts) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
+              <div v-if="!slotProps.item.run.has_resource_comparison && canAttachInventory(slotProps.item.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === slotProps.item.run.run_id" @click="attachInventory(slotProps.item.run)">{{ attachingRun === slotProps.item.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[slotProps.item.run.run_id]">{{ inventoryNotice[slotProps.item.run.run_id] }}</em></div>
+            </div>
+          </details>
+          <article v-else :key="recordKey(slotProps.item)" class="record-activity"><span><b>{{ activityTitle(slotProps.item.item) }}</b><small>{{ activityDetail(slotProps.item.item) }}</small></span><details v-if="slotProps.item.item.items.length > 1"><summary>查看 {{ slotProps.item.item.items.length }} 条明细</summary><p v-for="child in slotProps.item.item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></article>
+        </template>
+      </Timeline>
+      <p v-else class="report-empty">这一天还没有完成的任务记录。</p>
+      <button v-if="selectedRecords.length > timelineLimit || hasMoreRuns || hasMoreEvents" type="button" class="timeline-more secondary" :disabled="loadingOlder" @click="showMoreRecords">{{ loadingOlder ? '正在翻当天档案……' : '查看当天更早记录' }}</button>
+    </section>
   </section>
 </template>
+
+<style scoped>
+.records-browser { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 12px; align-items: start; }
+.records-calendar-panel, .records-day { min-width: 0; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
+.records-calendar-panel { position: sticky; top: 0; padding: 14px; }
+.records-calendar-panel header h3 { margin: 0; }
+.records-date-picker-mobile { display: none; }
+.records-day { padding: 0 16px 16px; }
+.records-day-header { display: flex; justify-content: space-between; align-items: end; gap: 14px; padding: 14px 0 12px; border-bottom: 1px solid var(--paper-line); }
+.records-day-header small { color: var(--ink-dim); }
+.records-day-header h3, .records-day-header p { margin: 0; }
+.records-day-header p { color: var(--ink-dim); font-size: 12px; }
+.records-day-header p b { color: var(--fox-gold-deep); font-size: 18px; }
+.calendar-day { position: relative; display: grid; width: 100%; height: 100%; place-items: center; }
+.calendar-day i { position: absolute; right: 1px; bottom: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--fox-gold); }
+.record-marker { display: grid; width: 28px; height: 28px; place-items: center; border: 2px solid var(--paper-card); border-radius: 50%; color: var(--ink-dim); background: var(--paper-panel); box-shadow: 0 0 0 1px var(--paper-line); font-size: 15px; }
+.record-marker.run { color: var(--ink); background: var(--fox-gold-pale); box-shadow: 0 0 0 1px var(--fox-gold); }
+.record-run, .record-activity { min-width: 0; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.record-run > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; align-items: center; gap: 10px; padding: 11px 12px; cursor: pointer; list-style: none; }
+.record-run > summary::-webkit-details-marker { display: none; }
+.record-run > summary::after { content: '＋'; color: var(--fox-gold-deep); font-size: 16px; }
+.record-run[open] > summary { background: var(--fox-gold-pale); border-radius: 9px 9px 0 0; }
+.record-run[open] > summary::after { content: '−'; }
+.record-run summary > span, .record-activity > span { display: grid; gap: 2px; min-width: 0; }
+.record-run summary small, .record-activity small { color: var(--ink-dim); font-size: 11px; }
+.record-run summary > em { overflow: hidden; color: var(--fox-gold-deep); font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.record-activity { padding: 11px 12px; }
+.record-activity > details summary { margin-top: 7px; color: var(--fox-gold-deep); cursor: pointer; font-size: 11px; }
+.record-activity > details p { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; margin: 6px 0 0; color: var(--ink-dim); font-size: 11px; }
+.record-activity > details time { white-space: nowrap; }
+.report-empty { padding: 28px 12px; text-align: center; }
+:deep(.records-calendar.p-datepicker) { width: 100%; margin-top: 10px; color: var(--ink); background: transparent; border: 0; box-shadow: none; }
+:deep(.records-calendar .p-datepicker-panel) { width: 100%; padding: 0; background: transparent; border: 0; box-shadow: none; }
+:deep(.records-calendar .p-datepicker-header) { padding-inline: 2px; background: transparent; border: 0; }
+:deep(.records-calendar .p-datepicker-day-view) { width: 100%; font-size: 12px; }
+:deep(.records-calendar .p-datepicker-day-view) { table-layout: fixed; }
+:deep(.records-calendar .p-datepicker-day-view th),
+:deep(.records-calendar .p-datepicker-day-view td) { padding: 2px 0; }
+:deep(.records-calendar .p-datepicker-day) { width: 27px; height: 27px; border-radius: 8px; }
+:deep(.records-calendar .p-datepicker-day-selected) { color: var(--ink); background: var(--fox-gold-pale); outline: 1px solid var(--fox-gold); }
+:deep(.records-calendar .p-datepicker-today > .p-datepicker-day) { color: var(--fox-gold-deep); font-weight: 700; }
+:deep(.day-timeline) { margin-top: 14px; }
+:deep(.day-timeline .p-timeline-event-opposite) { flex: 0 0 54px; padding: 7px 0 0; color: var(--ink-dim); font-size: 11px; text-align: left; }
+:deep(.day-timeline .p-timeline-event-separator) { flex: 0 0 36px; }
+:deep(.day-timeline .p-timeline-event-content) { min-width: 0; padding: 0 0 13px 8px; }
+:deep(.day-timeline .p-timeline-event-connector) { background: var(--paper-line); }
+:global(body[data-theme='pixel']) .records-calendar-panel,
+:global(body[data-theme='pixel']) .records-day,
+:global(body[data-theme='pixel']) .record-run,
+:global(body[data-theme='pixel']) .record-activity { border-width: 2px; border-color: #1a3055; border-radius: 0; box-shadow: 3px 3px 0 #c8bea5; }
+
+@media (max-width: 720px) {
+  .records-browser { grid-template-columns: 1fr; }
+  .records-calendar-panel { position: static; padding: 12px; }
+  .records-calendar-panel header, .records-calendar { display: none; }
+  .records-date-picker-mobile { display: flex; }
+  .records-day { padding-inline: 12px; }
+  .records-day-header { align-items: flex-start; }
+  .record-run > summary { grid-template-columns: minmax(0, 1fr) 18px; }
+  .record-run summary > em { grid-column: 1; }
+  .record-run summary::after { grid-column: 2; grid-row: 1 / 3; }
+  :deep(.day-timeline .p-timeline-event-opposite) { flex-basis: 45px; }
+  :deep(.day-timeline .p-timeline-event-separator) { flex-basis: 30px; }
+}
+</style>

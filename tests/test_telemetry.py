@@ -282,6 +282,24 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.recent_events(limit=1)[0]["id"], second)
         self.assertEqual(self.store.recent_events(limit=1, before_id=second)[0]["id"], first)
 
+    def test_record_pages_can_filter_one_day_without_losing_cursors(self):
+        conn = self.store._conn()
+        for ts, event_type in ((100, "old"), (200, "target"), (300, "new")):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, NULL, 'daily', ?, '{}')", (ts, event_type),
+            )
+        for run_id, started_at in (("old", 100), ("target", 200), ("new", 300)):
+            self.store.start_run(run_id, "daily", started_at=started_at)
+            self.store.finish_run(run_id, "completed", ended_at=started_at + 10)
+        conn.commit()
+
+        events = self.store.recent_events(from_ts=150, to_ts=250)
+        runs = self.store.recent_run_summaries(from_ts=150, to_ts=250)
+
+        self.assertEqual([event["event_type"] for event in events], ["target"])
+        self.assertEqual([run["run_id"] for run in runs], ["target"])
+
     def test_public_api_contract_uses_versioned_store(self):
         from panel.server import api_data_events, api_data_ocr, api_data_summary
 

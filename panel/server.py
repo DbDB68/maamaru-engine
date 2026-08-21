@@ -1559,13 +1559,15 @@ async def api_data_summary(days: int = 30):
 
 @app.get("/api/data/events")
 async def api_data_events(limit: int = 100, event_type: str = "",
-                          script: str = "", before_id: int | None = None):
+                          script: str = "", before_id: int | None = None,
+                          from_ts: float | None = None,
+                          to_ts: float | None = None):
     """结构化玩法事件；payload 只含机器字段，不依赖中文日志文案。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     page_limit = max(1, min(int(limit), 1000))
     items = get_telemetry_store().recent_events(
         limit=page_limit + 1, event_type=event_type or None, script=script or None,
-        before_id=before_id)
+        before_id=before_id, from_ts=from_ts, to_ts=to_ts)
     has_more = len(items) > page_limit
     items = items[:page_limit]
     return {
@@ -1578,13 +1580,15 @@ async def api_data_events(limit: int = 100, event_type: str = "",
 
 @app.get("/api/data/runs")
 async def api_data_runs(limit: int = 20, script: str = "",
-                        before_started_at: float | None = None):
+                        before_started_at: float | None = None,
+                        from_ts: float | None = None,
+                        to_ts: float | None = None):
     """每轮任务的结构化结算；圈速按相邻完成事件计算，不含盘点时间。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     page_limit = max(1, min(int(limit), 100))
     items = get_telemetry_store().recent_run_summaries(
         limit=page_limit + 1, script=script or None,
-        before_started_at=before_started_at)
+        before_started_at=before_started_at, from_ts=from_ts, to_ts=to_ts)
     has_more = len(items) > page_limit
     items = items[:page_limit]
     return {

@@ -590,7 +590,9 @@ class TelemetryStore:
 
     def recent_events(self, limit: int = 100, event_type: str | None = None,
                       script: str | None = None,
-                      before_id: int | None = None) -> list[dict]:
+                      before_id: int | None = None,
+                      from_ts: float | None = None,
+                      to_ts: float | None = None) -> list[dict]:
         clauses, args = [], []
         if event_type:
             clauses.append("event_type = ?")
@@ -601,6 +603,12 @@ class TelemetryStore:
         if before_id is not None:
             clauses.append("id < ?")
             args.append(max(1, int(before_id)))
+        if from_ts is not None:
+            clauses.append("ts >= ?")
+            args.append(float(from_ts))
+        if to_ts is not None:
+            clauses.append("ts < ?")
+            args.append(float(to_ts))
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         args.append(max(1, min(int(limit), 1001)))
         rows = self._conn().execute(
@@ -708,7 +716,9 @@ class TelemetryStore:
         }
 
     def recent_run_summaries(self, limit: int = 20, script: str | None = None,
-                             before_started_at: float | None = None) -> list[dict]:
+                             before_started_at: float | None = None,
+                             from_ts: float | None = None,
+                             to_ts: float | None = None) -> list[dict]:
         clauses, args = ["status != 'running'"], []
         if script:
             clauses.append("script = ?")
@@ -716,6 +726,12 @@ class TelemetryStore:
         if before_started_at is not None:
             clauses.append("started_at < ?")
             args.append(float(before_started_at))
+        if from_ts is not None:
+            clauses.append("started_at >= ?")
+            args.append(float(from_ts))
+        if to_ts is not None:
+            clauses.append("started_at < ?")
+            args.append(float(to_ts))
         args.append(max(1, min(int(limit), 101)))
         rows = self._conn().execute(
             "SELECT run_id FROM runs WHERE " + " AND ".join(clauses) +
