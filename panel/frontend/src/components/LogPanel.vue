@@ -30,6 +30,7 @@ function level(message: string) {
   if (/✓|✅|完成|成功|已领/.test(message)) return 'ok'
   return ''
 }
+function exportDiagnostics() { window.location.assign('/api/diagnostics/export') }
 async function scrollEnd() { await nextTick(); if (autoScroll.value) list.value?.scrollTo({ top: list.value.scrollHeight }) }
 async function load() { entries.value = (await api.logs()).logs || []; scrollEnd() }
 function connect() {
@@ -62,6 +63,7 @@ onBeforeUnmount(() => source?.close())
         <button v-if="!raw" class="secondary" :class="{ active: showProcess }" @click="showProcess = !showProcess">过程</button>
         <button class="secondary" @click="entries = []">清屏</button>
         <button class="secondary" :class="{ active: autoScroll }" @click="autoScroll = !autoScroll">自动滚动</button>
+        <button class="secondary" title="导出可直接附在 Issue 中的安全诊断包" @click="exportDiagnostics">排错包</button>
       </div>
       </template>
     </PanelHeader>

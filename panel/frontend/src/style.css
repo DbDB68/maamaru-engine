@@ -1218,6 +1218,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .log-panel .head-actions button:nth-child(3)::before { content: '▤'; }
 .log-panel .head-actions button:nth-child(4)::before { content: '■'; }
 .log-panel .head-actions button:nth-child(5)::before { content: '●'; }
+.log-panel .head-actions button:nth-child(6)::before { content: '⇩'; }
 .log-status-bar {
   display: flex;
   height: 18px;

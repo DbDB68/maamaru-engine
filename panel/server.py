@@ -15,12 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .log_store import get_store
 from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
+from touken.diagnostics import build_diagnostic_bundle
 from touken.runtime_paths import (
     BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
     ensure_runtime_data,
@@ -936,6 +937,17 @@ async def get_logs(limit: int = 100, after_id: int = 0):
     logs = store.get_recent(limit=limit, after_id=after_id)
     last_id = store.get_last_id()
     return {"logs": logs, "last_id": last_id}
+
+
+@app.get("/api/diagnostics/export")
+def export_diagnostics():
+    """Download a sanitized text-only bundle suitable for a public issue."""
+    bundle = build_diagnostic_bundle()
+    return Response(
+        content=bundle.content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{bundle.filename}"'},
+    )
 
 
 @app.get("/api/logs/stream")

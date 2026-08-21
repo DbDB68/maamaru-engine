@@ -14,6 +14,7 @@ from pathlib import Path
 
 import webview
 
+from touken.diagnostics import create_diagnostic_bundle
 from touken.runtime_paths import DATA_ROOT, LOG_DIR, UPDATES_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
 from .update_apply import consume_result, prepare_apply
@@ -42,7 +43,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:22px 0 18px}.hero
 <main>
 <section id="hero" class="hero"><div class="hero-state"><span id="stateMark" class="state-mark">…</span><div><span class="eyebrow">启动状态</span><h2 id="stateTitle">正在整理启动环境</h2><p id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</p></div></div><div class="hero-action"><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div></section>
 <section class="checks"><div class="checks-head"><div><h3>启动前检查</h3><p>只把需要你留意的事情摆在外面。</p></div><span id="checksCount" class="checks-count">正在检查…</span></div><div id="checks"><div class="loading">狐之助正在巡查……</div></div></section>
-<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="update()">⬆ 检查更新</button><button onclick="openData()">📁 数据目录</button></div>
+<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="update()">⬆ 检查更新</button><button onclick="exportDiagnostics(this)">📦 导出排错包</button><button onclick="openData()">📁 数据目录</button></div>
 <p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p>
 </main>
 <script>
@@ -68,6 +69,7 @@ function setLaunchStep(index){const steps=[...document.querySelectorAll('#launch
 async function startApp(){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start();clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
 async function update(){setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();if(r.update_available&&r.download_ready){if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){setState('','正在下载更新','安装包下载后还会校验大小和 SHA-256。','…');const d=await pywebview.api.download_update();alert(d.message);if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}}}else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}await refresh()}
+async function exportDiagnostics(button){const old=button.textContent;button.disabled=true;button.textContent='正在整理…';const r=await pywebview.api.export_diagnostics();alert(r.message);button.disabled=false;button.textContent=old}
 async function openData(){await pywebview.api.open_data()}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
@@ -232,6 +234,21 @@ class Api:
         DATA_ROOT.mkdir(parents=True, exist_ok=True)
         os.startfile(DATA_ROOT)
         return {"ok": True}
+
+    def export_diagnostics(self):
+        try:
+            path = create_diagnostic_bundle()
+            try:
+                subprocess.Popen(
+                    ["explorer.exe", "/select,", str(path)],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except OSError:
+                os.startfile(path.parent)
+            return {"ok": True, "message": f"排错包已经生成，并在文件夹中替你选好了。\n\n{path.name}"}
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": f"暂时没能生成排错包：{exc}"}
 
 
 def main():
