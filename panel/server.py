@@ -204,9 +204,9 @@ def _sword_names(raw) -> list[str]:
 # 整体归因）。builder 本体签名统一：(agent, config_path, params) -> generator。
 
 def _wrap_inventory(tag: str, runner, inventory=False):
-    """（2026-08 起退役为默认关闭）给玩法脚本套开工前/收工后库存盘点。
+    """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 必做的回本丸 + 强制 peek。
 
-    为什么默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
+    为什么盘点默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
     各循环 quick_peek 顺路更新（60s 节流），挖地小判差值由 osaka_stream
     自带的掉落率实验记账。专程跑腿盘点太磨叽（7-27 日课超时两次的教训）。
     想给某个任务恢复 run 级盘点就显式传 inventory=True。
@@ -215,6 +215,9 @@ def _wrap_inventory(tag: str, runner, inventory=False):
       会穿过 try/finally，finally 里照样补拍；紧急停止/看门狗是 kill，子进程
       没机会，由面板 has_after_snapshot=False 提示缺收工快照）。
     - 盘点失败绝不拖垮任务：before/after 各自 try，坏了只打日志继续。
+    - 收尾回本丸 + 强制顶栏 peek：与 inventory 开关无关，每个任务跑完都执行。
+      这是资源总账的固定“跑完了”观察点；若没能回到本丸，则作为故障信号上报。
+      收尾失败同样不拖垮任务结果。
     """
     def _fn(config_path, params):
         agent = _make_agent(config_path)
@@ -234,6 +237,22 @@ def _wrap_inventory(tag: str, runner, inventory=False):
                     yield from agent.status_snapshot_stream(phase="after")
                 except Exception as exc:
                     yield f"[{tag}] ⚠️ 收工盘点失败（不影响任务结果）：{exc}"
+            # --- 新收尾：每个任务跑完都导航回本丸，并强制拍一次顶栏 peek ---
+            # 这是固定观察点：给资源总账一个“跑完了”的锚点；如果没回到本丸，
+            # 多半是卡在某个界面了，作为故障信号上报。
+            try:
+                yield f"[{tag}] 收尾：导航回本丸"
+                for nav_msg in agent.navigate_to_stream("本丸"):
+                    yield nav_msg
+                if getattr(agent, "current_location", None) == "本丸":
+                    yield f"[{tag}] 收尾：已回本丸，强制拍一次顶栏"
+                    if hasattr(agent, "quick_peek"):
+                        agent.quick_peek(tag=f"{tag}·收尾", force=True)
+                else:
+                    yield (f"[{tag}] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
+                           "去看看")
+            except Exception as exc:
+                yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
     return _fn
 
 
@@ -333,9 +352,28 @@ def _build_daily_standalone(config_path, params):
     盘点时机由 daily_stream 自己管：登录落本丸后拍 before、⑫ 步骤拍 after。
     之前套 wrapper 时，开工盘点在打开游戏/登录之前就触发，游戏没开只能
     盲点模拟器桌面，把冷启动登录搞挂。
+
+    但统一收尾约定（回本丸 + 强制 peek）仍然要在整个日课 run 结束时执行
+    一次，与 inventory 开关无关；收尾失败不拖垮任务结果。
     """
     agent = _make_agent(config_path)
-    yield from _build_daily(agent, config_path, params)
+    try:
+        yield from _build_daily(agent, config_path, params)
+    finally:
+        # --- 统一收尾：回本丸 + 强制顶栏 peek ---
+        try:
+            yield "[日课] 收尾：导航回本丸"
+            for nav_msg in agent.navigate_to_stream("本丸"):
+                yield nav_msg
+            if getattr(agent, "current_location", None) == "本丸":
+                yield "[日课] 收尾：已回本丸，强制拍一次顶栏"
+                if hasattr(agent, "quick_peek"):
+                    agent.quick_peek(tag="日课·收尾", force=True)
+            else:
+                yield ("[日课] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
+                       "去看看")
+        except Exception as exc:
+            yield f"[日课] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
 
 
 def _build_raid(agent, config_path, params):

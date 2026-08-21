@@ -1,0 +1,118 @@
+import unittest
+from unittest.mock import patch
+
+from panel.server import _build_daily_standalone, _wrap_inventory
+
+
+class FakeAgent:
+    """只测 _wrap_inventory / _build_daily_standalone 收尾约定的最小假 Agent。"""
+
+    def __init__(self, location=None, nav_ok=True, peek_ok=True,
+                 raise_on_nav=False):
+        self.current_location = location
+        self.nav_ok = nav_ok
+        self.peek_ok = peek_ok
+        self.raise_on_nav = raise_on_nav
+        self.peek_calls = []
+        self.daily_args = None
+
+    def navigate_to_stream(self, target):
+        if self.raise_on_nav:
+            raise RuntimeError("导航模拟异常")
+        yield f"[NAV] 正在去 {target}"
+        if self.nav_ok:
+            self.current_location = target
+
+    def quick_peek(self, tag="", force=False):
+        self.peek_calls.append({"tag": tag, "force": force})
+        return self.peek_ok
+
+    def daily_stream(self, **kwargs):
+        self.daily_args = kwargs
+        yield "[日课] 跑完了"
+
+
+def _simple_runner(msg):
+    def _fn(agent, config_path, params):
+        yield msg
+    return _fn
+
+
+class TaskCleanupTests(unittest.TestCase):
+    def test_cleanup_navigates_home_and_forces_peek(self):
+        """收尾成功：回本丸 + quick_peek 被强制调用。"""
+        agent = FakeAgent()
+        wrapped = _wrap_inventory("TEST", _simple_runner("done"))
+        with patch("panel.server._make_agent", return_value=agent):
+            msgs = list(wrapped("config.json", {}))
+
+        self.assertIn("done", msgs)
+        self.assertIn("[TEST] 收尾：已回本丸，强制拍一次顶栏", msgs)
+        self.assertEqual(len(agent.peek_calls), 1)
+        self.assertEqual(agent.peek_calls[0]["tag"], "TEST·收尾")
+        self.assertTrue(agent.peek_calls[0]["force"])
+        self.assertEqual(agent.current_location, "本丸")
+
+    def test_cleanup_warns_when_not_home(self):
+        """导航失败：任务原结果保留，出现醒目警告，不调用 peek。"""
+        agent = FakeAgent(location="出阵", nav_ok=False)
+        wrapped = _wrap_inventory("TEST", _simple_runner("done"))
+        with patch("panel.server._make_agent", return_value=agent):
+            msgs = list(wrapped("config.json", {}))
+
+        self.assertIn("done", msgs)
+        self.assertTrue(
+            any("收尾没能回到本丸" in m for m in msgs),
+            f"未找到导航失败警告，消息为：{msgs}",
+        )
+        self.assertEqual(agent.peek_calls, [])
+
+    def test_cleanup_exception_does_not_pollute_result(self):
+        """收尾抛异常：吞掉、只出日志，任务原结果不被污染。"""
+        agent = FakeAgent(raise_on_nav=True)
+        wrapped = _wrap_inventory("TEST", _simple_runner("done"))
+        with patch("panel.server._make_agent", return_value=agent):
+            msgs = list(wrapped("config.json", {}))
+
+        self.assertIn("done", msgs)
+        self.assertTrue(
+            any("收尾导航/Peek 失败" in m for m in msgs),
+            f"未找到异常兜底日志，消息为：{msgs}",
+        )
+        self.assertEqual(agent.peek_calls, [])
+
+    def test_daily_cleanup_navigates_home_and_forces_peek(self):
+        """一键日课独立入口：跑完后同样回本丸 + 强制 peek。"""
+        agent = FakeAgent()
+        with patch("panel.server._make_agent", return_value=agent), \
+                patch("panel.server._load_panel_settings", return_value={}), \
+                patch("panel.scheduler.load_config",
+                      return_value={"common_plan": []}):
+            msgs = list(_build_daily_standalone("config.json", {}))
+
+        self.assertIn("[日课] 跑完了", msgs)
+        self.assertIn("[日课] 收尾：已回本丸，强制拍一次顶栏", msgs)
+        self.assertEqual(len(agent.peek_calls), 1)
+        self.assertEqual(agent.peek_calls[0]["tag"], "日课·收尾")
+        self.assertTrue(agent.peek_calls[0]["force"])
+        self.assertEqual(agent.current_location, "本丸")
+
+    def test_daily_cleanup_warns_when_not_home(self):
+        """一键日课导航失败：保留日课结果，出警告，不调用 peek。"""
+        agent = FakeAgent(location="出阵", nav_ok=False)
+        with patch("panel.server._make_agent", return_value=agent), \
+                patch("panel.server._load_panel_settings", return_value={}), \
+                patch("panel.scheduler.load_config",
+                      return_value={"common_plan": []}):
+            msgs = list(_build_daily_standalone("config.json", {}))
+
+        self.assertIn("[日课] 跑完了", msgs)
+        self.assertTrue(
+            any("收尾没能回到本丸" in m for m in msgs),
+            f"未找到导航失败警告，消息为：{msgs}",
+        )
+        self.assertEqual(agent.peek_calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
