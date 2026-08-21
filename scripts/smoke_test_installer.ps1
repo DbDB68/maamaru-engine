@@ -94,6 +94,7 @@ try {
     $driveMapped = $true
 
     $installDir = Join-Path $driveRoot "Programs\Maamaru"
+    $physicalInstallDir = Join-Path $installVolume "Programs\Maamaru"
     $install = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
@@ -106,8 +107,10 @@ try {
         throw "安装器返回错误码 $($install.ExitCode)"
     }
 
-    $launcher = Join-Path $installDir "まあ丸启动器.exe"
-    $manifest = Join-Path $installDir "manifest.json"
+    # subst 盘符在进程列表里会还原成实际路径。后续用实际路径启动和清理，
+    # 同时仍由安装器通过 R: 写入，覆盖“安装到非系统盘”的真实场景。
+    $launcher = Join-Path $physicalInstallDir "まあ丸启动器.exe"
+    $manifest = Join-Path $physicalInstallDir "manifest.json"
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
         throw "安装后没有找到启动器：$launcher"
     }
@@ -126,7 +129,7 @@ try {
         (Join-Path $dataRoot "config\expedition.json")
     )
 
-    $launcherProcess = Start-Process -FilePath $launcher -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    $launcherProcess = Start-Process -FilePath $launcher -WorkingDirectory $physicalInstallDir -WindowStyle Hidden -PassThru
     Wait-Until -TimeoutSeconds 30 -FailureMessage "首次启动没有建立完整的用户数据" -Condition {
         @($expectedData | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0
     }
@@ -141,7 +144,7 @@ try {
     Stop-LauncherProcesses -ExecutablePath $launcher
 
     # 直接进入面板模式，验证内置 Python/依赖能够在没有 ADB 和模拟器时提供页面。
-    $panelProcess = Start-Process -FilePath $launcher -ArgumentList "--panel" -WorkingDirectory $installDir -WindowStyle Hidden -PassThru
+    $panelProcess = Start-Process -FilePath $launcher -ArgumentList "--panel" -WorkingDirectory $physicalInstallDir -WindowStyle Hidden -PassThru
     Wait-Until -TimeoutSeconds 30 -FailureMessage "安装后的面板没有在 8080 端口就绪" -Condition {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8080/api/status" -TimeoutSec 2
@@ -157,7 +160,7 @@ try {
 
     $sentinel = Join-Path $dataRoot "installer-smoke-preserve.txt"
     Set-Content -LiteralPath $sentinel -Value "uninstall must preserve user data" -Encoding utf8
-    $uninstaller = Get-ChildItem -LiteralPath $installDir -Filter "unins*.exe" -File | Select-Object -First 1
+    $uninstaller = Get-ChildItem -LiteralPath $physicalInstallDir -Filter "unins*.exe" -File | Select-Object -First 1
     if (-not $uninstaller) {
         throw "安装目录里没有找到卸载程序"
     }
