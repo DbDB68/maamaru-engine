@@ -1,4 +1,4 @@
-import type { ScriptParams, ScriptsResponse } from './types'
+import type { ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -26,7 +26,7 @@ export const api = {
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
-  resourceLedger: (days = 7) => request<any>(`/api/data/resource-ledger?days=${days}`),
+  resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
   dataEvents: (limit = 100, beforeId?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/events?limit=${limit}${beforeId == null ? '' : `&before_id=${beforeId}`}`),
   dataRuns: (limit = 20, beforeStartedAt?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/runs?limit=${limit}${beforeStartedAt == null ? '' : `&before_started_at=${beforeStartedAt}`}`),
   attachRunInventory: (runId: string) => request<{ ok: boolean; run: any }>(`/api/data/runs/${encodeURIComponent(runId)}/attach-inventory`, { method: 'POST' }),
