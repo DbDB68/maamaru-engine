@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
@@ -175,8 +175,13 @@ function chooseResource(name: string) {
 }
 function onChartSelect({ date, key }: { date: string; key: string }) {
   if (mode.value === 'single' && key === 'unknown') {
+    // 点灰色 = 认领这部分：展开当天明细，并直接弹报备框
+    selectedDate.value = date
+    highlightCategory.value = key
     const gap = gapForDay(date)
-    if (gap) { openGapReport(gap); return }
+    if (gap) openGapReport(gap)
+    else openProactiveReport(dayRange(date)[1] * 1000)
+    return
   }
   if (mode.value === 'compare' && resourceNames.includes(key)) selectedResource.value = key
   if (selectedDate.value === date && highlightCategory.value === key) {
@@ -217,15 +222,21 @@ function localDateTime(timestamp = Date.now()) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
   return date.toISOString().slice(0, 16)
 }
-function openProactiveReport() {
-  reportMode.value = reportMode.value === 'proactive' ? '' : 'proactive'
+const reportFormEl = ref<HTMLElement | null>(null)
+function scrollToReportForm() {
+  void nextTick(() => reportFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+}
+function openProactiveReport(timestamp?: number) {
+  reportMode.value = 'proactive'
   reportGap.value = null
-  reportForm.value = { activities: [], note: '', occurred_at: localDateTime() }
+  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp) }
+  scrollToReportForm()
 }
 function openGapReport(gap: InventoryGap) {
   reportMode.value = `gap:${gap.gap_key}`
   reportGap.value = gap
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(gap.ended_at * 1000) }
+  scrollToReportForm()
 }
 function toggleReportActivity(value: string) {
   const clean = '没有其他操作'
@@ -336,7 +347,13 @@ onMounted(() => load())
             <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
           <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" />
+          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(dayRange(dayDetail.date)[1] * 1000)" />
+          <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
+            <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
+            <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
+            <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" placeholder="可选，不用写具体资源数字"></label>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">先不说了</button></div>
+          </form>
         </section>
 
         <section class="resource-ledger" :class="{ loading }">
@@ -349,15 +366,9 @@ onMounted(() => load())
           <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
         </section>
 
-        <section class="inventory-gap-panel" aria-label="库存差值说明">
+        <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
-          <form v-if="reportMode" @submit.prevent="saveHumanReport(false)">
-            <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
-            <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
-            <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" placeholder="可选，不用写具体资源数字"></label>
-            <button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button>
-          </form>
-          <button v-if="!reportMode" type="button" class="secondary report-proactive" @click="openProactiveReport">我自己动了家底，主动报备一笔</button>
+          <button v-if="!reportMode" type="button" class="secondary report-proactive" @click="openProactiveReport()">我自己动了家底，主动报备一笔</button>
         </section>
       </template>
 
@@ -382,4 +393,12 @@ onMounted(() => load())
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .report-proactive { align-self: flex-start; }
 .inventory-gap-panel:empty { display: none; }
+.report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
+.report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
+.report-form input { max-width: 260px; }
+.report-form fieldset { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }
+.report-form legend { font-size: 13px; color: var(--ink-dim); margin-bottom: 4px; }
+.report-form fieldset button { border: 1px solid var(--paper-line); background: var(--paper); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.report-form fieldset button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
+.report-form-actions { display: flex; gap: 8px; }
 </style>

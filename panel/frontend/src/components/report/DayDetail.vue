@@ -13,7 +13,7 @@ const props = defineProps<{
   gaps: InventoryGap[]
 }>()
 
-const emit = defineEmits<{ close: []; report: [gap: InventoryGap] }>()
+const emit = defineEmits<{ close: []; report: [gap: InventoryGap]; 'report-day': [] }>()
 
 const sortedAttributions = computed(() => [...props.attributions].sort((a, b) => a.ts - b.ts))
 const attributedTotal = computed(() => props.attributions.reduce((sum, item) => sum + Number(item.delta || 0), 0))
@@ -64,6 +64,14 @@ function gapDelta(gap: InventoryGap): string {
         <small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}</small>
       </div>
       <button type="button" class="primary" @click="emit('report', gap)">这是我干的，说明一下</button>
+    </div>
+
+    <div v-if="!gaps.length && unexplained" class="day-detail-gap">
+      <div>
+        <strong>🦊 {{ resource }} {{ signed(unexplained) }} 还不知道是谁干的</strong>
+        <small>这部分没有赶上库存盘点，只能按天估算；是你自己动的话就说一声。</small>
+      </div>
+      <button type="button" class="primary" @click="emit('report-day')">这是我干的，说明一下</button>
     </div>
   </section>
 </template>
