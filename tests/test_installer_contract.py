@@ -4,6 +4,8 @@ from pathlib import Path
 
 
 INSTALLER = Path(__file__).resolve().parents[1] / "installer" / "maamaru.iss"
+RELEASE_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
+INSTALLER_SMOKE = Path(__file__).resolve().parents[1] / "scripts" / "smoke_test_installer.ps1"
 
 
 class InstallerContractTests(unittest.TestCase):
@@ -48,6 +50,26 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(r'MessagesFile: ".\ChineseSimplified.isl"', self.script)
         self.assertTrue(language.is_file())
         self.assertIn("LanguageName=简体中文", language.read_text(encoding="utf-8"))
+
+    def test_release_smoke_runs_before_publishing(self):
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        smoke_step = "验证安装、首次启动与卸载"
+        publish_step = "发布 Release"
+        self.assertIn(smoke_step, workflow)
+        self.assertIn("scripts/smoke_test_installer.ps1", workflow)
+        self.assertLess(workflow.index(smoke_step), workflow.index(publish_step))
+        self.assertIn("if: startsWith(github.ref, 'refs/tags/v')", workflow)
+
+    def test_installer_smoke_covers_clean_install_and_data_survival(self):
+        script = INSTALLER_SMOKE.read_text(encoding="utf-8")
+        for required in (
+            "/DIR=",
+            "--panel",
+            "http://127.0.0.1:8080/api/status",
+            "installer-smoke-preserve.txt",
+            "uninstall_preserved_user_data",
+        ):
+            self.assertIn(required, script)
 
 
 if __name__ == "__main__":
