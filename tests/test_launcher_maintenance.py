@@ -36,7 +36,7 @@ class LauncherMaintenanceTests(unittest.TestCase):
 
         kwargs = create_window.call_args.kwargs
         self.assertEqual((kwargs["width"], kwargs["height"]), (1080, 720))
-        self.assertEqual(kwargs["min_size"], (860, 640))
+        self.assertEqual(kwargs["min_size"], (860, 660))
         self.assertIn(f"v{app.CURRENT_VERSION}", kwargs["html"])
         self.assertIn("data:image/png;base64,", kwargs["html"])
         self.assertEqual(

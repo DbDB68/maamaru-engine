@@ -34,54 +34,111 @@ HTML = r"""
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--ink:#332b23;--muted:#82766a;--paper:#f3ecdf;--card:#fffaf1;--line:#ddd0bb;--gold:#d99d08;--gold-deep:#a96f00;--gold-pale:#fff0bd;--green:#3f8f69;--red:#b74b44;--orange:#c77a1e}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;user-select:none}button{font:inherit;cursor:pointer}
-header{height:108px;padding:13px max(28px,calc((100% - 1120px)/2));background:linear-gradient(115deg,#29231f 0,#44352a 64%,#5f4020 100%);color:white;border-bottom:4px solid var(--gold);box-shadow:0 3px 12px #4b321c33}
-.brand{display:flex;height:78px;align-items:center;gap:17px}.brand img{width:76px;height:76px;object-fit:contain;image-rendering:auto}.brand-copy{min-width:0}.brand h1{margin:0;font-size:27px;letter-spacing:.04em}.brand p{margin:4px 0 0;color:#eadfcf;font-size:13px}.version{margin-left:auto;padding:6px 10px;color:#f7df9c;background:#ffffff12;border:1px solid #ffffff28;border-radius:999px;font-size:12px}
-main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:22px 0 18px}.hero{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:center;padding:22px 24px;background:linear-gradient(125deg,var(--card),#fff5d7);border:1px solid #dac9ab;border-left:5px solid var(--gold);border-radius:15px;box-shadow:0 7px 20px #705a3314}
-.eyebrow{display:block;margin-bottom:7px;color:var(--gold-deep);font-size:12px;font-weight:700;letter-spacing:.12em}.hero h2{margin:0;font-size:28px;line-height:1.25}.hero p{margin:8px 0 0;color:var(--muted);font-size:14px;line-height:1.6}.hero-state{display:flex;align-items:center;gap:13px}.state-mark{display:grid;width:48px;height:48px;flex:0 0 48px;place-items:center;color:white;background:var(--gold);border-radius:50%;font-size:24px;font-weight:800}.hero.blocked{border-left-color:var(--red)}.hero.blocked .state-mark{background:var(--red)}.hero.ready .state-mark{background:var(--green)}
-.start{width:100%;height:58px;border:0;border-radius:11px;color:white;background:linear-gradient(#e6aa0b,#ce8c00);box-shadow:0 4px 0 #855900,0 8px 14px #a56e1630;font-size:18px;font-weight:800}.start:hover{filter:brightness(1.04)}.start:active{transform:translateY(2px);box-shadow:0 2px 0 #855900}.start:disabled{cursor:not-allowed;filter:grayscale(.65);opacity:.66}
-.launch-progress{display:none;margin-top:13px;grid-template-columns:repeat(3,1fr);gap:5px}.launch-progress.show{display:grid}.launch-progress span{padding-top:7px;color:#a49483;border-top:3px solid #ddcfb9;font-size:11px;text-align:center}.launch-progress span.active{color:var(--gold-deep);border-color:var(--gold);font-weight:700}.launch-progress span.done{color:var(--green);border-color:var(--green)}
-.checks{margin-top:18px;padding:18px 20px;background:var(--card);border:1px solid var(--line);border-radius:14px}.checks-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:12px}.checks-head h3{margin:0;font-size:18px}.checks-head p{margin:3px 0 0;color:var(--muted);font-size:12px}.checks-count{color:var(--muted);font-size:12px}.issues{display:grid;gap:8px}.issue{display:grid;grid-template-columns:28px 118px 1fr;gap:8px;align-items:center;padding:11px 12px;border:1px solid #ecd4a8;border-radius:9px;background:#fff8e7}.issue.error{border-color:#e5b6b2;background:#fff0ee}.issue .mark{display:grid;width:22px;height:22px;place-items:center;color:white;background:var(--orange);border-radius:50%;font-size:13px;font-weight:800}.issue.error .mark{background:var(--red)}.issue b{font-size:14px}.issue small{color:var(--muted);font-size:12px;line-height:1.45}
-.healthy{margin-top:9px;border-top:1px dashed #e2d7c5}.healthy summary{padding:11px 2px 3px;color:var(--green);cursor:pointer;font-size:12px;font-weight:700}.healthy-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:7px}.healthy-row{display:grid;grid-template-columns:21px 96px 1fr;gap:5px;padding:8px 10px;background:#f7f2e8;border-radius:8px;font-size:12px}.healthy-row i{color:var(--green);font-style:normal;font-weight:800}.healthy-row span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.loading{padding:44px 0;color:var(--muted);text-align:center}.tools{display:flex;align-items:center;gap:8px;margin-top:14px}.tools-label{margin-right:auto;color:var(--muted);font-size:12px}.tools button{min-height:36px;padding:7px 12px;color:#554b40;background:transparent;border:1px solid #d3c5af;border-radius:8px}.tools button:hover{background:var(--card);border-color:#b99e72}.tools button:disabled{cursor:not-allowed;opacity:.55}.note{margin:12px 2px 0;color:#918579;font-size:11px}
-@media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.hero{grid-template-columns:1fr}.hero-action{display:grid;grid-template-columns:minmax(230px,320px) 1fr;gap:14px;align-items:start}.launch-progress{margin-top:0}.healthy-grid{grid-template-columns:1fr}.tools{flex-wrap:wrap}.tools-label{width:100%;flex-basis:100%}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;user-select:none;overflow-x:hidden}button{font:inherit;cursor:pointer}
+header{height:84px;padding:11px max(28px,calc((100% - 1120px)/2));background:linear-gradient(115deg,#29231f 0,#44352a 64%,#5f4020 100%);color:white;border-bottom:4px solid var(--gold);box-shadow:0 3px 12px #4b321c33}
+.brand{display:flex;height:60px;align-items:center;gap:14px}.brand img{width:56px;height:56px;object-fit:contain;image-rendering:auto}.brand-copy{min-width:0}.brand h1{margin:0;font-size:23px;letter-spacing:.04em}.brand p{margin:2px 0 0;color:#eadfcf;font-size:12px}.version{margin-left:auto;padding:6px 10px;color:#f7df9c;background:#ffffff12;border:1px solid #ffffff28;border-radius:999px;font-size:12px}
+main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
+.board{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px}
+.garden{position:relative;border:1px solid #dac9ab;border-left:5px solid var(--gold);border-radius:15px;overflow:hidden;background:#39434f;box-shadow:0 7px 20px #705a3314;min-height:0}
+.garden img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;object-position:33% 72%}
+.panel{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.checks{padding:14px 16px;border-right:1px dashed #e2d7c5;min-width:0}
+.checks h3,.tools h3{margin:0 0 9px;font-size:16px}
+.check-list{display:grid;gap:7px}
+.check-row{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:center;min-height:34px;padding:6px 9px;border-radius:8px;background:#f7f2e8}
+.check-row .mark{display:grid;width:18px;height:18px;place-items:center;color:white;background:var(--green);border-radius:50%;font-size:11px;font-weight:800}
+.check-row.warn{background:#fff8e7;border:1px solid #ecd4a8}.check-row.warn .mark{background:var(--orange)}
+.check-row.error{background:#fff0ee;border:1px solid #e5b6b2}.check-row.error .mark{background:var(--red)}
+.check-row b{font-size:13px}.check-row small{margin-left:7px;color:var(--muted);font-size:11px}.check-row div{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.checks-count{display:block;margin-top:9px;color:var(--muted);font-size:11px}
+.loading{padding:30px 0;color:var(--muted);text-align:center;font-size:13px}
+.tools{padding:14px 16px;display:flex;flex-direction:column;gap:7px;background:#fdf6e7}
+.tools button{min-height:34px;padding:6px 12px;text-align:left;color:#554b40;background:var(--card);border:1px solid #d3c5af;border-radius:8px;font-size:13px}
+.tools button:hover{background:#fff;border-color:#b99e72}.tools button:disabled{cursor:not-allowed;opacity:.55}
+.runbar{margin-top:12px;padding:10px 18px 14px;background:var(--card);border:1px solid var(--line);border-radius:14px}
+.run-track{position:relative;height:40px;border-bottom:2px dashed var(--gold);margin-bottom:8px}
+.run-fox{position:absolute;bottom:0;display:none;width:48px;height:48px;background:url("__FOX1_URI__") no-repeat center/contain;image-rendering:pixelated;animation:fox-run 18s linear infinite,fox-frames 1.2s steps(1,end) infinite,fox-bob .6s ease-in-out infinite}
+.runbar.busy .run-fox{display:block}
+@keyframes fox-frames{0%,49.9%{background-image:url("__FOX1_URI__")}50%,100%{background-image:url("__FOX2_URI__")}}
+@keyframes fox-run{0%{left:0;transform:scaleX(1)}48%{left:calc(100% - 48px);transform:scaleX(1)}50%{left:calc(100% - 48px);transform:scaleX(-1)}98%{left:0;transform:scaleX(-1)}100%{left:0;transform:scaleX(1)}}
+@keyframes fox-bob{0%,100%{margin-bottom:0}50%{margin-bottom:2px}}
+@media (prefers-reduced-motion:reduce){.run-fox{animation:none}}
+.status{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.status .mark{display:grid;width:26px;height:26px;flex:0 0 26px;place-items:center;color:white;background:var(--gold);border-radius:50%;font-size:14px;font-weight:800}
+.status.blocked .mark{background:var(--red)}.status.ready .mark{background:var(--green)}
+.status b{font-size:14px}.status span{color:var(--muted);font-size:12px}
+.progress-row{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:14px;align-items:center}
+.bar{height:12px;border:1px solid #ddcfb9;border-radius:999px;background:#eee2cc;overflow:hidden}
+.bar-fill{height:100%;width:0;background:linear-gradient(#e6aa0b,#ce8c00);transition:width .4s ease}
+.launch-progress{display:none;margin-top:8px;grid-template-columns:repeat(3,1fr);gap:5px}.launch-progress.show{display:grid}.launch-progress span{padding-top:6px;color:#a49483;border-top:3px solid #ddcfb9;font-size:11px;text-align:center}.launch-progress span.active{color:var(--gold-deep);border-color:var(--gold);font-weight:700}.launch-progress span.done{color:var(--green);border-color:var(--green)}
+.start{width:100%;height:44px;border:0;border-radius:11px;color:white;background:linear-gradient(#e6aa0b,#ce8c00);box-shadow:0 4px 0 #855900,0 8px 14px #a56e1630;font-size:16px;font-weight:800}.start:hover{filter:brightness(1.04)}.start:active{transform:translateY(2px);box-shadow:0 2px 0 #855900}.start:disabled{cursor:not-allowed;filter:grayscale(.65);opacity:.66}
+.note{margin:auto 2px 0;padding-top:8px;color:#918579;font-size:11px}
+@media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.board{grid-template-columns:1fr}.garden{height:150px}.panel{grid-template-columns:1fr}.checks{border-right:0;border-bottom:1px dashed #e2d7c5}.progress-row{grid-template-columns:1fr}}
 </style></head><body>
 <header><div class="brand"><img src="__ICON_URI__" alt=""><div class="brand-copy"><h1>まあ丸</h1><p>本丸近侍启动器 · 狐之助已经替你看过一遍</p></div><span class="version">v__VERSION__</span></div></header>
 <main>
-<section id="hero" class="hero"><div class="hero-state"><span id="stateMark" class="state-mark">…</span><div><span class="eyebrow">启动状态</span><h2 id="stateTitle">正在整理启动环境</h2><p id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</p></div></div><div class="hero-action"><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div></section>
-<section class="checks"><div class="checks-head"><div><h3>启动前检查</h3><p>只把需要你留意的事情摆在外面。</p></div><span id="checksCount" class="checks-count">正在检查…</span></div><div id="checks"><div class="loading">狐之助正在巡查……</div></div></section>
-<div class="tools"><span class="tools-label">启动器工具</span><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="chooseEmulator(this)">🖥️ 选择模拟器</button><button onclick="update()">⬆ 检查更新</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="openData()">📁 数据目录</button><button id="migrateDataButton" onclick="migrateData(this)">🗂️ 迁移数据</button><button id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">🧹 清理旧副本</button></div>
-<p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p>
+<div class="board">
+<div class="garden"><img src="__GARDEN_URI__" alt="雨中的本丸庭院，狐之助坐在缘侧"></div>
+<section class="panel">
+<div class="checks"><h3>检查</h3><div id="checks"><div class="loading">狐之助正在巡查……</div></div><span id="checksCount" class="checks-count"></span></div>
+<div class="tools"><h3>功能</h3><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="openData()">📁 数据目录</button><button id="migrateDataButton" onclick="migrateData(this)">🗂️ 迁移数据</button><button id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">🧹 清理旧副本</button><button onclick="chooseEmulator(this)">🖥️ 选择模拟器</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="update()">⬆ 检查更新</button><p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p></div>
+</section>
+</div>
+<div id="runbar" class="runbar">
+<div class="run-track"><span class="run-fox"></span></div>
+<div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
+<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button></div>
+</div>
 </main>
 <script>
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stateIcon={error:'×',warn:'!',info:'i',ok:'✓'};
 const issueUrl='https://github.com/DbDB68/maamaru-engine/issues/new';let feedbackFailures=0;let feedbackResetTimer=0;const feedbackLines={1:'导出失败？问问上天',2:'还失败？去issue骂作者',4:'干嘛不去？',5:'你是不是想骂连错误处理系统都做不好？',6:'噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',7:'面包店里卖面包，蛋糕店里卖蛋糕。',8:'你还点',9:'？',10:'我没有日志，你也不去issue，你到底想让我怎样'};
-function setState(kind,title,copy,mark){const hero=document.querySelector('#hero');hero.className='hero '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').textContent=mark}
+function setState(kind,title,copy,mark){const status=document.querySelector('#status');status.className='status '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').textContent=mark;document.querySelector('#runbar').classList.toggle('busy',kind==='')}
+function setProgress(ratio){document.querySelector('#barFill').style.width=(Math.max(0,Math.min(1,ratio))*100).toFixed(1)+'%'}
 function renderChecks(items){
- const issues=items.filter(x=>x.state==='error'||x.state==='warn');const healthy=items.filter(x=>x.state!=='error'&&x.state!=='warn');
- const issueHtml=issues.length?`<div class="issues">${issues.map(x=>`<div class="issue ${x.state}"><span class="mark">${stateIcon[x.state]}</span><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div>`).join('')}</div>`:'';
- const healthyHtml=`<details class="healthy" ${issues.length?'':'open'}><summary>${healthy.length} 项检查正常${issues.length?' · 展开查看':''}</summary><div class="healthy-grid">${healthy.map(x=>`<div class="healthy-row"><i>${stateIcon[x.state]}</i><b>${esc(x.label)}</b><span title="${esc(x.detail)}">${esc(x.detail)}</span></div>`).join('')}</div></details>`;
- document.querySelector('#checks').innerHTML=issueHtml+healthyHtml;document.querySelector('#checksCount').textContent=`${items.length} 项 · ${issues.length?issues.length+' 项提醒':'全部通过'}`;
+ const issues=items.filter(x=>x.state==='error'||x.state==='warn');
+ document.querySelector('#checks').innerHTML=`<div class="check-list">${items.map(x=>`<div class="check-row ${x.state}"><span class="mark">${stateIcon[x.state]||'i'}</span><div title="${esc(x.label)}：${esc(x.detail)}"><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div></div>`).join('')}</div>`;
+ document.querySelector('#checksCount').textContent=`${items.length} 项 · ${issues.length?issues.length+' 项提醒':'全部通过'}`;
  return issues;
 }
 async function refresh(){
- setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
+ setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');setProgress(0);const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
  const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'inline-block':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';
  const issues=renderChecks(data.items);const warnings=issues.filter(x=>x.state==='warn').length;
- if(data.blocked){setState('blocked','还差一步','先处理下方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
- else if(warnings){setState('ready','可以启动',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
- else{setState('ready','准备好了','程序与运行环境均已就绪，可以安心开工。','✓');start.textContent='启动まあ丸';start.disabled=false}
+ if(data.blocked){setState('blocked','还差一步','先处理上方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
+ else if(warnings){setState('ready','准备就绪',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
+ else{setState('ready','准备就绪','程序与运行环境均已就绪，可以安心开工。','✓');start.textContent='启动まあ丸';start.disabled=false}
 }
 function setLaunchStep(index){const steps=[...document.querySelectorAll('#launchProgress span')];document.querySelector('#launchProgress').classList.add('show');steps.forEach((step,i)=>step.className=i<index?'done':i===index?'active':'')}
 async function startApp(){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start();clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
-async function update(){setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();if(r.update_available&&r.download_ready){if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){setState('','正在下载更新','安装包下载后还会校验大小和 SHA-256。','…');const d=await pywebview.api.download_update();alert(d.message);if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}}}else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}await refresh()}
+async function update(){
+ setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();
+ if(r.update_available&&r.download_ready){
+  if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){
+   setState('','正在下载更新','安装包下载后还会校验大小和 SHA-256。','…');setProgress(0);
+   const started=await pywebview.api.download_update();
+   if(!started.ok){alert(started.message);await refresh();return}
+   let d;
+   for(;;){
+    await new Promise(resolve=>setTimeout(resolve,500));
+    d=await pywebview.api.download_progress();
+    if(d.total>0){setProgress(d.downloaded/d.total);document.querySelector('#stateCopy').textContent=`已下载 ${(d.downloaded/1048576).toFixed(1)} / ${(d.total/1048576).toFixed(1)} MB，下载后还会校验大小和 SHA-256。`}
+    if(!d.active)break;
+   }
+   d=d.result||{ok:false,message:'下载没有完成，请重试。'};
+   alert(d.message);
+   if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}
+  }
+ }else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
+ await refresh();
+}
 async function exportFeedback(button){if(button.disabled)return;button.disabled=true;button.textContent='正在整理…';let r;try{r=await pywebview.api.export_diagnostics()}catch(_){r={ok:false}}if(r.ok){alert(r.message);feedbackFailures=0;document.querySelector('#issueButton').style.display='none';button.disabled=false;button.textContent='📦 反馈错误';return}feedbackFailures+=1;if(feedbackFailures===3){document.querySelector('#issueButton').style.display='inline-block'}else if(feedbackFailures>=11){button.textContent='狐之助已下班';clearTimeout(feedbackResetTimer);feedbackResetTimer=setTimeout(()=>{feedbackFailures=0;button.disabled=false;button.textContent='📦 反馈错误';document.querySelector('#issueButton').style.display='none'},3000);return}else{alert(feedbackLines[feedbackFailures]||'导出失败')}button.disabled=false;button.textContent='📦 反馈错误'}
 async function openIssue(){await pywebview.api.open_url(issueUrl)}
 async function openData(){await pywebview.api.open_data()}
 async function chooseEmulator(button){button.disabled=true;const r=await pywebview.api.choose_emulator();if(r.message)alert(r.message);button.disabled=false;if(r.ok)await refresh()}
-async function migrateData(button){button.disabled=true;let chosen;try{chosen=await pywebview.api.choose_data_location()}catch(_){chosen={ok:false,message:'没能打开目录选择器'}}if(!chosen.ok){button.disabled=false;if(chosen.message)alert(chosen.message);return}if(!confirm(`まあ丸会先完整复制并校验用户数据，再让下次启动改用：\n\n${chosen.target}\n\n原目录暂时保留，确认新目录可用后可在启动器清理。现在开始吗？`)){button.disabled=false;return}button.textContent='正在迁移…';const r=await pywebview.api.migrate_data(chosen.selected);alert(r.message);button.disabled=false;button.textContent='🗂️ 迁移数据';if(r.ok){alert('请关闭并重新打开まあ丸。新目录通过启动检查后，会出现“清理旧副本”按钮。')}}
+async function migrateData(button){button.disabled=true;let chosen;try{chosen=await pywebview.api.choose_data_location()}catch(_){chosen={ok:false,message:'没能打开目录选择器'}}if(!chosen.ok){button.disabled=false;if(chosen.message)alert(chosen.message);return}if(!confirm(`まあ丸会先完整复制并校验用户数据，再让下次启动改用：\n\n${chosen.target}\n\n原目录暂时保留，确认新目录可用后可在启动器清理。现在开始吗？`)){button.disabled=false;return}button.textContent='正在迁移…';setState('','正在迁移数据','狐之助正在搬运家当，搬完会点一遍数。','…');const r=await pywebview.api.migrate_data(chosen.selected);alert(r.message);button.disabled=false;button.textContent='🗂️ 迁移数据';await refresh();if(r.ok){alert('请关闭并重新打开まあ丸。新目录通过启动检查后，会出现“清理旧副本”按钮。')}}
 async function cleanupOldData(button){const source=button.dataset.source;if(!confirm(`新目录已经通过校验。确定永久删除旧数据副本吗？\n\n${source}\n\n此操作无法撤销。`))return;button.disabled=true;const r=await pywebview.api.cleanup_old_data(button.dataset.token);alert(r.message);if(r.ok){button.style.display='none'}else{button.disabled=false}}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
@@ -91,6 +148,8 @@ window.addEventListener('pywebviewready',refresh);
 class Api:
     def __init__(self):
         self._pending_update = None
+        self._download_state = None
+        self._download_thread = None
 
     def check(self):
         ensure_runtime_data()
@@ -134,6 +193,8 @@ class Api:
             def open_panel():
                 time.sleep(0.15)
                 window = webview.windows[0]
+                # 面板的三栏布局需要 ≥1101px，启动时把窗口调到位
+                window.resize(1280, 860)
                 window.load_url("http://127.0.0.1:8080")
 
             threading.Thread(target=open_panel, daemon=True).start()
@@ -217,13 +278,49 @@ class Api:
     def download_update(self):
         if self._pending_update is None:
             return {"ok": False, "message": "请先重新检查更新。"}
-        try:
-            result = download_installer(self._pending_update)
-            action = "已找到此前校验完成的安装包" if result["reused"] else "安装包已下载并通过安全校验"
-            return {"ok": True, "message": f"{action}。\n位置：{result['path']}"}
-        except Exception as exc:
-            _write_launcher_log(traceback.format_exc())
-            return {"ok": False, "message": f"更新下载失败：{exc}"}
+        if self._download_thread is not None and self._download_thread.is_alive():
+            return {"ok": True, "message": "下载已经在进行中。"}
+        asset = self._pending_update
+        self._download_state = {
+            "active": True,
+            "downloaded": 0,
+            "total": int(asset["size"]),
+            "result": None,
+        }
+
+        def work():
+            result = None
+            error = None
+            for _attempt in range(2):
+                try:
+                    result = download_installer(asset, progress=self._report_download_progress)
+                    break
+                except Exception as exc:  # GitHub 直连经常中途抽风，原地重试一次
+                    error = exc
+            if result is not None:
+                action = "已找到此前校验完成的安装包" if result["reused"] else "安装包已下载并通过安全校验"
+                self._download_state["result"] = {
+                    "ok": True,
+                    "message": f"{action}。\n位置：{result['path']}",
+                }
+            else:
+                _write_launcher_log(traceback.format_exc())
+                self._download_state["result"] = {"ok": False, "message": f"更新下载失败：{error}"}
+            self._download_state["active"] = False
+
+        self._download_thread = threading.Thread(target=work, daemon=True)
+        self._download_thread.start()
+        return {"ok": True, "message": "下载已开始，小狐狸替你盯着进度。"}
+
+    def download_progress(self):
+        if self._download_state is None:
+            return {"active": False, "downloaded": 0, "total": 0, "result": None}
+        return dict(self._download_state)
+
+    def _report_download_progress(self, downloaded, total):
+        if self._download_state is not None:
+            self._download_state["downloaded"] = downloaded
+            self._download_state["total"] = total
 
     def apply_update(self):
         if self._pending_update is None:
@@ -335,11 +432,15 @@ class Api:
 
 def main():
     ensure_runtime_data()
-    html = HTML.replace("__VERSION__", CURRENT_VERSION).replace(
-        "__ICON_URI__", _launcher_icon_data_uri())
+    html = (HTML
+            .replace("__VERSION__", CURRENT_VERSION)
+            .replace("__ICON_URI__", _asset_data_uri("maamaru-launcher-header.png"))
+            .replace("__GARDEN_URI__", _asset_data_uri("honmaru_rain_garden.png"))
+            .replace("__FOX1_URI__", _asset_data_uri("fox_run_1_alpha.png"))
+            .replace("__FOX2_URI__", _asset_data_uri("fox_run_2_alpha.png")))
     webview.create_window("まあ丸启动器", html=html,
                           js_api=Api(), width=1080, height=720,
-                          min_size=(860, 640), resizable=True)
+                          min_size=(860, 660), resizable=True)
     webview.start(debug=False, icon=str(_launcher_icon_path()))
 
 
@@ -347,8 +448,8 @@ def _launcher_icon_path() -> Path:
     return _project_root() / "launcher" / "assets" / "maamaru-launcher.ico"
 
 
-def _launcher_icon_data_uri() -> str:
-    path = _launcher_icon_path().with_name("maamaru-launcher-header.png")
+def _asset_data_uri(name: str) -> str:
+    path = _launcher_icon_path().with_name(name)
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 

@@ -54,6 +54,15 @@ class UpdaterTests(unittest.TestCase):
                 updater.download_installer(asset, Path(tmp))
             self.assertEqual(list(Path(tmp).rglob("*.exe*")), [])
 
+    def test_progress_callback_reports_cumulative_bytes_and_total(self):
+        payload = b"installer"
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(updater.urllib.request, "urlopen", return_value=_Response(payload)):
+            updater.download_installer(self._asset(payload), Path(tmp),
+                                       progress=lambda done, total: calls.append((done, total)))
+        self.assertEqual(calls, [(len(payload), len(payload))])
+
 
 if __name__ == "__main__":
     unittest.main()

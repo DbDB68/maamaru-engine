@@ -43,8 +43,11 @@ def select_installer(release: dict) -> dict:
     raise UpdateError("这个版本没有找到 Windows 安装包")
 
 
-def download_installer(asset: dict, updates_dir: Path = UPDATES_DIR) -> dict:
-    """Download and verify an installer, atomically exposing only a complete file."""
+def download_installer(asset: dict, updates_dir: Path = UPDATES_DIR, progress=None) -> dict:
+    """Download and verify an installer, atomically exposing only a complete file.
+
+    ``progress`` is an optional callback invoked as ``progress(downloaded, total)``
+    after each chunk so callers can render a live progress bar."""
     digest_match = _SHA256.fullmatch(str(asset.get("digest") or ""))
     if not digest_match:
         raise UpdateError("安装包指纹无效")
@@ -68,13 +71,15 @@ def download_installer(asset: dict, updates_dir: Path = UPDATES_DIR) -> dict:
         request = urllib.request.Request(asset["url"], headers={"User-Agent": "MaamaruLauncher/0.1"})
         hasher = hashlib.sha256()
         downloaded = 0
-        with urllib.request.urlopen(request, timeout=30) as response, partial.open("wb") as output:
+        with urllib.request.urlopen(request, timeout=60) as response, partial.open("wb") as output:
             while chunk := response.read(1024 * 1024):
                 downloaded += len(chunk)
                 if downloaded > expected_size:
                     raise UpdateError("安装包大小与 GitHub 记录不一致")
                 hasher.update(chunk)
                 output.write(chunk)
+                if progress is not None:
+                    progress(downloaded, expected_size)
         if downloaded != expected_size or hasher.hexdigest() != expected_hash:
             raise UpdateError("安装包校验失败，未保留这次下载")
         partial.replace(target)
