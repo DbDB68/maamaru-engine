@@ -161,36 +161,6 @@ class SakuraMixin:
 
         yield f"[刷花] 刷了 {max_rounds} 圈还没到 {target}（当前 {fatigue}），安全上限收工"
 
-    # ==================== 自动换队长（刷花/保花辅助） ====================
-
-    def rotate_captain_stream(self, team_no: int = 1, margin: int = 10):
-        """
-        流式换队长：读全队疲劳，把疲劳最低的拖到队长位。
-
-        游戏机制（用户亲授）：队长位必定+疲劳，所以让全队最累（疲劳最低）
-        的人去当队长追进度，花才掉得慢。空位/读不到的行直接跳过。
-
-        Args:
-            team_no: 部队编号（1-5）
-            margin: 最低疲劳比队长低至少这么多才值得换（防每圈瞎折腾）
-
-        Yields:
-            str: 执行状态消息
-        """
-        if team_no not in _TEAM_TAB:
-            yield f"[换队长] 部队{team_no}不存在（1-5）"
-            return
-
-        yield f"[换队长] 看看部队{team_no}谁最需要队长位..."
-        for nav_msg in self.navigate_to_stream("编队"):
-            yield nav_msg
-        if self.current_location != "编队":
-            yield "[换队长] 到不了编队"
-            return
-        self.maa.click(Point(*_TEAM_TAB[team_no]))
-        time.sleep(1.5)
-        yield from self._rotate_captain_here(margin)
-
     def _rotate_captain_here(self, margin: int = 10):
         """
         在当前页原地换队长：读全队疲劳，最低的拖到队长位，拖完复查。

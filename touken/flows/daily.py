@@ -390,7 +390,9 @@ class DailyMixin:
                         auto_equip=sortie_plan.get("auto_equip", True),
                         retreat_before_boss=sortie_plan.get(
                             "retreat_before_boss", False),
-                        rotate_captain=sortie_plan.get("rotate_captain", False)):
+                        rotate_captain=sortie_plan.get("rotate_captain", False),
+                        rotate_captain_margin=sortie_plan.get(
+                            "rotate_captain_margin", 10)):
                     yield msg
                     if _is_fail(msg):
                         ok = False
@@ -428,7 +430,9 @@ class DailyMixin:
                         repair_threshold=sortie_plan.get("repair_threshold", "light"),
                         injury_action=sortie_plan.get("repair_on_injury", "continue"),
                         auto_equip=sortie_plan.get("auto_equip", True),
-                        rotate_captain=sortie_plan.get("rotate_captain", False)):
+                        rotate_captain=sortie_plan.get("rotate_captain", False),
+                        rotate_captain_margin=sortie_plan.get(
+                            "rotate_captain_margin", 10)):
                     yield msg
                     if _is_fail(msg):
                         ok = False

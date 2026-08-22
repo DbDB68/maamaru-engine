@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""刷花/换队长流程的纯逻辑测试（假 MAA，不碰真机）。"""
+"""刷花与出阵自动换队长的纯逻辑测试（假 MAA，不碰真机）。"""
 
 import unittest
 
@@ -58,8 +58,6 @@ class Maa:
 def _flow(maa):
     flow = SakuraMixin()
     flow.maa = maa
-    flow.current_location = "编队"
-    flow.navigate_to_stream = lambda location: iter(())
     return flow
 
 
@@ -69,7 +67,7 @@ FULL = {1: 80, 2: 60, 3: 90, 4: 30, 5: 70, 6: 85}
 class RotateCaptainTests(unittest.TestCase):
     def test_lowest_fatigue_is_dragged_to_captain(self):
         maa = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "小狐丸"})
-        messages = list(_flow(maa).rotate_captain_stream(team_no=1, margin=10))
+        messages = list(_flow(maa)._rotate_captain_here(margin=10))
 
         # 从 4 号位（cy=455）拖到队长位（cy=160）
         self.assertEqual(maa.swipes, [(200, 455, 200, 160, 1000)])
@@ -78,14 +76,14 @@ class RotateCaptainTests(unittest.TestCase):
 
     def test_captain_already_lowest_does_nothing(self):
         maa = Maa({**FULL, 1: 20})
-        messages = list(_flow(maa).rotate_captain_stream(team_no=1, margin=10))
+        messages = list(_flow(maa)._rotate_captain_here(margin=10))
 
         self.assertEqual(maa.swipes, [])
         self.assertTrue(any("位置没毛病" in m for m in messages))
 
     def test_gap_below_margin_is_not_worth_it(self):
         maa = Maa({**FULL, 1: 40, 4: 35})
-        messages = list(_flow(maa).rotate_captain_stream(team_no=1, margin=10))
+        messages = list(_flow(maa)._rotate_captain_here(margin=10))
 
         self.assertEqual(maa.swipes, [])
         self.assertTrue(any("不值得折腾" in m for m in messages))
@@ -93,29 +91,23 @@ class RotateCaptainTests(unittest.TestCase):
     def test_unreadable_captain_stops(self):
         rows = dict(FULL)
         del rows[1]  # 队长位读不到（空位/OCR 瞎了）
-        messages = list(_flow(Maa(rows)).rotate_captain_stream(team_no=1))
+        messages = list(_flow(Maa(rows))._rotate_captain_here())
 
         self.assertTrue(any("队长位读不到疲劳" in m for m in messages))
 
     def test_all_unreadable_stops(self):
-        messages = list(_flow(Maa({})).rotate_captain_stream(team_no=1))
+        messages = list(_flow(Maa({}))._rotate_captain_here())
 
         self.assertTrue(any("全队都读不到疲劳" in m for m in messages))
 
     def test_swallowed_drag_is_reported(self):
         # 拖完队长位还是原值 → 手势被吞，如实汇报
         maa = Maa(dict(FULL), after_rows=dict(FULL))
-        messages = list(_flow(maa).rotate_captain_stream(team_no=1, margin=10))
+        messages = list(_flow(maa)._rotate_captain_here(margin=10))
 
         self.assertEqual(len(maa.swipes), 1)
         self.assertTrue(any("拖动可能没生效" in m for m in messages))
         self.assertFalse(any("上任队长" in m for m in messages))
-
-    def test_bad_team_number(self):
-        messages = list(_flow(Maa(dict(FULL))).rotate_captain_stream(team_no=9))
-
-        self.assertTrue(any("不存在" in m for m in messages))
-
 
 class SortieRotateHookTests(unittest.TestCase):
     """出阵流程的换队长钩子：开了才换，且每圈在部队选择步之后触发。"""
@@ -155,6 +147,9 @@ class SortieRotateHookTests(unittest.TestCase):
         host._wait_for_team_select = lambda cfg, attempts=12, open_after=2: True
         host._pick_team = lambda team_no: True
         host._team_injury_status = lambda cfg: None
+        host.saved_records = []
+        host._save_team_record = lambda cfg, record_no=1: (
+            host.saved_records.append(record_no) or True)
         host._click_depart = lambda cfg: False  # 换完队长就收场，别真出阵
         host.rotations = []
         host._rotate_captain_here = \
@@ -167,9 +162,10 @@ class SortieRotateHookTests(unittest.TestCase):
         with patch("touken.flows.sortie.time.sleep"):
             messages = list(host.sortie_stream(chapter=1, map_no=1, team_no=3,
                                                auto_equip=False, auto_march=False,
-                                               rotate_captain=True))
+                                               rotate_captain=True,
+                                               rotate_captain_margin=20))
 
-        self.assertEqual(host.rotations, [10])
+        self.assertEqual(host.rotations, [20])
         self.assertIn("rot", messages)
         self.assertIn("[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停", messages)
 
@@ -181,9 +177,20 @@ class SortieRotateHookTests(unittest.TestCase):
 
         self.assertEqual(host.rotations, [])
 
+    def test_auto_equip_stays_active_when_injury_action_will_stop(self):
+        host = self._host()
+        from unittest.mock import patch
+        with patch("touken.flows.sortie.time.sleep"):
+            list(host.sortie_stream(
+                chapter=1, map_no=1, team_no=3,
+                auto_equip=True, auto_march=False,
+                injury_action="repair_stop"))
+
+        self.assertEqual(host.saved_records, [1])
+
 
 class SortieBuilderTests(unittest.TestCase):
-    """面板 builder 把 rotate_captain 开关透传给出阵/异去。"""
+    """面板 builder 把自动换队长开关和阈值透传给出阵/异去。"""
 
     class AgentStub:
         def sortie_stream(self, **kw):
@@ -198,16 +205,44 @@ class SortieBuilderTests(unittest.TestCase):
         from panel.server import _build_sortie, _build_yosari
 
         agent = self.AgentStub()
-        list(_build_sortie(agent, "cfg", {"rotate_captain": True}))
+        list(_build_sortie(agent, "cfg", {
+            "rotate_captain": True,
+            "rotate_captain_margin": "20",
+        }))
         self.assertIs(agent.kw["rotate_captain"], True)
+        self.assertEqual(agent.kw["rotate_captain_margin"], 20)
 
         agent = self.AgentStub()
-        list(_build_yosari(agent, "cfg", {"rotate_captain": True}))
+        list(_build_yosari(agent, "cfg", {
+            "rotate_captain": True,
+            "rotate_captain_margin": "5",
+        }))
         self.assertIs(agent.kw["rotate_captain"], True)
+        self.assertEqual(agent.kw["rotate_captain_margin"], 5)
 
         agent = self.AgentStub()
         list(_build_sortie(agent, "cfg", {}))
         self.assertIs(agent.kw["rotate_captain"], False)
+        self.assertEqual(agent.kw["rotate_captain_margin"], 10)
+
+    def test_battle_forms_only_show_margin_when_rotation_is_enabled(self):
+        from panel.script_runner import _SCRIPTS
+        import panel.server  # noqa: F401  # import 即注册脚本
+
+        for script in ("sortie", "yosari"):
+            fields = {field["key"]: field for field in _SCRIPTS[script]["params"]}
+            self.assertIn("rotate_captain", fields)
+            self.assertEqual(
+                fields["rotate_captain_margin"]["visibleWhen"],
+                {"key": "rotate_captain", "is": True})
+
+    def test_auto_equip_is_independent_from_injury_action_in_battle_forms(self):
+        from panel.script_runner import _SCRIPTS
+        import panel.server  # noqa: F401  # import 即注册脚本
+
+        for script in ("sortie", "yosari"):
+            fields = {field["key"]: field for field in _SCRIPTS[script]["params"]}
+            self.assertNotIn("visibleWhen", fields["auto_equip"])
 
 
 if __name__ == "__main__":

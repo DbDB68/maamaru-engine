@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """脚本注册表冒烟测试：worker 用 fn(config_path, params) 两参数调用，
-别把 (agent, config_path, params) 三参数的 builder 裸注册进去
-（2026-08-22 换队长脚本崩过的坑）。"""
+别把 (agent, config_path, params) 三参数的 builder 裸注册进去。"""
 
 import inspect
 import unittest
@@ -30,9 +29,8 @@ class ScriptRegistryTests(unittest.TestCase):
                 "worker 只给 (config_path, params) 两个——"
                 "三参数 builder 要用 _wrap_inventory 包一层")
 
-    def test_rotate_captain_is_registered(self):
-        self.assertIn("rotate_captain", _SCRIPTS)
-        self.assertEqual(_SCRIPTS["rotate_captain"]["label"], "换队长")
+    def test_rotate_captain_is_not_a_standalone_script(self):
+        self.assertNotIn("rotate_captain", _SCRIPTS)
 
 
 if __name__ == "__main__":

@@ -94,8 +94,9 @@ class OsakaMixin:
         if _target_floors is None:
             _target_floors = max_floors
         if _auto_equip_active is None:
-            _auto_equip_active = bool(
-                auto_equip and str(injury_action or "continue") == "continue")
+            # 刀装恢复与伤势处理互不绑定；伤势仍在出阵前优先按
+            # injury_action 处理，刀装警告出现时则只看 auto_equip。
+            _auto_equip_active = bool(auto_equip)
         cfg = self.config.get("osaka", {})
         if not cfg:
             yield "[挖地] 未配置大阪城"

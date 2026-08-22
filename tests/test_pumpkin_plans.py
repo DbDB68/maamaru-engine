@@ -55,8 +55,7 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertEqual(by_key["repair_on_injury"]["options"][-1],
                          ["stop", "返回本丸，不进行手入"])
         self.assertTrue(by_key["auto_equip"]["default"])
-        self.assertEqual(by_key["auto_equip"]["visibleWhen"],
-                         {"key": "repair_on_injury", "is": "continue"})
+        self.assertNotIn("visibleWhen", by_key["auto_equip"])
 
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent):
@@ -150,7 +149,9 @@ class PumpkinPlanTests(unittest.TestCase):
                   "yosari_map_no": "3", "yosari_runs": "8",
                   "yosari_auto_refill": True}
         saved = {"params": {"yosari": {"auto_march": False,
-                                          "repair_threshold": "medium"}}}
+                                          "repair_threshold": "medium",
+                                          "rotate_captain": True,
+                                          "rotate_captain_margin": "5"}}}
         with patch("panel.server._make_agent", return_value=agent), patch(
             "panel.server._load_panel_settings", return_value=saved
         ):
@@ -163,12 +164,16 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertTrue(plan["auto_refill"])
         self.assertFalse(plan["auto_march"])
         self.assertEqual(plan["repair_threshold"], "medium")
+        self.assertTrue(plan["rotate_captain"])
+        self.assertEqual(plan["rotate_captain_margin"], 5)
 
     def test_daily_sortie_can_retreat_before_boss(self):
         agent = FakeAgent()
         params = {"sortie_mode": "sortie", "chapter": "5", "map_no": "4",
                   "loops": "3", "team_no": "2", "retreat_before_boss": True}
-        saved = {"params": {"sortie": {"auto_march": False}}}
+        saved = {"params": {"sortie": {"auto_march": False,
+                                          "rotate_captain": True,
+                                          "rotate_captain_margin": "20"}}}
         with patch("panel.server._make_agent", return_value=agent), patch(
             "panel.server._load_panel_settings", return_value=saved
         ):
@@ -177,6 +182,8 @@ class PumpkinPlanTests(unittest.TestCase):
         plan = agent.daily_args["sortie_override"]
         self.assertTrue(plan["retreat_before_boss"])
         self.assertFalse(plan["auto_march"])
+        self.assertTrue(plan["rotate_captain"])
+        self.assertEqual(plan["rotate_captain_margin"], 20)
         field = next(field for field in list_scripts()["daily"]["params"]
                      if field.get("key") == "retreat_before_boss")
         self.assertEqual(field["visibleWhen"], {"key": "sortie_mode", "is": "sortie"})
