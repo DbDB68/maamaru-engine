@@ -79,6 +79,19 @@ _TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "run_rotate_captain",
+            "description": "换队长：读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "team_no": {"type": "integer", "description": "部队编号", "default": 1},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_practice",
             "description": "演练：认人打软柿子赢 3 场收工",
             "parameters": {"type": "object", "properties": {}},
@@ -228,6 +241,7 @@ class AgentGateway:
         TOOL_MAP = {
             "run_daily": "daily",
             "run_sakura": "sakura",
+            "run_rotate_captain": "rotate_captain",
             "run_practice": "practice",
             "run_collect_expedition": "expedition",
             "run_forge": "forge",

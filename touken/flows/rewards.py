@@ -279,7 +279,10 @@ class RewardsMixin:
 
                 # 优先等按钮刷新为灰态；报酬一览弹窗本身也是领取成功的直接证据。
                 # 两者都没有才算未确认，避免“刚关奖励弹窗却说没领到”的假阴性。
+                # 弹窗可能来得慢（实测日常 tab 点了 5 秒才弹），等待窗口内也要盯弹窗，
+                # 否则弹窗晚于首次读取 = 领到了却被记成未确认（2026-08-22 安装版实测）。
                 button_confirmed = False
+                late_popup = False
                 for _ in range(6):
                     self.maa.screenshot(force=True)
                     still_active = self.maa.template_match(
@@ -289,8 +292,19 @@ class RewardsMixin:
                     if now_inactive and not still_active:
                         button_confirmed = True
                         break
+                    if popup is None and self.maa.exists("ui完成任务.png"):
+                        late_popup = True
+                        break
                     time.sleep(0.5)
-                popup_confirmed = popup is not None
+                if late_popup:
+                    popup, notes = self._read_popup_guarded(tab_name)
+                    for note in notes:
+                        yield note
+                    if close_config:
+                        _, close_msgs = self._close_reward_popup(close_config)
+                        for msg in close_msgs:
+                            yield msg
+                popup_confirmed = popup is not None or late_popup
                 if button_confirmed or popup_confirmed:
                     if hasattr(self, "record_event"):
                         claimed_id = self.record_event("task_rewards.claimed",

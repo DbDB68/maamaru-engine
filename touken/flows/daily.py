@@ -37,7 +37,8 @@ _FAIL_RE = re.compile(
     r"到达.{0,8}失败|没打开|放弃|超时|翻车|没能|没等到|刀装未满警告|"
     r"未找到暖心礼包|未识别到领取按钮|未检测到0价格弹窗|"
     r"未确认一键领取按钮状态|点击后未确认领取成功|"
-    r"常用安排地图.{0,12}不存在"
+    r"常用安排地图.{0,12}不存在|"
+    r"未配置(?:异去|合战场)|配置里没有(?:章节|小图|部队)"
 )
 
 
@@ -388,7 +389,8 @@ class DailyMixin:
                         injury_action=sortie_plan.get("repair_on_injury", "continue"),
                         auto_equip=sortie_plan.get("auto_equip", True),
                         retreat_before_boss=sortie_plan.get(
-                            "retreat_before_boss", False)):
+                            "retreat_before_boss", False),
+                        rotate_captain=sortie_plan.get("rotate_captain", False)):
                     yield msg
                     if _is_fail(msg):
                         ok = False
@@ -425,7 +427,8 @@ class DailyMixin:
                         formation=sortie_plan.get("formation", "鱼鳞阵"),
                         repair_threshold=sortie_plan.get("repair_threshold", "light"),
                         injury_action=sortie_plan.get("repair_on_injury", "continue"),
-                        auto_equip=sortie_plan.get("auto_equip", True)):
+                        auto_equip=sortie_plan.get("auto_equip", True),
+                        rotate_captain=sortie_plan.get("rotate_captain", False)):
                     yield msg
                     if _is_fail(msg):
                         ok = False

@@ -158,6 +158,9 @@ def _run_count(params, default, *legacy_keys):
 def _march_and_injury_fields():
     """合战场与异去共享；阵形仅在脚本行军时显示。"""
     return [
+        {"key": "rotate_captain", "type": "toggle", "label": "出阵前自动换队长",
+         "default": False,
+         "help": "出阵前读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）。一键日课沿用此开关。"},
         {"key": "auto_march", "type": "toggle", "label": "是否使用自动行军",
          "default": True},
         {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
@@ -288,7 +291,8 @@ def _build_daily(agent, config_path, params):
                        "formation": saved_yosari.get("formation") or "鱼鳞阵",
                        "repair_threshold": saved_yosari.get("repair_threshold") or "light",
                        "repair_on_injury": saved_yosari.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(saved_yosari.get("auto_equip", True))}
+                       "auto_equip": _bool(saved_yosari.get("auto_equip", True)),
+                       "rotate_captain": _bool(saved_yosari.get("rotate_captain", False))}
     elif mode == "sortie":
         # 地图、队伍、圈数由一键日课决定；战斗行为统一沿用「出阵」配置页。
         saved_sortie = (_load_panel_settings().get("params", {}).get("sortie", {}) or {})
@@ -306,7 +310,8 @@ def _build_daily(agent, config_path, params):
                        "auto_equip": _bool(saved_sortie.get("auto_equip", True)),
                        "retreat_before_boss": _bool(params.get(
                            "retreat_before_boss",
-                           saved_sortie.get("retreat_before_boss", False)))}
+                           saved_sortie.get("retreat_before_boss", False))),
+                       "rotate_captain": _bool(saved_sortie.get("rotate_captain", False))}
     elif mode == "osaka":
         # 楼层、部队和圈数由日课决定；阵形、伤势与刀装恢复沿用独立大阪城配置。
         saved_osaka = (_load_panel_settings().get("params", {}).get("osaka", {}) or {})
@@ -414,7 +419,8 @@ def _build_sortie(agent, config_path, params):
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
         auto_equip=_bool(params.get("auto_equip", True)),
-        retreat_before_boss=_bool(params.get("retreat_before_boss", False)))
+        retreat_before_boss=_bool(params.get("retreat_before_boss", False)),
+        rotate_captain=_bool(params.get("rotate_captain", False)))
 
 
 def _build_yosari(agent, config_path, params):
@@ -429,7 +435,8 @@ def _build_yosari(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
-        auto_equip=_bool(params.get("auto_equip", True)))
+        auto_equip=_bool(params.get("auto_equip", True)),
+        rotate_captain=_bool(params.get("rotate_captain", False)))
 
 
 def _build_osaka(agent, config_path, params):
@@ -452,6 +459,12 @@ def _build_sakura(agent, config_path, params):
     yield from agent.sakura_stream(
         team_no=_i(params, "team_no", 1),
         slot=_i(params, "slot", 1))
+
+
+def _build_rotate_captain(agent, config_path, params):
+    yield from agent.rotate_captain_stream(
+        team_no=_i(params, "team_no", 1),
+        margin=_i(params, "margin", 10))
 
 
 def _build_forge(agent, config_path, params):
@@ -758,6 +771,14 @@ register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了�
                         {"key": "slot", "type": "select", "label": "位置",
                          "options": [[str(i), f"{i}号位" + ("（队长）" if i == 1 else "")]
                                      for i in range(1, 7)], "default": "1"}])
+register_script("rotate_captain", "换队长", "读全队疲劳，把最低的拖到队长位吃加成（保花用）",
+                _wrap_inventory("换队长", _build_rotate_captain),
+                params=[_team_field("1"),
+                        {"key": "margin", "type": "select", "label": "差距多少才换",
+                         "options": [["5", "差 5 点就换"], ["10", "差 10 点才换"],
+                                     ["20", "差 20 点才换"]],
+                         "default": "10",
+                         "help": "全队最低疲劳比队长低至少这么多才动手，防止每圈瞎折腾。"}])
 def _build_practice(agent, config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
     return agent.practice_stream(
@@ -1233,6 +1254,7 @@ _SCRIPT_FLAVOR = {
     "yosari": "正在提灯照耀的异去探索🏮",
     "osaka": "正在大阪城地下咔咔挖土⛏️",
     "sakura": "正在给刀剑男士刷樱花🌸",
+    "rotate_captain": "正在给全队换队长🌸",
     "practice": "正在演练场挑软柿子捏🥊",
     "expedition": "正在流放刀剑男士⛺",
     "dispatch": "正在流放刀剑男士⛺",

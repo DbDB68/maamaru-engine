@@ -257,6 +257,26 @@ class TaskRewardTests(unittest.TestCase):
         self.assertIn(("popup.resources", {"items": [("木炭", 1050)]}), flow.events)
         self.assertTrue(any("已确认报酬弹窗" in msg for msg in messages))
 
+    def test_late_reward_popup_still_confirms_claim(self):
+        """弹窗比首次读取慢（安装版实测月常/活动）：等待窗口里弹出来也算领到。"""
+        maa = self.Maa(active_first=True, inactive=False)
+        maa.exists = lambda template: template == "ui完成任务.png"
+        flow = self._flow(maa)
+        reads = []
+
+        def fake_read():
+            reads.append(1)
+            # 首次读时弹窗还没弹；等待窗口里二次读才有
+            return None if len(reads) == 1 else ([("玉钢", 800)], [])
+
+        flow._read_reward_popup = fake_read
+        with patch("touken.flows.rewards.time.sleep"):
+            messages = list(flow.claim_task_rewards_stream())
+
+        self.assertIn(("task_rewards.claimed", {"tab": "日常"}), flow.events)
+        self.assertTrue(any("已确认报酬弹窗" in msg for msg in messages))
+        self.assertFalse(any("未确认领取成功" in msg for msg in messages))
+
     def test_unknown_button_state_is_not_clicked_or_counted(self):
         maa = self.Maa()
         flow = self._flow(maa)

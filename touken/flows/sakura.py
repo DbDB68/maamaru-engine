@@ -37,6 +37,25 @@ _SWAP_X = 1033            # 每行"替换"按钮
 _AUTO_EQUIP = (621, 96)   # 更换装备页"自动装备刀装"
 _EQUIP_BACK = (135, 25)   # 更换装备页返回箭头
 
+# 换队长拖拽：从成员卡片拖到队长位。起点 x 和时长是真机校准点——
+# 太快会被游戏吞（repair.py 实测 <400ms 失灵）；拖不动就加长 _DRAG_MS
+_DRAG_X = 200
+_DRAG_MS = 1000
+
+
+def _parse_fatigue_text(text: str):
+    """从一行 OCR 文本里挑疲劳值：配对的两个数里分母是 100 的才是疲劳
+    （roi 可能蹭到上面那行"生存 xx/xx"，疲劳上限永远 100）。
+    Returns: 疲劳值 int 或 None
+    """
+    pairs = re.findall(r"(\d{1,3})\D{0,2}/\D{0,2}(\d{1,3})", text)
+    if not pairs:
+        return None
+    for cur, mx in pairs:
+        if mx == "100":
+            return int(cur)
+    return int(pairs[0][0])
+
 # 刀剑男士选择（替换列表）：行位置随滚动会飘，不写死行坐标，
 # 整列 OCR 按 y 分行找"疲劳"行；决定按钮 x≈1197，中心≈疲劳行上方 40
 _SEL_DECIDE_X = 1197
@@ -142,6 +161,98 @@ class SakuraMixin:
 
         yield f"[刷花] 刷了 {max_rounds} 圈还没到 {target}（当前 {fatigue}），安全上限收工"
 
+    # ==================== 自动换队长（刷花/保花辅助） ====================
+
+    def rotate_captain_stream(self, team_no: int = 1, margin: int = 10):
+        """
+        流式换队长：读全队疲劳，把疲劳最低的拖到队长位。
+
+        游戏机制（用户亲授）：队长位必定+疲劳，所以让全队最累（疲劳最低）
+        的人去当队长追进度，花才掉得慢。空位/读不到的行直接跳过。
+
+        Args:
+            team_no: 部队编号（1-5）
+            margin: 最低疲劳比队长低至少这么多才值得换（防每圈瞎折腾）
+
+        Yields:
+            str: 执行状态消息
+        """
+        if team_no not in _TEAM_TAB:
+            yield f"[换队长] 部队{team_no}不存在（1-5）"
+            return
+
+        yield f"[换队长] 看看部队{team_no}谁最需要队长位..."
+        for nav_msg in self.navigate_to_stream("编队"):
+            yield nav_msg
+        if self.current_location != "编队":
+            yield "[换队长] 到不了编队"
+            return
+        self.maa.click(Point(*_TEAM_TAB[team_no]))
+        time.sleep(1.5)
+        yield from self._rotate_captain_here(margin)
+
+    def _rotate_captain_here(self, margin: int = 10):
+        """
+        在当前页原地换队长：读全队疲劳，最低的拖到队长位，拖完复查。
+
+        调用前必须已停在目标部队的六行成员列表页（部队标签已切好）。
+        编队页和出阵前的部队选择页布局相同、都能拖人换位（用户实测），
+        所以出阵循环里每圈走到部队选择页时直接调用本方法，不用绕路。
+
+        Yields:
+            str: 执行状态消息
+        """
+        values = self._read_rows_fatigue()
+        if not values:
+            yield "[换队长] 全队都读不到疲劳（在远征？界面不对？），跳过"
+            return
+
+        captain = values.get(1)
+        if captain is None:
+            yield "[换队长] 队长位读不到疲劳（空位？），跳过"
+            return
+        low_slot = min(values, key=values.get)
+        low = values[low_slot]
+        overview = "、".join(f"{s}号位{v}" for s, v in sorted(values.items()))
+        yield f"[换队长] 全队疲劳：{overview}"
+
+        if low_slot == 1:
+            yield f"[换队长] 队长自己就是全队最低（{captain}/100），位置没毛病，收工"
+            return
+        if captain - low < margin:
+            yield (f"[换队长] 全队最低才 {low}/100，跟队长（{captain}）"
+                   f"差不到 {margin}，不值得折腾，收工")
+            return
+
+        # 读个名字好汇报（名字在疲劳行上方，同 _swap_tired_in 的相对位置）
+        cy = _ROW_CY[low_slot - 1]
+        name_tokens = self.maa.ocr_all(roi_4to4(100, cy + 8, 265, cy + 36))
+        name = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
+        yield f"[换队长] {name} 疲劳 {low} 全队最低，拖去队长位（原队长 {captain}/100）"
+
+        self.maa.swipe(_DRAG_X, cy, _DRAG_X, _ROW_CY[0], _DRAG_MS)
+        time.sleep(1.5)
+
+        # 拖完复查：队长位的疲劳应该变成刚才那位最低值
+        after = self._read_rows_fatigue()
+        if after.get(1) == low:
+            yield f"[换队长] ✓ 换好了，{name} 上任队长，去吃疲劳加成吧"
+        else:
+            got = after.get(1, "读不到")
+            yield (f"[换队长] ⚠️ 拖完队长位疲劳是 {got}，不是预期的 {low}"
+                   "——拖动可能没生效（手势被吞？），你手动瞅一眼")
+
+    def _read_rows_fatigue(self) -> dict:
+        """当前页截屏读 6 行疲劳。Returns: {位置: 疲劳值}（读不到的行跳过）"""
+        self.maa.screenshot(force=True)
+        values = {}
+        for slot, cy in enumerate(_ROW_CY, start=1):
+            tokens = self.maa.ocr_all(roi_4to4(290, cy + 28, 425, cy + 52))
+            value = _parse_fatigue_text("".join(t for t, _ in tokens))
+            if value is not None:
+                values[slot] = value
+        return values
+
     # ==================== 读疲劳 ====================
 
     def _check_fatigue(self, team_no: int, slot: int):
@@ -161,14 +272,7 @@ class SakuraMixin:
         cy = _ROW_CY[slot - 1]
         tokens = self.maa.ocr_all(roi_4to4(290, cy + 28, 425, cy + 52))
         text = "".join(t for t, _ in tokens)
-        pairs = re.findall(r"(\d{1,3})\D{0,2}/\D{0,2}(\d{1,3})", text)
-        if not pairs:
-            return None
-        # 分母是 100 的才是疲劳（可能蹭到上面"生存 xx/xx"那行）
-        for cur, mx in pairs:
-            if mx == "100":
-                return int(cur)
-        return int(pairs[0][0])
+        return _parse_fatigue_text(text)
 
     # ==================== 装备解除：刀装·部队以外 ====================
 

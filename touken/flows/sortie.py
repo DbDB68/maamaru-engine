@@ -36,7 +36,8 @@ class SortieMixin:
                       repair_threshold: str = "light",
                       injury_action: str = "continue",
                       auto_equip: bool = True,
-                      retreat_before_boss: bool = False):
+                      retreat_before_boss: bool = False,
+                      rotate_captain: bool = False):
         yield from self._map_sortie_stream(
             chapter=chapter, map_no=map_no, team_no=team_no,
             auto_march=auto_march, max_loops=max_loops,
@@ -45,6 +46,7 @@ class SortieMixin:
             repair_threshold=repair_threshold, injury_action=injury_action,
             auto_equip=auto_equip,
             retreat_before_boss=retreat_before_boss,
+            rotate_captain=rotate_captain,
         )
 
     def yosari_stream(self, map_no: int, team_no: int = 3,
@@ -55,7 +57,8 @@ class SortieMixin:
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
                       injury_action: str = "continue",
-                      auto_equip: bool = True):
+                      auto_equip: bool = True,
+                      rotate_captain: bool = False):
         """流式跑常驻玩法“异去”；目前只有第一章。"""
         yield from self._map_sortie_stream(
             chapter=1, map_no=map_no, team_no=team_no,
@@ -65,6 +68,7 @@ class SortieMixin:
             formation_strategy=formation_strategy, formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
             auto_equip=auto_equip,
+            rotate_captain=rotate_captain,
             map_type="异去", cfg_key="yosari",
         )
 
@@ -78,6 +82,7 @@ class SortieMixin:
                            auto_equip: bool = True,
                            auto_refill: bool = False,
                            retreat_before_boss: bool = False,
+                           rotate_captain: bool = False,
                            map_type: str = "合战场",
                            cfg_key: str = "sortie"):
         """
@@ -90,6 +95,7 @@ class SortieMixin:
             auto_march: 是否委托自动行军（True=全自动打完一圈回本丸）
             max_loops: 连续打几圈
             repair_threshold: 自动手入阈值（light / medium / heavy）
+            rotate_captain: 每圈在部队选择页读全队疲劳，最低的拖去队长位（保花）
 
         Yields:
             str: 执行状态消息
@@ -189,6 +195,15 @@ class SortieMixin:
                 continue
 
             self._pick_team(team_no)
+
+            # ========== 4.5 每圈原地换队长（保花：部队选择页与编队页布局相同，
+            # 用户实测能直接拖人换位，不用绕路编队页；差距不到阈值会自动跳过） ==========
+            if rotate_captain:
+                try:
+                    for rot_msg in self._rotate_captain_here():
+                        yield rot_msg
+                except Exception as exc:
+                    yield f"[出阵] 自动换队长翻车（不影响出阵）: {exc}"
 
             # ========== 5. 【保命】重伤检查（先于一切出阵准备） ==========
             self.maa.screenshot(force=True)

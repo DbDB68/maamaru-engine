@@ -58,7 +58,9 @@ class RuntimePathsTests(unittest.TestCase):
             result = ensure_runtime_data(data, bundle, legacy_roots=[legacy])
 
             self.assertGreaterEqual(result["copied"], 4)
-            self.assertEqual(json.loads((data / "config" / "touken.json").read_text()), {"mine": True})
+            # 迁移来的老配置会被补上新版本新增的字段，已有键保持不动
+            self.assertEqual(json.loads((data / "config" / "touken.json").read_text()),
+                             {"mine": True, "default": True})
             self.assertTrue((data / "state" / "daily_flags.json").is_file())
             self.assertFalse((data / "state" / "maamaru_logs.db").exists())
             self.assertEqual((data / "logs" / "maamaru_logs.db").read_bytes(), b"sqlite")
@@ -78,12 +80,52 @@ class RuntimePathsTests(unittest.TestCase):
             (data / "config").mkdir(parents=True)
             (legacy).mkdir()
             target = data / "config" / "touken.json"
-            target.write_text('{"new": true}', encoding="utf-8")
+            # default=false 模拟用户改过的值：补键时绝不能被模板覆盖
+            target.write_text('{"new": true, "default": false}', encoding="utf-8")
             (legacy / "touken_config.json").write_text('{"old": true}', encoding="utf-8")
 
             ensure_runtime_data(data, bundle, legacy_roots=[legacy])
 
-            self.assertEqual(json.loads(target.read_text()), {"new": True})
+            self.assertEqual(json.loads(target.read_text()), {"new": True, "default": False})
+
+    def test_old_config_gets_new_template_keys_filled_with_backup(self):
+        """复现 2026-08-22 安装版事故：老配置没有异去坐标，升级后出阵哑跑报绿。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "program"
+            (bundle / "panel").mkdir(parents=True)
+            (bundle / "profiles").mkdir()
+            (bundle / "touken_config.example.json").write_text(json.dumps({
+                "map_select": {"合战场": {"chapters": {"1": [1, 2]}},
+                               "异去": {"chapters": {"1": [3, 4]}}},
+                "yosari": {"auto_refill": False},
+            }, ensure_ascii=False), encoding="utf-8")
+            (bundle / "panel" / "panel_config.example.json").write_text('{}', encoding="utf-8")
+            (bundle / "panel" / "expedition_schedule.json").write_text('{}', encoding="utf-8")
+            data = root / "user-data"
+            (data / "config").mkdir(parents=True)
+            target = data / "config" / "touken.json"
+            target.write_text(json.dumps({
+                "map_select": {"合战场": {"chapters": {"1": [9, 9]}}},
+            }, ensure_ascii=False), encoding="utf-8")
+
+            ensure_runtime_data(data, bundle, legacy_roots=[])
+
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            # 新增字段补齐
+            self.assertEqual(merged["map_select"]["异去"], {"chapters": {"1": [3, 4]}})
+            self.assertEqual(merged["yosari"], {"auto_refill": False})
+            # 用户已有的值（哪怕和模板不一样）原样保留
+            self.assertEqual(merged["map_select"]["合战场"]["chapters"]["1"], [9, 9])
+            # 写入前有备份
+            backups = list((data / "backups").glob("touken-pre-keyfill-*.json"))
+            self.assertEqual(len(backups), 1)
+            self.assertNotIn("异去", backups[0].read_text(encoding="utf-8"))
+            # 再跑一次：没有新键可补，文件和备份数都不变
+            digest_before = hashlib.sha256(target.read_bytes()).hexdigest()
+            ensure_runtime_data(data, bundle, legacy_roots=[])
+            self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), digest_before)
+            self.assertEqual(len(list((data / "backups").glob("touken-pre-keyfill-*.json"))), 1)
 
     def test_v014_flat_user_directory_migrates_completely_and_is_repeatable(self):
         """Model the writable files produced beside data in the v0.1.4 release."""
@@ -130,6 +172,12 @@ class RuntimePathsTests(unittest.TestCase):
                 "profiles/custom_head.png": "profiles/overrides/custom_head.png",
             }
             for source, target in expected.items():
+                if source == "touken_config.json":
+                    # 迁移落地后还会被补上新版本新增的模板字段
+                    self.assertEqual(
+                        json.loads((old / target).read_text(encoding="utf-8")),
+                        {**json.loads(fixtures[source]), "default": True}, target)
+                    continue
                 self.assertEqual((old / target).read_bytes(), fixtures[source], target)
             for source, digest in original.items():
                 self.assertEqual(hashlib.sha256((old / source).read_bytes()).hexdigest(), digest)

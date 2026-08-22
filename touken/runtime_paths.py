@@ -285,6 +285,49 @@ def migrate_legacy_data(
     return result
 
 
+def _fill_missing_config_keys(
+    example_path: Path,
+    target_path: Path,
+    backup_dir: Path,
+) -> list[str]:
+    """给老配置补新版本新增的字段（递归；用户已有的值一概不动）。
+
+    只补缺失键，不覆盖、不删除。写入前把原文件备份到 backup_dir。
+    返回补过的字段路径列表；没补就是空列表（也没动文件）。
+    """
+    if not example_path.is_file() or not target_path.is_file():
+        return []
+    try:
+        template = json.loads(example_path.read_text(encoding="utf-8-sig"))
+        current = json.loads(target_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(template, dict) or not isinstance(current, dict):
+        return []
+
+    added: list[str] = []
+
+    def fill(dst: dict, src: dict, prefix: str = "") -> None:
+        for key, value in src.items():
+            if key not in dst:
+                dst[key] = value
+                added.append(prefix + key)
+            elif isinstance(value, dict) and isinstance(dst.get(key), dict):
+                fill(dst[key], value, prefix + key + ".")
+
+    fill(current, template)
+    if not added:
+        return []
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = backup_dir / f"{target_path.stem}-pre-keyfill-{stamp}{target_path.suffix}"
+    shutil.copy2(target_path, backup)
+    target_path.write_text(
+        json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    return added
+
+
 def ensure_runtime_data(
     data_root: Path = DATA_ROOT,
     bundle_root: Path = BUNDLE_ROOT,
@@ -312,6 +355,14 @@ def ensure_runtime_data(
     )
     for source, target in defaults:
         _copy_missing_file(source, target)
+
+    # 老安装升级：配置已存在时 _copy_missing_file 不会动它，新版本新增的
+    # 字段（比如异去坐标）永远进不来，出阵直接哑跑还报绿。这里只补缺失键。
+    _fill_missing_config_keys(
+        Path(bundle_root) / "touken_config.example.json",
+        layout.config / "touken.json",
+        layout.backups,
+    )
 
     _ensure_data_version(layout.root / "data-version.json")
     return migration
