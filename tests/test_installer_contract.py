@@ -45,6 +45,21 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("ExpandConstant('{userprofile}')", self.script)
         self.assertIn("确定继续吗？", self.script)
 
+    def test_silent_uninstall_skips_prompt_and_keeps_user_data(self):
+        # 2026-08-23 事故：自定义卸载询问窗不受 /VERYSILENT 抑制，
+        # CI 冒烟在卸载步骤永久挂起。静默模式必须直接走保留数据分支。
+        init = re.search(
+            r"function InitializeUninstall\(\): Boolean;(?P<body>.*?)\nend;",
+            self.script, flags=re.DOTALL)
+        self.assertIsNotNone(init)
+        body = init.group("body")
+        silent = re.search(
+            r"if UninstallSilent then(.*?)Exit;", body, flags=re.DOTALL)
+        self.assertIsNotNone(silent, "静默卸载必须跳过自定义询问窗")
+        self.assertIn("DeleteUserData := False", silent.group(1))
+        self.assertLess(body.index("if UninstallSilent then"),
+                        body.index("AskUninstallPurpose();"))
+
     def test_installer_uses_simplified_chinese_messages(self):
         language = INSTALLER.with_name("ChineseSimplified.isl")
         self.assertIn(r'MessagesFile: ".\ChineseSimplified.isl"', self.script)
@@ -68,6 +83,7 @@ class InstallerContractTests(unittest.TestCase):
             "http://127.0.0.1:8080/api/status",
             "installer-smoke-preserve.txt",
             "uninstall_preserved_user_data",
+            "WaitForExit",  # 安装/卸载等待必须有超时兜底，禁止挂死 CI
         ):
             self.assertIn(required, script)
 

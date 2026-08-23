@@ -95,7 +95,7 @@ try {
 
     $installDir = Join-Path $driveRoot "Programs\Maamaru"
     $physicalInstallDir = Join-Path $installVolume "Programs\Maamaru"
-    $install = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+    $install = Start-Process -FilePath $installer -PassThru -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
@@ -103,6 +103,11 @@ try {
         "/DIR=`"$installDir`"",
         "/LOG=`"$installerLog`""
     )
+    # -Wait 没有超时兜底：万一出现未被静默抑制的窗口，10 分钟后按失败处理而不是挂死 CI
+    if (-not $install.WaitForExit(600000)) {
+        Stop-Process -Id $install.Id -Force -ErrorAction SilentlyContinue
+        throw "安装器 10 分钟未结束，疑似出现未被静默抑制的窗口"
+    }
     if ($install.ExitCode -ne 0) {
         throw "安装器返回错误码 $($install.ExitCode)"
     }
@@ -164,12 +169,16 @@ try {
     if (-not $uninstaller) {
         throw "安装目录里没有找到卸载程序"
     }
-    $uninstall = Start-Process -FilePath $uninstaller.FullName -Wait -PassThru -ArgumentList @(
+    $uninstall = Start-Process -FilePath $uninstaller.FullName -PassThru -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
         "/LOG=`"$uninstallerLog`""
     )
+    if (-not $uninstall.WaitForExit(120000)) {
+        Stop-Process -Id $uninstall.Id -Force -ErrorAction SilentlyContinue
+        throw "卸载程序 2 分钟未结束，疑似出现未被静默抑制的窗口"
+    }
     if ($uninstall.ExitCode -ne 0) {
         throw "卸载程序返回错误码 $($uninstall.ExitCode)"
     }

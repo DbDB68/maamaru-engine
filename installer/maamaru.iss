@@ -199,6 +199,15 @@ begin
   RegQueryStringValue(HKCU, 'Software\Maamaru', 'DataRoot', SelectedDataRoot);
   RegQueryStringValue(HKCU, 'Software\Maamaru', 'PreviousDataRoot', PreviousDataRoot);
 
+  { 静默卸载（CI 冒烟、批量运维）不弹窗：默认走“保留用户数据”的安全分支。
+    自定义窗体不受 /VERYSILENT 抑制，无人值守环境弹窗会永久挂起。 }
+  if UninstallSilent then
+  begin
+    DeleteUserData := False;
+    Result := True;
+    Exit;
+  end;
+
   Choice := AskUninstallPurpose();
   Result := Choice >= 0;
   DeleteUserData := Choice = 1;
