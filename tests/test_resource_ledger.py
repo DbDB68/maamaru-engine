@@ -310,6 +310,31 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(self._res(ledger, "小判")["total_delta"], 200)
         self.assertEqual(self._res(ledger, "小判")["confidence"], "low")
 
+    def test_gap_lowers_only_named_resources_confidence(self):
+        # 缺口只波及小判时，木炭观察链完整（首末相等也算配对），不跟着躺枪；
+        # 人工报备范围未知（resources 为空），仍把所有资源一起降到 low
+        t0 = sh("2026-08-20 09:00:00")
+        self._captured(t0, {"小判": 1000, "木炭": 500}, phase="after", run_id="run-a")
+        self._captured(t0 + 3600, {"小判": 1200, "木炭": 500},
+                       phase="before", run_id="run-b")
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 7200)
+        gap = next(g for g in ledger["gaps"] if g["reason"] == "no_observation")
+        self.assertEqual(gap["resources"], {"小判": 200})
+        self.assertEqual(self._res(ledger, "小判")["confidence"], "low")
+        self.assertEqual(self._res(ledger, "木炭")["confidence"], "medium")
+        day = self._day(ledger, "2026-08-20", "木炭")
+        self.assertEqual(day["confidence"], "medium")
+        self.assertEqual(day["gap_ids"], [])
+        day = self._day(ledger, "2026-08-20", "小判")
+        self.assertEqual(day["confidence"], "low")
+        self.assertEqual(day["gap_ids"], [gap["id"]])
+
+        # 报备时间落在缺口外 → 单独成条（范围未知），所有资源一起降
+        self.store.add_human_report(occurred_at=t0 + 5400, activities=["手动出阵"])
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 7200)
+        self.assertEqual(self._res(ledger, "木炭")["confidence"], "low")
+
     def test_window_baseline_comes_from_before_window(self):
         # 窗前最近一次观察当 opening 基线：窗口内没有首观察也能结账
         t0 = sh("2026-08-19 09:00:00")
@@ -336,7 +361,7 @@ class ResourceLedgerTests(unittest.TestCase):
                 api_data_resource_ledger(days=7, from_ts=t0 - 60, to=t0 + 900))
             by_days = asyncio.run(api_data_resource_ledger(days=7, from_ts=None, to=None))
 
-        self.assertEqual(by_from_to["schema_version"], 1)
+        self.assertEqual(by_from_to["schema_version"], 2)
         self.assertEqual(by_from_to["window"]["from"], t0 - 60)
         self.assertEqual(by_from_to["window"]["to"], t0 + 900)
         self.assertEqual([r["resource"] for r in by_from_to["per_resource"]],

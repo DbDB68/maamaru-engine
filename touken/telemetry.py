@@ -23,7 +23,8 @@ TELEMETRY_SCHEMA_VERSION = 4
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
-LEDGER_SCHEMA_VERSION = 1
+# v2：缺口按波及资源降置信度（v1 是窗口内任何缺口把所有资源打成 low）
+LEDGER_SCHEMA_VERSION = 2
 # 资源全集，顺序固定：顶栏四资源 + 真小判 + 甲州金 + 右栏两符
 LEDGER_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石", "小判", "甲州金", "委托符", "加速符")
 # peek 只有顶栏五资源（契约：永远不含小判/委托符/加速符），
@@ -282,10 +283,14 @@ class TelemetryStore:
 
     def inventory_gaps(self, limit: int = 50) -> list[dict]:
         """Return resource changes between a prior closing snapshot and next run start."""
+        # 只看最近 500 条快照（返回上限 200 个缺口，500 条配对绰绰有余），
+        # 快照事件永久保留，全表扫描会随年份线性变慢
         rows = self._conn().execute(
             "SELECT id, ts, run_id, payload FROM events "
-            "WHERE event_type = 'inventory.captured' ORDER BY ts, id",
+            "WHERE event_type = 'inventory.captured' "
+            "ORDER BY ts DESC, id DESC LIMIT 500",
         ).fetchall()
+        rows = list(reversed(rows))
         snapshots = [{**dict(row), "payload": _loads(row["payload"], {})}
                      for row in rows]
         reported = {row["gap_key"] for row in self._conn().execute(
@@ -524,14 +529,26 @@ class TelemetryStore:
                          "reason": "conflicting_evidence", "human_report_ids": []})
         gaps.sort(key=lambda g: (g["from"], g["id"]))
 
-        def _gap_ids(start: float, end: float) -> list[str]:
-            return [g["id"] for g in gaps if g["from"] <= end and g["to"] >= start]
+        def _gap_ids(start: float, end: float,
+                     resource: str | None = None) -> list[str]:
+            ids = []
+            for g in gaps:
+                if not (g["from"] <= end and g["to"] >= start):
+                    continue
+                # 缺口点名了波及资源（no_observation/conflict 的 resources 非空）时，
+                # 没点名的资源不背锅；人工报备范围未知（resources 为空），一起降
+                if (resource is not None and g["resources"]
+                        and resource not in g["resources"]):
+                    continue
+                ids.append(g["id"])
+            return ids
 
         def _confidence(obs_count: int, attrs: list[dict], paired: bool,
-                        start: float, end: float) -> str:
-            # 观察缺失 / 有人工报备或缺口 / 证据冲突 = low；
+                        start: float, end: float,
+                        resource: str | None = None) -> str:
+            # 观察缺失 / 有波及该资源的人工报备或缺口 / 证据冲突 = low；
             # 观察链完整且有 confirmed 覆盖 = high；只有观察差值无归因 = medium
-            if obs_count == 0 or _gap_ids(start, end):
+            if obs_count == 0 or _gap_ids(start, end, resource):
                 return "low"
             if paired and any(a["confidence"] == "confirmed" for a in attrs):
                 return "high"
@@ -565,7 +582,8 @@ class TelemetryStore:
                 "attributed_delta": attributed,
                 "unattributed_delta": (total - attributed) if total is not None else None,
                 "observation_count": len(within),
-                "confidence": _confidence(len(within), attrs, paired, from_ts, to_ts),
+                "confidence": _confidence(len(within), attrs, paired,
+                                          from_ts, to_ts, name),
             })
 
         # ── 按 Asia/Shanghai 日期分桶：跨日 run 按观察发生日记账 ──
@@ -595,8 +613,8 @@ class TelemetryStore:
                     "unattributed_delta": (total - attributed) if total is not None else None,
                     "observation_count": len(within),
                     "confidence": _confidence(len(within), day_attrs, paired,
-                                              start_ts, end_ts),
-                    "gap_ids": _gap_ids(start_ts, end_ts),
+                                              start_ts, end_ts, name),
+                    "gap_ids": _gap_ids(start_ts, end_ts, name),
                     "attribution_ids": [a["id"] for a in day_attrs],
                 })
             day = next_day

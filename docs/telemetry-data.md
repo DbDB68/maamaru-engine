@@ -84,7 +84,7 @@
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": 1787219985.79,
   "window": {"from": 1786615185.79, "to": 1787219985.79,
              "timezone": "Asia/Shanghai", "days": 7.0},
@@ -192,8 +192,11 @@
   不改写库存数值**。
 - `conflicting_evidence`：同资源 5 秒内不同来源读数不一致。
 
-confidence 规则（per_resource 和 daily_series 通用）：
+confidence 规则（per_resource 和 daily_series 通用；schema_version 2 起）：
 
 - `high`：有 confirmed 归因覆盖且观察链完整（opening/closing 都可靠、无缺口）。
 - `medium`：只有观察差值、无归因覆盖。
-- `low`：观察缺失 / 有缺口（含人工报备）/ 证据冲突。
+- `low`：观察缺失 / 有波及该资源的缺口 / 该资源证据冲突。
+  缺口按 `resources` 点名的波及范围降置信度：只动了小判的缺口不会把木炭
+  打成 low；人工报备没挂到缺口上、单独成条时范围未知（resources 为空），
+  窗口内所有资源一起降。
