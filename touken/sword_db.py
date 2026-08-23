@@ -46,7 +46,7 @@ def all_swords() -> dict:
     return _load()
 
 
-def find_by_name(ocr_text: str) -> Optional[tuple]:
+def find_by_name(ocr_text: str, fuzzy: bool = True) -> Optional[tuple]:
     """
     用 OCR 出的文字查刀
 
@@ -54,6 +54,9 @@ def find_by_name(ocr_text: str) -> Optional[tuple]:
       1. 日文名精确等于
       2. 互相包含（OCR 多读/少读了字，如"长谷部"对"へし切長谷部"）
       3. 中文名兜底
+
+    fuzzy=False 时跳过第 4 步模糊兜底——锻刀获得画面认人这类
+    「认错比认不到更糟」的场景用严格模式。
 
     Returns:
         (id, info) 或 None
@@ -83,7 +86,7 @@ def find_by_name(ocr_text: str) -> Optional[tuple]:
 
     # 4. 模糊兜底（OCR 错一个字的情况，如"源清磨"对"源清麿"）
     #    只在相似度够高且目标不短时用，避免乱撞
-    if len(target) >= 2:
+    if fuzzy and len(target) >= 2:
         best = (0.0, None)
         for sid, info in chars.items():
             for cand in (info["name"], info.get("name_zh", "")):

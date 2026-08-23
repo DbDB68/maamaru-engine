@@ -112,8 +112,11 @@ function activityDetail(item: any) {
     const losses = items.filter((entry: any) => isLoss(entry.payload)).length
     return `${wins} 胜${losses ? ` · ${losses} 负` : ''} · ${items.map((entry: any) => entry.payload?.result).filter(Boolean).join(' / ')}`
   }
-  if (item.event_type === 'forge.collected') return `炉位 ${items.map((entry: any) => entry.payload?.slot).filter(Boolean).join('、')}`
-  if (item.event_type === 'forge.started') return `已确认点火 · ${items.length} 炉`
+  if (item.event_type === 'forge.collected') return items.map((entry: any) => entry.payload?.name ? `【${entry.payload.name}】` : `炉位${entry.payload?.slot ?? '？'}`).join('、')
+  if (item.event_type === 'forge.started') {
+    const durations = items.map((entry: any) => entry.payload?.duration).filter(Boolean)
+    return `已确认点火 · ${items.length} 炉${durations.length ? `（${durations.join('、')}）` : ''}`
+  }
   if (item.event_type === 'expedition.dispatched') return items.map((entry: any) => `部队${entry.payload?.team_no ?? '？'} ${entry.payload?.map_name || entry.payload?.map_code || ''}`).join(' · ')
   if (item.event_type === 'expedition.settled') return items.map((entry: any) => entry.payload?.map_name || entry.payload?.header).filter(Boolean).join(' · ') || '奖励已领取'
   if (item.event_type === 'task_rewards.claimed' || item.event_type === 'task_rewards.none') return items.map((entry: any) => entry.payload?.tab || '当前页').join(' / ')
@@ -123,6 +126,16 @@ function instanceDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed' && p.completed != null) return `第 ${p.completed} 圈 · ${p.selected_floor == null ? '未指定层数' : `${p.selected_floor}F`}`
   if (item.event_type === 'pumpkin.sortie_completed' && p.sequence != null) return `第 ${p.sequence} 次出阵`
+  if (item.event_type === 'forge.collected') {
+    const parts = []
+    if (p.name) parts.push(`【${p.name}】`)
+    if (p.duration) parts.push(`${p.duration} 炉`)
+    if (p.slot != null) parts.push(`炉位 ${p.slot}`)
+    if (parts.length) return parts.join(' · ')
+  }
+  if (item.event_type === 'forge.started' && (p.duration || p.slot != null)) {
+    return [p.duration, p.slot != null ? `炉位 ${p.slot}` : ''].filter(Boolean).join(' · ')
+  }
   return eventDetail(item)
 }
 

@@ -115,6 +115,7 @@ class SmithMixin:
         time.sleep(1.0)
 
         forged = 0
+        slot_durations = {}  # 炉号 → 点火时的倒计时文本（本轮点火的才有；跨轮收的炉时长在昨天的 forge.started 里）
         for attempt in range(6):  # 收刀/点火来回倒腾，给个安全上限
             if forged >= times:
                 break
@@ -126,7 +127,8 @@ class SmithMixin:
 
             if kind == "完成":
                 yield f"[锻刀] 收一炉（y={cy}）"
-                if not self._collect_slot(cy):
+                collected, sword = self._collect_slot(cy)
+                if not collected:
                     # 刀位满了：刀解一把白名单腾位置再收
                     yield "[锻刀] 刀位满了！去刀解一把白名单腾位置..."
                     freed = False
@@ -140,19 +142,37 @@ class SmithMixin:
                     for nav_msg in self.navigate_to_stream("锻刀"):
                         yield nav_msg
                     time.sleep(1.0)
-                elif hasattr(self, "record_event"):
-                    self.record_event("forge.collected", slot=_SLOT_CY.index(cy) + 1)
+                else:
+                    if sword:
+                        yield f"[锻刀] 🎉 收到【{sword['name']}】"
+                    if hasattr(self, "record_event"):
+                        slot_no = _SLOT_CY.index(cy) + 1
+                        payload = {"slot": slot_no}
+                        if sword:
+                            payload.update(sword)
+                        duration = slot_durations.pop(slot_no, None)
+                        if duration:
+                            payload["duration"] = duration
+                        self.record_event("forge.collected", **payload)
                 continue
 
             if kind == "空闲中":
                 yield f"[锻刀] 给炉子点火（第 {forged + 1}/{times} 炉）"
                 if self._start_forge(cy):
                     forged += 1
-                    hit = self._check_watch(cy, watch_secs)
+                    slot_no = _SLOT_CY.index(cy) + 1
+                    countdown = self._read_countdown(cy)
+                    hit = self._watch_hit(countdown, watch_secs)
+                    if countdown:
+                        slot_durations[slot_no] = countdown[0]
                     if hasattr(self, "record_event"):
+                        started_payload = {"slot": slot_no, "sequence": forged,
+                                           "target_hit": hit}
+                        if countdown:
+                            started_payload["duration"] = countdown[0]
+                            started_payload["duration_secs"] = countdown[1]
                         started_id = self.record_event("forge.started",
-                                                       slot=_SLOT_CY.index(cy) + 1,
-                                                       sequence=forged, target_hit=hit)
+                                                       **started_payload)
                         self._emit_forge_costs(started_id)
                     if hit:
                         yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
@@ -187,10 +207,11 @@ class SmithMixin:
                 idle = ("空闲中", cy)
         return idle
 
-    def _collect_slot(self, cy: int) -> bool:
-        """收一炉。刀位满弹氪金窗则返回 False。
+    def _collect_slot(self, cy: int) -> tuple:
+        """收一炉，返回 (是否收成功, 认出的刀 or None)。刀位满弹氪金窗则 (False, None)。
         获得动画要轮询着点穿：一口气连点会顺手把下一个完成的炉也开了，
         后面的步骤全踩在动画上（血泪）"""
+        sword = None
         self.maa.click(Point(265, cy))
         time.sleep(2.5)
         for _ in range(10):
@@ -202,13 +223,34 @@ class SmithMixin:
                 pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
                 self.maa.click(pt if pt else Point(1062, 70))
                 time.sleep(1.5)
-                return False
+                return (False, None)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
-                return True
+                return (True, sword)
+            # 还在获得画面：顺路认一下是哪位刀剑男士（只认一次，认不到拉倒）
+            if sword is None:
+                sword = self._read_forge_sword()
             # 安全点：点穿获得动画；回到状况界面这点是空地，点不坏
             self.maa.click(Point(290, 600))
             time.sleep(1.5)
-        return True  # 超时也当收了，别卡死
+        return (True, sword)  # 超时也当收了，别卡死
+
+    def _read_forge_sword(self):
+        """获得画面认人：整屏 OCR + 名册严格匹配（精确/包含，不走模糊兜底）。
+
+        获得画面除了刀名没有别的文字（揭竿帧干净得很），严格匹配不会撞车；
+        认错比认不到更糟，所以关掉模糊兜底。认不到返回 None。
+        """
+        try:
+            for text, _pt in self.maa.ocr_all(roi_4to4(0, 90, 1280, 720)):
+                found = sword_db.find_by_name(text, fuzzy=False)
+                if found:
+                    sid, info = found
+                    return {"sword_id": sid,
+                            "name": info.get("name_zh") or info["name"],
+                            "name_jp": info["name"]}
+        except Exception:
+            pass
+        return None
 
     def _start_forge(self, cy: int) -> bool:
         """给空闲炉点火：进配比界面 → 点锻刀 → 等回到状况界面"""
@@ -249,10 +291,9 @@ class SmithMixin:
             self.record_event("resource.change", resource=name, delta=-cost, **payload)
         self.record_event("resource.change", resource="委托符", delta=-1, **payload)
 
-    def _check_watch(self, cy: int, watch_secs: set):
-        """点火后读这炉的倒计时，命中目标时长（倒计时走字，容忍少 90 秒）就报"""
-        if not watch_secs:
-            return None
+    def _read_countdown(self, cy: int):
+        """读这炉的剩余时间，返回 ("01:27:30", 秒数) 或 None。
+        点火后倒计时已经开始走字，读到的会比名义时长短一两秒"""
         try:
             self.maa.screenshot(force=True)
             tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
@@ -260,13 +301,20 @@ class SmithMixin:
             m = re.search(r"(\d{1,2})\s*[:：]\s*(\d{1,2})\s*[:：]\s*(\d{1,2})", text)
             if not m:
                 return None
-            shown = f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}"
             secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
-            for target in watch_secs:
-                if target - 90 <= secs <= target:
-                    return shown
+            return (f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}", secs)
         except Exception:
-            pass
+            return None
+
+    @staticmethod
+    def _watch_hit(countdown, watch_secs: set):
+        """倒计时命中盯梢目标（走字容忍少 90 秒）就返回显示文本"""
+        if not countdown or not watch_secs:
+            return None
+        shown, secs = countdown
+        for target in watch_secs:
+            if target - 90 <= secs <= target:
+                return shown
         return None
 
     # ==================== 刀解 ====================
