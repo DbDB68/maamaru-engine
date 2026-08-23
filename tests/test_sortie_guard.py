@@ -80,8 +80,16 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
 
 class _PlateMaa:
-    def __init__(self, tokens):
+    """badge=True 表示当前画面有刀派立牌（获得画面）；False 则没有"""
+
+    def __init__(self, tokens, badge=True):
         self.tokens = tokens
+        self.badge = badge
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if expected == "刀派" and self.badge and roi.to_list() == [1105, 40, 65, 120]:
+            return Point(1135, 100)
+        return None
 
     def ocr_all(self, roi):
         if roi.to_list() == [20, 630, 360, 75]:  # 左下对话框名牌区
@@ -104,6 +112,16 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # 「刀派」「粟田口」（右边刀派立牌）不是刀名，严格匹配不许乱认
         flow = SortieMixin()
         flow.maa = _PlateMaa([("刀派", Point(1, 1)), ("粟田口", Point(2, 2))])
+
+        self.assertIsNone(flow._read_drop_sword())
+
+    def test_result_screen_roster_card_is_not_a_drop(self):
+        # 2026-08-24 事故：战斗结果页底部成员栏末位卡片落进名牌 ROI，
+        # 「之六 博多藤四郎」被逐圈误记成掉落。没有刀派立牌就必须拒认。
+        flow = SortieMixin()
+        flow.maa = _PlateMaa(
+            [("之六", Point(40, 660)), ("博多藤四郎", Point(150, 660))],
+            badge=False)
 
         self.assertIsNone(flow._read_drop_sword())
 

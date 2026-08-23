@@ -469,9 +469,14 @@ class OsakaMixin:
                     drop_credit = dropped["sword_id"]
                     yield f"[挖地] 🎉 刀剑男士【{dropped['name']}】来本丸了！"
                     if hasattr(self, "record_event"):
+                        # select_floor/target_floor 可能是布尔（开关语义），
+                        # 只有真数字层号才值得记账（bool 是 int 子类，得先排掉）
+                        floor = next((f for f in (select_floor, target_floor)
+                                      if isinstance(f, int) and not isinstance(f, bool)),
+                                     None)
                         self.record_event(
                             "sword.obtained", **dropped, source="osaka.drop",
-                            floor=select_floor or target_floor)
+                            floor=floor)
             else:
                 drop_credit = None
 

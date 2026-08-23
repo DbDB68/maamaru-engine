@@ -520,12 +520,22 @@ class SortieMixin:
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
 
+    # 掉落获得画面的识别点位（1280x720，真机截图校准）
+    _OBTAIN_BADGE_ROI = (1105, 40, 1170, 160)   # 右侧黑色刀派立牌的红底「刀派」徽
+    _NAME_PLATE_ROI = (20, 630, 380, 705)       # 左下对话框名牌「短刀 毛利藤四郎」
+
     def _read_drop_sword(self):
-        """掉落获得画面认人：左下对话框名牌（「短刀 毛利藤四郎」式，刀种+名字
-        一条读出，包含匹配能接住）严格匹配名册。认错比认不到糟，关模糊兜底。
-        认不到返回 None。"""
+        """掉落获得画面认人：先认画面（刀派立牌）再认名牌。
+
+        为什么必须先认画面（2026-08-24 事故）：战斗结果页底部队伍成员栏的
+        末位卡片正好落在名牌 ROI 里，「之六 博多藤四郎」被当成掉落逐圈误记。
+        刀派立牌只有获得画面有，gate 不过宁可漏认也不错认。
+        认错比认不到糟，名牌走名册严格匹配（关模糊兜底）。认不到返回 None。
+        """
         try:
-            tokens = self.maa.ocr_all(roi_4to4(20, 630, 380, 705))
+            if not self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
+                return None
+            tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
             for text, _pt in tokens:
                 found = sword_db.find_by_name(text, fuzzy=False)
                 if found:
