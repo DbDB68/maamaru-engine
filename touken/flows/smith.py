@@ -116,7 +116,8 @@ class SmithMixin:
 
         forged = 0
         slot_durations = {}  # 炉号 → 点火时的倒计时文本（本轮点火的才有；跨轮收的炉时长在昨天的 forge.started 里）
-        for attempt in range(6):  # 收刀/点火来回倒腾，给个安全上限
+        # 刀位满时收一刀要烧 2 次循环（收失败→刀解腾位→再收），上限按双倍成本留余量
+        for attempt in range(times * 2 + 4):
             if forged >= times:
                 break
             self.maa.screenshot(force=True)

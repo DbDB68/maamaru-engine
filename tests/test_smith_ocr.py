@@ -128,5 +128,61 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         self.assertEqual(flow._watch_hit(("1:27:30", 5250), {5340}), "1:27:30")
 
 
+class _ForgeHost(SmithMixin):
+    """锻刀主流水的测试宿主：三炉全完成待收、刀位满（每炉第一次收失败→刀解腾位→再收）。
+    刀位满时收一刀要烧 2 次循环，3 收×2 + 3 点火 = 9 次；旧上限 range(6) 会在
+    收完 3 炉后烧光次数，点火一炉都排不上（2026-08-23 日课只收不锻的 bug）。"""
+
+    def __init__(self):
+        self.maa = _RevealFakeMaa([])
+        self.current_location = None
+        self.completed = [205, 345, 475]  # 待收炉队列（cy）
+        self.collect_calls = {}           # cy → 已尝试收的次数
+        self.ignited = 0
+
+    def navigate_to_stream(self, loc):
+        self.current_location = loc
+        yield f"导航到{loc}"
+
+    def _scan_slots(self):
+        if self.completed:
+            return ("完成", self.completed[0])
+        if self.ignited < 3:
+            return ("空闲中", 205)
+        return None
+
+    def _collect_slot(self, cy):
+        self.collect_calls[cy] = self.collect_calls.get(cy, 0) + 1
+        if self.collect_calls[cy] == 1:
+            return (False, None)  # 刀位满，弹氪金窗
+        self.completed.remove(cy)
+        return (True, None)
+
+    def dismantle_stream(self, max_dismantle=1, _from_forge=False):
+        yield "分解完成 1 把"
+
+    def _start_forge(self, cy):
+        self.ignited += 1
+        return True
+
+    def _read_countdown(self, cy):
+        return None
+
+    def _capture_inventory(self, phase=""):
+        return
+        yield
+
+
+class ForgeAttemptBudgetTests(unittest.TestCase):
+    def test_full_inventory_collects_still_leave_budget_to_ignite(self):
+        host = _ForgeHost()
+        with patch("touken.flows.smith.time.sleep"):
+            messages = list(host.forge_stream(times=3))
+
+        self.assertEqual(host.completed, [])      # 三炉都收了
+        self.assertEqual(host.ignited, 3)         # 且三炉都点了火（旧上限下这里是 0）
+        self.assertTrue(any("点了 3 炉" in m for m in messages))
+
+
 if __name__ == "__main__":
     unittest.main()
