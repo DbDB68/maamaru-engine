@@ -154,6 +154,67 @@ class ResourceLedgerTests(unittest.TestCase):
         koban_attrs = [a for a in ledger["attributions"] if a["resource"] == "小判"]
         self.assertEqual(len(koban_attrs), 1)
 
+    def test_resource_change_before_after_feeds_observation_chain(self):
+        # 2026-08-23 事故：异去补充提灯的 resource.change 带了精确 before/after，
+        # 却只算归因不进观察链 → 次日日榜 opening 跳过整条补充链，
+        # -8000 支出漏成次日「不知道谁干的」。修后补充链必须接住日界。
+        d1 = sh("2026-08-21 10:00:00")
+        d2 = sh("2026-08-22 14:00:00")
+        d3 = sh("2026-08-23 06:00:00")
+        self._event(d1, "osaka.koban_session",
+                    {"before": 900, "after": 1000, "delta": 100,
+                     "floors": 2, "target_floor": 99}, run_id="run-d1")
+        self._event(d2, "resource.change",
+                    {"resource": "小判", "delta": -300, "before": 1050, "after": 750,
+                     "source": "yosari.ticket_refill", "attribution": "confirmed",
+                     "evidence": "purchase_preview_balances", "note": "异去归城提灯补充"},
+                    run_id="run-d2", script="yosari")
+        self._event(d3, "osaka.koban_session",
+                    {"before": 750, "after": 850, "delta": 100,
+                     "floors": 2, "target_floor": 99}, run_id="run-d3")
+
+        ledger = self.store.resource_ledger(d1 - 60, d3 + 600)
+
+        koban = self._res(ledger, "小判")
+        self.assertEqual(koban["observation_count"], 6)
+        self.assertEqual(koban["total_delta"], -50)
+        self.assertEqual(koban["attributed_delta"], -100)
+        self.assertEqual(koban["unattributed_delta"], 50)
+        # 补充当天：opening 接窗前基线 1000，closing 是补充后余额 750，
+        # 未归因只剩补充前真实多出来的 +50
+        day2 = self._day(ledger, "2026-08-22", "小判")
+        self.assertEqual(day2["opening"], 1000)
+        self.assertEqual(day2["closing"], 750)
+        self.assertEqual(day2["total_delta"], -250)
+        self.assertEqual(day2["attributed_delta"], -300)
+        self.assertEqual(day2["unattributed_delta"], 50)
+        # 次日：opening 必须接补充链末尾 750，不再用前天的旧值
+        day3 = self._day(ledger, "2026-08-23", "小判")
+        self.assertEqual(day3["opening"], 750)
+        self.assertEqual(day3["closing"], 850)
+        self.assertEqual(day3["total_delta"], 100)
+        self.assertEqual(day3["unattributed_delta"], 0)
+        self.assertEqual(day3["confidence"], "high")
+
+    def test_resource_change_baseline_scans_back_for_balances(self):
+        # 窗前基线：resource.change 不是每条都带 before/after（锻刀等没有），
+        # 基线要向前翻找最近一条带余额的，而不是抓到无余额的就放弃
+        t0 = sh("2026-08-20 09:00:00")
+        self._event(t0, "resource.change",
+                    {"resource": "小判", "delta": -500, "before": 1000, "after": 500,
+                     "source": "yosari.ticket_refill", "attribution": "confirmed"},
+                    script="yosari")
+        self._event(t0 + 10, "resource.change",
+                    {"resource": "木炭", "delta": -700, "source": "forge.started",
+                     "attribution": "confirmed"}, script="forge")
+        self._captured(t0 + 3600, {"小判": 800}, phase="after", run_id="run-b")
+
+        koban = self._res(self.store.resource_ledger(t0 + 1800, t0 + 7200), "小判")
+
+        self.assertEqual(koban["opening"], 500)
+        self.assertEqual(koban["closing"], 800)
+        self.assertEqual(koban["total_delta"], 300)
+
     def test_resource_change_shadows_legacy_event(self):
         # 双写兼容：resource.change 用 source_event_id 指向旧事件，旧的那份不重复聚合
         t0 = sh("2026-08-20 09:00:00")

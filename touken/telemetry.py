@@ -341,6 +341,18 @@ class TelemetryStore:
                 (from_ts, event_type)).fetchone()
             if row:
                 baseline_rows.append(row)
+        # resource.change 的 before/after 同样是直读观察（异去补充提灯等），
+        # 但不是每条都有余额，基线向前翻找最近一条带 before/after 的
+        for row in conn.execute(
+                "SELECT id, ts, run_id, script, event_type, payload FROM events "
+                "WHERE ts < ? AND event_type = 'resource.change' "
+                "ORDER BY ts DESC, id DESC LIMIT 50", (from_ts,)).fetchall():
+            rc_payload = _loads(row["payload"], {})
+            if (rc_payload.get("resource")
+                    and isinstance(rc_payload.get("before"), (int, float))
+                    and isinstance(rc_payload.get("after"), (int, float))):
+                baseline_rows.append(row)
+                break
         reports = conn.execute(
             "SELECT id, occurred_at, gap_key FROM human_reports "
             "WHERE occurred_at <= ? ORDER BY occurred_at, id", (to_ts,)).fetchall()
@@ -371,6 +383,18 @@ class TelemetryStore:
                         raw.append({"ts": row["ts"], "sub": 0, "resource": name,
                                     "value": value, "priority": 1, "source": event_type,
                                     "event_id": row["id"], "evidence": [row["id"]]})
+            elif event_type == "resource.change":
+                # 带 before/after 的 resource.change（如异去补充提灯）是直读观察，
+                # 否则跨日分桶的 opening 会跳过这条消费链，把支出漏成次日未归因
+                name = payload.get("resource")
+                if name:
+                    for sub, key in ((0, "before"), (1, "after")):
+                        value = payload.get(key)
+                        if isinstance(value, (int, float)):
+                            raw.append({"ts": row["ts"], "sub": sub, "resource": name,
+                                        "value": value, "priority": 3,
+                                        "source": event_type,
+                                        "event_id": row["id"], "evidence": [row["id"]]})
 
         # 去重：时间贴脸（5 秒内）且数值一致 = 同一观察点，合并证据 event id，
         # 来源升到最高优先级；数值不同 = 证据冲突，各算各的观察并记冲突缺口

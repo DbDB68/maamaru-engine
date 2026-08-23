@@ -16,6 +16,23 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; report: [gap: InventoryGap]; 'report-day': []; 'open-records': [date: string] }>()
 
 const sortedAttributions = computed(() => [...props.attributions].sort((a, b) => a.ts - b.ts))
+// 连续相同的归因（同标签同金额，如连续补充提灯）折叠成一条，显示次数与合计
+const groupedAttributions = computed(() => {
+  const groups: { ts: number; tsEnd: number; label: string; source: string; script: string; delta: number; count: number }[] = []
+  for (const item of sortedAttributions.value) {
+    const label = item.label || categoryLabel(item.source)
+    const script = item.script || ''
+    const delta = Number(item.delta || 0)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label && last.script === script && last.delta === delta) {
+      last.count += 1
+      last.tsEnd = item.ts
+    } else {
+      groups.push({ ts: item.ts, tsEnd: item.ts, label, source: item.source, script, delta, count: 1 })
+    }
+  }
+  return groups
+})
 const attributedTotal = computed(() => props.attributions.reduce((sum, item) => sum + Number(item.delta || 0), 0))
 const unexplained = computed(() => props.totalDelta == null ? null : props.totalDelta - attributedTotal.value)
 
@@ -45,10 +62,10 @@ function recordDateLabel(date: string): string {
       狐之助确认 {{ signed(attributedTotal) }}<template v-if="unexplained"> · 还有 <b>{{ signed(unexplained) }}</b> 不知道谁干的</template>
     </p>
 
-    <ul v-if="sortedAttributions.length" class="day-detail-attributions">
-      <li v-for="item in sortedAttributions" :key="item.id">
-        <time>{{ eventTime(item.ts) }}</time>
-        <span><b>{{ item.label || categoryLabel(item.source) }}</b><small>{{ scriptNames[item.script || ''] || item.script || 'まあ丸' }} · {{ resource }} {{ signed(Number(item.delta)) }}</small></span>
+    <ul v-if="groupedAttributions.length" class="day-detail-attributions">
+      <li v-for="group in groupedAttributions" :key="`${group.ts}:${group.label}`">
+        <time>{{ eventTime(group.ts) }}<template v-if="group.count > 1"> → {{ eventTime(group.tsEnd) }}</template></time>
+        <span><b>{{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template></b><small>{{ scriptNames[group.script || ''] || group.script || 'まあ丸' }} · {{ resource }} {{ signed(group.delta) }}<template v-if="group.count > 1"> · 共 {{ signed(group.delta * group.count) }}</template></small></span>
       </li>
     </ul>
     <p v-else class="day-detail-empty">这天没有能确认来源的{{ resource }}记录。</p>

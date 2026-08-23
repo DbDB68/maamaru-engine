@@ -128,6 +128,7 @@
 | 来源 | 覆盖资源 | 优先级 |
 |---|---|---|
 | `osaka.koban_session` 的 before/after（读游戏界面真数值） | 小判 | 3（最高） |
+| `resource.change` 的 before/after（如异去补充提灯的购买页余额） | 按 payload 的 resource | 3 |
 | `inventory.captured` 的 resources（任何 phase 都算观察） | 全部 8 项 | 2 |
 | `inventory.peek` | 顶栏五资源（木炭/玉钢/冷却材/砥石/甲州金） | 1 |
 
