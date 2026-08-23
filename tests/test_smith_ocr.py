@@ -80,6 +80,12 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         self.assertIsNotNone(sword_db.find_by_name("源清磨"))  # 模糊兜底认对错字
         self.assertIsNone(sword_db.find_by_name("源清磨", fuzzy=False))
 
+    def test_display_name_corrects_ocr_typos_for_logs(self):
+        # 换队长/换人日志用：漏字补全成标准名，认不出原样返回
+        self.assertEqual(sword_db.display_name("夜左文字"), "小夜左文字")
+        self.assertEqual(sword_db.display_name("研藤四郎"), "药研藤四郎")
+        self.assertEqual(sword_db.display_name("？？天书？？"), "??天书??")  # 认不出返回清洗后原文
+
     def test_collect_slot_returns_recognized_sword(self):
         flow = SmithMixin()
         flow.maa = _RevealFakeMaa([("大和守安定", Point(500, 600))])

@@ -102,6 +102,15 @@ def find_by_name(ocr_text: str, fuzzy: bool = True) -> Optional[tuple]:
     return None
 
 
+def display_name(ocr_text: str) -> str:
+    """OCR 名字校正成标准中文名，日志展示用（"夜左文字"→"小夜左文字"）。
+    认不出返回清洗后的原文——校正只影响给人看的文字，不影响任何动作。"""
+    found = find_by_name(ocr_text)
+    if found:
+        return found[1].get("name_zh") or found[1]["name"]
+    return _normalize(ocr_text) or str(ocr_text or "")
+
+
 def find_by_id(id_num: int) -> Optional[tuple]:
     """按图鉴编号查（如 118 → 长谷部）"""
     prefix = f"touken_{id_num:03d}_"

@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
-import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, runElapsedSeconds, runTitle, shanghaiDate } from './reportModel'
+import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
   events: any[]
@@ -32,6 +32,7 @@ const eventNames: Record<string, string> = {
   'expedition.dispatched': '远征派遣成功', 'expedition.settled': '远征结算',
   'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
   'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
+  'sword.obtained': '刀剑男士来本丸',
 }
 
 function isWin(payload: any) {
@@ -80,6 +81,10 @@ function eventDetail(item: any) {
   }
   if (item.event_type === 'pumpkin.sword_obtained') return p.name || p.sword_name || '获得刀剑已记录'
   if (item.event_type === 'repair.session_completed') return p.repaired != null ? `完成 ${p.repaired} 振` : '本轮手入结束'
+  if (item.event_type === 'sword.obtained') {
+    const src = obtainSourceLabel(p.source)
+    return `【${p.name || '认不出是谁'}】${src ? ` · ${src}` : ''}`
+  }
   return '本丸记录'
 }
 function activityTitle(item: any) {
@@ -95,6 +100,7 @@ function activityTitle(item: any) {
   if (item.event_type === 'expedition.settled') return `领取远征奖励 ${count} 份`
   if (item.event_type === 'task_rewards.claimed') return `领取任务奖励 ${count} 类`
   if (item.event_type === 'task_rewards.none') return `检查任务奖励 ${count} 类`
+  if (item.event_type === 'sword.obtained') return `刀剑男士来本丸 ${count} 位`
   if (item.event_type === 'repair.summary') return repairCount(item.payload) ? `手入 ${repairCount(item.payload)} 振` : '检查手入名单'
   if (item.event_type === 'equipment.restored') return `恢复刀装 ${count} 次`
   return eventTitle(item)
@@ -112,7 +118,10 @@ function activityDetail(item: any) {
     const losses = items.filter((entry: any) => isLoss(entry.payload)).length
     return `${wins} 胜${losses ? ` · ${losses} 负` : ''} · ${items.map((entry: any) => entry.payload?.result).filter(Boolean).join(' / ')}`
   }
-  if (item.event_type === 'forge.collected') return items.map((entry: any) => entry.payload?.name ? `【${entry.payload.name}】` : `炉位${entry.payload?.slot ?? '？'}`).join('、')
+  if (item.event_type === 'forge.collected') {
+    const names = items.map((entry: any) => entry.payload?.name).filter(Boolean)
+    return names.length ? names.map((name: string) => `【${name}】`).join('、') : `共 ${items.length} 炉（没认出是谁）`
+  }
   if (item.event_type === 'forge.started') {
     const durations = items.map((entry: any) => entry.payload?.duration).filter(Boolean)
     return `已确认点火 · ${items.length} 炉${durations.length ? `（${durations.join('、')}）` : ''}`
@@ -120,6 +129,7 @@ function activityDetail(item: any) {
   if (item.event_type === 'expedition.dispatched') return items.map((entry: any) => `部队${entry.payload?.team_no ?? '？'} ${entry.payload?.map_name || entry.payload?.map_code || ''}`).join(' · ')
   if (item.event_type === 'expedition.settled') return items.map((entry: any) => entry.payload?.map_name || entry.payload?.header).filter(Boolean).join(' · ') || '奖励已领取'
   if (item.event_type === 'task_rewards.claimed' || item.event_type === 'task_rewards.none') return items.map((entry: any) => entry.payload?.tab || '当前页').join(' / ')
+  if (item.event_type === 'sword.obtained') return items.map((entry: any) => `【${entry.payload?.name || '认不出是谁'}】`).join('、')
   return eventDetail(item)
 }
 function instanceDetail(item: any) {
@@ -130,8 +140,7 @@ function instanceDetail(item: any) {
     const parts = []
     if (p.name) parts.push(`【${p.name}】`)
     if (p.duration) parts.push(`${p.duration} 炉`)
-    if (p.slot != null) parts.push(`炉位 ${p.slot}`)
-    if (parts.length) return parts.join(' · ')
+    return parts.length ? parts.join(' · ') : '没认出是谁'
   }
   if (item.event_type === 'forge.started' && (p.duration || p.slot != null)) {
     return [p.duration, p.slot != null ? `炉位 ${p.slot}` : ''].filter(Boolean).join(' · ')

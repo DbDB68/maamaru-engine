@@ -200,6 +200,7 @@ class OsakaMixin:
 
         floors = 0
         idle_checks = 0
+        drop_credit = None  # 掉落认人去重：获得画面等戳、连帧都在，刚出现才记一次
         while idle_checks < 300:
             self.maa.screenshot(force=True)
 
@@ -459,6 +460,20 @@ class OsakaMixin:
                 self.maa.click(march)
                 time.sleep(1.0)
                 continue
+
+            # 掉落获得画面：左下对话框名牌认人（挖地没有自动行军，
+            # 获得画面一定会等戳，跟合战场共用 _read_drop_sword）
+            dropped = self._read_drop_sword()
+            if dropped:
+                if drop_credit != dropped["sword_id"]:
+                    drop_credit = dropped["sword_id"]
+                    yield f"[挖地] 🎉 刀剑男士【{dropped['name']}】来本丸了！"
+                    if hasattr(self, "record_event"):
+                        self.record_event(
+                            "sword.obtained", **dropped, source="osaka.drop",
+                            floor=select_floor or target_floor)
+            else:
+                drop_credit = None
 
             # 狐之助对话和战斗过场都用右下安全区驱散；没有目标时绝不盲点按钮区。
             self._click_point(cfg.get("skip_tap", [775, 695]))

@@ -28,6 +28,7 @@
 import re
 import time
 
+from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
 
 _TEAM_TAB = {1: (154, 91), 2: (274, 91), 3: (394, 91), 4: (516, 91), 5: (638, 91)}
@@ -194,10 +195,12 @@ class SakuraMixin:
                    f"差不到 {margin}，不值得折腾，收工")
             return
 
-        # 读个名字好汇报（名字在疲劳行上方，同 _swap_tired_in 的相对位置）
+        # 读个名字好汇报（名字在疲劳行上方，同 _swap_tired_in 的相对位置）。
+        # OCR 老眼昏花会漏字（"夜左文字"），过名册校正成标准名再上日志
         cy = _ROW_CY[low_slot - 1]
         name_tokens = self.maa.ocr_all(roi_4to4(100, cy + 8, 265, cy + 36))
-        name = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
+        name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
+        name = sword_db.display_name(name_raw)
         yield f"[换队长] {name} 疲劳 {low} 全队最低，拖去队长位（原队长 {captain}/100）"
 
         self.maa.swipe(_DRAG_X, cy, _DRAG_X, _ROW_CY[0], _DRAG_MS)
@@ -311,9 +314,11 @@ class SakuraMixin:
                         break
                 if value is None or value >= threshold:
                     continue
-                # 找到累的了：读个名字好汇报，点决定（按钮中心≈疲劳行上方40）
+                # 找到累的了：读个名字好汇报（过名册校正错别字），点决定
+                # （按钮中心≈疲劳行上方40）
                 name_tokens = self.maa.ocr_all(roi_4to4(100, fy - 32, 265, fy - 4))
-                name = max((t for t, _ in name_tokens), key=len, default="?")
+                name = sword_db.display_name(
+                    max((t for t, _ in name_tokens), key=len, default="?"))
                 yield f"[刷花·换人] 第{page + 1}页找到 {name} 疲劳{value}，换！"
                 self.maa.click(Point(_SEL_DECIDE_X, fy - 40))
                 time.sleep(1.5)

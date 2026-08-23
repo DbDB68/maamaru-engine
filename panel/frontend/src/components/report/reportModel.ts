@@ -142,3 +142,12 @@ export function sumByCategory(attributions: LedgerAttribution[]): Record<string,
   }
   return totals
 }
+
+// 刀剑进账来源的展示名
+export function obtainSourceLabel(source: string | undefined): string {
+  if (source === 'sortie.drop') return '出阵掉落'
+  if (source === 'osaka.drop') return '大阪城挖地'
+  if (source === 'forge') return '锻刀'
+  if (source === 'pumpkin') return '南瓜大作战'
+  return source || ''
+}

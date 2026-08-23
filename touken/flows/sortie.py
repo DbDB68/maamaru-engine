@@ -21,6 +21,7 @@
 import re
 import time
 
+from .. import sword_db
 from ..maa_adapter import roi_4to4
 from ..map_read import CV2_AVAILABLE, boss_distance_from_image
 
@@ -123,6 +124,13 @@ class SortieMixin:
         if str(team_no) not in teams:
             yield f"[出阵] 配置里没有部队{team_no}的坐标"
             return
+
+        # 硬保护：王点前撤退必须脚本亲手盯小地图走；委托挂上后路线全归游戏，
+        # 撤退会静默失效直接进王点。面板只是隐藏开关不是清空，这里必须兜底。
+        if retreat_before_boss and auto_march and cfg_key == "sortie":
+            yield ("[出阵] 🛡️ 王点前撤退和自动行军只能二选一"
+                   "（撤退得脚本盯着小地图走），本轮改用脚本手动行军")
+            auto_march = False
 
         # ========== 1. 导航到出阵（默认就在合战场） ==========
         yield "[出阵] 正在导航到出阵..."
@@ -340,6 +348,8 @@ class SortieMixin:
             # 王点航位推算状态：(上次认出的距王点步数, 此后盲走的步数)。
             # None = 还没有可信读数。每圈出阵重置。
             boss_track = None
+            # 掉落认人去重：获得画面会等戳、连帧都在，只在「刚出现」时记一次
+            drop_credit = None
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
 
@@ -456,6 +466,21 @@ class SortieMixin:
                     time.sleep(1.0)
                     continue
 
+                # 掉落获得画面：左下对话框名牌认人（画面等戳不自动翻页；
+                # 自动行军时游戏自己跳过获得动画，认不到正常）
+                dropped = self._read_drop_sword()
+                if dropped:
+                    if drop_credit != dropped["sword_id"]:
+                        drop_credit = dropped["sword_id"]
+                        yield f"[出阵] 🎉 刀剑男士【{dropped['name']}】来本丸了！"
+                        if hasattr(self, "record_event"):
+                            self.record_event(
+                                "sword.obtained", **dropped,
+                                source="sortie.drop", chapter=chapter,
+                                map_no=map_no, sequence=loop_no)
+                else:
+                    drop_credit = None
+
                 # 安全区跳动画
                 self._click_point(cfg["skip_tap"])
                 time.sleep(0.8)
@@ -494,6 +519,23 @@ class SortieMixin:
 
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
+
+    def _read_drop_sword(self):
+        """掉落获得画面认人：左下对话框名牌（「短刀 毛利藤四郎」式，刀种+名字
+        一条读出，包含匹配能接住）严格匹配名册。认错比认不到糟，关模糊兜底。
+        认不到返回 None。"""
+        try:
+            tokens = self.maa.ocr_all(roi_4to4(20, 630, 380, 705))
+            for text, _pt in tokens:
+                found = sword_db.find_by_name(text, fuzzy=False)
+                if found:
+                    sid, info = found
+                    return {"sword_id": sid,
+                            "name": info.get("name_zh") or info["name"],
+                            "name_jp": info["name"]}
+        except Exception:
+            pass
+        return None
 
     def _enter_yosari(self, cfg: dict) -> bool:
         """从默认的“过去”切换到右上角“异去”，并用文字复核。"""
