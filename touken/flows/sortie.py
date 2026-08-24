@@ -521,28 +521,86 @@ class SortieMixin:
         return
 
     # 掉落获得画面的识别点位（1280x720，真机截图校准）
-    _OBTAIN_BADGE_ROI = (1105, 40, 1170, 160)   # 右侧黑色刀派立牌的红底「刀派」徽
-    _NAME_PLATE_ROI = (20, 630, 380, 705)       # 左下对话框名牌「短刀 毛利藤四郎」
+    _OBTAIN_BADGE_ROI = (1105, 40, 1170, 160)   # 右侧立牌的红底「刀派」徽（稀有款）
+    # 掉刀预告横幅「发现了新的刀剑男士！」：点掉结算页后 +0.4~1.6s 贴在结算页
+    # 上（2026-08-24 真机连拍），是掉刀最早最稳的信号
+    _OBTAIN_BANNER_ROI = (100, 280, 1180, 460)
+    _OBTAIN_BANNER_TEXT = "新的刀剑男士"
+    # 左下对话框名牌「打刀 大和守安定」。获得画面有两种布局：带刀派立牌的
+    # 对话框偏下（名牌 y≈630-690），不带的偏上（y≈500-560，2026-08-24 真机
+    # 连拍实测），宽 ROI 两种都罩住。
+    _NAME_PLATE_ROI = (0, 480, 430, 710)
+    # 名牌 = 刀种前缀 + 空格 + 名字；名字里不许夹标点（防 OCR 粘连对话框台词）
+    _STRIP_RE = re.compile(
+        r"^\s*(短刀|胁差|打刀|太刀|大太刀|枪|薙刀|剑)[\s_　]*([^\s，。,.、！!？?]+)")
+    _SWORD_TYPES = ("短刀", "胁差", "打刀", "太刀", "大太刀", "枪", "薙刀", "剑")
 
     def _read_drop_sword(self):
-        """掉落获得画面认人：先认画面（刀派立牌）再认名牌。
+        """掉落获得画面认人：横幅预告 + 名牌确认，两段式。
 
-        为什么必须先认画面（2026-08-24 事故）：战斗结果页底部队伍成员栏的
-        末位卡片正好落在名牌 ROI 里，「之六 博多藤四郎」被当成掉落逐圈误记。
-        刀派立牌只有获得画面有，gate 不过宁可漏认也不错认。
-        认错比认不到糟，名牌走名册严格匹配（关模糊兜底）。认不到返回 None。
+        时机（2026-08-24 真机连拍，从点掉结算页起算）：+0.4~1.6s 横幅
+        「发现了新的刀剑男士！」→ +2~3s 樱花转场 → +3.5~4.8s 裸立绘
+        （名牌区全空，啥都认不到）→ +5s 起立牌+对话框+名牌齐活，画面
+        静止等戳。所以名牌区空时先看横幅：有横幅 = 掉刀预告，耐心等名牌
+        到位（约 5 秒），绝不提前放弃——提前返回 None，下一拍安全区点击
+        正好把刚到位的获得画面点掉（漏认的元凶）。没横幅按老节奏快速退场，
+        不拖慢正常行军圈。
+        名牌的「刀种+名字」组合只有获得画面有；结果页成员栏裸名没有刀种
+        前缀，天然拒认（2026-08-24 假博多事故的根治）。认错比认不到糟，
+        名字走名册严格匹配（关模糊兜底）。认不到返回 None。
         """
         try:
-            if not self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
+            patient = False
+            for attempt in range(10):  # 耐心模式覆盖横幅→名牌约 5 秒，余量翻倍
+                tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
+                saw_prefix = False
+                for text, _pt in tokens:
+                    m = self._STRIP_RE.match(text)
+                    if m:
+                        saw_prefix = True
+                        found = sword_db.find_by_name(m.group(2), fuzzy=False)
+                        if found:
+                            sid, info = found
+                            return {"sword_id": sid,
+                                    "name": info.get("name_zh") or info["name"],
+                                    "name_jp": info["name"]}
+                    elif text.strip() in self._SWORD_TYPES:
+                        saw_prefix = True
+                if saw_prefix:
+                    # 刀种和名字被 OCR 拆成两条：有刀种在场，裸名也认
+                    # （结果页成员栏没有刀种前缀，进不来这个分支）
+                    for text, _pt in tokens:
+                        if self._STRIP_RE.match(text) or text.strip() in self._SWORD_TYPES:
+                            continue
+                        found = sword_db.find_by_name(text.strip(), fuzzy=False)
+                        if found:
+                            sid, info = found
+                            return {"sword_id": sid,
+                                    "name": info.get("name_zh") or info["name"],
+                                    "name_jp": info["name"]}
+                    time.sleep(0.8)  # 名牌在但名字没匹配上（OCR 花了），重读
+                    self.maa.screenshot(force=True)
+                    continue
+                # 名牌区空空：横幅在 = 掉刀预告，转耐心模式等获得画面到位
+                if not patient and self.maa.ocr(
+                        self._OBTAIN_BANNER_TEXT,
+                        roi_4to4(*self._OBTAIN_BANNER_ROI)):
+                    patient = True
+                if patient:
+                    time.sleep(0.8)
+                    self.maa.screenshot(force=True)
+                    continue
+                # 没横幅：有立牌=获得画面，等对话框滑入重读；
+                # 没立牌先给一拍（对话框可能还在路上），第二拍还空就不是获得画面
+                if self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
+                    time.sleep(0.8)
+                    self.maa.screenshot(force=True)
+                    continue
+                if attempt == 0:
+                    time.sleep(0.6)
+                    self.maa.screenshot(force=True)
+                    continue
                 return None
-            tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
-            for text, _pt in tokens:
-                found = sword_db.find_by_name(text, fuzzy=False)
-                if found:
-                    sid, info = found
-                    return {"sword_id": sid,
-                            "name": info.get("name_zh") or info["name"],
-                            "name_jp": info["name"]}
         except Exception:
             pass
         return None
