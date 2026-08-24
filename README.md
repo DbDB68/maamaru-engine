@@ -18,12 +18,14 @@
 
 ## 界面
 
-![本丸成绩单资源统计](docs/assets/report-resource-chart.png)
+![まあ丸主面板](docs/assets/dashboard.png)
 
-成绩单可比较多种资源、查看确定来源与未归因变化，并按日期下钻到当天任务和记录。
+主面板集中任务选择、当前任务、日志与本丸状态；成绩单可比较多种资源、查看确定来源与未归因变化，并按日期下钻到当天任务和记录。
 
 <details>
-<summary>查看资源变化与全部记录</summary>
+<summary>查看成绩单资源变化与全部记录</summary>
+
+![本丸成绩单资源统计](docs/assets/report-resource-chart.png)
 
 ![资源变化与掉落结果](docs/assets/report-resource-summary.png)
 
