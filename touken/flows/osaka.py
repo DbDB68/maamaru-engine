@@ -493,9 +493,19 @@ class OsakaMixin:
     def _open_osaka(self, cfg: dict) -> bool:
         activity = cfg.get("activity_entry", {})
         entry = cfg.get("event_entry", {})
+        # 活动页有加载动画，模板可能早拍了半拍（2026-08-24 验证跑遇到一次
+        # 点开活动页瞬间模板未命中直接放弃），每步给几拍重试
         for step in (activity, entry):
             template = step.get("template")
-            target = self.maa.template_match(template) if template else None
+            if not template:
+                return False
+            target = None
+            for _ in range(4):
+                target = self.maa.template_match(template)
+                if target:
+                    break
+                time.sleep(1.0)
+                self.maa.screenshot(force=True)
             if not target:
                 return False
             self.maa.click(target)
