@@ -46,6 +46,22 @@ class Flow(BattleMixin):
         self.points.append(point)
 
 
+class FormationPageMaa(FakeMaa):
+    """阵形页标题在双击确认后消失：前 title_ttl 次查询返回标题，之后不再返回。"""
+
+    def __init__(self, title_ttl=1, **kwargs):
+        super().__init__(**kwargs)
+        self.title_ttl = title_ttl
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if template == "battle/ui阵形选择.png":
+            if self.title_ttl <= 0:
+                self.template_calls.append((template, roi))
+                return None
+            self.title_ttl -= 1
+        return super().template_match(template, roi, threshold)
+
+
 class BattleComponentTests(unittest.TestCase):
     @staticmethod
     def _record_flow(start="team", save_auto_return=True, yes_template=True):
@@ -259,7 +275,7 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(flow._formation_mode_state(), "manual")
 
     def test_manual_formation_switches_from_auto_then_selects_fixed(self):
-        flow = Flow(FakeMaa(templates={
+        flow = Flow(FormationPageMaa(title_ttl=1, templates={
             "battle/ui阵形选择.png": Point(640, 24),
             "battle/阵形选择自动.png": Point(910, 32),
         }))
@@ -267,12 +283,12 @@ class BattleComponentTests(unittest.TestCase):
             "auto_mode": {"toggle": [910, 32]},
             "formations": {"逆行阵": [1034, 420]},
             "double_click": True,
-            "confirm_offset": [-115, 13],
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
                 formation_name="逆行阵", enable_auto=False), "fixed")
-        self.assertEqual(flow.points, [[910, 32], [1034, 420], [919, 433]])
+        # 拨开关后双击同一张阵形卡：第一下选中、第二下即确定，不点偏移热点
+        self.assertEqual(flow.points, [[910, 32], [1034, 420], [1034, 420]])
 
     def test_auto_formation_switches_from_manual_without_clicking_fixed(self):
         flow = Flow(FakeMaa(templates={
@@ -291,7 +307,7 @@ class BattleComponentTests(unittest.TestCase):
     def test_auto_formation_stuck_on_selection_page_falls_back_to_fixed(self):
         """夜战图敌方阵形「不明」：游戏自动阵形没东西可选，页面挂着不动，
         已经是自动模式时脚本必须兜底手动点兜底阵形（6-2 实战卡死修复）。"""
-        flow = Flow(FakeMaa(templates={
+        flow = Flow(FormationPageMaa(title_ttl=2, templates={
             "battle/ui阵形选择.png": Point(640, 24),
             "battle/阵形选择自动.png": Point(910, 32),
         }))
@@ -299,14 +315,30 @@ class BattleComponentTests(unittest.TestCase):
             "auto_mode": {"toggle": [910, 32]},
             "formations": {"逆行阵": [1034, 420]},
             "double_click": True,
-            "confirm_offset": [-115, 13],
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
                 strategy="advantage", formation_name="逆行阵",
                 enable_auto=True), "fixed")
-        # 没有有利标（夜图），直接点兜底阵形卡；没有去拨自动/手动开关
-        self.assertEqual(flow.points, [[1034, 420], [919, 433]])
+        # 没有有利标（夜图），双击兜底阵形卡；没有去拨自动/手动开关
+        self.assertEqual(flow.points, [[1034, 420], [1034, 420]])
+
+    def test_formation_double_click_gives_up_when_page_never_leaves(self):
+        """双击三轮阵形页都不走：如实报失败，让调用方停止这场，绝不盲点。"""
+        flow = Flow(FakeMaa(templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择手动.png": Point(910, 32),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="逆行阵", enable_auto=False), "failed")
+        # 三轮双击共 6 击，全部落在阵形卡上，没有偏移热点
+        self.assertEqual(flow.points, [[1034, 420]] * 6)
 
 
     def test_formation_status_alone_during_battle_is_not_a_selection_screen(self):

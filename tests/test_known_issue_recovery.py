@@ -7,6 +7,7 @@ from touken.flows.daily import (
     _equip_warning_status,
     _is_fail,
     _is_success_status,
+    _practice_report_status,
     _shop_report_status,
 )
 from touken.flows.rewards import RewardsMixin
@@ -113,6 +114,76 @@ class DailyReportTests(unittest.TestCase):
             _shop_report_status(msg),
             "✗ 未识别到领取按钮，未点击",
         )
+
+    def test_20260824_practice_formation_stall_is_not_green(self):
+        """8-24 事故：阵形页卡死连环翻车 7 步，成绩单却全绿。"""
+        for msg in (
+            "[演练] 阵形选择失败，停止这场，避免在选择页误点",
+            "[演练] 阵形仍未确认，停止这场，避免在选择页误点",
+            "[演练] : 再次进入失败，跳过",
+        ):
+            self.assertTrue(_is_fail(msg), msg)
+
+    def test_practice_zero_new_wins_is_a_detailed_failure(self):
+        msg = "[演练] 收工：本次新赢 0 场，当前刷新场累计 0 场"
+        self.assertFalse(_is_fail(msg))  # 词表不背这锅，专项判分接住
+        self.assertEqual(_practice_report_status(msg), "✗ 一场没赢")
+        self.assertFalse(_is_success_status("✗ 一场没赢"))
+
+    def test_practice_enough_wins_and_real_wins_stay_green(self):
+        self.assertEqual(
+            _practice_report_status("[演练] 已有胜场 3/3，无需重复挑战，收工"),
+            "✓ 已有胜场够数")
+        self.assertIsNone(_practice_report_status(
+            "[演练] 收工：本次新赢 2 场，当前刷新场累计 2 场"))
+
+    def test_step_abort_wording_across_flows_is_not_green(self):
+        """各流程自己的"中止"话术都得判红。"""
+        for msg in (
+            "[远征] 找不到远征开始按钮（条件不满足/部队已在远征？），停",
+            "[远征] 确认弹窗没出现，停，你去看看卡哪了",
+            "[远征] 没找到小图「5-4」（名字写错了？），停",
+            "[远征] 未配置远征",
+            "[内番] 既没看到内番开始按钮也没看到内番中标记，画面不对劲，停",
+            "[内番] 二次确认弹窗没出现，停",
+            "[锻刀] 点火失败，停",
+            "[锻刀] 刀解腾位置失败，这炉先不收",
+            "[合成] 动画等太久没回素材界面，可能成了也可能没成",
+            "[TASK] 失效弹窗后没找到一键领取按钮，无法补点",
+            "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理",
+            "[出阵] 未配置异去",
+            "[挖地] 没找到大阪城活动入口",
+            "[挖地] 层数没有成功切到目标（现在是 50），已停止出阵",
+            "[RAID] 既没确认弹窗也没补充弹窗，卡在未知画面，停",
+            "[快照] 等待 90 秒后目录仍不可用，取消本次收工盘点",
+            "[远征] 🛑 检测到重伤标记！按规矩绝不派遣，停。去修刀吧",
+            "[收菜] ⚠️ 连续认不出画面，停，你去看看卡哪了",
+            "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了",
+            "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工",
+            "[南瓜] 更新完部队选择按钮没回来",
+        ):
+            self.assertTrue(_is_fail(msg), msg)
+
+    def test_benign_skip_and_fallback_wording_stays_green(self):
+        """幂等跳过、兜底坐标、可自愈的提示不许误伤。"""
+        for msg in (
+            "[SHOP] 模板匹配购买按钮失败，使用固定坐标 (100, 200)",
+            "[SHOP] 今日暖心礼包已售罄，说明此前已经领取，跳过",
+            "[签到] 没有领取奖励按钮（今天签过了？），跳过",
+            "[签到] 没直接落在签到页，点签到标签",
+            "[收菜] ✓ 没有远征回来，本丸风平浪静～",
+            "[远征] 没有启用常用安排，本次只收取归来奖励",
+            "[远征] ⚠️ 没看到「远征中」字样，可能派遣失败也可能已回本丸",
+            "[演练] 已有胜场 3/3，无需重复挑战，收工",
+            "[演练] 打完没回到对手列表，重新导航",
+            "[挖地] 🧪 开工小判没读到（不在本丸？），收场再补",
+            "[挖地] 98 层，已达到停止条件，本次不出阵",
+            "[南瓜] ⚠️ 剪影素材库加载失败，这局当死板版刷",
+            "[异去] 归城提灯补充完成；小判金额未识别，已回到部队选择",
+            "[快照] 小判读取失败（不影响其他数据）",
+            "[日课] ✓ 今天已经刀解过了（锻刀收刀腾位置时顺手解的），这步跳过",
+        ):
+            self.assertFalse(_is_fail(msg), msg)
 
     def test_daily_expedition_dispatches_idle_teams_from_common_plan(self):
         flow = DailyMixin()

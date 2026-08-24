@@ -614,15 +614,26 @@ class BattleMixin:
         formations = formation_config.get("formations", {})
         if formation_name in formations:
             target = formations[formation_name]
-            self._click_point(target)
-            time.sleep(0.3)
+            if not formation_config.get("double_click"):
+                self._click_point(target)
+                time.sleep(0.3)
+                return True
 
-            # 第一击选中阵形卡；确认热点随后出现在卡内左下，不是原地双击。
-            if formation_config.get("double_click"):
-                dx, dy = formation_config.get("confirm_offset", [-115, 13])
-                self._click_point([target[0] + dx, target[1] + dy])
-
-            return True
+            # 双击同一张阵形卡：第一下选中、第二下即确定（和部队选择同一交互，
+            # 选中不联网、确定才发送）。不再戳卡内"确定"热点的偏移坐标——
+            # 旧偏移实测擦着按钮下沿点空，阵形页不走导致整场卡死。
+            # 每轮双击后验一次页面是否离开，没走就再点，三轮还不走如实报错，
+            # 交给调用方停止这场，绝不盲信一次必中。
+            for _ in range(3):
+                self._click_point(target)
+                time.sleep(0.35)
+                self._click_point(target)
+                time.sleep(0.8)
+                self.maa.screenshot(force=True)
+                if self._formation_mode_state() is None:
+                    return True
+            print(f"[ERROR] 阵形 {formation_name} 双击后仍未离开选择页")
+            return False
 
         print(f"[ERROR] 未知阵形: {formation_name}")
         return False

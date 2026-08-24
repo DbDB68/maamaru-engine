@@ -32,23 +32,52 @@ from ..runtime_paths import STATUS_DIR
 
 from ..maa_adapter import Point, roi_4to4
 
-# 判定步骤翻车的消息特征（别写太宽：'失败'会误伤"模板匹配失败，使用固定坐标"这种兜底）
+# 白名单：带着"失败/停/跳过"等字样、但其实没翻车的消息，先放行再判红。
+# （判红宁可严一点：没跑成的步骤必须如实 ✗，不许"没跑却标绿"——
+#   2026-08-24 演练阵形页卡死，连环翻车 7 步成绩单却全绿的教训）
+_PASS_RE = re.compile(
+    r"模板匹配.{0,12}失败.{0,12}固定坐标|"  # 万屋购买按钮模板没中，兜底固定坐标
+    r"已达到停止条件|"                      # 挖地/出阵按约定主动收工
+    r"今天签过了|今天已经刀解过了|"          # 幂等跳过
+    r"没有远征回来|没有启用常用安排|没有可领奖励|"
+    r"无需重复挑战|"                        # 演练胜场已够
+    r"可能派遣失败也可能已回本丸|"           # 远征结果不确定，日志里另有 ⚠️ 详述
+    r"这局当死板版刷|"                      # 南瓜剪影库没加载，降级刷不是翻车
+    r"收场再补|"                            # 挖地开工小判没读到，收工时补拍
+    r"小判金额未识别|"                      # 异去提灯补充已成功，只是金额没读出来
+    r"游戏自动行军已经停止|"                # 游戏自身的保护性停军，脚本会安全收尾
+    r"不影响"                               # 明确标注不影响主线的旁路失败（快照/推送等）
+)
+
+# 判定步骤翻车的消息特征：没 x 到/找不到/未配置/停止/，停 收场等都是各流程
+# 自己约定的"中止"话术，一律判红；个别误伤用上面的白名单捞回来。
 _FAIL_RE = re.compile(
-    r"到达.{0,8}失败|没打开|放弃|超时|翻车|没能|没等到|刀装未满警告|"
-    r"未找到暖心礼包|未识别到领取按钮|未检测到0价格弹窗|"
-    r"未确认一键领取按钮状态|点击后未确认领取成功|"
-    r"常用安排地图.{0,12}不存在|"
-    r"未配置(?:异去|合战场)|配置里没有(?:章节|小图|部队)"
+    r"失败|翻车|没能|没等到|没打开|没找到|没出现|没看到|没读到|没读全|没识别|"
+    r"找不到|未配置|尚未配置|配置里没有|未开始|未找到|未识别|未确认|未检测|"
+    r"无法|不可用|停止|卡死|卡在|强制停|没生效|没回来|"
+    r"，停(?=[，。]|$)|超时|放弃|刀装未满警告|"
+    r"可能成了也可能没成"
 )
 
 
 def _is_fail(msg: str) -> bool:
+    if _PASS_RE.search(msg):
+        return False
     return bool(_FAIL_RE.search(msg))
 
 
 def _is_success_status(status: str) -> bool:
     """Detailed successes such as ``✓ 本次领取成功`` are still green."""
     return str(status).lstrip().startswith("✓")
+
+
+def _practice_report_status(msg: str, current=None):
+    """演练专项判分：打了却一场没赢（认不出人/阵形卡死/全输）不算绿。"""
+    if "无需重复挑战，收工" in msg:
+        return "✓ 已有胜场够数"
+    if "收工：本次新赢 0 场" in msg:
+        return "✗ 一场没赢"
+    return current
 
 
 def _equip_warning_status(msg: str, current=None):
@@ -208,6 +237,8 @@ class DailyMixin:
                         ok = False
                     if name == "万屋":
                         detail_status = _shop_report_status(msg, detail_status)
+                    if name == "演练":
+                        detail_status = _practice_report_status(msg, detail_status)
             except Exception as exc:
                 ok = False
                 yield f"[日课] {name}翻车: {exc}"
