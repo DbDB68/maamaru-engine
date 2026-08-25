@@ -115,7 +115,11 @@ jobs:
         run: python -m pip install . pyinstaller
 
       - name: 运行完整测试
+        # windows-latest 控制台是 cp1252，裸 print 中文会炸；
+        # ubuntu 的 Check 流水线没这问题，这里必须显式 UTF-8
         run: python -m unittest discover -s tests -v
+        env:
+          PYTHONIOENCODING: utf-8
 
       - name: 构建启动器
         run: python -m PyInstaller --clean --noconfirm "まあ丸启动器.spec"
