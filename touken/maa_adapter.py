@@ -108,18 +108,18 @@ def _ocr_text_matches(text: str, expected: str, match_mode: str) -> bool:
     return False
 
 
-def _safe_print(message: object) -> None:
+def _safe_print(message: object, flush: bool = False) -> None:
     """Best-effort console output; logging must never change automation results."""
     text = str(message)
     try:
-        print(text)
+        print(text, flush=flush)
     except UnicodeEncodeError:
         # Windows workers may inherit a GBK console. Preserve a readable escaped
         # form for unsupported characters such as © instead of failing OCR.
         try:
             encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
             escaped = text.encode(encoding, errors="backslashreplace").decode(encoding)
-            print(escaped)
+            print(escaped, flush=flush)
         except Exception:
             pass
     except Exception:
@@ -192,19 +192,19 @@ class MAAAdapter:
                 if job.done:
                     return job
             except Exception as exc:
-                print(f"[MAA 错误] {label} 状态查询失败: {exc}")
+                _safe_print(f"[MAA 错误] {label} 状态查询失败: {exc}")
                 return None
             # MAA 内核猝死（ADB 一断 Tasker 就地暴毙，8-25 两次实测）时
             # job 永远不会 done——直接查 inited 标志秒杀，不傻等到超时。
             # init 期间（self._initialized=False）Tasker 没绑好是正常的，不查。
             if tasker is not None and not getattr(tasker, "inited", True):
-                print(f"[MAA] Tasker 已掉线（{label}），按 MAA 已死处理",
-                      flush=True)
+                _safe_print(f"[MAA] Tasker 已掉线（{label}），按 MAA 已死处理",
+                            flush=True)
                 self._maa_timeouts = self.MAX_CONSECUTIVE_TIMEOUTS
                 return None
             if time.time() >= deadline:
-                print(f"[MAA 超时] {label} 超过 {timeout:.0f}s 没完成，按失败处理（MAA 疑似卡死）",
-                      flush=True)
+                _safe_print(f"[MAA 超时] {label} 超过 {timeout:.0f}s 没完成，按失败处理（MAA 疑似卡死）",
+                            flush=True)
                 return None
             time.sleep(0.05)
 
@@ -220,8 +220,8 @@ class MAAAdapter:
                     and self._try_revive()):
                 self._maa_timeouts = 0
                 return
-            print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，MAA 已死，"
-                  "工人进程自我了断（退出码 43）", flush=True)
+            _safe_print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，MAA 已死，"
+                        "工人进程自我了断（退出码 43）", flush=True)
             os._exit(43)
 
     def _try_revive(self) -> bool:
@@ -233,9 +233,9 @@ class MAAAdapter:
         （工人进程是消耗品，漏一个原生对象比碰一个坏对象安全）。
         """
         self._revive_attempts += 1
-        print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，"
-              f"第 {self._revive_attempts} 次抢救：重启 ADB 并重绑 Tasker",
-              flush=True)
+        _safe_print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，"
+                    f"第 {self._revive_attempts} 次抢救：重启 ADB 并重绑 Tasker",
+                    flush=True)
         try:
             # 重启 ADB 服务：MuMu 的 ADB 通道抽风时，旧坏连接一起陪葬
             self._adb_run(["kill-server"], timeout=10.0)
@@ -251,19 +251,19 @@ class MAAAdapter:
                                   timeout=self.CONNECT_TIMEOUT,
                                   label="ADB 抢救重连")
             if conn is None or not conn.succeeded:
-                print("[MAA] 抢救失败：ADB 重连没成", flush=True)
+                _safe_print("[MAA] 抢救失败：ADB 重连没成", flush=True)
                 return False
             tasker = Tasker()
             if not tasker.bind(self.resource, controller) or not tasker.inited:
-                print("[MAA] 抢救失败：Tasker 重绑没成", flush=True)
+                _safe_print("[MAA] 抢救失败：Tasker 重绑没成", flush=True)
                 return False
             self.controller = controller
             self.tasker = tasker
             self._last_image = None  # 缓存截图是暴毙前的现场，作废
-            print("[MAA] ✓ 抢救成功，接着跑", flush=True)
+            _safe_print("[MAA] ✓ 抢救成功，接着跑", flush=True)
             return True
         except Exception as exc:
-            print(f"[MAA] 抢救失败: {exc}", flush=True)
+            _safe_print(f"[MAA] 抢救失败: {exc}", flush=True)
             return False
 
     def init(self) -> bool:
