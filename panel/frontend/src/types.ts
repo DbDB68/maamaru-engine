@@ -101,3 +101,32 @@ export interface InventoryGap {
   resource_delta?: Record<string, number>
   reported?: boolean
 }
+
+// ---- 规划建议 /api/planning ----
+
+export interface PlanningGoalAdvice {
+  id: number
+  resource: string
+  target: number
+  deadline: string
+  note?: string
+  days_left: number
+  current: number | null
+  rate: number | null
+  projected: number | null
+  shortfall: number | null
+  extra_daily: number | null
+  extra_floors: number | null
+  status: 'done' | 'on_track' | 'behind' | 'expired' | 'unknown'
+  message: string
+}
+
+export interface PlanningReport {
+  schema_version: number
+  generated_at: number
+  today: string
+  rate_window_days: number
+  rates: Record<string, { daily: number | null; days_observed: number }>
+  koban_per_floor: { per_floor: number; sessions: number } | null
+  goals: PlanningGoalAdvice[]
+}

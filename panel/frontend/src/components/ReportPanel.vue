@@ -7,6 +7,7 @@ import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
+import PlanningPanel from './report/PlanningPanel.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, obtainSourceLabel, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
@@ -491,6 +492,8 @@ onMounted(() => load())
           </div>
           <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
         </section>
+
+        <PlanningPanel />
 
         <section v-if="swordDrops.length" class="sword-drops" :class="{ loading }">
           <header><div><h3>掉落结果</h3><p>{{ rangeLabel }}认出来的刀剑男士进账，共 {{ swordDropTotal }} 位</p></div></header>

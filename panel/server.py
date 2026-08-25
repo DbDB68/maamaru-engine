@@ -1701,6 +1701,41 @@ async def api_delete_human_report(report_id: int):
     return {"ok": True}
 
 
+# ── API：规划建议（攒钱小目标） ──
+
+
+@app.get("/api/planning")
+async def api_planning():
+    """攒钱目标 + 按近日净收支速率推算的到期预测。契约见 touken/advisor.py。"""
+    from touken import advisor
+    from touken.telemetry import get_telemetry_store
+    return advisor.get_planning(get_telemetry_store(),
+                                STATUS_DIR / advisor.GOALS_FILENAME)
+
+
+@app.post("/api/planning/goals")
+async def api_add_planning_goal(request: Request):
+    body = await request.json()
+    from touken import advisor
+    try:
+        goal = advisor.add_goal(STATUS_DIR / advisor.GOALS_FILENAME,
+                                resource=str(body.get("resource") or ""),
+                                target=body.get("target"),
+                                deadline=str(body.get("deadline") or ""),
+                                note=str(body.get("note") or ""))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "goal": goal}
+
+
+@app.delete("/api/planning/goals/{goal_id}")
+async def api_delete_planning_goal(goal_id: int):
+    from touken import advisor
+    if not advisor.delete_goal(STATUS_DIR / advisor.GOALS_FILENAME, goal_id):
+        return JSONResponse({"ok": False, "reason": "找不到这个小目标"}, status_code=404)
+    return {"ok": True}
+
+
 @app.get("/api/data/ocr")
 async def api_data_ocr(limit: int = 100, script: str = "",
                        matched: bool | None = None):
