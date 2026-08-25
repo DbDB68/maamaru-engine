@@ -1,0 +1,14 @@
+{
+  "江户城潜入调查": {
+    "mechanics": "edocastle",
+    "start_date": "2026-08-27",
+    "end_date": null,
+    "ticket_price": 300,
+    "daily_free_tickets": 12,
+    "keys_total": 1500,
+    "keys_per_box": 5,
+    "boxes": 300,
+    "est_keys_per_run": null,
+    "note": "四座宝库 30+60+90+120 箱全开=1500 钥匙；每天 5:00/17:00 令牌回满（12 张免费票）；脚本打一把买一张票，300 小判/张；虚拟伤害活动"
+  }
+}

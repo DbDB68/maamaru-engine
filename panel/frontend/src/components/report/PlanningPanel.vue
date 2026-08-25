@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api'
-import type { EventsCalendar, PlanningReport } from '../../types'
+import type { EventAbacus, EventsCalendar, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 
 const planning = ref<PlanningReport | null>(null)
@@ -54,12 +54,47 @@ function goalFromEvent(updateDate: string, eventName: string) {
   form.value = { ...form.value, deadline: updateDate, note: eventName }
 }
 
+// ---- 活动算盘 ----
+
+const estimateInputs = ref<Record<string, string>>({})
+const estimateSaving = ref('')
+const abacusGoalSaving = ref('')
+
+async function saveEstimate(event: string) {
+  estimateSaving.value = event
+  try {
+    await api.saveEventEstimate(event, Number(estimateInputs.value[event]))
+    await load()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '场均预估保存失败' }
+  finally { estimateSaving.value = '' }
+}
+
+async function goalFromAbacus(abacus: EventAbacus) {
+  const deadline = abacus.end_date || abacus.start_date
+  if (!deadline || !abacus.koban_cost) return
+  abacusGoalSaving.value = abacus.event
+  try {
+    const current = planning.value?.current?.['小判'] ?? 0
+    await api.addPlanningGoal({
+      resource: '小判',
+      target: Math.round(current + abacus.koban_cost),
+      deadline,
+      note: `${abacus.event}门票钱`,
+    })
+    await load()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
+  finally { abacusGoalSaving.value = '' }
+}
+
 async function load() {
   loading.value = true
   try {
     const [nextPlanning, nextCalendar] = await Promise.all([api.planning(), api.events()])
     planning.value = nextPlanning
     calendar.value = nextCalendar
+    for (const abacus of nextPlanning.events || []) {
+      if (abacus.keys_per_run != null) estimateInputs.value[abacus.event] = String(abacus.keys_per_run)
+    }
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '规划建议读取失败' }
   finally { loading.value = false }
@@ -117,6 +152,24 @@ onMounted(load)
           </template>
         </span>
         <button type="button" class="planning-event-goal" @click="goalFromEvent(item.update_date!, item.events[0] || '')">按这天立目标</button>
+      </div>
+    </div>
+
+    <div v-for="abacus in planning?.events || []" :key="abacus.event" class="planning-abacus">
+      <div class="planning-goal-head">
+        <b>🧮 {{ abacus.event }}</b>
+        <span v-if="abacus.start_date">{{ shortDate(abacus.start_date) }} 开打<template v-if="abacus.end_date">，{{ shortDate(abacus.end_date) }} 收摊</template></span>
+        <em v-if="abacus.keys_source === 'measured'" class="planning-abacus-tag measured">实测场均</em>
+        <em v-else-if="abacus.keys_source === 'estimate'" class="planning-abacus-tag">估计场均</em>
+      </div>
+      <p class="planning-message">🦊 {{ abacus.message }}</p>
+      <small v-if="abacus.note">{{ abacus.note }}</small>
+      <div class="planning-abacus-actions">
+        <label>场均钥匙
+          <input v-model="estimateInputs[abacus.event]" type="number" min="1" max="200" step="1" placeholder="填个估计">
+        </label>
+        <button type="button" class="secondary" :disabled="estimateSaving === abacus.event" @click="saveEstimate(abacus.event)">{{ estimateSaving === abacus.event ? '记账中……' : '记下' }}</button>
+        <button v-if="abacus.koban_cost && (abacus.end_date || abacus.start_date)" type="button" :disabled="abacusGoalSaving === abacus.event" @click="goalFromAbacus(abacus)">立成攒钱目标（{{ fmt(abacus.koban_cost) }} 小判）</button>
       </div>
     </div>
 
@@ -179,6 +232,13 @@ onMounted(load)
 .planning-event-chip { background: var(--fox-gold-pale); border: 1px solid var(--fox-gold); border-radius: 999px; padding: 1px 10px; font-size: 13px; color: var(--ink); text-decoration: none; }
 .planning-event-goal { margin-left: auto; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
 .planning-event-goal:hover { border-color: var(--fox-gold); color: var(--ink); }
+.planning-abacus { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--fox-gold); border-radius: 10px; background: var(--paper); }
+.planning-abacus small { color: var(--ink-dim); }
+.planning-abacus-tag { font-style: normal; font-size: 12px; border: 1px solid var(--paper-line); border-radius: 999px; padding: 1px 10px; color: var(--ink-dim); }
+.planning-abacus-tag.measured { color: #4d7a3a; border-color: #4d7a3a; }
+.planning-abacus-actions { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.planning-abacus-actions label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
+.planning-abacus-actions input { width: 110px; }
 .planning-empty { color: var(--ink-dim); font-size: 13px; margin: 10px 0 2px; }
 .planning-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 12px; background: var(--paper); border: 1px solid var(--fox-gold); border-radius: 10px; }
 .planning-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }

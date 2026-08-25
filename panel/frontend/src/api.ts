@@ -41,6 +41,9 @@ export const api = {
   }),
   deletePlanningGoal: (id: number) => request<{ ok: boolean }>(`/api/planning/goals/${id}`, { method: 'DELETE' }),
   events: () => request<EventsCalendar>('/api/events'),
+  saveEventEstimate: (event: string, keysPerRun: number) => request<{ ok: boolean }>('/api/planning/event-estimate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, keys_per_run: keysPerRun }),
+  }),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {

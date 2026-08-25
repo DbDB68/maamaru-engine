@@ -1766,6 +1766,20 @@ async def api_delete_planning_goal(goal_id: int):
     return {"ok": True}
 
 
+@app.post("/api/planning/event-estimate")
+async def api_save_event_estimate(request: Request):
+    """保存用户手填的活动场均钥匙预估；实测数据来了自动盖过它。"""
+    body = await request.json()
+    from touken import advisor
+    try:
+        card = advisor.save_key_estimate(STATUS_DIR,
+                                         str(body.get("event") or ""),
+                                         body.get("keys_per_run"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "card": card}
+
+
 @app.get("/api/data/ocr")
 async def api_data_ocr(limit: int = 100, script: str = "",
                        matched: bool | None = None):

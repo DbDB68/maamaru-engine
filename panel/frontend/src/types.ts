@@ -128,7 +128,9 @@ export interface PlanningReport {
   rate_window_days: number
   rates: Record<string, { daily: number | null; days_observed: number }>
   koban_per_floor: { per_floor: number; sessions: number } | null
+  current?: Record<string, number | null>
   goals: PlanningGoalAdvice[]
+  events?: EventAbacus[]
 }
 
 // ---- 活动日历 /api/events ----
@@ -148,4 +150,25 @@ export interface EventsCalendar {
   announcements: EventAnnouncement[]
   stale: boolean
   reason?: string
+}
+
+// ---- 活动算盘（/api/planning 的 events 字段） ----
+
+export interface EventAbacus {
+  event: string
+  start_date: string | null
+  end_date: string | null
+  keys_total: number
+  boxes: number | null
+  ticket_price: number
+  daily_free_tickets: number
+  note: string
+  keys_per_run: number | null
+  keys_source: 'measured' | 'estimate' | null
+  runs_needed: number | null
+  free_runs: number | null
+  paid_tickets: number | null
+  koban_cost: number | null
+  days_left: number | null
+  message: string
 }

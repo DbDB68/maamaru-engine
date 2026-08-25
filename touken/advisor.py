@@ -253,12 +253,169 @@ def get_planning(store, goals_path: Path, *,
                            rate_info=rates.get(goal["resource"]),
                            floor_yield=floor_yield, today=today)
              for goal in load_goals(goals_path)]
+    measured = measured_keys_per_run(store)
+    cards = load_event_cards(Path(goals_path).parent)
+    abacuses = [event_abacus(name, card, measured=measured, today=today)
+                for name, card in cards.items()]
     return {
         "schema_version": PLANNING_SCHEMA_VERSION,
         "generated_at": now,
         "today": today.isoformat(),
         "rate_window_days": RATE_WINDOW_DAYS,
         "rates": rates,
+        "current": current,
         "koban_per_floor": floor_yield,
         "goals": goals,
+        "events": abacuses,
     }
+
+
+# ── 活动算盘（江户城这类门票/钥匙活动的预算） ──
+
+EVENTS_META_LOCAL = "events_meta.local.json"
+_DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
+def load_event_cards(status_dir: Path) -> dict:
+    """活动知识卡：仓库默认卡 + 数据目录本地覆盖（老大的场均预估存本地）。"""
+    cards = {}
+    try:
+        cards = json.loads((_DATA_DIR / "events_meta.json")
+                           .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    try:
+        local = json.loads((Path(status_dir) / EVENTS_META_LOCAL)
+                           .read_text(encoding="utf-8"))
+        for name, patch in local.items():
+            if isinstance(patch, dict) and name in cards:
+                cards[name].update(patch)
+    except (OSError, ValueError):
+        pass
+    return cards
+
+
+def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
+    """保存老大手填的场均钥匙预估（实测数据来了会被实测覆盖显示）。"""
+    cards = load_event_cards(status_dir)
+    if event not in cards:
+        raise ValueError(f"不认识活动「{event}」")
+    try:
+        estimate = float(keys_per_run)
+    except (TypeError, ValueError):
+        raise ValueError("场均钥匙得是个数")
+    if not 0 < estimate <= 200:
+        raise ValueError("场均钥匙不对劲（大于 0，别超过 200）")
+    path = Path(status_dir) / EVENTS_META_LOCAL
+    try:
+        local = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        local = {}
+    local.setdefault(event, {})["est_keys_per_run"] = estimate
+    path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+    return cards[event]
+
+
+def measured_keys_per_run(store, *, limit: int = 50) -> dict | None:
+    """实测场均钥匙：edocastle.run_completed 事件（江户城流程产出）的平均。"""
+    events = store.recent_events(limit=limit, event_type="edocastle.run_completed")
+    keys = []
+    for event in events:
+        payload = event.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("keys"), (int, float)) \
+                and payload["keys"] > 0:
+            keys.append(payload["keys"])
+    if not keys:
+        return None
+    return {"per_run": sum(keys) / len(keys), "runs": len(keys)}
+
+
+def event_abacus(name: str, card: dict, *, measured: dict | None,
+                 today: date | None = None) -> dict:
+    """江户城式算盘：钥匙总量 ÷ 场均 = 圈数 → 扣白票 → 补票钱。
+
+    实测场均优先，其次老大手填预估，都没有就老实说还没数。
+    """
+    today = today or _today()
+    keys_total = int(card.get("keys_total") or 0)
+    ticket_price = int(card.get("ticket_price") or 0)
+    daily_free = int(card.get("daily_free_tickets") or 0)
+    abacus = {
+        "event": name,
+        "start_date": card.get("start_date"),
+        "end_date": card.get("end_date"),
+        "keys_total": keys_total,
+        "boxes": card.get("boxes"),
+        "ticket_price": ticket_price,
+        "daily_free_tickets": daily_free,
+        "note": card.get("note") or "",
+        "keys_per_run": None,
+        "keys_source": None,
+        "runs_needed": None,
+        "free_runs": None,
+        "paid_tickets": None,
+        "koban_cost": None,
+        "days_left": None,
+        "message": "",
+    }
+
+    if measured:
+        keys_per_run, source = measured["per_run"], "measured"
+    elif card.get("est_keys_per_run"):
+        keys_per_run, source = float(card["est_keys_per_run"]), "estimate"
+    else:
+        keys_per_run, source = None, None
+    abacus["keys_per_run"] = round(keys_per_run, 1) if keys_per_run else None
+    abacus["keys_source"] = source
+
+    if not keys_total or not ticket_price:
+        abacus["message"] = "这张活动卡还缺数据，回头补。"
+        return abacus
+    if keys_per_run is None:
+        abacus["message"] = (
+            f"四座宝库全开要 {keys_total:,} 把钥匙（{card.get('boxes')} 箱 × "
+            f"{card.get('keys_per_box')} 把）。场均几把还没数——你可以先填个估计，"
+            "或者等开战狐之助实测几圈就会算了。")
+        return abacus
+
+    import math
+    runs = math.ceil(keys_total / keys_per_run)
+    abacus["runs_needed"] = runs
+    label = "实测" if source == "measured" else "估计"
+
+    end_date = None
+    if card.get("end_date"):
+        try:
+            end_date = date.fromisoformat(card["end_date"])
+        except ValueError:
+            pass
+    if end_date is None:
+        # 不知道结束日：算不出白票能顶多少，给全自费上限
+        abacus["koban_cost"] = runs * ticket_price
+        abacus["message"] = (
+            f"按{label}场均 {keys_per_run:.1f} 把钥匙，全开四座宝库要打 "
+            f"{runs} 圈。门票 {ticket_price} 小判/张，全自费最坏 "
+            f"{runs * ticket_price:,} 小判；每天白送 {daily_free} 张票，"
+            "排进日常就能省一大截。等结束日定了狐之助再算细账。")
+        return abacus
+
+    start = date.fromisoformat(card["start_date"]) if card.get("start_date") else today
+    days_left = (end_date - max(today, start)).days + 1
+    abacus["days_left"] = max(days_left, 0)
+    free_runs = daily_free * max(days_left, 0)
+    abacus["free_runs"] = free_runs
+    paid = max(0, runs - free_runs)
+    abacus["paid_tickets"] = paid
+    abacus["koban_cost"] = paid * ticket_price
+    if paid == 0:
+        abacus["message"] = (
+            f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈——"
+            f"到 {card['end_date']} 的白票（每天 {daily_free} 张 × "
+            f"{max(days_left, 0)} 天）就够用了，一个小判都不用花🎉")
+    else:
+        abacus["message"] = (
+            f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈；"
+            f"到 {card['end_date']}（{max(days_left, 0)} 天）白票能顶 "
+            f"{free_runs} 圈，还得补 {paid} 张票 ≈ {paid * ticket_price:,} 小判。")
+    return abacus
