@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api'
-import type { PlanningReport } from '../../types'
+import type { EventsCalendar, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 
 const planning = ref<PlanningReport | null>(null)
+const calendar = ref<EventsCalendar | null>(null)
 const loading = ref(false)
 const error = ref('')
 
@@ -32,10 +33,33 @@ const statusLabel: Record<string, string> = {
   unknown: '数据不足',
 }
 
+// ---- 近期活动（B 站官方公告日历，云服务器每天扒一次） ----
+
+const upcoming = computed(() => {
+  const today = localToday()
+  return (calendar.value?.announcements || [])
+    .filter(item => item.update_date && item.update_date >= today)
+    .sort((a, b) => a.update_date!.localeCompare(b.update_date!))
+    .slice(0, 4)
+})
+
+function shortDate(iso: string | null) {
+  if (!iso) return ''
+  const [, month, day] = iso.split('-').map(Number)
+  return `${month}月${day}日`
+}
+
+function goalFromEvent(updateDate: string, eventName: string) {
+  formOpen.value = true
+  form.value = { ...form.value, deadline: updateDate, note: eventName }
+}
+
 async function load() {
   loading.value = true
   try {
-    planning.value = await api.planning()
+    const [nextPlanning, nextCalendar] = await Promise.all([api.planning(), api.events()])
+    planning.value = nextPlanning
+    calendar.value = nextCalendar
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '规划建议读取失败' }
   finally { loading.value = false }
@@ -77,6 +101,24 @@ onMounted(load)
       <button v-if="!formOpen" type="button" class="secondary" @click="formOpen = true">＋ 立个小目标</button>
     </header>
     <p v-if="error" class="planning-error">{{ error }}</p>
+
+    <div v-if="upcoming.length || calendar?.reason" class="planning-events">
+      <small class="planning-events-title">
+        📣 近期公告（B 站官方号）
+        <em v-if="calendar?.stale">日历是旧缓存，服务器暂时联系不上</em>
+      </small>
+      <p v-if="calendar?.reason && !upcoming.length" class="planning-empty">{{ calendar.reason }}</p>
+      <div v-for="item in upcoming" :key="item.title" class="planning-event-row">
+        <b>{{ shortDate(item.update_date) }}</b>
+        <span class="planning-event-names">
+          <template v-for="name in item.events" :key="name">
+            <a v-if="item.url" class="planning-event-chip" :href="item.url" target="_blank" rel="noopener" @click.stop>{{ name }}</a>
+            <span v-else class="planning-event-chip">{{ name }}</span>
+          </template>
+        </span>
+        <button type="button" class="planning-event-goal" @click="goalFromEvent(item.update_date!, item.events[0] || '')">按这天立目标</button>
+      </div>
+    </div>
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
       <label>攒什么
@@ -128,6 +170,15 @@ onMounted(load)
 .planning-panel h3 { margin: 0; }
 .planning-panel header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
 .planning-error { color: #b0492e; }
+.planning-events { margin-top: 10px; padding: 8px 12px; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.planning-events-title { color: var(--ink-dim); }
+.planning-events-title em { font-style: normal; color: #b0492e; margin-left: 8px; }
+.planning-event-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.planning-event-row > b { color: var(--fox-gold-deep); white-space: nowrap; }
+.planning-event-names { display: flex; gap: 6px; flex-wrap: wrap; }
+.planning-event-chip { background: var(--fox-gold-pale); border: 1px solid var(--fox-gold); border-radius: 999px; padding: 1px 10px; font-size: 13px; color: var(--ink); text-decoration: none; }
+.planning-event-goal { margin-left: auto; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.planning-event-goal:hover { border-color: var(--fox-gold); color: var(--ink); }
 .planning-empty { color: var(--ink-dim); font-size: 13px; margin: 10px 0 2px; }
 .planning-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 12px; background: var(--paper); border: 1px solid var(--fox-gold); border-radius: 10px; }
 .planning-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }

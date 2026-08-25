@@ -1,4 +1,4 @@
-import type { PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventsCalendar, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -40,6 +40,7 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   deletePlanningGoal: (id: number) => request<{ ok: boolean }>(`/api/planning/goals/${id}`, { method: 'DELETE' }),
+  events: () => request<EventsCalendar>('/api/events'),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {

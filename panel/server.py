@@ -1703,6 +1703,36 @@ async def api_delete_human_report(report_id: int):
 
 # ── API：规划建议（攒钱小目标） ──
 
+# 活动日历源：腾讯云服务器上 scripts/bili_events_crawler.py 每天扒一次
+# B 站官方号公告生成 events.json（部署见交接文档 §23）
+EVENTS_CALENDAR_URL = "http://49.235.132.50:8321/events.json"
+EVENTS_CACHE_TTL = 6 * 3600
+
+
+@app.get("/api/events")
+async def api_events():
+    """活动日历：拉服务器上的 events.json，带 6h 本地缓存；拉不动就用旧缓存。"""
+    import urllib.request
+    cache_path = STATUS_DIR / "events_calendar.json"
+    cached = None
+    try:
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    if cached and time.time() - cached.get("fetched_at", 0) < EVENTS_CACHE_TTL:
+        return {**cached["data"], "stale": False}
+    try:
+        with urllib.request.urlopen(EVENTS_CALENDAR_URL, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        cache_path.write_text(json.dumps({"fetched_at": time.time(), "data": data},
+                                         ensure_ascii=False), encoding="utf-8")
+        return {**data, "stale": False}
+    except Exception:
+        if cached:
+            return {**cached["data"], "stale": True}
+        return {"announcements": [], "stale": True,
+                "reason": "活动日历服务器暂时联系不上"}
+
 
 @app.get("/api/planning")
 async def api_planning():

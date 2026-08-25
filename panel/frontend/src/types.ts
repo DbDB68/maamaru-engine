@@ -130,3 +130,22 @@ export interface PlanningReport {
   koban_per_floor: { per_floor: number; sessions: number } | null
   goals: PlanningGoalAdvice[]
 }
+
+// ---- 活动日历 /api/events ----
+
+export interface EventAnnouncement {
+  title: string
+  publish_time: number
+  publish_date: string | null
+  update_date: string | null
+  events: string[]
+  url: string | null
+}
+
+export interface EventsCalendar {
+  generated_at?: number
+  source?: string
+  announcements: EventAnnouncement[]
+  stale: boolean
+  reason?: string
+}
