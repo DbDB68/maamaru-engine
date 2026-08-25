@@ -17,6 +17,7 @@ class MaaAdapterLoggingTests(unittest.TestCase):
         adapter.screenshot = lambda force=False: object()
         adapter._record_ocr = lambda *_args, **_kwargs: None
         adapter._maa_timeouts = 0
+        adapter._initialized = True
 
         encoding_error = UnicodeEncodeError("gbk", "©", 0, 1, "illegal multibyte sequence")
         with patch("builtins.print", side_effect=encoding_error):

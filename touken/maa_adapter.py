@@ -10,7 +10,8 @@ OCR/模板匹配走 MAA 本地推理（不碰 ADB，天然安全）。
 
 2026-08-05 二次加固：MAA 的所有 post_* 不再裸 .wait()（硬阻塞无超时），
 改同线程轮询 job.done 限时等待（_wait_job）。不开新线程、不包 MAA 调用，
-守 §14.1 血泪红线。连续多次识别超时 = MAA 已死，工人进程里直接自我了断
+守 §14.1 血泪红线。连续多次识别超时 = MAA 已死：先照 MAA 本家的思路抢救
+（重启 ADB 服务 + 重建控制器 + 重绑 Tasker），救不回来工人进程再自我了断
 （退出码 43），面板看门狗/退出码会给出明确死因，不再无声卡死。
 """
 
@@ -137,6 +138,8 @@ class MAAAdapter:
     BUNDLE_TIMEOUT = 120.0
     # 连续识别超时几次就认定 MAA 死了
     MAX_CONSECUTIVE_TIMEOUTS = 3
+    # MAA 内核暴毙抢救上限：一场运行最多抢救几次，救不回来再按章程了断
+    MAX_REVIVE_ATTEMPTS = 2
 
     def __init__(self, adb_path: str, adb_address: str, resource_dir: str,
                  project_root: Optional[str] = None,
@@ -168,6 +171,7 @@ class MAAAdapter:
         self.tasker: Optional[Tasker] = None
         self._last_image: Optional[Any] = None  # 缓存上次截图
         self._maa_timeouts = 0  # 连续识别超时计数
+        self._revive_attempts = 0  # 本场运行已抢救次数
 
         self._initialized = False
 
@@ -182,12 +186,21 @@ class MAAAdapter:
         不踩「线程包 MAA 调用」的血泪红线。
         """
         deadline = time.time() + timeout
+        tasker = self.tasker if self._initialized else None
         while True:
             try:
                 if job.done:
                     return job
             except Exception as exc:
                 print(f"[MAA 错误] {label} 状态查询失败: {exc}")
+                return None
+            # MAA 内核猝死（ADB 一断 Tasker 就地暴毙，8-25 两次实测）时
+            # job 永远不会 done——直接查 inited 标志秒杀，不傻等到超时。
+            # init 期间（self._initialized=False）Tasker 没绑好是正常的，不查。
+            if tasker is not None and not getattr(tasker, "inited", True):
+                print(f"[MAA] Tasker 已掉线（{label}），按 MAA 已死处理",
+                      flush=True)
+                self._maa_timeouts = self.MAX_CONSECUTIVE_TIMEOUTS
                 return None
             if time.time() >= deadline:
                 print(f"[MAA 超时] {label} 超过 {timeout:.0f}s 没完成，按失败处理（MAA 疑似卡死）",
@@ -197,14 +210,61 @@ class MAAAdapter:
 
     def _note_recognize_timeout(self):
         """连续识别超时 = MAA 大概率已经死了，再跑下去也是空转。
-        工人子进程里直接自我了断（退出码 43），让面板报出明确死因；
-        非工人环境（test_*.py 手动调试）只计数不自杀。"""
+        工人子进程里先抢救（重启 ADB + 重绑 Tasker），救不回来再自我了断
+        （退出码 43），让面板报出明确死因；
+        非工人环境（test_*.py 手动调试）只计数不抢救不自杀。"""
         self._maa_timeouts += 1
         if (self._maa_timeouts >= self.MAX_CONSECUTIVE_TIMEOUTS
                 and os.environ.get("MAAMARU_WORKER")):
+            if (self._revive_attempts < self.MAX_REVIVE_ATTEMPTS
+                    and self._try_revive()):
+                self._maa_timeouts = 0
+                return
             print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，MAA 已死，"
                   "工人进程自我了断（退出码 43）", flush=True)
             os._exit(43)
+
+    def _try_revive(self) -> bool:
+        """MAA 内核暴毙抢救（MAA 本家同款思路：连接死了就重启 ADB 再重连）。
+
+        2026-08-25 凌晨实测：MuMu 截图通道抽风吐出半张图，同一毫秒 MAA
+        原生层 Tasker 猝死（Tasker not inited），此后所有识别全是超时。
+        旧 Tasker/Controller 的原生状态已不可信，不碰不销毁，直接弃置换新
+        （工人进程是消耗品，漏一个原生对象比碰一个坏对象安全）。
+        """
+        self._revive_attempts += 1
+        print(f"[MAA] 连续 {self._maa_timeouts} 次识别超时，"
+              f"第 {self._revive_attempts} 次抢救：重启 ADB 并重绑 Tasker",
+              flush=True)
+        try:
+            # 重启 ADB 服务：MuMu 的 ADB 通道抽风时，旧坏连接一起陪葬
+            self._adb_run(["kill-server"], timeout=10.0)
+            self._adb_run(["start-server"], timeout=10.0)
+            self._adb_run(["connect", self.adb_address], timeout=10.0)
+
+            # 先弃置旧 Tasker：它已是尸体，留着会让抢救自己的 _wait_job
+            # 误判「Tasker 又掉了」直接放弃
+            self.tasker = None
+            controller = AdbController(adb_path=self.adb_path,
+                                       address=self.adb_address)
+            conn = self._wait_job(controller.post_connection(),
+                                  timeout=self.CONNECT_TIMEOUT,
+                                  label="ADB 抢救重连")
+            if conn is None or not conn.succeeded:
+                print("[MAA] 抢救失败：ADB 重连没成", flush=True)
+                return False
+            tasker = Tasker()
+            if not tasker.bind(self.resource, controller) or not tasker.inited:
+                print("[MAA] 抢救失败：Tasker 重绑没成", flush=True)
+                return False
+            self.controller = controller
+            self.tasker = tasker
+            self._last_image = None  # 缓存截图是暴毙前的现场，作废
+            print("[MAA] ✓ 抢救成功，接着跑", flush=True)
+            return True
+        except Exception as exc:
+            print(f"[MAA] 抢救失败: {exc}", flush=True)
+            return False
 
     def init(self) -> bool:
         """初始化资源、连接 ADB、绑定 Tasker"""
@@ -266,6 +326,37 @@ class MAAAdapter:
         self._initialized = True
         print("[MAA] 初始化完成")
         return True
+
+    # ---------- 黑屏转花加载检测 ----------
+
+    # 1280×720 实测：加载画面≈纯黑，左下角一朵白色樱花常亮。
+    # 不做模板匹配——樱花是旋转动画，静态模板会间歇性失明；
+    # 「全屏近乎纯黑 + 左下角有亮斑」两条特征与旋转角度无关。
+    LOADING_DARK_RATIO = 0.95       # 全屏暗像素占比下限
+    LOADING_DARK_MAX = 40           # 暗像素的亮度上限（BGR 三通道最大值）
+    LOADING_CORNER = (0, 640, 70, 80)   # 左下樱花区 (x, y, w, h)
+    LOADING_BRIGHT_MIN = 160        # 亮像素亮度下限
+    LOADING_BRIGHT_COUNT = 80       # 角落亮像素个数下限
+
+    def looks_like_loading(self) -> bool:
+        """是否在黑屏转花加载中（切场景/断网时的服务器等待画面）。
+
+        加载态下点屏幕没意义，NAV 用它把「还在加载」和「导航失败」分开。
+        """
+        image = self.screenshot()
+        if image is None:
+            return False
+        try:
+            brightness = image.max(axis=2)
+            dark_ratio = float((brightness < self.LOADING_DARK_MAX).mean())
+            if dark_ratio < self.LOADING_DARK_RATIO:
+                return False
+            x, y, w, h = self.LOADING_CORNER
+            corner = brightness[y:y + h, x:x + w]
+            return int((corner > self.LOADING_BRIGHT_MIN).sum()) >= \
+                self.LOADING_BRIGHT_COUNT
+        except Exception:
+            return False
 
     # ---------- 裸 ADB 通道（截图/点击/滑动） ----------
     #

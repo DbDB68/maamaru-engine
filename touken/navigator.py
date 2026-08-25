@@ -90,6 +90,14 @@ class NavigationMixin:
 
     DEFAULT_SKIP_POINT = (775, 695)
 
+    # 黑屏转花加载的耐心上限（秒）：超过这个还在转，基本是断网/炸服
+    LOADING_PATIENCE_S = 90.0
+
+    def _is_loading(self) -> bool:
+        """是否在黑屏转花加载中。旧版 FakeMaa 没这个能力时当作不在加载。"""
+        probe = getattr(self.maa, "looks_like_loading", None)
+        return bool(probe and probe())
+
     def _skip_point(self, point=None) -> tuple:
         """安全点优先级：显式传 > 顶层配置 skip_tap > 全局默认"""
         if point is None:
@@ -179,11 +187,30 @@ class NavigationMixin:
         if self.current_location == "通用入口":
             return True
 
-        for attempt in range(max_attempts):
-            print(f"[NAV] 尝试打开目录 (第{attempt+1}次)")
+        attempt = 0
+        loading_waits = 0
+        # 加载等待按「次」数不按墙钟：固定 1.5s 一拍，次数上限 = 耐心/拍长。
+        # （Windows 的 time.monotonic 粒度十几毫秒，测试里快转会永远不够耐心值）
+        max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 1.5))
+        while attempt < max_attempts:
+            attempt += 1
+            print(f"[NAV] 尝试打开目录 (第{attempt}次)")
 
             # 强制刷新截图
             self.maa.screenshot(force=True)
+
+            # 黑屏转花 = 游戏在加载（断网/切场景），点屏幕没意义，等它转完；
+            # 加载不占尝试次数，但转太久就是断网/炸服了，别死等
+            if self._is_loading():
+                attempt -= 1
+                loading_waits += 1
+                if loading_waits > max_loading_waits:
+                    print("[NAV] 加载转太久还没完，没能打开目录（断网/炸服？）")
+                    return False
+                print("[NAV] 游戏加载中（转樱花），等它转完...")
+                time.sleep(1.5)
+                continue
+            loading_waits = 0
 
             # 检测菜单是否已展开：检测 ui目录.png
             if self.maa.exists("menu/ui目录.png"):
@@ -257,6 +284,8 @@ class NavigationMixin:
                 if "verify" in target_config:
                     verify_timeout = 10  # 最多等10秒
                     verify_start = time.time()
+                    loading_waits = 0
+                    max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 0.8))
                     while time.time() - verify_start < verify_timeout:
                         time.sleep(0.8)
                         # 强制刷新截图，确保识别的是最新画面
@@ -266,6 +295,17 @@ class NavigationMixin:
                             self.current_location = target
                             print(f"[NAV] 成功到达: {target}")
                             return True
+                        # 黑屏转花 = 还在加载，等它转完，不占验证预算
+                        if self._is_loading():
+                            loading_waits += 1
+                            if loading_waits > max_loading_waits:
+                                print(f"[NAV] 加载转太久还没完，没能到达 "
+                                      f"{target}（断网/炸服？）")
+                                return False
+                            verify_start += 0.8
+                            print("[NAV] 游戏加载中（转樱花），等它转完...")
+                            continue
+                        loading_waits = 0
                         print(f"[NAV] 等待 {target} 界面加载中...")
 
                     print(f"[NAV] 等待 {target} 加载超时，重试")
@@ -331,6 +371,9 @@ class NavigationMixin:
                 if "verify" in target_config:
                     verify_timeout = 10
                     verify_start = time.time()
+                    loading_waits = 0
+                    # 次数制耐心（0.8s 一拍），理由同 _open_menu
+                    max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 0.8))
                     while time.time() - verify_start < verify_timeout:
                         time.sleep(0.8)
                         self.maa.screenshot(force=True)
@@ -339,6 +382,18 @@ class NavigationMixin:
                             self.current_location = target
                             yield f"[NAV] 成功到达: {target}"
                             return
+                        # 黑屏转花 = 游戏还在加载，等它转完；加载时间不占
+                        # 验证预算，但转太久就是断网/炸服，如实报失败
+                        if self._is_loading():
+                            loading_waits += 1
+                            if loading_waits > max_loading_waits:
+                                yield (f"[NAV] 加载转太久还没完，没能到达 "
+                                       f"{target}（断网/炸服？）")
+                                return
+                            verify_start += 0.8
+                            yield "[NAV] 游戏加载中（转樱花），等它转完..."
+                            continue
+                        loading_waits = 0
                         yield f"[NAV] 等待 {target} 界面加载中..."
 
                     yield f"[NAV] 等待 {target} 加载超时，重试..."
