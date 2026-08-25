@@ -32,7 +32,7 @@ const eventNames: Record<string, string> = {
   'expedition.dispatched': '远征派遣成功', 'expedition.settled': '远征结算',
   'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
   'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
-  'sword.obtained': '刀剑男士来本丸',
+  'sword.obtained': '刀剑男士来本丸', 'naihanka.gains': '内番收工',
 }
 
 function isWin(payload: any) {
@@ -85,6 +85,12 @@ function eventDetail(item: any) {
     const src = obtainSourceLabel(p.source)
     return `【${p.name || '认不出是谁'}】${src ? ` · ${src}` : ''}`
   }
+  if (item.event_type === 'naihanka.gains') {
+    const gains = p.gains || []
+    if (!gains.length) return '收工了，没人 +1（都喂满金框了？）'
+    const head = p.source === 'diff' ? '数值比对发现' : '报告屏确认'
+    return `${head}：${gains.map((g: any) => `【${g.name}】${g.stat}+1`).join('、')}`
+  }
   return '本丸记录'
 }
 function activityTitle(item: any) {
@@ -101,6 +107,7 @@ function activityTitle(item: any) {
   if (item.event_type === 'task_rewards.claimed') return `领取任务奖励 ${count} 类`
   if (item.event_type === 'task_rewards.none') return `检查任务奖励 ${count} 类`
   if (item.event_type === 'sword.obtained') return `刀剑男士来本丸 ${count} 位`
+  if (item.event_type === 'naihanka.gains') return `内番收工 ${count} 次`
   if (item.event_type === 'repair.summary') return repairCount(item.payload) ? `手入 ${repairCount(item.payload)} 振` : '检查手入名单'
   if (item.event_type === 'equipment.restored') return `恢复刀装 ${count} 次`
   return eventTitle(item)

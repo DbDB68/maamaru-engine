@@ -31,6 +31,7 @@ import time
 from ..runtime_paths import STATUS_DIR
 
 from ..maa_adapter import Point, roi_4to4
+from . import naihanka_report
 
 # 白名单：带着"失败/停/跳过"等字样、但其实没翻车的消息，先放行再判红。
 # （判红宁可严一点：没跑成的步骤必须如实 ✗，不许"没跑却标绿"——
@@ -574,6 +575,12 @@ class DailyMixin:
                     break
             if acted:
                 clean = 0
+                continue
+            # 内番报告屏：谁+1 在这儿，先读再点穿（自然收工的横幅在本丸随机蹦）
+            if self.maa.ocr("内番报告", roi_4to4(*naihanka_report.REPORT_TITLE_ROI)):
+                for msg in self._collect_report_gains():
+                    print(msg)
+                time.sleep(1.0)
                 continue
             if self.maa.exists("目录.png", threshold=0.7):
                 clean += 1
