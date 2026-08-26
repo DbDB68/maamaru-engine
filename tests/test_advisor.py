@@ -1,7 +1,8 @@
+import json
 import tempfile
 import time
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from touken import advisor
@@ -283,6 +284,47 @@ class GoalStorageTests(unittest.TestCase):
         self.assertTrue(advisor.delete_goal(self.path, goal["id"]))
         self.assertEqual(advisor.load_goals(self.path), [])
 
+    def _write_v1(self, goals):
+        self.path.write_text(json.dumps(goals, ensure_ascii=False),
+                             encoding="utf-8")
+
+    def test_v1_file_loads_with_resource_kind(self):
+        # v1 纯数组：老目标一律按攒钱目标读（牛评审：格式升级不许丢老数据）
+        self._write_v1([{"id": 1, "resource": "小判", "target": 300000,
+                         "deadline": _day(20), "note": "老目标"}])
+        loaded = advisor.load_goals(self.path)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["kind"], "resource")
+        self.assertEqual(loaded[0]["note"], "老目标")
+
+    def test_v1_to_v2_migration_backs_up_and_preserves(self):
+        v1 = [{"id": 1, "resource": "小判", "target": 300000,
+               "deadline": _day(20), "note": "老目标"}]
+        self._write_v1(v1)
+        advisor.add_goal(self.path, resource="砥石", target=5000,
+                         deadline=_day(5))
+        # 新文件是 v2 信封，新老目标都在
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["schema_version"], advisor.GOALS_SCHEMA_VERSION)
+        self.assertEqual(len(data["goals"]), 2)
+        self.assertEqual(data["goals"][0]["note"], "老目标")
+        # 旧格式有备份，真要回滚有得捡
+        backup = self.path.with_name(self.path.name + ".v1.bak")
+        self.assertEqual(json.loads(backup.read_text(encoding="utf-8")), v1)
+        # 再写一次还是 v2，不重复备份
+        advisor.add_goal(self.path, resource="小判", target=100,
+                         deadline=_day(3))
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(len(data["goals"]), 3)
+
+    def test_v2_file_roundtrip(self):
+        advisor.add_goal(self.path, resource="小判", target=100,
+                         deadline=_day(3))
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(data["schema_version"], advisor.GOALS_SCHEMA_VERSION)
+        self.assertFalse(self.path.with_name(self.path.name + ".v1.bak")
+                         .exists())  # 全新文件没有可备份的旧格式
+
 
 class _FakeStore:
     def resource_ledger(self, from_ts, to_ts):
@@ -319,6 +361,70 @@ class GetPlanningTests(unittest.TestCase):
         abacus = planning["events"][0]
         self.assertEqual(abacus["event"], "江户城潜入调查")
         self.assertIsNone(abacus["keys_source"])
+        # 预算判定字段由服务端给出；还没数时是 None，不许前端自己拼
+        self.assertEqual(abacus["available_now"], 9000)
+        self.assertIsNone(abacus["sufficient"])
+        self.assertIsNone(abacus["shortfall"])
+
+
+class EventGoalTests(unittest.TestCase):
+    """牛评审：活动攒钱目标的语义是「预算 vs 家底」，
+    不是旧前端的「家底 + 预算」（那等于让人多攒一倍）。"""
+
+    def _setup(self, tmp: str, balance: int):
+        # 日期跟着真实今天走，免得活动一过测试自己过期
+        start = date.today() + timedelta(days=1)
+        end = date.today() + timedelta(days=15)
+        card = {"start_date": start.isoformat(), "end_date": end.isoformat(),
+                "start_at": f"{start.isoformat()}T10:00:00+08:00",
+                "end_at": f"{end.isoformat()}T05:00:00+08:00",
+                "ticket_price": 300, "ticket_cap": 6, "refill_hours": [5, 17],
+                "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
+                "est_keys_per_run": 5}
+        patch = {"江户城潜入调查": card}
+        (Path(tmp) / advisor.EVENTS_META_LOCAL).write_text(
+            json.dumps(patch, ensure_ascii=False), encoding="utf-8")
+
+        class _Store:
+            def resource_ledger(self, from_ts, to_ts):
+                return {"per_resource": [{"resource": "小判", "opening": balance,
+                                          "closing": balance}],
+                        "daily_series": []}
+
+            def recent_events(self, limit=100, event_type=None):
+                return []
+        return _Store(), card
+
+    def test_shortfall_creates_goal_with_budget_as_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, card = self._setup(tmp, 9000)
+            path = Path(tmp) / "planning_goals.json"
+            result = advisor.add_event_goal(store, path, "江户城潜入调查")
+            self.assertFalse(result["sufficient"])
+            expected = advisor.event_abacus("江户城潜入调查", card,
+                                            measured=None)["koban_cost"]
+            goal = result["goal"]
+            self.assertEqual(goal["target"], expected)  # 目标是预算本身
+            self.assertNotEqual(goal["target"], 9000 + expected)  # 旧错法
+            self.assertEqual(goal["resource"], "小判")
+            self.assertEqual(goal["deadline"], card["start_date"])
+            self.assertEqual(result["shortfall"], expected - 9000)
+            self.assertEqual(advisor.load_goals(path), [goal])
+
+    def test_sufficient_balance_creates_no_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp, 90_000_000)
+            path = Path(tmp) / "planning_goals.json"
+            result = advisor.add_event_goal(store, path, "江户城潜入调查")
+            self.assertTrue(result["sufficient"])
+            self.assertIsNone(result["goal"])
+            self.assertEqual(advisor.load_goals(path), [])
+
+    def test_unknown_event_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp, 9000)
+            with self.assertRaises(ValueError):
+                advisor.add_event_goal(store, Path(tmp) / "g.json", "南瓜大作战")
 
 
 if __name__ == "__main__":
@@ -541,3 +647,58 @@ class ModeledWindowGoalTests(unittest.TestCase):
             window_impacts=impact)
         self.assertEqual(advice["projected"], 81500)
         self.assertFalse(advice["event_modeled"])
+
+
+class PreciseWindowAbacusTests(unittest.TestCase):
+    """带时刻的活动卡：白票按回满点交集数，不按整天（牛评审第 6 条）。
+
+    江户城 8-27 10:00 开、9-10 05:00 收：整天口径算 15×12=180 张白票，
+    精确口径是开打前存货（8-27 05:00 回满）+ 窗口内 27 次回满 = 168 张。
+    """
+
+    NOW = datetime(2026, 8, 26, 12, tzinfo=advisor._TZ)  # 开打前一天中午
+
+    def _card(self, **overrides):
+        card = {
+            "mechanics": "edocastle",
+            "start_at": "2026-08-27T10:00:00+08:00",
+            "end_at": "2026-09-10T05:00:00+08:00",
+            "ticket_price": 300, "daily_free_tickets": 12, "ticket_cap": 6,
+            "refill_hours": [5, 17],
+            "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
+            "est_keys_per_run": 5,
+        }
+        card.update(overrides)
+        return card
+
+    def test_free_tickets_counted_by_refill_overlap(self):
+        abacus = advisor.event_abacus("江户城潜入调查", self._card(),
+                                      measured=None, today=date(2026, 8, 26),
+                                      now=self.NOW)
+        self.assertEqual(abacus["free_runs"], 168)  # 28 次回满 × 6
+        self.assertEqual(abacus["runs_needed"], 300)
+        self.assertEqual(abacus["paid_tickets"], 132)
+        self.assertEqual(abacus["koban_cost"], 39600)
+
+    def test_mid_event_check_excludes_past_refills(self):
+        # 9-05 中午再看：当天 05:00 回满的票 17:00 前还花得掉（算），
+        # 之后 9-05 17:00 ~ 9-09 17:00 共 9 次 → 10 次 × 6 = 60 张
+        abacus = advisor.event_abacus(
+            "江户城潜入调查", self._card(), measured=None,
+            today=date(2026, 9, 5),
+            now=datetime(2026, 9, 5, 12, tzinfo=advisor._TZ))
+        self.assertEqual(abacus["free_runs"], 60)
+
+    def test_precise_window_impact_uses_refill_counting(self):
+        impact = advisor.window_impact("江户城潜入调查", self._card(),
+                                       today=date(2026, 8, 26))
+        self.assertEqual(impact["delta"], -39600)
+
+    def test_end_refill_at_closing_instant_not_counted(self):
+        # 收摊改到 17:00：9-10 05:00 回满的票白天花得掉（算进来 +6），
+        # 9-10 17:00 收摊瞬间的回满零交集，仍不算
+        abacus = advisor.event_abacus(
+            "江户城潜入调查",
+            self._card(end_at="2026-09-10T17:00:00+08:00"),
+            measured=None, today=date(2026, 8, 26), now=self.NOW)
+        self.assertEqual(abacus["free_runs"], 174)

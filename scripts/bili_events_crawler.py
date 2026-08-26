@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import http.cookiejar
 import json
 import os
@@ -36,6 +37,10 @@ KEEP_WEEKS = 12
 
 _UPDATE_RE = re.compile(r"(\d{1,2})月(\d{1,2})日更新公告")
 _EVENT_RE = re.compile(r"「([^」]+)」")
+_TIME_RANGE_RE = re.compile(
+    r"(\d{1,2})月(\d{1,2})日(\d{1,2}):(\d{2})\s*[-~—–～]\s*"
+    r"(\d{1,2})月(\d{1,2})日(\d{1,2}):(\d{2})")
+_SECTION_RE = re.compile(r"^(\d+)、(.+)$")
 
 
 def _open_session():
@@ -83,6 +88,69 @@ def fetch_announcements(pages: int = 2, page_size: int = 20) -> list[dict]:
     return articles
 
 
+def fetch_article_text(cvid: int | str) -> str:
+    """抓公告正文纯文本。read 网页版已 302 到 opus（正文靠 JS 渲染拿不到），
+    改用 x/article/view 接口，免登录免 WBI。"""
+    req = urllib.request.Request(
+        f"https://api.bilibili.com/x/article/view?id={cvid}",
+        headers={"User-Agent": USER_AGENT,
+                 "Referer": "https://www.bilibili.com/"})
+    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+    if data.get("code") != 0:
+        raise RuntimeError(f"正文接口返回 code={data.get('code')} "
+                           f"{data.get('message')}")
+    raw = (data.get("data") or {}).get("content") or ""
+    raw = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.S)
+    raw = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.S)
+    raw = re.sub(r"<[^>]+>", "\n", raw)
+    return html.unescape(raw)
+
+
+def _to_iso(pub: date, month: int, day: int, hour: int, minute: int) -> str | None:
+    """月日时分 + 发布日 → ISO(+08:00)。跨年规则同 _infer_update_date。"""
+    try:
+        candidate = date(pub.year, month, day)
+    except ValueError:
+        return None
+    if candidate < pub - timedelta(days=20):
+        candidate = date(pub.year + 1, month, day)
+    return f"{candidate.isoformat()}T{hour:02d}:{minute:02d}:00+08:00"
+
+
+def extract_schedule_candidates(text: str, publish_time: float) -> list[dict]:
+    """从正文里找「【活动时间】X月X日H:MM - Y月Y日H:MM」，活动名取最近的
+    「N、…」小节里最后一个「…」。定位是待核对候选，不进业务数据。"""
+    pub = datetime.fromtimestamp(publish_time).date() if publish_time else date.today()
+    lines = [line.strip() for line in text.splitlines()]
+    candidates = []
+    for idx, line in enumerate(lines):
+        if "【活动时间】" not in line:
+            continue
+        # 时间范围可能在同一行或紧随其后
+        window = " ".join(lines[idx:idx + 3])
+        match = _TIME_RANGE_RE.search(window)
+        if not match:
+            continue
+        m1, d1, h1, mi1, m2, d2, h2, mi2 = (int(g) for g in match.groups())
+        start = _to_iso(pub, m1, d1, h1, mi1)
+        end = _to_iso(pub, m2, d2, h2, mi2)
+        if not start or not end:
+            continue
+        section, name = None, None
+        for prev in reversed(lines[:idx]):
+            sec = _SECTION_RE.match(prev)
+            if sec:
+                section = sec.group(1)
+                names = _EVENT_RE.findall(sec.group(2))
+                if names:
+                    name = names[-1]
+                break
+        candidates.append({"section": section, "name": name,
+                           "start_at": start, "end_at": end})
+    return candidates
+
+
+
 def _infer_update_date(title: str, publish_time: float) -> str | None:
     """「8月27日更新公告」→ 2026-08-27。年份按发布时间推，跨年往回绕。"""
     match = _UPDATE_RE.search(title)
@@ -120,6 +188,11 @@ def merge_history(old: list[dict], new: list[dict]) -> list[dict]:
     merged = {}
     for item in old + new:
         if item.get("publish_time", 0) >= cutoff and item.get("title"):
+            prev = merged.get(item["title"])
+            if (prev and "schedule_candidates" not in item
+                    and prev.get("schedule_candidates")):
+                item = {**item,
+                        "schedule_candidates": prev["schedule_candidates"]}
             merged[item["title"]] = item
     return sorted(merged.values(), key=lambda x: x.get("publish_time", 0),
                   reverse=True)
@@ -141,10 +214,26 @@ def main() -> int:
             old_items = json.load(fh).get("announcements", [])
     except (OSError, ValueError):
         old_items = []
+    merged = merge_history(old_items, new_items)
+    # 抓正文找活动时间候选。对合并后的全量做：老公告上次没抓到的这次补票，
+    # 已有候选的跳过（候选是静态事实，不重复请求）
+    for item in merged:
+        if (not item.get("update_date") or not item.get("url")
+                or item.get("schedule_candidates")):
+            continue
+        cvid = item["url"].rsplit("cv", 1)[-1]
+        try:
+            text = fetch_article_text(cvid)
+            found = extract_schedule_candidates(text, item["publish_time"])
+            if found:
+                item["schedule_candidates"] = found
+        except Exception as exc:  # 单篇失败不拖垮整批
+            print(f"[爬虫] cv{cvid} 正文抓取失败：{exc}", file=sys.stderr)
+        time.sleep(3)  # 正文接口风控敏感，宁可慢不可 429
     payload = {
         "generated_at": time.time(),
         "source": f"bilibili:{OFFICIAL_MID}",
-        "announcements": merge_history(old_items, new_items),
+        "announcements": merged,
     }
     # 原子写：先临时文件再替换，面板读到一半的概率归零
     out_dir = os.path.dirname(os.path.abspath(args.output))

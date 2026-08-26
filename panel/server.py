@@ -1780,6 +1780,22 @@ async def api_save_event_estimate(request: Request):
     return {"ok": True, "card": card}
 
 
+@app.post("/api/planning/event-goals")
+async def api_add_event_goal(request: Request):
+    """把活动预算立成攒钱目标。预算是服务端按知识卡算的（目标=预算本身，
+    家底自动抵扣），前端不许自己拼「现有+预算」那种数字。"""
+    body = await request.json()
+    from touken import advisor
+    from touken.telemetry import get_telemetry_store
+    try:
+        result = advisor.add_event_goal(get_telemetry_store(),
+                                        STATUS_DIR / advisor.GOALS_FILENAME,
+                                        str(body.get("event") or ""))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, **result}
+
+
 @app.get("/api/data/ocr")
 async def api_data_ocr(limit: int = 100, script: str = "",
                        matched: bool | None = None):

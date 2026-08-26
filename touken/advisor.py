@@ -7,6 +7,8 @@ resource_ledger(daily_series) 和 osaka.koban_session 事件，输出结构化
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +22,7 @@ except Exception:  # pragma: no cover - 老 Python 兜底
 from .telemetry import LEDGER_RESOURCES
 
 PLANNING_SCHEMA_VERSION = 1
+GOALS_SCHEMA_VERSION = 2  # planning_goals.json 文件格式：{schema_version, goals[]}
 RATE_WINDOW_DAYS = 14
 EVENT_RATE_WINDOW_DAYS = 60
 GOALS_FILENAME = "planning_goals.json"
@@ -45,24 +48,43 @@ def _local_date(ts: float) -> str:
 
 
 def load_goals(path: Path) -> list[dict]:
-    """读目标清单；文件缺失或损坏都当空清单（不炸面板）。"""
+    """读目标清单；文件缺失或损坏都当空清单（不炸面板）。
+    兼容两代格式：v1 纯数组、v2 {schema_version, goals[]}。"""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    if not isinstance(data, list):
+    if isinstance(data, dict):
+        entries = data.get("goals")
+    else:
+        entries = data  # v1：顶层就是数组
+    if not isinstance(entries, list):
         return []
-    return [g for g in data if isinstance(g, dict)
-            and g.get("resource") in LEDGER_RESOURCES
-            and isinstance(g.get("target"), (int, float))
-            and isinstance(g.get("deadline"), str)]
+    goals = [g for g in entries if isinstance(g, dict)
+             and g.get("resource") in LEDGER_RESOURCES
+             and isinstance(g.get("target"), (int, float))
+             and isinstance(g.get("deadline"), str)]
+    for goal in goals:
+        goal.setdefault("kind", "resource")  # v1 老目标一律是攒钱目标
+    return goals
 
 
 def _save_goals(path: Path, goals: list[dict]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(goals, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
+    # v1 → v2 迁移留后路：先备份旧文件，再临时文件 + 原子替换
+    if path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            old = None
+        if isinstance(old, list):
+            shutil.copy2(path, path.with_name(path.name + ".v1.bak"))
+    payload = {"schema_version": GOALS_SCHEMA_VERSION, "goals": goals}
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def add_goal(path: Path, *, resource: str, target, deadline: str,
@@ -85,6 +107,7 @@ def add_goal(path: Path, *, resource: str, target, deadline: str,
     goals = load_goals(path)
     goal = {
         "id": max([int(g.get("id") or 0) for g in goals], default=0) + 1,
+        "kind": "resource",
         "resource": resource,
         "target": target,
         "deadline": deadline_date.isoformat(),
@@ -391,6 +414,50 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
     return advice
 
 
+def _current_balances(store, now: float) -> dict:
+    """账本里每种资源的最新余额（closing 优先，opening 兜底）。"""
+    ledger = store.resource_ledger(now - EVENT_RATE_WINDOW_DAYS * 86400, now)
+    current = {}
+    for row in ledger.get("per_resource", []):
+        value = row.get("closing")
+        current[row.get("resource")] = value if value is not None else row.get("opening")
+    return current
+
+
+def add_event_goal(store, goals_path: Path, event: str, *,
+                   today: date | None = None) -> dict:
+    """把活动预算立成攒钱目标。语义：目标是「预算本身」，家底会拿来抵；
+    不是旧前端那套「现有余额 + 预算」（那等于让人家多攒一倍）。
+    家底已够就不立目标，直接报充足。预算数字只能这里算，前端不许自己拼。
+    """
+    today = today or _today()
+    cards = load_event_cards(Path(goals_path).parent)
+    if event not in cards:
+        raise ValueError(f"不认识活动「{event}」")
+    card = cards[event]
+    abacus = event_abacus(event, card,
+                          measured=measured_keys_per_run(store), today=today)
+    cost = abacus.get("koban_cost")
+    if cost is None:
+        raise ValueError(abacus.get("message") or "这场活动的预算还算不出来")
+    current = _current_balances(store, time.time()).get("小判")
+    deadline = card.get("start_date") or card.get("end_date")
+    if not deadline:
+        raise ValueError("这张活动卡还没日期，立不了目标")
+    if date.fromisoformat(deadline) < today and card.get("end_date"):
+        deadline = card["end_date"]  # 已开打：钱在收摊前备齐就行
+    result = {"sufficient": None, "goal": None, "koban_cost": cost,
+              "available_now": current, "shortfall": None}
+    if current is not None:
+        result["shortfall"] = max(0, int(cost - current))
+        result["sufficient"] = result["shortfall"] == 0
+    if result["sufficient"]:
+        return result
+    result["goal"] = add_goal(goals_path, resource="小判", target=cost,
+                              deadline=deadline, note=f"{event}门票预算")
+    return result
+
+
 def get_planning(store, goals_path: Path, *,
                  today: date | None = None) -> dict:
     """汇总入口：store 是 telemetry 仓库（resource_ledger / recent_events）。"""
@@ -435,6 +502,17 @@ def get_planning(store, goals_path: Path, *,
              for goal in load_goals(goals_path)]
     abacuses = [event_abacus(name, card, measured=measured, today=today)
                 for name, card in cards.items()]
+    # 预算 vs 家底的判定也在服务端做：前端只展示，不许自己拼目标数字
+    koban_now = current.get("小判")
+    for abacus in abacuses:
+        cost = abacus.get("koban_cost")
+        abacus["available_now"] = koban_now
+        if cost is None or koban_now is None:
+            abacus["sufficient"] = None
+            abacus["shortfall"] = None
+        else:
+            abacus["shortfall"] = max(0, int(cost - koban_now))
+            abacus["sufficient"] = abacus["shortfall"] == 0
     return {
         "schema_version": PLANNING_SCHEMA_VERSION,
         "generated_at": now,
@@ -510,8 +588,52 @@ def measured_keys_per_run(store, *, limit: int = 50) -> dict | None:
     return {"per_run": sum(keys) / len(keys), "runs": len(keys)}
 
 
+def _ticket_cap(card: dict) -> int:
+    return (int(card.get("ticket_cap") or 0)
+            or int(card.get("daily_free_tickets") or 0) // 2)
+
+
+def _card_window(card: dict):
+    """活动窗口：(start_dt, end_dt, precise)。优先精确时刻，退回日期按整天。"""
+    try:
+        if card.get("start_at") and card.get("end_at"):
+            return (datetime.fromisoformat(str(card["start_at"])),
+                    datetime.fromisoformat(str(card["end_at"])), True)
+        if card.get("start_date") and card.get("end_date"):
+            start = date.fromisoformat(str(card["start_date"]))
+            end = date.fromisoformat(str(card["end_date"]))
+            return (datetime.combine(start, datetime.min.time(), tzinfo=_TZ),
+                    datetime.combine(end, datetime.max.time(), tzinfo=_TZ), False)
+    except ValueError:
+        pass
+    return None, None, False
+
+
+def _count_free_tickets(card: dict, start_dt: datetime, end_dt: datetime) -> int:
+    """按回满点（默认每天 5:00/17:00）与窗口的交集数白票。
+
+    回满是重置不是累加：回满时刻起 12 小时内落在活动窗口里的那段，
+    这 6 枚令牌才花得出去。开打前最近一次回满（如 8-27 05:00）的存货
+    靠交集自然算进来；收摊瞬间的回满（9-10 05:00）零交集自然排除。
+    """
+    cap = _ticket_cap(card)
+    if not cap:
+        return 0
+    hours = card.get("refill_hours") or [5, 17]
+    count = 0
+    day = start_dt.date() - timedelta(days=1)
+    while day <= end_dt.date():
+        for hour in hours:
+            refill = (datetime.combine(day, datetime.min.time(), tzinfo=_TZ)
+                      + timedelta(hours=hour))
+            if min(refill + timedelta(hours=12), end_dt) > max(refill, start_dt):
+                count += 1
+        day += timedelta(days=1)
+    return count * cap
+
+
 def event_abacus(name: str, card: dict, *, measured: dict | None,
-                 today: date | None = None) -> dict:
+                 today: date | None = None, now: datetime | None = None) -> dict:
     """江户城式算盘：钥匙总量 ÷ 场均 = 圈数 → 扣白票 → 补票钱。
 
     实测场均优先，其次老大手填预估，都没有就老实说还没数。
@@ -563,13 +685,8 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     abacus["runs_needed"] = runs
     label = "实测" if source == "measured" else "估计"
 
-    end_date = None
-    if card.get("end_date"):
-        try:
-            end_date = date.fromisoformat(card["end_date"])
-        except ValueError:
-            pass
-    if end_date is None:
+    start_dt, end_dt, precise = _card_window(card)
+    if end_dt is None:
         # 不知道结束日：算不出白票能顶多少，给全自费上限
         abacus["koban_cost"] = runs * ticket_price
         abacus["message"] = (
@@ -579,23 +696,33 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
             "排进日常就能省一大截。等结束日定了狐之助再算细账。")
         return abacus
 
-    start = date.fromisoformat(card["start_date"]) if card.get("start_date") else today
-    days_left = (end_date - max(today, start)).days + 1
-    abacus["days_left"] = max(days_left, 0)
-    free_runs = daily_free * max(days_left, 0)
+    now_dt = now or (datetime.combine(today, datetime.min.time(), tzinfo=_TZ)
+                     + timedelta(hours=12))
+    effective_start = max(start_dt, now_dt) if start_dt else now_dt
+    days_left = max((end_dt.date() - effective_start.date()).days + 1, 0)
+    abacus["days_left"] = days_left
+    if precise:
+        free_runs = _count_free_tickets(card, effective_start, end_dt)
+        free_desc = f"回满 {free_runs // _ticket_cap(card)} 次 × {_ticket_cap(card)} 枚"
+    else:
+        free_runs = daily_free * days_left
+        free_desc = f"每天 {daily_free} 张 × {days_left} 天"
     abacus["free_runs"] = free_runs
     paid = max(0, runs - free_runs)
     abacus["paid_tickets"] = paid
     abacus["koban_cost"] = paid * ticket_price
+    end_label = card.get("end_at") or card["end_date"]
+    if precise and isinstance(end_label, str) and "T" in end_label:
+        end_label = end_label.replace("T", " ")[:16]
     if paid == 0:
         abacus["message"] = (
             f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈——"
-            f"到 {card['end_date']} 的白票（每天 {daily_free} 张 × "
-            f"{max(days_left, 0)} 天）就够用了，一个小判都不用花🎉")
+            f"到 {end_label} 的白票（{free_desc}）就够用了，"
+            "一个小判都不用花🎉")
     else:
         abacus["message"] = (
             f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈；"
-            f"到 {card['end_date']}（{max(days_left, 0)} 天）白票能顶 "
+            f"到 {end_label}（还剩 {days_left} 天）白票能顶 "
             f"{free_runs} 圈，还得补 {paid} 张票 ≈ {paid * ticket_price:,} 小判。")
     return abacus
 
