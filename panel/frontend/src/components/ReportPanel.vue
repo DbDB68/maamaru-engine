@@ -8,10 +8,12 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
+import ObtainRecords from './report/ObtainRecords.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, obtainSourceLabel, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const days = ref(7)
+const honmaruTab = ref<'report' | 'obtains' | 'planning'>('report')
 const view = ref<'chart' | 'records'>('chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
@@ -36,6 +38,11 @@ const selectedDate = ref('')
 const highlightCategory = ref('')
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
+const honmaruItems = [
+  { value: 'report', label: '成绩单' },
+  { value: 'obtains', label: '入手' },
+  { value: 'planning', label: '规划' },
+]
 const viewItems = [
   { value: 'chart', label: '资源对账图' },
   { value: 'records', label: '全部记录' },
@@ -443,17 +450,25 @@ onMounted(() => load())
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" title="本丸成绩单" subtitle="资源涨跌都归到干活的人头上">
+    <PanelHeader variant="page" title="本丸" subtitle="账目、入手与接下来的打算">
       <template #actions>
         <div class="report-toolbar-actions">
-          <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="成绩单视图" @update:model-value="switchView($event as 'chart' | 'records')" />
-          <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+          <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'obtains' | 'planning'" />
         </div>
       </template>
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
 
+      <div v-if="honmaruTab === 'report'" class="report-context-toolbar">
+        <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="成绩单视图" @update:model-value="switchView($event as 'chart' | 'records')" />
+        <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+      </div>
+      <div v-else-if="honmaruTab === 'obtains'" class="report-context-toolbar report-context-toolbar-range">
+        <SegmentedControl class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+      </div>
+
+      <template v-if="honmaruTab === 'report'">
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }">
           <p class="report-glance-lead">🦊 {{ glance }}</p>
@@ -493,17 +508,9 @@ onMounted(() => load())
           <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
         </section>
 
-        <PlanningPanel />
-
-        <section v-if="swordDrops.length" class="sword-drops" :class="{ loading }">
-          <header><div><h3>掉落结果</h3><p>{{ rangeLabel }}认出来的刀剑男士进账，共 {{ swordDropTotal }} 位</p></div></header>
-          <ul class="sword-drops-list">
-            <li v-for="row in swordDrops" :key="row.name">
-              <b>{{ row.name }}</b><span v-if="row.count > 1" class="sword-drops-count">×{{ row.count }}</span>
-              <small>{{ [...row.sources].join('、') }} · 最近 {{ eventTime(row.last) }}</small>
-            </li>
-          </ul>
-        </section>
+        <button v-if="swordDropTotal" type="button" class="report-obtains-link" @click="honmaruTab = 'obtains'">
+          <b>🗡️ {{ rangeLabel }}收获 {{ swordDropTotal }} 振</b><em>查看入手记录 →</em>
+        </button>
 
         <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
@@ -512,11 +519,18 @@ onMounted(() => load())
       </template>
 
       <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      </template>
+
+      <ObtainRecords v-else-if="honmaruTab === 'obtains'" :rows="swordDrops" :total="swordDropTotal" :range-label="rangeLabel" :loading="loading" />
+
+      <PlanningPanel v-else />
     </div>
   </section>
 </template>
 
 <style scoped>
+.report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.report-context-toolbar-range { justify-content: flex-end; }
 .report-glance { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
 .report-glance-lead { margin: 0; font-size: 15px; }
 .report-glance-chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -531,13 +545,9 @@ onMounted(() => load())
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .report-proactive { align-self: flex-start; }
-.sword-drops { background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
-.sword-drops header h3 { margin: 0; }
-.sword-drops header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
-.sword-drops-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.sword-drops-list li { display: flex; align-items: baseline; gap: 8px; }
-.sword-drops-list small { margin-left: auto; color: var(--ink-dim); }
-.sword-drops-count { color: var(--fox-gold-deep); font-weight: 600; }
+.report-obtains-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; cursor: pointer; color: var(--ink); font-size: 14px; }
+.report-obtains-link:hover { border-color: var(--fox-gold); }
+.report-obtains-link em { font-style: normal; color: var(--fox-gold-deep); white-space: nowrap; }
 .inventory-gap-panel:empty { display: none; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
@@ -547,4 +557,9 @@ onMounted(() => load())
 .report-form fieldset button { border: 1px solid var(--paper-line); background: var(--paper); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .report-form fieldset button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .report-form-actions { display: flex; gap: 8px; }
+@media (max-width: 520px) {
+  .report-context-toolbar { align-items: stretch; flex-direction: column; }
+  .report-context-toolbar .segmented-control { width: 100%; }
+  .report-context-toolbar .segmented-control button { flex: 1 1 0; min-width: 0; padding-inline: 7px; }
+}
 </style>

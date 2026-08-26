@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../../api'
-import type { EventAbacus, EventsCalendar, PlanningReport } from '../../types'
+import type { EventAbacus, EventsCalendar, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 
 const planning = ref<PlanningReport | null>(null)
@@ -10,6 +10,7 @@ const loading = ref(false)
 const error = ref('')
 
 const formOpen = ref(false)
+const formEvent = ref('')
 const saving = ref(false)
 const form = ref({ resource: '小判', target: 100000, deadline: '', note: '' })
 
@@ -21,19 +22,20 @@ function localToday() {
 function fmt(value: number | null | undefined) {
   return value == null ? '—' : Math.round(value).toLocaleString()
 }
-function signedRate(value: number | null | undefined) {
-  return value == null ? '—' : `${Math.round(value) >= 0 ? '+' : ''}${Math.round(value).toLocaleString()}`
+
+function shortDate(iso: string | null) {
+  if (!iso) return ''
+  const [, month, day] = iso.split('-').map(Number)
+  return `${month}月${day}日`
 }
 
 const statusLabel: Record<string, string> = {
   done: '已达成',
-  on_track: '进度在线',
+  on_track: '来得及',
   behind: '要加把劲',
   expired: '已到期',
   unknown: '数据不足',
 }
-
-// ---- 近期活动（B 站官方公告日历，云服务器每天扒一次） ----
 
 const upcoming = computed(() => {
   const today = localToday()
@@ -42,35 +44,62 @@ const upcoming = computed(() => {
     .sort((a, b) => a.update_date!.localeCompare(b.update_date!))
     .slice(0, 4)
 })
+const featuredAnnouncement = computed(() => upcoming.value[0] || null)
+const actionableEvents = computed(() => (planning.value?.events || []).filter(item => item.start_date || item.end_date || item.keys_total > 0))
+const waitingEvents = computed(() => (planning.value?.events || []).filter(item => !item.start_date && !item.end_date && item.keys_total <= 0))
 
-function shortDate(iso: string | null) {
-  if (!iso) return ''
-  const [, month, day] = iso.split('-').map(Number)
-  return `${month}月${day}日`
+function eventDate(abacus: EventAbacus) {
+  if (abacus.start_date && abacus.end_date) return `${shortDate(abacus.start_date)}开打 · ${shortDate(abacus.end_date)}收摊`
+  if (abacus.start_date) return `${shortDate(abacus.start_date)}开打`
+  if (abacus.end_date) return `${shortDate(abacus.end_date)}前结束`
+  return '日期待公告'
 }
 
-function goalFromEvent(updateDate: string, eventName: string) {
+function goalHeadline(goal: PlanningGoalAdvice) {
+  if (goal.status === 'done') return `已经攒够 ${fmt(goal.target)} ${goal.resource}`
+  if (goal.status === 'on_track') return '照现在的速度来得及'
+  if (goal.status === 'expired') return '这个目标已经到期'
+  if (goal.status === 'unknown') return '还缺一些库存记录'
+  if (goal.shortfall != null) return `还差 ${fmt(goal.shortfall)} ${goal.resource}`
+  return '需要再加把劲'
+}
+
+function goalAction(goal: PlanningGoalAdvice) {
+  if (goal.status === 'behind' && goal.extra_daily != null) {
+    const floors = goal.resource === '小判' && goal.extra_floors != null ? `，约合每天多挖 ${fmt(goal.extra_floors)} 层大阪城` : ''
+    return `接下来每天还需多攒 ${fmt(goal.extra_daily)} ${goal.resource}${floors}`
+  }
+  if (goal.status === 'on_track') return '保持最近的进账速度即可。'
+  if (goal.status === 'done') return '目标已经完成，可以放心开打。'
+  return ''
+}
+
+function planFromEvent(eventName: string) {
   formOpen.value = true
-  form.value = { ...form.value, deadline: updateDate, note: eventName }
+  formEvent.value = eventName
+  form.value = { ...form.value, deadline: '', note: eventName }
 }
-
-// ---- 活动算盘 ----
 
 const estimateInputs = ref<Record<string, string>>({})
 const estimateSaving = ref('')
 const abacusGoalSaving = ref('')
 
 async function saveEstimate(event: string) {
+  const value = Number(estimateInputs.value[event])
+  if (!Number.isFinite(value) || value <= 0) {
+    error.value = '先填一个大于 0 的场均钥匙数。'
+    return
+  }
   estimateSaving.value = event
   try {
-    await api.saveEventEstimate(event, Number(estimateInputs.value[event]))
+    await api.saveEventEstimate(event, value)
     await load()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '场均预估保存失败' }
   finally { estimateSaving.value = '' }
 }
 
 async function goalFromAbacus(abacus: EventAbacus) {
-  const deadline = abacus.end_date || abacus.start_date
+  const deadline = abacus.start_date || abacus.end_date
   if (!deadline || !abacus.koban_cost) return
   abacusGoalSaving.value = abacus.event
   try {
@@ -100,6 +129,12 @@ async function load() {
   finally { loading.value = false }
 }
 
+function openCustomForm() {
+  formOpen.value = true
+  formEvent.value = ''
+  form.value = { ...form.value, note: '' }
+}
+
 async function saveGoal() {
   saving.value = true
   try {
@@ -110,6 +145,7 @@ async function saveGoal() {
       note: form.value.note,
     })
     formOpen.value = false
+    formEvent.value = ''
     form.value = { resource: '小判', target: 100000, deadline: '', note: '' }
     await load()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
@@ -128,134 +164,208 @@ onMounted(load)
 
 <template>
   <section class="planning-panel" :class="{ loading }">
-    <header>
+    <header class="planning-hero">
       <div>
-        <h3>攒钱小目标</h3>
-        <p v-if="planning">狐之助按最近 {{ planning.rate_window_days }} 天的进出账速度帮你算日子</p>
+        <small>规划</small>
+        <h3>接下来要准备什么</h3>
+        <p>先看差多少，再决定要不要加把劲。</p>
       </div>
-      <button v-if="!formOpen" type="button" class="secondary" @click="formOpen = true">＋ 立个小目标</button>
+      <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
     </header>
+
     <p v-if="error" class="planning-error">{{ error }}</p>
 
-    <div v-if="upcoming.length || calendar?.reason" class="planning-events">
-      <small class="planning-events-title">
-        📣 近期公告（B 站官方号）
-        <em v-if="calendar?.stale">日历是旧缓存，服务器暂时联系不上</em>
-      </small>
-      <p v-if="calendar?.reason && !upcoming.length" class="planning-empty">{{ calendar.reason }}</p>
-      <div v-for="item in upcoming" :key="item.title" class="planning-event-row">
-        <b>{{ shortDate(item.update_date) }}</b>
-        <span class="planning-event-names">
-          <template v-for="name in item.events" :key="name">
-            <a v-if="item.url" class="planning-event-chip" :href="item.url" target="_blank" rel="noopener" @click.stop>{{ name }}</a>
-            <span v-else class="planning-event-chip">{{ name }}</span>
-          </template>
-        </span>
-        <button type="button" class="planning-event-goal" @click="goalFromEvent(item.update_date!, item.events[0] || '')">按这天立目标</button>
+    <aside v-if="featuredAnnouncement" class="planning-news">
+      <span>
+        <small>官方公告 · {{ shortDate(featuredAnnouncement.update_date) }}</small>
+        <b>{{ featuredAnnouncement.events.join('、') }}</b>
+      </span>
+      <div>
+        <a v-if="featuredAnnouncement.url" :href="featuredAnnouncement.url" target="_blank" rel="noopener">查看公告</a>
+        <button type="button" class="secondary" @click="planFromEvent(featuredAnnouncement.events[0] || '')">按活动准备</button>
       </div>
-    </div>
-
-    <div v-for="abacus in planning?.events || []" :key="abacus.event" class="planning-abacus">
-      <div class="planning-goal-head">
-        <b>🧮 {{ abacus.event }}</b>
-        <span v-if="abacus.start_date">{{ shortDate(abacus.start_date) }} 开打<template v-if="abacus.end_date">，{{ shortDate(abacus.end_date) }} 收摊</template></span>
-        <em v-if="abacus.keys_source === 'measured'" class="planning-abacus-tag measured">实测场均</em>
-        <em v-else-if="abacus.keys_source === 'estimate'" class="planning-abacus-tag">估计场均</em>
-      </div>
-      <p class="planning-message">🦊 {{ abacus.message }}</p>
-      <small v-if="abacus.note">{{ abacus.note }}</small>
-      <div class="planning-abacus-actions">
-        <label>场均钥匙
-          <input v-model="estimateInputs[abacus.event]" type="number" min="1" max="200" step="1" placeholder="填个估计">
-        </label>
-        <button type="button" class="secondary" :disabled="estimateSaving === abacus.event" @click="saveEstimate(abacus.event)">{{ estimateSaving === abacus.event ? '记账中……' : '记下' }}</button>
-        <button v-if="abacus.koban_cost && (abacus.end_date || abacus.start_date)" type="button" :disabled="abacusGoalSaving === abacus.event" @click="goalFromAbacus(abacus)">立成攒钱目标（{{ fmt(abacus.koban_cost) }} 小判）</button>
-      </div>
-    </div>
+    </aside>
+    <p v-else-if="calendar?.reason" class="planning-muted">{{ calendar.reason }}</p>
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
-      <label>攒什么
-        <select v-model="form.resource">
-          <option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option>
-        </select>
-      </label>
-      <label>目标数量
-        <input v-model.number="form.target" type="number" min="0" step="1000" required>
-      </label>
-      <label>截止日期
-        <input v-model="form.deadline" type="date" :min="localToday()" required>
-      </label>
-      <label>备注（可选）
-        <input v-model="form.note" maxlength="50" placeholder="比如：江户城门票钱">
-      </label>
+      <header>
+        <div><h4>{{ formEvent ? `为「${formEvent}」做准备` : '自定目标' }}</h4><p>{{ formEvent ? '资源最好在活动开打前备齐。' : '给自己定一个明确的数量和日期。' }}</p></div>
+        <button type="button" class="planning-close" aria-label="关闭目标表单" @click="formOpen = false; formEvent = ''">×</button>
+      </header>
+      <div class="planning-form-fields">
+        <label>攒什么
+          <select v-model="form.resource">
+            <option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </label>
+        <label>目标数量
+          <input v-model.number="form.target" type="number" min="0" step="1000" required>
+        </label>
+        <label>截止日期
+          <input v-model="form.deadline" type="date" :min="localToday()" required>
+        </label>
+        <label>备注
+          <input v-model="form.note" maxlength="50" placeholder="可不填">
+        </label>
+      </div>
       <div class="planning-form-actions">
-        <button type="submit" class="primary" :disabled="saving">{{ saving ? '记账中……' : '立目标' }}</button>
-        <button type="button" class="secondary" @click="formOpen = false">先不立了</button>
+        <button type="submit" class="primary" :disabled="saving">{{ saving ? '记账中……' : '立下目标' }}</button>
+        <button type="button" class="secondary" @click="formOpen = false; formEvent = ''">取消</button>
       </div>
     </form>
 
-    <p v-if="planning && !planning.goals.length && !formOpen" class="planning-empty">
-      还没立目标。比如「9 月 10 日前攒 30 万小判」——狐之助会盯着每天的进账告诉你来不来得及。
-    </p>
-
-    <article v-for="goal in planning?.goals || []" :key="goal.id" class="planning-goal" :class="goal.status">
-      <div class="planning-goal-head">
-        <b>{{ goal.resource }}</b>
-        <span>目标 {{ fmt(goal.target) }}</span>
-        <span v-if="goal.note" class="planning-note">{{ goal.note }}</span>
-        <em class="planning-status">{{ statusLabel[goal.status] || goal.status }}</em>
-        <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
+    <section class="planning-section planning-goals-section">
+      <header>
+        <div><h4>我的目标</h4><p>最需要你做决定的事放在最前面。</p></div>
+      </header>
+      <div v-if="planning?.goals.length" class="planning-goal-list">
+        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="goal.status">
+          <header>
+            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.deadline }} 截止</small></span>
+            <em>{{ statusLabel[goal.status] || goal.status }}</em>
+            <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
+          </header>
+          <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
+          <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
+          <div class="planning-goal-metrics">
+            <span><small>当前</small><b>{{ fmt(goal.current) }}</b></span>
+            <span><small>目标</small><b>{{ fmt(goal.target) }}</b></span>
+            <span><small>还剩</small><b>{{ Math.max(0, goal.days_left) }} 天</b></span>
+            <span><small>到期预计</small><b>{{ fmt(goal.projected) }}</b></span>
+          </div>
+          <details>
+            <summary>查看预测依据</summary>
+            <p>{{ goal.message }}</p>
+          </details>
+        </article>
       </div>
-      <p class="planning-message">🦊 {{ goal.message }}</p>
-      <small>
-        {{ goal.deadline }} 截止（还剩 {{ goal.days_left }} 天）
-        <template v-if="goal.current != null"> · 当前 {{ fmt(goal.current) }}</template>
-        <template v-if="goal.rate != null"> · 近日 {{ signedRate(goal.rate) }}/天</template>
-        <template v-if="goal.projected != null"> · 到期预计 {{ fmt(goal.projected) }}</template>
-      </small>
-    </article>
+      <div v-else class="planning-empty-state">
+        <b>还没有目标</b>
+        <span>立一个之后，这里会直接告诉你来不来得及。</span>
+        <button type="button" class="secondary" @click="openCustomForm">＋ 立个目标</button>
+      </div>
+    </section>
+
+    <section class="planning-section planning-events-section">
+      <header>
+        <div><h4>活动准备</h4><p>只展示现在能算、也值得你动手的活动。</p></div>
+      </header>
+
+      <article v-for="abacus in actionableEvents" :key="abacus.event" class="planning-event-card">
+        <header>
+          <span><small>近期活动</small><b>{{ abacus.event }}</b></span>
+          <em>{{ eventDate(abacus) }}</em>
+        </header>
+        <p class="planning-event-result">{{ abacus.message }}</p>
+        <div v-if="abacus.keys_total || abacus.runs_needed || abacus.koban_cost" class="planning-event-metrics">
+          <span v-if="abacus.keys_total"><small>总目标</small><b>{{ fmt(abacus.keys_total) }} 把钥匙</b></span>
+          <span v-if="abacus.runs_needed"><small>预计要跑</small><b>{{ fmt(abacus.runs_needed) }} 圈</b></span>
+          <span v-if="abacus.koban_cost != null"><small>预计买票</small><b>{{ fmt(abacus.koban_cost) }} 小判</b></span>
+        </div>
+        <div v-if="abacus.keys_total > 0 && abacus.keys_per_run == null" class="planning-question">
+          <label>你一圈通常拿几把钥匙？
+            <input v-model="estimateInputs[abacus.event]" type="number" min="1" max="200" step="1" placeholder="填个估计">
+          </label>
+          <button type="button" class="primary" :disabled="estimateSaving === abacus.event" @click="saveEstimate(abacus.event)">{{ estimateSaving === abacus.event ? '计算中……' : '帮我算' }}</button>
+        </div>
+        <button v-else-if="abacus.koban_cost && (abacus.start_date || abacus.end_date)" type="button" class="primary planning-event-goal" :disabled="abacusGoalSaving === abacus.event" @click="goalFromAbacus(abacus)">{{ abacusGoalSaving === abacus.event ? '正在立目标……' : `开打前备好 ${fmt(abacus.koban_cost)} 小判` }}</button>
+        <details v-if="abacus.note">
+          <summary>怎么算的</summary>
+          <p>{{ abacus.note }}</p>
+        </details>
+      </article>
+
+      <div v-for="abacus in waitingEvents" :key="abacus.event" class="planning-waiting-event">
+        <b>{{ abacus.event }}</b><span>日期待公告，暂不参与规划</span>
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.planning-panel { background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
-.planning-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.planning-panel h3 { margin: 0; }
-.planning-panel header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
-.planning-error { color: #b0492e; }
-.planning-events { margin-top: 10px; padding: 8px 12px; background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 10px; }
-.planning-events-title { color: var(--ink-dim); }
-.planning-events-title em { font-style: normal; color: #b0492e; margin-left: 8px; }
-.planning-event-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.planning-event-row > b { color: var(--fox-gold-deep); white-space: nowrap; }
-.planning-event-names { display: flex; gap: 6px; flex-wrap: wrap; }
-.planning-event-chip { background: var(--fox-gold-pale); border: 1px solid var(--fox-gold); border-radius: 999px; padding: 1px 10px; font-size: 13px; color: var(--ink); text-decoration: none; }
-.planning-event-goal { margin-left: auto; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
-.planning-event-goal:hover { border-color: var(--fox-gold); color: var(--ink); }
-.planning-abacus { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--fox-gold); border-radius: 10px; background: var(--paper); }
-.planning-abacus small { color: var(--ink-dim); }
-.planning-abacus-tag { font-style: normal; font-size: 12px; border: 1px solid var(--paper-line); border-radius: 999px; padding: 1px 10px; color: var(--ink-dim); }
-.planning-abacus-tag.measured { color: #4d7a3a; border-color: #4d7a3a; }
-.planning-abacus-actions { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.planning-abacus-actions label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
-.planning-abacus-actions input { width: 110px; }
-.planning-empty { color: var(--ink-dim); font-size: 13px; margin: 10px 0 2px; }
-.planning-form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 12px; background: var(--paper); border: 1px solid var(--fox-gold); border-radius: 10px; }
-.planning-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
-.planning-form input, .planning-form select { min-width: 140px; }
-.planning-form-actions { display: flex; gap: 8px; align-items: flex-end; }
-.planning-goal { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--paper-line); border-left-width: 4px; border-radius: 10px; background: var(--paper); }
+.planning-panel { display: grid; gap: 12px; }
+.planning-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; background: linear-gradient(110deg, var(--fox-gold-pale), var(--paper-card)); border: 1px solid var(--paper-line); border-left: 4px solid var(--fox-gold); border-radius: 12px; }
+.planning-hero small { color: var(--fox-gold-deep); font-weight: 700; letter-spacing: .08em; }
+.planning-hero h3 { margin: 2px 0 0; font-size: 20px; }
+.planning-hero p, .planning-section > header p, .planning-form header p { margin: 3px 0 0; color: var(--ink-dim); font-size: 13px; }
+.planning-error { margin: 0; padding: 10px 12px; color: #9f3d28; background: #f9e6df; border: 1px solid #d6a394; border-radius: 10px; }
+.planning-news { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 14px; background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.planning-news > span { display: grid; gap: 2px; min-width: 0; }
+.planning-news small { color: var(--ink-dim); }
+.planning-news b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planning-news > div { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.planning-news a { color: var(--fox-gold-deep); font-size: 13px; }
+.planning-muted { margin: 0; color: var(--ink-dim); font-size: 13px; }
+.planning-section, .planning-form { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
+.planning-section > header, .planning-form > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.planning-section h4, .planning-form h4 { margin: 0; font-size: 16px; }
+.planning-close { padding: 0 5px; color: var(--ink-dim); background: transparent; border: 0; font-size: 20px; cursor: pointer; }
+.planning-form-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.planning-form label, .planning-question label { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }
+.planning-form input, .planning-form select, .planning-question input { width: 100%; min-width: 0; }
+.planning-form-actions { display: flex; gap: 8px; margin-top: 12px; }
+.planning-goal-list { display: grid; gap: 10px; margin-top: 12px; }
+.planning-goal { padding: 14px 16px; background: var(--paper); border: 1px solid var(--paper-line); border-left: 5px solid var(--paper-line); border-radius: 10px; }
 .planning-goal.done { border-left-color: #4d7a3a; }
 .planning-goal.on_track { border-left-color: var(--fox-gold); }
 .planning-goal.behind { border-left-color: #b0492e; }
-.planning-goal.expired, .planning-goal.unknown { border-left-color: var(--paper-line); }
-.planning-goal-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.planning-note { color: var(--ink-dim); }
-.planning-status { margin-left: auto; font-style: normal; font-size: 12px; border: 1px solid var(--paper-line); border-radius: 999px; padding: 1px 10px; color: var(--ink-dim); }
-.planning-goal.done .planning-status { color: #4d7a3a; border-color: #4d7a3a; }
-.planning-goal.behind .planning-status { color: #b0492e; border-color: #b0492e; }
-.planning-goal.on_track .planning-status { color: var(--fox-gold-deep); border-color: var(--fox-gold); }
-.planning-delete { border: 0; background: none; color: var(--ink-dim); font-size: 16px; cursor: pointer; padding: 0 4px; }
-.planning-message { margin: 6px 0 4px; }
-.planning-goal small { color: var(--ink-dim); }
+.planning-goal > header { display: flex; align-items: flex-start; gap: 8px; }
+.planning-goal > header > span { display: grid; gap: 1px; min-width: 0; }
+.planning-goal > header small { color: var(--ink-dim); font-size: 11px; }
+.planning-goal > header em { margin-left: auto; padding: 2px 9px; color: var(--ink-dim); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 11px; font-style: normal; white-space: nowrap; }
+.planning-goal.behind > header em { color: #9f3d28; border-color: #c98673; }
+.planning-goal.on_track > header em { color: var(--fox-gold-deep); border-color: var(--fox-gold); }
+.planning-delete { padding: 0 3px; color: var(--ink-dim); background: transparent; border: 0; font-size: 17px; cursor: pointer; }
+.planning-goal-result { display: block; margin-top: 13px; font-size: clamp(22px, 3vw, 30px); line-height: 1.1; }
+.planning-next-action { margin: 7px 0 0; color: #9f3d28; }
+.planning-goal-metrics, .planning-event-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px; border: 1px solid var(--paper-line); }
+.planning-goal-metrics span, .planning-event-metrics span { display: grid; gap: 3px; min-width: 0; padding: 9px 11px; border-left: 1px solid var(--paper-line); }
+.planning-goal-metrics span:first-child, .planning-event-metrics span:first-child { border-left: 0; }
+.planning-goal-metrics small, .planning-event-metrics small { color: var(--ink-dim); font-size: 11px; }
+.planning-goal-metrics b, .planning-event-metrics b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planning-panel details { margin-top: 10px; color: var(--ink-dim); font-size: 12px; }
+.planning-panel summary { color: var(--fox-gold-deep); cursor: pointer; }
+.planning-panel details p { margin: 7px 0 0; line-height: 1.6; }
+.planning-empty-state { display: grid; justify-items: start; gap: 5px; margin-top: 12px; padding: 18px; color: var(--ink-dim); background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.planning-empty-state b { color: var(--ink); }
+.planning-empty-state button { margin-top: 5px; }
+.planning-events-section { display: grid; gap: 10px; }
+.planning-event-card { padding: 14px 16px; background: var(--paper); border: 1px solid var(--fox-gold); border-radius: 10px; }
+.planning-event-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.planning-event-card > header span { display: grid; gap: 2px; }
+.planning-event-card > header small { color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; }
+.planning-event-card > header b { font-size: 16px; }
+.planning-event-card > header em { color: var(--ink-dim); font-size: 12px; font-style: normal; white-space: nowrap; }
+.planning-event-result { margin: 12px 0 0; font-size: 15px; line-height: 1.65; }
+.planning-event-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.planning-question { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; padding: 11px 12px; background: var(--fox-gold-pale); border-radius: 8px; }
+.planning-question label { flex: 1 1 180px; color: var(--ink); font-size: 13px; }
+.planning-question input { max-width: 180px; background: var(--paper-card); }
+.planning-event-goal { margin-top: 12px; }
+.planning-waiting-event { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; color: var(--ink-dim); border-top: 1px dashed var(--paper-line); }
+.planning-waiting-event b { color: var(--ink); }
+@media (max-width: 700px) {
+  .planning-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .planning-goal-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .planning-goal-metrics span:nth-child(odd) { border-left: 0; }
+  .planning-goal-metrics span:nth-child(n+3) { border-top: 1px solid var(--paper-line); }
+}
+@media (max-width: 520px) {
+  .planning-hero { align-items: flex-start; padding: 14px; }
+  .planning-hero h3 { font-size: 18px; }
+  .planning-hero p { max-width: 210px; }
+  .planning-news { align-items: flex-start; flex-direction: column; }
+  .planning-news > span { width: 100%; }
+  .planning-news > div { justify-content: space-between; width: 100%; }
+  .planning-section, .planning-form { padding: 14px; }
+  .planning-form-fields { grid-template-columns: 1fr; }
+  .planning-event-card > header { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .planning-event-metrics { grid-template-columns: 1fr; }
+  .planning-event-metrics span { border-top: 1px solid var(--paper-line); border-left: 0; }
+  .planning-event-metrics span:first-child { border-top: 0; }
+  .planning-question { align-items: stretch; flex-direction: column; }
+  .planning-question label { flex: none; }
+  .planning-question label, .planning-question input, .planning-question button { width: 100%; max-width: none; }
+  .planning-waiting-event { align-items: flex-start; flex-direction: column; gap: 2px; }
+}
 </style>

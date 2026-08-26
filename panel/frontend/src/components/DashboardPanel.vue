@@ -93,7 +93,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
           </template>
           <span v-else class="activity-waiting">新任务运行后开始记录</span>
         </div>
-        <button class="report-link" type="button" @click="emit('openReport')">查看本丸成绩单 →</button>
+        <button class="report-link" type="button" @click="emit('openReport')">查看本丸账 →</button>
       </PaperCard>
       <PaperCard variant="dashboard" class="resources-card">
         <h3>💰 家底 <small>{{ data?.inventory?.captured_at ? `快照 ${data.inventory.captured_at.slice(5, 16)}` : '' }}</small></h3>

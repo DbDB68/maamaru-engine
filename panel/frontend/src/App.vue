@@ -222,7 +222,7 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
       <nav class="topnav">
         <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
         <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
-        <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">成绩单</button>
+        <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
         <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
         <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
       </nav>
