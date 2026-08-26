@@ -92,6 +92,8 @@ export interface HumanReport {
   note?: string
   source?: string
   gap_key?: string | null
+  resource?: string | null
+  claimed_delta?: number | null
 }
 
 export interface InventoryGap {

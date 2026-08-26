@@ -7,11 +7,12 @@ const props = defineProps<{
   date: string
   resource: string
   totalDelta: number | null
+  claimedAmount: number
+  unexplained: number | null
   highlightCategory?: string
   attributions: LedgerAttribution[]
   runs: any[]
   gaps: InventoryGap[]
-  claimed?: boolean
 }>()
 
 const emit = defineEmits<{ close: []; report: [gap: InventoryGap]; 'report-day': []; 'open-records': [date: string] }>()
@@ -35,7 +36,6 @@ const groupedAttributions = computed(() => {
   return groups
 })
 const attributedTotal = computed(() => props.attributions.reduce((sum, item) => sum + Number(item.delta || 0), 0))
-const unexplained = computed(() => props.totalDelta == null ? null : props.totalDelta - attributedTotal.value)
 
 function gapDelta(gap: InventoryGap): string {
   const order = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
@@ -60,7 +60,7 @@ function recordDateLabel(date: string): string {
     </header>
 
     <p class="day-detail-total">
-      狐之助确认 {{ signed(attributedTotal) }}<template v-if="unexplained && !claimed"> · 还有 <b>{{ signed(unexplained) }}</b> 不知道谁干的</template><template v-else-if="unexplained && claimed"> · 还有 <b>{{ signed(unexplained) }}</b> 审神者已认领</template>
+      狐之助确认 {{ signed(attributedTotal) }}<template v-if="claimedAmount"> · 审神者认领 {{ signed(claimedAmount) }}</template><template v-if="unexplained"> · 还有 <b>{{ signed(unexplained) }}</b> 不知道谁干的</template>
     </p>
 
     <ul v-if="groupedAttributions.length" class="day-detail-attributions">
@@ -85,7 +85,7 @@ function recordDateLabel(date: string): string {
       <button type="button" class="primary" @click="emit('report', gap)">这是我干的，说明一下</button>
     </div>
 
-    <div v-if="!gaps.length && unexplained && !claimed" class="day-detail-gap">
+    <div v-if="!gaps.length && unexplained" class="day-detail-gap">
       <div>
         <strong>🦊 {{ resource }} {{ signed(unexplained) }} 还不知道是谁干的</strong>
         <small>这部分没有赶上库存盘点，只能按天估算；是你自己动的话就说一声。</small>

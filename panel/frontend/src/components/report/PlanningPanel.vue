@@ -29,7 +29,7 @@ function applyTimingFallback(report: PlanningReport, runs: any[]) {
   if (!latest) return
   const secondsPerFloor = Number(latest.average_loop_seconds)
   for (const goal of report.goals) {
-    if (goal.goal_mode !== 'stock_target' || goal.estimated_seconds != null
+    if (['done', 'expired'].includes(goal.status) || goal.goal_mode !== 'stock_target' || goal.estimated_seconds != null
         || goal.floors_needed == null || !goal.deadline_at) continue
     const remainingSeconds = Math.max(0, Math.round(
       (new Date(goal.deadline_at).getTime() - Date.now()) / 1000))
@@ -70,6 +70,7 @@ const statusLabel: Record<string, string> = {
 }
 
 function goalStatusLabel(goal: PlanningGoalAdvice) {
+  if (goal.status === 'done' || goal.status === 'expired') return statusLabel[goal.status]
   if (goal.goal_mode === 'stock_target' && goal.can_finish === false) return '来不及'
   if (goal.goal_mode === 'stock_target' && goal.can_finish === true) return '来得及'
   return statusLabel[goal.status] || goal.status
@@ -104,6 +105,18 @@ function floorPace(seconds: number | null | undefined) {
   if (seconds == null || !Number.isFinite(seconds)) return ''
   const value = Math.max(0, Math.round(seconds))
   return `${Math.floor(value / 60)}分${String(value % 60).padStart(2, '0')}秒`
+}
+
+function goalProgressMeta(goal: PlanningGoalAdvice) {
+  if (goal.status === 'done') return ''
+  if (goal.status === 'expired') return '已到期'
+  const remaining = goal.goal_mode === 'stock_target' && goal.remaining_seconds != null
+    ? `距收摊 ${durationHours(goal.remaining_seconds)}`
+    : `剩 ${Math.max(0, goal.days_left)} 天`
+  if (goal.goal_mode === 'stock_target') {
+    return `${remaining} · ${goal.floors_needed == null ? '待实测' : `还需约 ${fmt(goal.floors_needed)} 层`}`
+  }
+  return goal.projected == null ? remaining : `${remaining} · 预计 ${fmt(goal.projected)}`
 }
 
 function goalAction(goal: PlanningGoalAdvice) {
@@ -291,7 +304,7 @@ onMounted(load)
           <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
           <div class="planning-goal-progress">
             <progress v-if="goal.current != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
-            <p><span>当前 <b>{{ fmt(goal.current) }}</b> / {{ fmt(goal.target) }} {{ goal.resource }}</span><span><template v-if="goal.goal_mode === 'stock_target' && goal.remaining_seconds != null">距收摊 {{ durationHours(goal.remaining_seconds) }}</template><template v-else>剩 {{ Math.max(0, goal.days_left) }} 天</template><template v-if="goal.goal_mode === 'stock_target'"> · {{ goal.floors_needed == null ? '待实测' : `还需约 ${fmt(goal.floors_needed)} 层` }}</template><template v-else-if="goal.projected != null"> · 预计 {{ fmt(goal.projected) }}</template></span></p>
+            <p><span>当前 <b>{{ fmt(goal.current) }}</b> / {{ fmt(goal.target) }} {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
           </div>
           <details>
             <summary>查看预测依据</summary>

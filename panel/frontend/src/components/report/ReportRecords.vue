@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
-import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runTitle, shanghaiDate } from './reportModel'
+import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runStatusLabel, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
   events: any[]
@@ -187,14 +187,17 @@ const systemEventTypes = new Set([
   'game_update.detected', 'game_update.recovered', 'resource.change',
 ])
 function activityGroupKey(item: any) {
-  const p = item.payload || {}, run = item.run_id || `minute:${Math.floor(item.ts / 300)}`
-  if (item.event_type === 'sortie.completed') return `${run}:sortie:${p.mode}:${p.chapter}:${p.map_no}`
-  if (item.event_type === 'sortie.retreated_before_boss') return `${run}:retreat:${p.chapter}:${p.map_no}`
-  if (item.event_type === 'osaka.floor_completed') return `${run}:osaka:${p.selected_floor}`
-  if (item.event_type === 'practice.result') return `${run}:practice`
-  if (item.event_type.startsWith('task_rewards.')) return `${run}:${item.event_type}`
-  if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${run}:${item.event_type}`
-  return `${run}:${item.event_type}:${eventDetail(item)}`
+  const p = item.payload || {}, day = shanghaiDate(Number(item.ts))
+  const run = item.run_id || `minute:${Math.floor(item.ts / 300)}`
+  // 同一轮可能跨零点；先按上海日期切开，避免第二天的成绩被吞回开工日。
+  const prefix = `${day}:${run}`
+  if (item.event_type === 'sortie.completed') return `${prefix}:sortie:${p.mode}:${p.chapter}:${p.map_no}`
+  if (item.event_type === 'sortie.retreated_before_boss') return `${prefix}:retreat:${p.chapter}:${p.map_no}`
+  if (item.event_type === 'osaka.floor_completed') return `${prefix}:osaka:${p.selected_floor}`
+  if (item.event_type === 'practice.result') return `${prefix}:practice`
+  if (item.event_type.startsWith('task_rewards.')) return `${prefix}:${item.event_type}`
+  if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${prefix}:${item.event_type}`
+  return `${prefix}:${item.event_type}:${eventDetail(item)}`
 }
 const groupedActivityEvents = computed(() => {
   const groups = new Map<string, any>()
@@ -208,11 +211,16 @@ const groupedActivityEvents = computed(() => {
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
 const allRecords = computed(() => {
-  const visibleRunIds = new Set(props.runs.map(run => run.run_id).filter(Boolean))
+  const runsById = new Map(props.runs.filter(run => run.run_id).map(run => [run.run_id, run]))
   return [
     ...props.runs.map(run => ({ kind: 'run' as const, ts: Number(run.started_at), run })),
     ...groupedActivityEvents.value
-      .filter(item => !item.run_id || !visibleRunIds.has(item.run_id))
+      .filter(item => {
+        if (!item.run_id) return true
+        const run = runsById.get(item.run_id)
+        // 开工日的活动收进任务卡；跨日部分在实际发生日单独出现。
+        return !run || shanghaiDate(Number(run.started_at)) !== shanghaiDate(Number(item.ts))
+      })
       .map(item => ({ kind: 'activity' as const, ts: Number(item.ts), item })),
   ].sort((a, b) => b.ts - a.ts)
 })
@@ -247,7 +255,12 @@ function recordKey(entry: any): string {
 function recordTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
-function runActivities(run: any) { return groupedActivityEvents.value.filter(item => item.run_id && item.run_id === run.run_id) }
+function runActivities(run: any) {
+  const startDay = shanghaiDate(Number(run.started_at))
+  return groupedActivityEvents.value.filter(item => (
+    item.run_id && item.run_id === run.run_id && shanghaiDate(Number(item.ts)) === startDay
+  ))
+}
 function runRepairTotal(run: any) {
   const activityTotal = runActivities(run).filter(item => item.event_type === 'repair.summary')
     .reduce((total, item) => total + repairCount(item.payload), 0)
@@ -268,7 +281,7 @@ function hasUpkeep(run: any) { return Boolean(runRepairTotal(run) || runSpeedupT
 const attachingRun = ref('')
 const inventoryNotice = ref<Record<string, string>>({})
 const attachError = ref('')
-const latestInventoriedRun = computed(() => props.runs.find(run => run.has_before_snapshot))
+const latestInventoriedRun = computed(() => props.runs.find(run => Number(run.loops) > 0 && run.has_before_snapshot))
 function canAttachInventory(run: any) {
   return latestInventoriedRun.value?.run_id === run.run_id && !run.has_after_snapshot
 }
@@ -327,13 +340,14 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
         <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : '·' }}</span></template>
         <template #content="slotProps">
           <details v-if="slotProps.item.kind === 'run'" :key="recordKey(slotProps.item)" class="record-run">
-            <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
+            <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ runStatusLabel(slotProps.item.run) }} · {{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
             <div class="run-evidence">
-              <p v-if="!hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
-              <div v-else class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(slotProps.item.run)">🩹 手入 <b>{{ runRepairTotal(slotProps.item.run) }}</b> 振</span><span v-if="runSpeedupTotal(slotProps.item.run)">⚡ 加速符 <b>{{ runSpeedupTotal(slotProps.item.run) }}</b> 枚</span><span v-if="runEquipmentTotal(slotProps.item.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(slotProps.item.run) }}</b> 次</span></div>
+              <p v-if="Number(slotProps.item.run.loops) > 0 && !hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
+              <div v-if="hasUpkeep(slotProps.item.run)" class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(slotProps.item.run)">🩹 手入 <b>{{ runRepairTotal(slotProps.item.run) }}</b> 振</span><span v-if="runSpeedupTotal(slotProps.item.run)">⚡ 加速符 <b>{{ runSpeedupTotal(slotProps.item.run) }}</b> 枚</span><span v-if="runEquipmentTotal(slotProps.item.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(slotProps.item.run) }}</b> 次</span></div>
               <p v-if="attributedStats(slotProps.item.run)" class="run-delta"><small>🦊 已确认收支</small>{{ attributedStats(slotProps.item.run) }}</p>
               <p v-if="deltaStats(slotProps.item.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(slotProps.item.run) }}<span v-if="kobanPerHourLabel(slotProps.item.run)">· 小判约 {{ kobanPerHourLabel(slotProps.item.run) }} / 小时</span><span v-if="kobanPerFloorLabel(slotProps.item.run)">· 平均每层 {{ kobanPerFloorLabel(slotProps.item.run) }}</span></p>
               <div v-if="runActivities(slotProps.item.run).length" class="run-activities"><p v-for="item in runActivities(slotProps.item.run)" :key="item.id"><time>{{ recordTime(item.ts) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
+              <p v-else-if="!attributedStats(slotProps.item.run) && !deltaStats(slotProps.item.run)" class="run-upkeep-quiet">这次任务没有额外成绩明细。</p>
               <div v-if="!slotProps.item.run.has_resource_comparison && canAttachInventory(slotProps.item.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === slotProps.item.run.run_id" @click="attachInventory(slotProps.item.run)">{{ attachingRun === slotProps.item.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[slotProps.item.run.run_id]">{{ inventoryNotice[slotProps.item.run.run_id] }}</em></div>
             </div>
           </details>

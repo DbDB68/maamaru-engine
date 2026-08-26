@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -271,8 +272,8 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertIsNone(first["total_delta"])
         self.assertEqual(second["total_delta"], 100)
 
-    def test_human_report_lowers_confidence_without_rewriting_inventory(self):
-        # 人工报备只降置信度，库存数值照旧
+    def test_human_report_without_resource_is_archive_only(self):
+        # 旧式无资源报备只留档：gap 照常列出，但不再波及任何资源的置信度
         t0 = sh("2026-08-20 09:00:00")
         self._captured(t0, {"小判": 1000}, phase="before")
         self._captured(t0 + 3600, {"小判": 1200}, phase="after")
@@ -286,8 +287,9 @@ class ResourceLedgerTests(unittest.TestCase):
 
         koban = self._res(after_report, "小判")
         self.assertEqual(koban["total_delta"], 200)
-        self.assertEqual(koban["confidence"], "low")
+        self.assertEqual(koban["confidence"], "medium")
         gap = next(g for g in after_report["gaps"] if g["reason"] == "human_reported")
+        self.assertEqual(gap["resources"], {})
         self.assertEqual(gap["human_report_ids"], [report["id"]])
 
     def test_cross_run_gap_links_human_report(self):
@@ -330,10 +332,11 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(day["confidence"], "low")
         self.assertEqual(day["gap_ids"], [gap["id"]])
 
-        # 报备时间落在缺口外 → 单独成条（范围未知），所有资源一起降
+        # 报备时间落在缺口外 → 单独成条（旧式无资源报备只留档），不再波及任何资源
         self.store.add_human_report(occurred_at=t0 + 5400, activities=["手动出阵"])
         ledger = self.store.resource_ledger(t0 - 60, t0 + 7200)
-        self.assertEqual(self._res(ledger, "木炭")["confidence"], "low")
+        self.assertEqual(self._res(ledger, "木炭")["confidence"], "medium")
+        self.assertTrue(any(g["reason"] == "human_reported" for g in ledger["gaps"]))
 
     def test_window_baseline_comes_from_before_window(self):
         # 窗前最近一次观察当 opening 基线：窗口内没有首观察也能结账
@@ -393,6 +396,111 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(residual["delta"], 300)
         self.assertEqual(self._res(ledger, "小判")["unattributed_delta"], 0)
 
+    def test_claim_isolates_confidence_to_named_resource(self):
+        # 带 resource+claimed_delta 的认领只波及点名资源，其他资源不背锅
+        t0 = sh("2026-08-20 09:00:00")
+        self._captured(t0, {"小判": 1000, "木炭": 500}, phase="before")
+        self._captured(t0 + 3600, {"小判": 1200, "木炭": 700}, phase="after")
+
+        report = self.store.add_human_report(
+            occurred_at=t0 + 1800, activities=["领邮箱"],
+            resource="小判", claimed_delta=200)
+        self.assertEqual(report["resource"], "小判")
+        self.assertEqual(report["claimed_delta"], 200)
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 7200)
+        gap = next(g for g in ledger["gaps"] if g["reason"] == "human_reported")
+        self.assertEqual(gap["resources"], {"小判": 200})
+        self.assertEqual(self._res(ledger, "小判")["confidence"], "low")
+        self.assertEqual(self._res(ledger, "木炭")["confidence"], "medium")
+        # 认领不改写库存总变化，也不产生归因
+        self.assertEqual(self._res(ledger, "小判")["total_delta"], 200)
+        self.assertEqual(self._res(ledger, "小判")["attributed_delta"], 200)  # 残差推断
+        self.assertFalse(any(a["source"] != "inventory.run_delta"
+                             for a in ledger["attributions"]))
+
+    def test_claim_roundtrip_via_store(self):
+        item = self.store.add_human_report(
+            occurred_at=sh("2026-08-20 09:00:00"), activities=["万屋购买"],
+            resource="小判", claimed_delta=-4000)
+        found = next(r for r in self.store.human_reports() if r["id"] == item["id"])
+        self.assertEqual(found["resource"], "小判")
+        self.assertEqual(found["claimed_delta"], -4000)
+        # 旧式报备两个字段保持 None
+        legacy = self.store.add_human_report(
+            occurred_at=sh("2026-08-20 10:00:00"), activities=["记不清了"])
+        found_legacy = next(r for r in self.store.human_reports()
+                            if r["id"] == legacy["id"])
+        self.assertIsNone(found_legacy["resource"])
+        self.assertIsNone(found_legacy["claimed_delta"])
+
+    def test_claim_validation_rejects_bad_input(self):
+        t0 = sh("2026-08-20 09:00:00")
+        bad_calls = [
+            dict(resource="小判"),                          # 缺数额
+            dict(claimed_delta=100),                      # 缺资源
+            dict(resource="元宝", claimed_delta=100),     # 资源不在白名单
+            dict(resource="小判", claimed_delta=0),       # 零数额没意义
+            dict(resource="小判", claimed_delta=float("nan")),
+            dict(resource="小判", claimed_delta=float("inf")),
+            dict(resource="小判", claimed_delta=True),    # bool 不是数额
+            dict(resource="小判", claimed_delta="一百"),  # 字符串不是数额
+            dict(resource="小判", claimed_delta=1.5),     # 资源数不能是小数
+            dict(resource="小判", claimed_delta=2 ** 63), # SQLite 整数边界
+            dict(gap_key="1:2", resource="小判", claimed_delta=100),  # 缺口报备不许自带数额
+        ]
+        for kwargs in bad_calls:
+            with self.assertRaises(ValueError, msg=str(kwargs)):
+                self.store.add_human_report(
+                    occurred_at=t0, activities=["其他操作"], **kwargs)
+        self.assertEqual(self.store.human_reports(), [])
+
+    def test_claim_is_not_linked_to_other_resource_gap(self):
+        t0 = sh("2026-08-20 09:00:00")
+        self._captured(t0, {"小判": 1000, "木炭": 500}, phase="after", run_id="r0")
+        self._captured(t0 + 3600, {"小判": 1000, "木炭": 700}, phase="before", run_id="r1")
+        report = self.store.add_human_report(
+            occurred_at=t0 + 1800, activities=["领邮箱"],
+            resource="小判", claimed_delta=100)
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 7200)
+        stock_gap = next(g for g in ledger["gaps"] if g["reason"] == "no_observation")
+        claim_gap = next(g for g in ledger["gaps"] if g["reason"] == "human_reported")
+        self.assertNotIn(report["id"], stock_gap["human_report_ids"])
+        self.assertEqual(claim_gap["resources"], {"小判": 100})
+        self.assertEqual(self._res(ledger, "小判")["confidence"], "low")
+
+    def test_old_database_migrates_in_place(self):
+        # 旧库没有 resource/claimed_delta 列：原地补列，旧记录原样保留
+        self.store.close()
+        db_path = Path(self.temp.name) / "telemetry.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DROP TABLE human_reports")
+        conn.execute(
+            "CREATE TABLE human_reports ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, "
+            "occurred_at REAL NOT NULL, source TEXT NOT NULL, gap_key TEXT, "
+            "activities TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')")
+        conn.execute(
+            "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
+            "activities, note) VALUES (1, 1700000000, 'proactive', NULL, '[\"领邮箱\"]', '')")
+        conn.commit()
+        conn.close()
+
+        store = TelemetryStore(db_path)
+        rows = store.human_reports()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["activities"], ["领邮箱"])
+        self.assertIsNone(rows[0]["resource"])
+        self.assertIsNone(rows[0]["claimed_delta"])
+        # 迁移后新认领正常工作
+        item = store.add_human_report(
+            occurred_at=1700000100, activities=["领邮箱"],
+            resource="小判", claimed_delta=500)
+        self.assertEqual(item["claimed_delta"], 500)
+        store.close()
+        self.store = TelemetryStore(db_path)  # tearDown 里统一关
+
     def test_api_endpoint_aggregates_server_side(self):
         from panel.server import api_data_resource_ledger
 
@@ -414,6 +522,39 @@ class ResourceLedgerTests(unittest.TestCase):
         # days 分支：窗口 7 天、八资源齐全（空窗期也返回完整结构）
         self.assertEqual(by_days["window"]["days"], 7.0)
         self.assertEqual(len(by_days["per_resource"]), 8)
+
+    def test_api_claim_roundtrip_and_validation(self):
+        from panel.server import api_add_human_report, api_human_reports
+
+        class _Req:
+            def __init__(self, body):
+                self._body = body
+
+            async def json(self):
+                return self._body
+
+        t0 = sh("2026-08-20 09:00:00")
+        with patch("touken.telemetry._store", self.store):
+            ok = asyncio.run(api_add_human_report(_Req({
+                "occurred_at": t0, "activities": ["领邮箱"],
+                "resource": "小判", "claimed_delta": 111000})))
+            self.assertTrue(ok["ok"])
+            self.assertEqual(ok["item"]["resource"], "小判")
+            self.assertEqual(ok["item"]["claimed_delta"], 111000)
+            bad = asyncio.run(api_add_human_report(_Req({
+                "occurred_at": t0, "activities": ["领邮箱"],
+                "resource": "元宝", "claimed_delta": 100})))
+            self.assertEqual(bad.status_code, 400)
+            half = asyncio.run(api_add_human_report(_Req({
+                "occurred_at": t0, "activities": ["领邮箱"],
+                "claimed_delta": 100})))
+            self.assertEqual(half.status_code, 400)
+            listing = asyncio.run(api_human_reports(limit=10))
+
+        items = listing["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["resource"], "小判")
+        self.assertEqual(items[0]["claimed_delta"], 111000)
 
 
 if __name__ == "__main__":

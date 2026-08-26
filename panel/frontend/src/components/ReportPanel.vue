@@ -145,19 +145,32 @@ const reportedDailyTotals = computed(() => {
   }
   return totals
 })
-// 日级认领：没有快照缺口的日子，从「还不知道」入口报备并说明过的，
-// 当天未归因部分视为已说明（只改展示颜色，不改库存数字）
-const claimedDays = computed(() => {
-  const cutoff = Date.now() / 1000 - days.value * 86400
-  const dates = new Set<string>()
+const claimedDailyTotals = computed(() => {
+  const totals: Record<string, Record<string, number>> = {}
   for (const report of humanReports.value) {
-    if (report.gap_key || Number(report.occurred_at) < cutoff) continue
-    if (!reportExplainsGap(report)) continue
-    dates.add(shanghaiDate(Number(report.occurred_at)))
+    const resource = String(report.resource || '')
+    const delta = Number(report.claimed_delta)
+    if (report.source !== 'proactive' || !resourceNames.includes(resource)
+        || report.claimed_delta == null || !Number.isFinite(delta) || !delta) continue
+    const date = shanghaiDate(Number(report.occurred_at))
+    totals[date] ||= {}
+    totals[date][resource] = (totals[date][resource] || 0) + delta
   }
-  return dates
+  return totals
 })
 
+function claimWithinUnknown(unknown: number, claim: number): number {
+  if (!unknown || !claim || Math.sign(unknown) !== Math.sign(claim)) return 0
+  return Math.sign(unknown) * Math.min(Math.abs(unknown), Math.abs(claim))
+}
+
+function remainingUnknown(date: string, resource: string): number | null {
+  const row = (ledger.value?.daily_series || []).find(item => item.date === date && item.resource === resource)
+  if (row?.unattributed_delta == null) return null
+  const requested = Number(reportedDailyTotals.value[date]?.[resource] || 0)
+    + Number(claimedDailyTotals.value[date]?.[resource] || 0)
+  return Number(row.unattributed_delta) - claimWithinUnknown(Number(row.unattributed_delta), requested)
+}
 const chartDates = computed(() => {
   const names = mode.value === 'single' ? [selectedResource.value] : compareResources.value
   const dates = new Set<string>()
@@ -197,18 +210,14 @@ const chartSeries = computed<ChartSeries[]>(() => {
     const index = dayIndex.get(shanghaiDate(attr.ts))
     if (index != null) byKey[categoryOf(attr.source)][index] += Number(attr.delta || 0)
   }
-  for (const [date, resources] of Object.entries(reportedDailyTotals.value)) {
-    const index = dayIndex.get(date)
-    const value = resources[name]
-    if (index != null && value) byKey.human[index] += value
-  }
   chartDates.value.forEach((date, index) => {
     const row = book.daily_series.find(item => item.resource === name && item.date === date)
     if (row?.unattributed_delta != null) {
-      let unknown = row.unattributed_delta - (byKey.human[index] || 0)
-      // 这天已被审神者认领：剩余的「还不知道」整体挪到「已说明」
-      if (unknown && claimedDays.value.has(date)) { byKey.human[index] += unknown; unknown = 0 }
-      byKey.unknown[index] += unknown
+      const requested = Number(reportedDailyTotals.value[date]?.[name] || 0)
+        + Number(claimedDailyTotals.value[date]?.[name] || 0)
+      const claimed = claimWithinUnknown(row.unattributed_delta, requested)
+      byKey.human[index] += claimed
+      byKey.unknown[index] += row.unattributed_delta - claimed
     }
   })
   return sourceCategories.map(cat => ({
@@ -231,10 +240,9 @@ function onChartSelect({ date, key }: { date: string; key: string }) {
     // 点灰色 = 认领这部分：展开当天明细，并直接弹报备框
     selectedDate.value = date
     highlightCategory.value = key
-    const gap = gapForDay(date)
+    const gap = gapForDay(date, selectedResource.value)
     if (gap) openGapReport(gap)
-    // 默认时间取当天最后一秒；如果是今天则取现在，避免指到未来
-    else openProactiveReport(Math.min(dayRange(date)[1] * 1000 - 1, Date.now()))
+    else openDayClaim(date, selectedResource.value, remainingUnknown(date, selectedResource.value))
     return
   }
   if (mode.value === 'compare' && resourceNames.includes(key)) selectedResource.value = key
@@ -246,9 +254,10 @@ function onChartSelect({ date, key }: { date: string; key: string }) {
   selectedDate.value = date
   highlightCategory.value = mode.value === 'single' ? key : ''
 }
-function gapForDay(date: string) {
+function gapForDay(date: string, resource: string) {
   const [start, end] = dayRange(date)
-  return unreportedGaps.value.find(gap => gap.started_at < end && gap.ended_at >= start) || null
+  return unreportedGaps.value.find(gap => gap.started_at < end && gap.ended_at >= start
+    && Number(gap.resource_delta?.[resource] || 0) !== 0) || null
 }
 
 function latestRecordDate(): string {
@@ -267,7 +276,8 @@ function mergeEvents(items: any[]) {
 
 function mergeRuns(items: any[]) {
   const merged = new Map(runs.value.map(item => [item.run_id, item]))
-  for (const item of items.filter(run => run.loops)) merged.set(item.run_id, item)
+  // 盘点、收杂物箱等一次性任务天生没有圈数，也是完整的任务记录。
+  for (const item of items) merged.set(item.run_id, item)
   runs.value = [...merged.values()].sort((a, b) => b.started_at - a.started_at)
 }
 
@@ -309,12 +319,19 @@ const dayDetail = computed(() => {
   const [start, end] = dayRange(date)
   const resource = selectedResource.value
   const row = (ledger.value?.daily_series || []).find(item => item.date === date && item.resource === resource)
+  const unexplained = remainingUnknown(date, resource)
+  const claimedAmount = row?.unattributed_delta == null || unexplained == null
+    ? 0
+    : Number(row.unattributed_delta) - unexplained
   return {
     date, resource,
     totalDelta: row?.total_delta ?? null,
+    claimedAmount,
+    unexplained,
     attributions: (ledger.value?.attributions || []).filter(item => item.resource === resource && start <= item.ts && item.ts < end),
     runs: runs.value.filter(run => start <= Number(run.started_at) && Number(run.started_at) < end),
-    gaps: unreportedGaps.value.filter(gap => gap.started_at < end && gap.ended_at >= start),
+    gaps: unreportedGaps.value.filter(gap => gap.started_at < end && gap.ended_at >= start
+      && Number(gap.resource_delta?.[resource] || 0) !== 0),
   }
 })
 
@@ -323,7 +340,14 @@ const dayDetail = computed(() => {
 const reportMode = ref('')
 const reportGap = ref<InventoryGap | null>(null)
 const reportSaving = ref(false)
-const reportForm = ref<{ activities: string[]; note: string; occurred_at: string }>({ activities: [], note: '', occurred_at: '' })
+const reportForm = ref<{ activities: string[]; note: string; occurred_at: string; resource: string; claimed_delta: number | null; claim_limit: number | null }>({ activities: [], note: '', occurred_at: '', resource: '', claimed_delta: null, claim_limit: null })
+const reportClaimInvalid = computed(() => {
+  if (!reportForm.value.resource) return false
+  const value = Number(reportForm.value.claimed_delta)
+  const limit = Number(reportForm.value.claim_limit)
+  return !Number.isFinite(value) || !value || !Number.isFinite(limit) || !limit
+    || Math.sign(value) !== Math.sign(limit) || Math.abs(value) > Math.abs(limit)
+})
 const humanActivities = ['领邮箱', '手动领奖', '手动出阵', '锻刀', '手入', '万屋购买', '其他操作']
 function localDateTime(timestamp = Date.now()) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
@@ -333,16 +357,21 @@ const reportFormEl = ref<HTMLElement | null>(null)
 function scrollToReportForm() {
   void nextTick(() => reportFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
 }
-function openProactiveReport(timestamp?: number) {
+function openProactiveReport(timestamp?: number, resource = '', claimedDelta: number | null = null) {
   reportMode.value = 'proactive'
   reportGap.value = null
-  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp) }
+  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp), resource, claimed_delta: claimedDelta, claim_limit: claimedDelta }
   scrollToReportForm()
+}
+function openDayClaim(date: string, resource: string, unexplained: number | null) {
+  const amount = Number(unexplained)
+  if (!Number.isFinite(amount) || !amount) return
+  openProactiveReport(Math.min(dayRange(date)[1] * 1000 - 1, Date.now()), resource, amount)
 }
 function openGapReport(gap: InventoryGap) {
   reportMode.value = `gap:${gap.gap_key}`
   reportGap.value = gap
-  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(gap.ended_at * 1000) }
+  reportForm.value = { activities: [], note: '', occurred_at: localDateTime(gap.ended_at * 1000), resource: '', claimed_delta: null, claim_limit: null }
   scrollToReportForm()
 }
 function toggleReportActivity(value: string) {
@@ -360,6 +389,8 @@ async function refreshHumanReports() {
 async function saveHumanReport(skip = false) {
   reportSaving.value = true
   try {
+    const claimedPrecisely = Boolean(!reportGap.value && reportForm.value.resource
+      && reportForm.value.claimed_delta)
     const activities = skip ? ['暂不说明'] : reportForm.value.activities
     await api.addHumanReport({
       occurred_at: new Date(reportForm.value.occurred_at).getTime() / 1000,
@@ -367,9 +398,12 @@ async function saveHumanReport(skip = false) {
       note: reportForm.value.note,
       source: reportGap.value ? 'gap' : 'proactive',
       gap_key: reportGap.value?.gap_key || null,
+      resource: reportGap.value ? null : reportForm.value.resource || null,
+      claimed_delta: reportGap.value ? null : reportForm.value.claimed_delta,
     })
     await refreshHumanReports()
     await load(days.value)
+    if (claimedPrecisely) highlightCategory.value = 'human'
     reportMode.value = ''; reportGap.value = null
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
   finally { reportSaving.value = false }
@@ -393,7 +427,7 @@ async function load(nextDays = days.value) {
     summary.value = nextSummary
     ledger.value = nextLedger
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
-    runs.value = nextRuns.items.filter(item => item.loops && item.started_at >= Date.now() / 1000 - nextDays * 86400)
+    runs.value = nextRuns.items.filter(item => item.started_at >= Date.now() / 1000 - nextDays * 86400)
     hasMoreEvents.value = nextEvents.has_more
     hasMoreRuns.value = nextRuns.has_more
     eventCursor.value = nextEvents.next_cursor
@@ -433,7 +467,7 @@ async function loadOlder() {
       hasMoreEvents.value = next.has_more && next.items.some((item: any) => item.ts >= cutoff)
     }))
     if (hasMoreRuns.value) requests.push(api.dataRuns(30, runCursor.value ?? undefined).then(next => {
-      runs.value.push(...next.items.filter((item: any) => item.loops && item.started_at >= cutoff))
+      mergeRuns(next.items.filter((item: any) => item.started_at >= cutoff))
       runCursor.value = next.next_cursor
       hasMoreRuns.value = next.has_more && next.items.some((item: any) => item.started_at >= cutoff)
     }))
@@ -487,12 +521,14 @@ onMounted(() => load())
             <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
           <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" :claimed="claimedDays.has(dayDetail.date)" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(Math.min(dayRange(dayDetail.date)[1] * 1000 - 1, Date.now()))" @open-records="selectRecordDate" />
+          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
           <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
+            <p v-if="reportForm.resource && reportForm.claimed_delta" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
+            <label v-if="reportForm.resource">认领数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多认领当前灰色部分 {{ signed(reportForm.claim_limit) }}</small></label>
             <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
             <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
-            <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" placeholder="可选，不用写具体资源数字"></label>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim())">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">先不说了</button></div>
+            <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim()) || reportClaimInvalid">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">先不说了</button></div>
           </form>
         </section>
 
@@ -540,6 +576,7 @@ onMounted(() => load())
 .report-proactive { align-self: flex-start; }
 .inventory-gap-panel:empty { display: none; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
+.report-claim-summary { margin: 0; padding: 9px 11px; color: var(--ink); background: var(--fox-gold-pale); border-radius: 8px; }
 .report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
 .report-form input { max-width: 260px; }
 .report-form fieldset { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }

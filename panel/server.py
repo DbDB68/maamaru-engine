@@ -1692,7 +1692,8 @@ async def api_add_human_report(request: Request):
         item = get_telemetry_store().add_human_report(
             occurred_at=float(body.get("occurred_at") or time.time()),
             activities=body.get("activities") or [], note=body.get("note", ""),
-            source=body.get("source", "proactive"), gap_key=body.get("gap_key"))
+            source=body.get("source", "proactive"), gap_key=body.get("gap_key"),
+            resource=body.get("resource"), claimed_delta=body.get("claimed_delta"))
     except (TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
     return {"ok": True, "item": item}

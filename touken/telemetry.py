@@ -8,6 +8,7 @@ but it must never make automation fail.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -19,7 +20,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 4
+TELEMETRY_SCHEMA_VERSION = 5
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -128,6 +129,13 @@ class TelemetryStore:
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
             (str(TELEMETRY_SCHEMA_VERSION),),
         )
+        # v5 原地补列：人工认领的精确数额（旧记录保持 NULL，不回填不猜测）
+        report_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(human_reports)").fetchall()}
+        if "resource" not in report_cols:
+            conn.execute("ALTER TABLE human_reports ADD COLUMN resource TEXT")
+        if "claimed_delta" not in report_cols:
+            conn.execute("ALTER TABLE human_reports ADD COLUMN claimed_delta REAL")
         conn.commit()
 
     def close(self) -> None:
@@ -246,7 +254,9 @@ class TelemetryStore:
 
     def add_human_report(self, *, occurred_at: float, activities: list[str],
                          note: str = "", source: str = "proactive",
-                         gap_key: str | None = None) -> dict:
+                         gap_key: str | None = None,
+                         resource: str | None = None,
+                         claimed_delta: float | None = None) -> dict:
         activities = [str(value).strip()[:40] for value in activities
                       if str(value).strip()][:20]
         note = str(note or "").strip()[:300]
@@ -254,20 +264,44 @@ class TelemetryStore:
         gap_key = str(gap_key or "").strip()[:80] or None
         if not activities and not note:
             raise ValueError("请至少选一项，或留一句说明")
+        # 认领数额必须资源+数额成对出现；缺口报备的金额以缺口快照差为准，
+        # 不允许再自带数额（两种语义不许混在一条记录里）
+        if gap_key and (resource is not None or claimed_delta is not None):
+            raise ValueError("缺口报备的金额以库存缺口为准，不用填资源和数额")
+        if (resource is None) != (claimed_delta is None):
+            raise ValueError("认领需要同时填写资源和数额")
+        if resource is not None:
+            resource = str(resource).strip()
+            if resource not in LEDGER_RESOURCES:
+                raise ValueError(f"不认识这种资源：{resource}")
+            if (isinstance(claimed_delta, bool)
+                    or not isinstance(claimed_delta, (int, float))):
+                raise ValueError("认领数额必须是非零整数")
+            if (isinstance(claimed_delta, float)
+                    and (not math.isfinite(claimed_delta)
+                         or not claimed_delta.is_integer())):
+                raise ValueError("认领数额必须是非零整数")
+            claimed_delta = int(claimed_delta)
+            if not claimed_delta or not -(2 ** 63) <= claimed_delta <= 2 ** 63 - 1:
+                raise ValueError("认领数额超出可记录范围")
         created_at = time.time()
         cursor = self._conn().execute(
-            "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, activities, note) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (created_at, float(occurred_at), source, gap_key, _json(activities), note),
+            "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
+            "activities, note, resource, claimed_delta) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (created_at, float(occurred_at), source, gap_key,
+             _json(activities), note, resource, claimed_delta),
         )
         self._conn().commit()
         return {"id": cursor.lastrowid, "created_at": created_at,
                 "occurred_at": float(occurred_at), "source": source,
-                "gap_key": gap_key, "activities": activities, "note": note}
+                "gap_key": gap_key, "activities": activities, "note": note,
+                "resource": resource, "claimed_delta": claimed_delta}
 
     def human_reports(self, limit: int = 200) -> list[dict]:
         rows = self._conn().execute(
-            "SELECT id, created_at, occurred_at, source, gap_key, activities, note "
+            "SELECT id, created_at, occurred_at, source, gap_key, activities, note, "
+            "resource, claimed_delta "
             "FROM human_reports ORDER BY occurred_at DESC, id DESC LIMIT ?",
             (max(1, min(int(limit), 1000)),),
         ).fetchall()
@@ -359,7 +393,7 @@ class TelemetryStore:
                 baseline_rows.append(row)
                 break
         reports = conn.execute(
-            "SELECT id, occurred_at, gap_key FROM human_reports "
+            "SELECT id, occurred_at, gap_key, resource, claimed_delta FROM human_reports "
             "WHERE occurred_at <= ? ORDER BY occurred_at, id", (to_ts,)).fetchall()
 
         # ── 观察流：优先级 直读 before/after(3) > captured(2) > peek(1) ──
@@ -525,7 +559,8 @@ class TelemetryStore:
         # ── 缺口：跨 run 快照差值 + 人工报备 + 证据冲突 ──
         gaps: list[dict] = []
         report_list = [{"id": r["id"], "occurred_at": r["occurred_at"],
-                        "gap_key": r["gap_key"]} for r in reports]
+                        "gap_key": r["gap_key"], "resource": r["resource"],
+                        "claimed_delta": r["claimed_delta"]} for r in reports]
         captured = sorted((r for r in [*baseline_rows, *rows]
                            if r["event_type"] == "inventory.captured"),
                           key=lambda r: (r["ts"], r["id"]))
@@ -550,19 +585,24 @@ class TelemetryStore:
             gap_key = f'{prev["id"]}:{cur["id"]}'
             linked = [r["id"] for r in report_list
                       if r["gap_key"] == gap_key
-                      or (prev["ts"] < r["occurred_at"] <= cur["ts"])]
+                      or (prev["ts"] < r["occurred_at"] <= cur["ts"]
+                          and (not r["resource"] or r["resource"] in delta))]
             gaps.append({"id": f'gap-{int(prev["ts"])}-{int(cur["ts"])}',
                          "from": prev["ts"], "to": cur["ts"], "resources": delta,
                          "reason": "no_observation", "human_report_ids": linked})
         linked_report_ids = {rid for gap in gaps for rid in gap["human_report_ids"]}
         for report in report_list:
-            # 没挂上任何缺口的窗口内人工报备单独成条：只降置信度，不改写库存
+            # 没挂上任何缺口的窗口内人工报备单独成条：不改写库存；
+            # 带了 resource 的认领只波及该资源的置信度，
+            # 旧的无资源报备只留档，不再代表当天所有资源都已认领
             if (report["id"] in linked_report_ids
                     or not from_ts <= report["occurred_at"] <= to_ts):
                 continue
+            resources = ({report["resource"]: report["claimed_delta"]}
+                         if report["resource"] else {})
             gaps.append({"id": f'gap-hr-{report["id"]}',
                          "from": report["occurred_at"], "to": report["occurred_at"],
-                         "resources": {}, "reason": "human_reported",
+                         "resources": resources, "reason": "human_reported",
                          "human_report_ids": [report["id"]]})
         for name, ts_a, ts_b, value_a, value_b in conflicts:
             gaps.append({"id": f"gap-conflict-{int(ts_a)}-{int(ts_b)}",
@@ -577,10 +617,9 @@ class TelemetryStore:
             for g in gaps:
                 if not (g["from"] <= end and g["to"] >= start):
                     continue
-                # 缺口点名了波及资源（no_observation/conflict 的 resources 非空）时，
-                # 没点名的资源不背锅；人工报备范围未知（resources 为空），一起降
-                if (resource is not None and g["resources"]
-                        and resource not in g["resources"]):
+                # 缺口必须点名波及资源才影响该资源置信度；
+                # 旧版无资源的人工报备（resources 为空）只留档，不波及任何资源
+                if resource is not None and resource not in g["resources"]:
                     continue
                 ids.append(g["id"])
             return ids

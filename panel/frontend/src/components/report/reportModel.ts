@@ -59,6 +59,8 @@ export function eventTime(ts: number): string {
 export const scriptNames: Record<string, string> = {
   osaka: '大阪城', sortie: '合战场', yosari: '异去', raid: '联队战',
   pumpkin: '南瓜大作战', daily: '一键日课',
+  expedition: '远征', practice: '演练', smith: '锻刀', repair: '手入',
+  sakura: '刷花', sugar: '炼糖', rotate_captain: '换队长', scheduler: '排班',
   inbox_supplies: '收杂物箱', snapshot: '库存盘点',
 }
 
@@ -86,8 +88,18 @@ export function loopTime(seconds: number | null): string {
 
 export function runTitle(run: any): string {
   const name = scriptNames[run.script] || '挂机任务'
-  if (run.script === 'osaka' && run.selected_floor != null) return `大阪城 ${run.selected_floor}F · ${run.loops} 圈`
-  return `${name} · ${run.loops} 圈`
+  const loops = Number(run.loops || 0)
+  if (run.script === 'osaka' && run.selected_floor != null) {
+    return loops > 0 ? `大阪城 ${run.selected_floor}F · ${loops} 圈` : `大阪城 ${run.selected_floor}F`
+  }
+  return loops > 0 ? `${name} · ${loops} 圈` : name
+}
+
+export function runStatusLabel(run: any): string {
+  const labels: Record<string, string> = {
+    completed: '已完成', stopped: '已手动停止', failed: '翻车',
+  }
+  return labels[String(run.status || '')] || String(run.status || '状态未记录')
 }
 
 const deltaOrder = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
