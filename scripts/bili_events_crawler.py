@@ -182,6 +182,25 @@ def parse_announcement(article: dict) -> dict:
     }
 
 
+# 候选重抓间隔：公告可能修订、解析规则会升级，候选不是终身制；
+# 但也别每天骚扰同一篇，一周一轮够了
+CANDIDATES_TTL = 7 * 86400
+
+
+def _needs_schedule_fetch(item: dict, now: float) -> bool:
+    """这篇公告要不要（重）抓正文找活动时间。
+
+    没有候选的要抓；有候选但提取时间超过一周的也要重抓
+    （公告修订/解析规则升级后自愈），新鲜候选不重复请求。
+    """
+    if not item.get("update_date") or not item.get("url"):
+        return False
+    candidates = item.get("schedule_candidates")
+    if not candidates:
+        return True
+    return now - float(item.get("candidates_extracted_at") or 0) > CANDIDATES_TTL
+
+
 def merge_history(old: list[dict], new: list[dict]) -> list[dict]:
     """按标题去重合并，只保留近 KEEP_WEEKS 周的公告。"""
     cutoff = time.time() - KEEP_WEEKS * 7 * 86400
@@ -192,7 +211,9 @@ def merge_history(old: list[dict], new: list[dict]) -> list[dict]:
             if (prev and "schedule_candidates" not in item
                     and prev.get("schedule_candidates")):
                 item = {**item,
-                        "schedule_candidates": prev["schedule_candidates"]}
+                        "schedule_candidates": prev["schedule_candidates"],
+                        "candidates_extracted_at":
+                            prev.get("candidates_extracted_at")}
             merged[item["title"]] = item
     return sorted(merged.values(), key=lambda x: x.get("publish_time", 0),
                   reverse=True)
@@ -216,10 +237,9 @@ def main() -> int:
         old_items = []
     merged = merge_history(old_items, new_items)
     # 抓正文找活动时间候选。对合并后的全量做：老公告上次没抓到的这次补票，
-    # 已有候选的跳过（候选是静态事实，不重复请求）
+    # 候选超过一周的重抓（公告会修订、规则会升级），新鲜候选跳过
     for item in merged:
-        if (not item.get("update_date") or not item.get("url")
-                or item.get("schedule_candidates")):
+        if not _needs_schedule_fetch(item, time.time()):
             continue
         cvid = item["url"].rsplit("cv", 1)[-1]
         try:
@@ -227,6 +247,7 @@ def main() -> int:
             found = extract_schedule_candidates(text, item["publish_time"])
             if found:
                 item["schedule_candidates"] = found
+                item["candidates_extracted_at"] = time.time()
         except Exception as exc:  # 单篇失败不拖垮整批
             print(f"[爬虫] cv{cvid} 正文抓取失败：{exc}", file=sys.stderr)
         time.sleep(3)  # 正文接口风控敏感，宁可慢不可 429
