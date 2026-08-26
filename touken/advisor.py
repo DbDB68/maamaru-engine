@@ -481,9 +481,12 @@ def add_event_goal(store, goals_path: Path, event: str, *,
     if event not in cards:
         raise ValueError(f"不认识活动「{event}」")
     card = cards[event]
+    from . import event_history
+    periods = event_history.load_history(Path(goals_path).parent)
     abacus = event_abacus(event, card,
-                          measured=measured_keys_per_run(store), today=today,
-                          now=now_dt)
+                          measured=resolve_keys_per_run(store, event, card,
+                                                        periods),
+                          today=today, now=now_dt)
     cost = abacus.get("koban_cost")
     if cost is None:
         raise ValueError(abacus.get("message") or "这场活动的预算还算不出来")
@@ -548,11 +551,19 @@ def get_planning(store, goals_path: Path, *,
                       "end_date": card.get("end_date")}
                      for name, card in cards.items()
                      if card.get("start_date") and card.get("end_date")]
-    measured = measured_keys_per_run(store)
+    # 活动周期档案：收摊的期次懒归档（幂等）；取值链 本期实测 > 上期经验 > 手填
+    from . import event_history
+    status_dir = Path(goals_path).parent
+    periods = event_history.load_history(status_dir)
+    resolutions = {}
+    for name, card in cards.items():
+        event_history.archive_if_finished(store, name, card, status_dir,
+                                          now=now_dt)
+        resolutions[name] = resolve_keys_per_run(store, name, card, periods)
     # §25：有机理模型的活动按知识卡直接算窗口净影响，喂给目标评估
     window_impacts = {}
     for name, card in cards.items():
-        impact = window_impact(name, card, measured_keys=measured,
+        impact = window_impact(name, card, measured_keys=resolutions.get(name),
                                floor_yield=floor_yield, today=today,
                                now=now_dt)
         if impact:
@@ -563,8 +574,8 @@ def get_planning(store, goals_path: Path, *,
                            event_windows=event_windows,
                            window_impacts=window_impacts)
              for goal in load_goals(goals_path)]
-    abacuses = [event_abacus(name, card, measured=measured, today=today,
-                             now=now_dt)
+    abacuses = [event_abacus(name, card, measured=resolutions.get(name),
+                             today=today, now=now_dt)
                 for name, card in cards.items()]
     # 预算 vs 家底的判定也在服务端做：前端只展示，不许自己拼目标数字
     koban_now = current.get("小判")
@@ -633,23 +644,88 @@ def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
     except (OSError, ValueError):
         local = {}
     local.setdefault(event, {})["est_keys_per_run"] = estimate
+    # 估计按期次归档：复刻换新期时老估计不自动带过来（取值链会校验）
+    from .event_history import period_key
+    period = period_key(event, cards[event])
+    if period:
+        local[event]["est_period"] = period
     path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
                     encoding="utf-8")
     return cards[event]
 
 
-def measured_keys_per_run(store, *, limit: int = 50) -> dict | None:
-    """实测场均钥匙：edocastle.run_completed 事件（江户城流程产出）的平均。"""
+def measured_keys_per_run(store, *, name: str | None = None,
+                          card: dict | None = None,
+                          limit: int = 50) -> dict | None:
+    """实测场均钥匙：edocastle.run_completed 事件（江户城流程产出）的平均。
+
+    给了 name+card 就只算本期（复刻不串期）：payload 带 period 的按期次
+    归属；老数据没 period 的，按事件时间落在卡的窗口内归属。
+    """
+    from .event_history import period_key
     events = store.recent_events(limit=limit, event_type="edocastle.run_completed")
+    this_period = period_key(name, card) if name and card else None
+    start_dt, end_dt, _ = _card_window(card) if card else (None, None, False)
     keys = []
     for event in events:
         payload = event.get("payload")
-        if isinstance(payload, dict) and isinstance(payload.get("keys"), (int, float)) \
-                and payload["keys"] > 0:
-            keys.append(payload["keys"])
+        if not (isinstance(payload, dict)
+                and isinstance(payload.get("keys"), (int, float))
+                and payload["keys"] > 0):
+            continue
+        if this_period:
+            marker = payload.get("period")
+            if marker:
+                if marker != this_period:
+                    continue  # 别期的实测
+            elif start_dt is not None:
+                ts = event.get("ts")
+                upper = end_dt.timestamp() if end_dt else float("inf")
+                if not isinstance(ts, (int, float)) \
+                        or not (start_dt.timestamp() <= ts <= upper):
+                    continue  # 老数据落在窗口外，不是本期
+        keys.append(payload["keys"])
     if not keys:
         return None
-    return {"per_run": sum(keys) / len(keys), "runs": len(keys)}
+    return {"per_run": sum(keys) / len(keys), "runs": len(keys),
+            "keys_total": int(sum(keys))}
+
+
+def resolve_keys_per_run(store, name: str, card: dict, periods: list[dict],
+                         *, limit: int = 50) -> dict | None:
+    """场均钥匙取值链：本期实测 > 规则相同的上期经验 > 玩家估计 > 没数。
+
+    返回 {"per_run", "source", "basis", ...}，啥都没有返回 None。
+    basis 是人话依据，前端原样展示，不许自己编理由。
+    source: measured（本期实测）/ history（上期经验）/ estimate（手填估计）。
+    """
+    from .event_history import (find_matching_period, period_key,
+                                rules_fingerprint)
+    this_period = period_key(name, card)
+    measured = measured_keys_per_run(store, name=name, card=card, limit=limit)
+    if measured:
+        return {**measured, "source": "measured", "period": this_period,
+                "basis": f"本期实测 {measured['runs']} 圈平均出来的"}
+    previous = find_matching_period(
+        periods, name, rules_fingerprint(card),
+        str(card.get("start_date") or "")[:10] or None)
+    if previous:
+        return {"per_run": float(previous["keys_per_run"]),
+                "runs": previous.get("runs"),
+                "source": "history",
+                "period": f"{name}@{previous['start_date']}",
+                "basis": (f"上期（{previous['start_date']}）打了 "
+                          f"{previous.get('runs')} 圈，平均每圈 "
+                          f"{previous['keys_per_run']:.1f} 把，规则相同，"
+                          "先按这个估")}
+    estimate = card.get("est_keys_per_run")
+    if estimate:
+        est_period = card.get("est_period")
+        # 别的期次填的估计不带过来；没记期次的老估计默认是当期填的
+        if not (est_period and this_period and est_period != this_period):
+            return {"per_run": float(estimate), "source": "estimate",
+                    "period": this_period, "basis": "你手填的临时估计"}
+    return None
 
 
 def _ticket_cap(card: dict) -> int:
@@ -727,13 +803,15 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     }
 
     if measured:
-        keys_per_run, source = measured["per_run"], "measured"
+        keys_per_run = measured["per_run"]
+        source = measured.get("source") or "measured"
     elif card.get("est_keys_per_run"):
         keys_per_run, source = float(card["est_keys_per_run"]), "estimate"
     else:
         keys_per_run, source = None, None
     abacus["keys_per_run"] = round(keys_per_run, 1) if keys_per_run else None
     abacus["keys_source"] = source
+    abacus["keys_basis"] = (measured or {}).get("basis")  # 取值依据（人话）
 
     if not keys_total or not ticket_price:
         abacus["message"] = "这张活动卡还缺数据，回头补。"
@@ -748,7 +826,8 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     import math
     runs = math.ceil(keys_total / keys_per_run)
     abacus["runs_needed"] = runs
-    label = "实测" if source == "measured" else "估计"
+    label = {"measured": "实测", "history": "上期经验",
+             "estimate": "估计"}.get(source, "估计")
 
     start_dt, end_dt, precise = _card_window(card)
     if end_dt is None:
