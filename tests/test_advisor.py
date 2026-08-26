@@ -355,7 +355,8 @@ class GetPlanningTests(unittest.TestCase):
         self.assertEqual(goal["current"], 9000)
         self.assertEqual(goal["rate"], 500)
         self.assertEqual(goal["status"], "behind")
-        self.assertEqual(goal["extra_floors"], 344)  # 8600/天 ÷ 25/层
+        # 本期大阪城已进入知识卡窗口，预测会把窗口净收益一并算进去。
+        self.assertEqual(goal["extra_floors"], 345)
         self.assertEqual(planning["koban_per_floor"]["per_floor"], 25)
         # 仓库默认活动卡（江户城）也应出现在算盘里，没实测就保持「还没数」
         abacus = planning["events"][0]
@@ -453,6 +454,94 @@ class EventGoalTests(unittest.TestCase):
             store, _ = self._setup(tmp, 9000)
             with self.assertRaises(ValueError):
                 advisor.add_event_goal(store, Path(tmp) / "g.json", "南瓜大作战")
+
+
+class OsakaStockGoalTests(unittest.TestCase):
+    NOW = datetime(2026, 8, 26, 12, tzinfo=advisor._TZ)
+
+    def _setup(self, tmp: str, balance: int = 9000):
+        card = {
+            "start_date": "2026-08-13", "end_date": "2026-08-27",
+            "start_at": "2026-08-13T10:00:00+08:00",
+            "end_at": "2026-08-27T05:00:00+08:00",
+            "mechanics": "osaka",
+        }
+        (Path(tmp) / advisor.EVENTS_META_LOCAL).write_text(
+            json.dumps({"大阪城": card}, ensure_ascii=False), encoding="utf-8")
+
+        class _Store:
+            def resource_ledger(self, from_ts, to_ts):
+                return {"per_resource": [{"resource": "小判",
+                                           "opening": balance,
+                                           "closing": balance}],
+                        "daily_series": []}
+
+            def recent_events(self, limit=100, event_type=None):
+                if event_type == "osaka.koban_session":
+                    return [{"ts": OsakaStockGoalTests.NOW.timestamp(),
+                             "payload": {"delta": 250, "floors": 10}}]
+                return []
+        return _Store(), card
+
+    def test_creates_final_stock_goal_with_precise_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, card = self._setup(tmp)
+            path = Path(tmp) / "planning_goals.json"
+            result = advisor.add_event_goal(
+                store, path, "大阪城", target=10000,
+                today=self.NOW.date(), now=self.NOW)
+            self.assertEqual(result["shortfall"], 1000)
+            self.assertEqual(result["goal_mode"], "stock_target")
+            self.assertEqual(result["goal"]["target"], 10000)
+            self.assertEqual(result["goal"]["deadline"], card["end_date"])
+            self.assertEqual(result["goal"]["deadline_at"], card["end_at"])
+            self.assertEqual(result["goal"]["note"], "大阪城收摊目标")
+
+    def test_repeated_request_updates_same_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp)
+            path = Path(tmp) / "planning_goals.json"
+            first = advisor.add_event_goal(
+                store, path, "大阪城", target=10000,
+                today=self.NOW.date(), now=self.NOW)
+            second = advisor.add_event_goal(
+                store, path, "大阪城", target=12000,
+                today=self.NOW.date(), now=self.NOW)
+            goals = advisor.load_goals(path)
+            self.assertEqual(len(goals), 1)
+            self.assertEqual(first["goal"]["id"], second["goal"]["id"])
+            self.assertEqual(goals[0]["target"], 12000)
+
+    def test_missing_target_and_closed_activity_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp)
+            path = Path(tmp) / "planning_goals.json"
+            with self.assertRaises(ValueError):
+                advisor.add_event_goal(store, path, "大阪城", now=self.NOW)
+            with self.assertRaises(ValueError):
+                advisor.add_event_goal(
+                    store, path, "大阪城", target=10000,
+                    now=datetime(2026, 8, 27, 5, tzinfo=advisor._TZ))
+
+    def test_evaluation_uses_measured_floor_yield_and_exact_closing_time(self):
+        goal = {
+            "id": 1, "kind": "event", "event": "大阪城",
+            "goal_mode": "stock_target", "resource": "小判",
+            "target": 10000, "deadline": "2026-08-27",
+            "deadline_at": "2026-08-27T05:00:00+08:00",
+        }
+        advice = advisor.evaluate_goal(
+            goal, current=9000, rate_info={},
+            floor_yield={"per_floor": 25, "sessions": 3},
+            now=self.NOW)
+        self.assertEqual(advice["status"], "active")
+        self.assertEqual(advice["floors_needed"], 40)
+        self.assertEqual(advice["floors_per_day"], 40)
+        expired = advisor.evaluate_goal(
+            goal, current=9000, rate_info={},
+            floor_yield={"per_floor": 25, "sessions": 3},
+            now=datetime(2026, 8, 27, 5, tzinfo=advisor._TZ))
+        self.assertEqual(expired["status"], "expired")
 
 
 if __name__ == "__main__":

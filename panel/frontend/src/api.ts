@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventsCalendar, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -41,11 +41,12 @@ export const api = {
   }),
   deletePlanningGoal: (id: number) => request<{ ok: boolean }>(`/api/planning/goals/${id}`, { method: 'DELETE' }),
   events: () => request<EventsCalendar>('/api/events'),
+  eventsTimeline: () => request<EventTimelineReport>('/api/events/timeline'),
   saveEventEstimate: (event: string, keysPerRun: number) => request<{ ok: boolean }>('/api/planning/event-estimate', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, keys_per_run: keysPerRun }),
   }),
-  addEventGoal: (event: string) => request<EventGoalResult>('/api/planning/event-goals', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event }),
+  addEventGoal: (event: string, target?: number) => request<EventGoalResult>('/api/planning/event-goals', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, ...(target == null ? {} : { target }) }),
   }),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),

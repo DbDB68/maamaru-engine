@@ -108,9 +108,11 @@ export interface PlanningGoalAdvice {
   id: number
   kind?: 'resource' | 'event'
   event?: string | null
+  goal_mode?: 'budget' | 'stock_target' | null
   resource: string
   target: number
   deadline: string
+  deadline_at?: string | null
   note?: string
   days_left: number
   current: number | null
@@ -119,7 +121,9 @@ export interface PlanningGoalAdvice {
   shortfall: number | null
   extra_daily: number | null
   extra_floors: number | null
-  status: 'done' | 'on_track' | 'behind' | 'expired' | 'unknown'
+  floors_needed?: number | null
+  floors_per_day?: number | null
+  status: 'done' | 'on_track' | 'behind' | 'active' | 'expired' | 'unknown'
   message: string
 }
 
@@ -158,6 +162,8 @@ export interface EventsCalendar {
 
 export interface EventAbacus {
   event: string
+  goal_mode?: 'budget' | 'stock_target'
+  goal_resource?: string
   start_date: string | null
   end_date: string | null
   keys_total: number
@@ -166,7 +172,8 @@ export interface EventAbacus {
   daily_free_tickets: number
   note: string
   keys_per_run: number | null
-  keys_source: 'measured' | 'estimate' | null
+  keys_source: 'measured' | 'history' | 'estimate' | null
+  keys_basis?: string | null
   runs_needed: number | null
   free_runs: number | null
   paid_tickets: number | null
@@ -175,6 +182,8 @@ export interface EventAbacus {
   available_now: number | null
   sufficient: boolean | null
   shortfall: number | null
+  yield_per_floor?: number | null
+  yield_sessions?: number | null
   message: string
 }
 
@@ -182,7 +191,50 @@ export interface EventGoalResult {
   ok: boolean
   sufficient: boolean | null
   goal: Record<string, unknown> | null
-  koban_cost: number
+  goal_mode?: 'budget' | 'stock_target'
+  target?: number
+  koban_cost: number | null
   available_now: number | null
   shortfall: number | null
+}
+
+// ---- 事件时间轴 /api/events/timeline ----
+
+export interface EventTimelineBudget {
+  koban_cost: number | null
+  available_now: number | null
+  shortfall: number | null
+  sufficient: boolean | null
+  message: string
+}
+
+export interface EventTimelineEntry {
+  name: string
+  precise: boolean
+  start_at: string | null
+  end_at: string | null
+  start_date: string
+  end_date: string | null
+  note: string
+  days_left: number | null
+  days_until_start?: number
+  budget: EventTimelineBudget | null
+}
+
+export interface EventTimelineCandidate {
+  name: string | null
+  section: string | null
+  start_at: string | null
+  end_at: string | null
+  announcement: string | null
+  url: string | null
+}
+
+export interface EventTimelineReport {
+  generated_at: string
+  calendar_stale: boolean
+  ongoing: EventTimelineEntry[]
+  upcoming: EventTimelineEntry[]
+  later: EventTimelineEntry[]
+  unverified: EventTimelineCandidate[]
 }

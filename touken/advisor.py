@@ -303,13 +303,15 @@ def _window_coverage(today: date, deadline: date,
 def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
                   floor_yield: dict | None, today: date | None = None,
                   event_windows: list[dict] | None = None,
-                  window_impacts: dict | None = None) -> dict:
+                  window_impacts: dict | None = None,
+                  now: datetime | None = None) -> dict:
     """给一条目标算命。status: done / on_track / behind / expired / unknown。
 
     rate_info 里 daily 是平常速度、event_daily 是活动期间速度；截止日内
     落在活动期的天数按活动速度估，其余按平常速度。
     """
-    today = today or _today()
+    now_dt = _resolve_now(today, now)
+    today = today or now_dt.date()
     resource = goal["resource"]
     target = int(goal["target"])
     deadline = date.fromisoformat(goal["deadline"])
@@ -319,9 +321,11 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         "id": goal.get("id"),
         "kind": goal.get("kind") or "resource",
         "event": goal.get("event"),
+        "goal_mode": goal.get("goal_mode"),
         "resource": resource,
         "target": target,
         "deadline": goal["deadline"],
+        "deadline_at": goal.get("deadline_at"),
         "note": goal.get("note") or "",
         "days_left": max(days_left, 0),
         "current": current,
@@ -332,6 +336,8 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         "shortfall": None,
         "extra_daily": None,
         "extra_floors": None,
+        "floors_needed": None,
+        "floors_per_day": None,
         "status": "unknown",
         "message": "",
     }
@@ -344,6 +350,45 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         advice["status"] = "done"
         advice["message"] = (f"{resource}已经有 {_fmt(current)}，"
                              f"目标 {_fmt(target)} 稳稳拿下啦🎉")
+        return advice
+    if goal.get("goal_mode") == "stock_target":
+        deadline_at = goal.get("deadline_at")
+        try:
+            end_dt = (datetime.fromisoformat(str(deadline_at))
+                      if deadline_at else datetime.combine(
+                          deadline, datetime.max.time(), tzinfo=_TZ))
+        except ValueError:
+            end_dt = datetime.combine(deadline, datetime.max.time(), tzinfo=_TZ)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=_TZ)
+        if now_dt >= end_dt:
+            advice["status"] = "expired"
+            advice["shortfall"] = int(target - current)
+            advice["message"] = (f"{goal.get('event') or '活动'}已经收摊，"
+                                 f"{resource}离目标还差 {_fmt(target - current)}。")
+            return advice
+        advice["shortfall"] = int(target - current)
+        per_floor = (floor_yield or {}).get("per_floor")
+        if not per_floor or per_floor <= 0:
+            advice["message"] = (
+                f"现在有 {_fmt(current)} {resource}，离目标还差 "
+                f"{_fmt(target - current)}。狐之助还没攒够大阪城单层收益样本，"
+                "再挖几层就能换算需要多少层。")
+            return advice
+        import math
+        floors_needed = max(1, math.ceil((target - current) / per_floor))
+        remaining_days = max(1, math.ceil(
+            (end_dt - now_dt).total_seconds() / 86400))
+        advice["status"] = "active"
+        advice["floors_needed"] = floors_needed
+        advice["floors_per_day"] = max(1, math.ceil(floors_needed / remaining_days))
+        advice["extra_floors"] = advice["floors_per_day"]
+        advice["message"] = (
+            f"现在有 {_fmt(current)} 小判，收摊前还差 "
+            f"{_fmt(target - current)}。按最近 {floor_yield.get('sessions', 0)} 次"
+            f"挖地实测（每层约 {per_floor:.0f} 小判），还要挖约 "
+            f"{floors_needed} 层；按剩余时间分摊，约每天 "
+            f"{advice['floors_per_day']} 层。")
         return advice
     if days_left <= 0:
         advice["status"] = "expired"
@@ -440,8 +485,10 @@ def _current_balances(store, now: float) -> dict:
 
 
 def _upsert_event_goal(path: Path, *, event: str, target: int,
-                       deadline: str, note: str) -> dict:
-    """每个活动至多一条预算目标；预算变化时原位更新，不重复追加。"""
+                       deadline: str, note: str,
+                       goal_mode: str = "budget",
+                       deadline_at: str | None = None) -> dict:
+    """每个活动至多一条目标；数字变化时原位更新，不重复追加。"""
     if not 0 < int(target) <= _MAX_TARGET:
         raise ValueError("活动预算不对劲，暂时不能立目标")
     goals = load_goals(path)
@@ -453,6 +500,7 @@ def _upsert_event_goal(path: Path, *, event: str, target: int,
             "id": max([int(item.get("id") or 0) for item in goals], default=0) + 1,
             "kind": "event",
             "event": event,
+            "goal_mode": goal_mode,
             "resource": "小判",
             "target": int(target),
             "deadline": deadline,
@@ -461,17 +509,26 @@ def _upsert_event_goal(path: Path, *, event: str, target: int,
         }
         goals.append(goal)
     else:
-        goal.update({"resource": "小判", "target": int(target),
+        goal.update({"goal_mode": goal_mode, "resource": "小判",
+                     "target": int(target),
                      "deadline": deadline, "note": note[:50],
                      "updated_at": time.time()})
+    if deadline_at:
+        goal["deadline_at"] = deadline_at
+    else:
+        goal.pop("deadline_at", None)
     _save_goals(path, goals)
     return dict(goal)
 
 
 def add_event_goal(store, goals_path: Path, event: str, *,
+                   target=None,
                    today: date | None = None,
                    now: datetime | None = None) -> dict:
-    """把活动预算立成攒钱目标。语义：目标是「预算本身」，家底会拿来抵；
+    """把活动准备立成目标。
+
+    大阪城是「收摊时小判家底达到多少」；其余预算型活动的目标是预算本身，
+    家底会拿来抵；
     不是旧前端那套「现有余额 + 预算」（那等于让人家多攒一倍）。
     家底已够就不立目标，直接报充足。预算数字只能这里算，前端不许自己拼。
     """
@@ -481,6 +538,40 @@ def add_event_goal(store, goals_path: Path, event: str, *,
     if event not in cards:
         raise ValueError(f"不认识活动「{event}」")
     card = cards[event]
+    current = _current_balances(store, now_dt.timestamp()).get("小判")
+    if card.get("mechanics") == "osaka":
+        if isinstance(target, bool):
+            raise ValueError("先填一个想攒到的小判数")
+        try:
+            target = int(target)
+        except (TypeError, ValueError):
+            raise ValueError("先填一个想攒到的小判数") from None
+        if not 0 < target <= _MAX_TARGET:
+            raise ValueError("小判目标不对劲，暂时不能立目标")
+        deadline = card.get("end_date")
+        if not deadline:
+            raise ValueError("这张活动卡还没结束日期，立不了目标")
+        _, end_dt, _ = _card_window(card)
+        if end_dt is not None and now_dt >= end_dt:
+            raise ValueError("这场活动已经结束，不能再立目标")
+        result = {
+            "goal_mode": "stock_target", "sufficient": None, "goal": None,
+            "target": target, "koban_cost": None, "available_now": current,
+            "shortfall": None,
+        }
+        if current is not None:
+            result["shortfall"] = max(0, int(target - current))
+            result["sufficient"] = result["shortfall"] == 0
+        existing = next((item for item in load_goals(goals_path)
+                         if item.get("kind") == "event"
+                         and item.get("event") == event), None)
+        if result["sufficient"] and existing is None:
+            return result
+        result["goal"] = _upsert_event_goal(
+            goals_path, event=event, target=target, deadline=deadline,
+            deadline_at=card.get("end_at"), goal_mode="stock_target",
+            note=f"{event}收摊目标")
+        return result
     from . import event_history
     periods = event_history.load_history(Path(goals_path).parent)
     abacus = event_abacus(event, card,
@@ -490,7 +581,6 @@ def add_event_goal(store, goals_path: Path, event: str, *,
     cost = abacus.get("koban_cost")
     if cost is None:
         raise ValueError(abacus.get("message") or "这场活动的预算还算不出来")
-    current = _current_balances(store, now_dt.timestamp()).get("小判")
     deadline = card.get("start_date") or card.get("end_date")
     if not deadline:
         raise ValueError("这张活动卡还没日期，立不了目标")
@@ -515,7 +605,7 @@ def add_event_goal(store, goals_path: Path, event: str, *,
         return result
     result["goal"] = _upsert_event_goal(
         goals_path, event=event, target=cost, deadline=deadline,
-        note=f"{event}门票预算")
+        note=f"{event}门票预算", goal_mode="budget")
     return result
 
 
@@ -572,7 +662,7 @@ def get_planning(store, goals_path: Path, *,
                            rate_info=rates.get(goal["resource"]),
                            floor_yield=floor_yield, today=today,
                            event_windows=event_windows,
-                           window_impacts=window_impacts)
+                           window_impacts=window_impacts, now=now_dt)
              for goal in load_goals(goals_path)]
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
@@ -580,6 +670,9 @@ def get_planning(store, goals_path: Path, *,
     # 预算 vs 家底的判定也在服务端做：前端只展示，不许自己拼目标数字
     koban_now = current.get("小判")
     for abacus in abacuses:
+        if abacus.get("goal_mode") == "stock_target":
+            abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
+            abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
         cost = abacus.get("koban_cost")
         abacus["available_now"] = koban_now
         if cost is None or koban_now is None:
@@ -785,6 +878,9 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     daily_free = int(card.get("daily_free_tickets") or 0)
     abacus = {
         "event": name,
+        "goal_mode": ("stock_target"
+                      if card.get("mechanics") == "osaka" else "budget"),
+        "goal_resource": "小判",
         "start_date": card.get("start_date"),
         "end_date": card.get("end_date"),
         "keys_total": keys_total,
@@ -801,6 +897,12 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
         "days_left": None,
         "message": "",
     }
+
+    if card.get("mechanics") == "osaka":
+        abacus["message"] = (
+            "大阪城会持续产小判。给收摊时的家底定个数，狐之助会按最近"
+            "实测换算还要挖多少层。")
+        return abacus
 
     if measured:
         keys_per_run = measured["per_run"]
