@@ -36,6 +36,19 @@ def _today() -> date:
     return datetime.now(_TZ).date()
 
 
+def _resolve_now(today: date | None = None,
+                 now: datetime | None = None) -> datetime:
+    """生产入口用真实上海时刻；测试显式传 today 时保持中午的确定性。"""
+    if now is not None:
+        if now.tzinfo is None:
+            return now.replace(tzinfo=_TZ)
+        return now.astimezone(_TZ)
+    if today is not None:
+        return datetime.combine(today, datetime.min.time(), tzinfo=_TZ) \
+            + timedelta(hours=12)
+    return datetime.now(_TZ)
+
+
 def _fmt(value: float | int) -> str:
     return f"{int(round(value)):,}"
 
@@ -304,6 +317,8 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
     rate = (rate_info or {}).get("daily")
     advice = {
         "id": goal.get("id"),
+        "kind": goal.get("kind") or "resource",
+        "event": goal.get("event"),
         "resource": resource,
         "target": target,
         "deadline": goal["deadline"],
@@ -424,47 +439,93 @@ def _current_balances(store, now: float) -> dict:
     return current
 
 
+def _upsert_event_goal(path: Path, *, event: str, target: int,
+                       deadline: str, note: str) -> dict:
+    """每个活动至多一条预算目标；预算变化时原位更新，不重复追加。"""
+    if not 0 < int(target) <= _MAX_TARGET:
+        raise ValueError("活动预算不对劲，暂时不能立目标")
+    goals = load_goals(path)
+    goal = next((item for item in goals
+                 if item.get("kind") == "event"
+                 and item.get("event") == event), None)
+    if goal is None:
+        goal = {
+            "id": max([int(item.get("id") or 0) for item in goals], default=0) + 1,
+            "kind": "event",
+            "event": event,
+            "resource": "小判",
+            "target": int(target),
+            "deadline": deadline,
+            "note": note[:50],
+            "created_at": time.time(),
+        }
+        goals.append(goal)
+    else:
+        goal.update({"resource": "小判", "target": int(target),
+                     "deadline": deadline, "note": note[:50],
+                     "updated_at": time.time()})
+    _save_goals(path, goals)
+    return dict(goal)
+
+
 def add_event_goal(store, goals_path: Path, event: str, *,
-                   today: date | None = None) -> dict:
+                   today: date | None = None,
+                   now: datetime | None = None) -> dict:
     """把活动预算立成攒钱目标。语义：目标是「预算本身」，家底会拿来抵；
     不是旧前端那套「现有余额 + 预算」（那等于让人家多攒一倍）。
     家底已够就不立目标，直接报充足。预算数字只能这里算，前端不许自己拼。
     """
-    today = today or _today()
+    now_dt = _resolve_now(today, now)
+    today = today or now_dt.date()
     cards = load_event_cards(Path(goals_path).parent)
     if event not in cards:
         raise ValueError(f"不认识活动「{event}」")
     card = cards[event]
     abacus = event_abacus(event, card,
-                          measured=measured_keys_per_run(store), today=today)
+                          measured=measured_keys_per_run(store), today=today,
+                          now=now_dt)
     cost = abacus.get("koban_cost")
     if cost is None:
         raise ValueError(abacus.get("message") or "这场活动的预算还算不出来")
-    current = _current_balances(store, time.time()).get("小判")
+    current = _current_balances(store, now_dt.timestamp()).get("小判")
     deadline = card.get("start_date") or card.get("end_date")
     if not deadline:
         raise ValueError("这张活动卡还没日期，立不了目标")
-    if date.fromisoformat(deadline) < today and card.get("end_date"):
+    start_dt, _, _ = _card_window(card)
+    if ((start_dt is not None and now_dt >= start_dt)
+            or date.fromisoformat(deadline) < today) and card.get("end_date"):
         deadline = card["end_date"]  # 已开打：钱在收摊前备齐就行
+    if date.fromisoformat(deadline) < today:
+        raise ValueError("这场活动已经结束，不能再立预算目标")
     result = {"sufficient": None, "goal": None, "koban_cost": cost,
               "available_now": current, "shortfall": None}
-    if current is not None:
+    if cost <= 0:
+        result["shortfall"] = 0
+        result["sufficient"] = True
+    elif current is not None:
         result["shortfall"] = max(0, int(cost - current))
         result["sufficient"] = result["shortfall"] == 0
-    if result["sufficient"]:
+    existing = next((item for item in load_goals(goals_path)
+                     if item.get("kind") == "event"
+                     and item.get("event") == event), None)
+    if result["sufficient"] and existing is None:
         return result
-    result["goal"] = add_goal(goals_path, resource="小判", target=cost,
-                              deadline=deadline, note=f"{event}门票预算")
+    result["goal"] = _upsert_event_goal(
+        goals_path, event=event, target=cost, deadline=deadline,
+        note=f"{event}门票预算")
     return result
 
 
 def get_planning(store, goals_path: Path, *,
-                 today: date | None = None) -> dict:
+                 today: date | None = None,
+                 now: datetime | None = None) -> dict:
     """汇总入口：store 是 telemetry 仓库（resource_ledger / recent_events）。"""
-    today = today or _today()
-    now = time.time()
+    now_dt = _resolve_now(today, now)
+    today = today or now_dt.date()
+    now_ts = now_dt.timestamp()
     # 平常速度看最近 14 天；活动速度要回望更久，老活动样本也是样本
-    ledger = store.resource_ledger(now - EVENT_RATE_WINDOW_DAYS * 86400, now)
+    ledger = store.resource_ledger(now_ts - EVENT_RATE_WINDOW_DAYS * 86400,
+                                   now_ts)
     current = {}
     for row in ledger.get("per_resource", []):
         value = row.get("closing")
@@ -480,7 +541,8 @@ def get_planning(store, goals_path: Path, *,
                        "event_daily": event_rates[name]["daily"],
                        "event_days_observed": event_rates[name]["days_observed"]}
     floor_yield = koban_floor_yield(
-        store.recent_events(limit=50, event_type="osaka.koban_session"))
+        store.recent_events(limit=50, event_type="osaka.koban_session"),
+        now=now_ts)
     cards = load_event_cards(Path(goals_path).parent)
     event_windows = [{"name": name, "start_date": card.get("start_date"),
                       "end_date": card.get("end_date")}
@@ -491,7 +553,8 @@ def get_planning(store, goals_path: Path, *,
     window_impacts = {}
     for name, card in cards.items():
         impact = window_impact(name, card, measured_keys=measured,
-                               floor_yield=floor_yield, today=today)
+                               floor_yield=floor_yield, today=today,
+                               now=now_dt)
         if impact:
             window_impacts[name] = impact
     goals = [evaluate_goal(goal, current=current.get(goal["resource"]),
@@ -500,7 +563,8 @@ def get_planning(store, goals_path: Path, *,
                            event_windows=event_windows,
                            window_impacts=window_impacts)
              for goal in load_goals(goals_path)]
-    abacuses = [event_abacus(name, card, measured=measured, today=today)
+    abacuses = [event_abacus(name, card, measured=measured, today=today,
+                             now=now_dt)
                 for name, card in cards.items()]
     # 预算 vs 家底的判定也在服务端做：前端只展示，不许自己拼目标数字
     koban_now = current.get("小判")
@@ -515,7 +579,7 @@ def get_planning(store, goals_path: Path, *,
             abacus["sufficient"] = abacus["shortfall"] == 0
     return {
         "schema_version": PLANNING_SCHEMA_VERSION,
-        "generated_at": now,
+        "generated_at": now_ts,
         "today": today.isoformat(),
         "rate_window_days": RATE_WINDOW_DAYS,
         "event_rate_window_days": EVENT_RATE_WINDOW_DAYS,
@@ -638,7 +702,8 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
 
     实测场均优先，其次老大手填预估，都没有就老实说还没数。
     """
-    today = today or _today()
+    now_dt = _resolve_now(today, now)
+    today = today or now_dt.date()
     keys_total = int(card.get("keys_total") or 0)
     ticket_price = int(card.get("ticket_price") or 0)
     daily_free = int(card.get("daily_free_tickets") or 0)
@@ -696,8 +761,6 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
             "排进日常就能省一大截。等结束日定了狐之助再算细账。")
         return abacus
 
-    now_dt = now or (datetime.combine(today, datetime.min.time(), tzinfo=_TZ)
-                     + timedelta(hours=12))
     effective_start = max(start_dt, now_dt) if start_dt else now_dt
     days_left = max((end_dt.date() - effective_start.date()).days + 1, 0)
     abacus["days_left"] = days_left
@@ -729,17 +792,20 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
 
 def window_impact(name: str, card: dict, *, measured_keys: dict | None = None,
                   floor_yield: dict | None = None,
-                  today: date | None = None) -> dict | None:
+                  today: date | None = None,
+                  now: datetime | None = None) -> dict | None:
     """按知识卡机理算活动窗口的资源净影响（§25 活动感知规划）。
 
     返回 {"resource", "delta", "detail"} 或 None（没模型/缺数据/没日期）。
     delta 正数 = 活动净赚，负数 = 活动净花（门票钱）。没数据时返回 None，
     让目标评估退回速率兜底——宁可少说，不许瞎编。
     """
-    today = today or _today()
+    now_dt = _resolve_now(today, now)
+    today = today or now_dt.date()
     mechanics = card.get("mechanics")
     if mechanics == "edocastle":
-        abacus = event_abacus(name, card, measured=measured_keys, today=today)
+        abacus = event_abacus(name, card, measured=measured_keys, today=today,
+                              now=now_dt)
         cost = abacus.get("koban_cost")
         if cost is None:
             return None

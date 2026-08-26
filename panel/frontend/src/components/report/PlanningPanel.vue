@@ -47,6 +47,11 @@ const upcoming = computed(() => {
 const featuredAnnouncement = computed(() => upcoming.value[0] || null)
 const actionableEvents = computed(() => (planning.value?.events || []).filter(item => item.start_date || item.end_date || item.keys_total > 0))
 const waitingEvents = computed(() => (planning.value?.events || []).filter(item => !item.start_date && !item.end_date && item.keys_total <= 0))
+const eventGoalNames = computed(() => new Set(
+  (planning.value?.goals || [])
+    .filter(goal => goal.kind === 'event' && goal.event)
+    .map(goal => String(goal.event)),
+))
 
 function eventDate(abacus: EventAbacus) {
   if (abacus.start_date && abacus.end_date) return `${shortDate(abacus.start_date)}开打 · ${shortDate(abacus.end_date)}收摊`
@@ -99,17 +104,10 @@ async function saveEstimate(event: string) {
 }
 
 async function goalFromAbacus(abacus: EventAbacus) {
-  const deadline = abacus.start_date || abacus.end_date
-  if (!deadline || !abacus.koban_cost) return
+  if (!abacus.koban_cost) return
   abacusGoalSaving.value = abacus.event
   try {
-    const current = planning.value?.current?.['小判'] ?? 0
-    await api.addPlanningGoal({
-      resource: '小判',
-      target: Math.round(current + abacus.koban_cost),
-      deadline,
-      note: `${abacus.event}门票钱`,
-    })
+    await api.addEventGoal(abacus.event)
     await load()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { abacusGoalSaving.value = '' }
@@ -221,7 +219,7 @@ onMounted(load)
       <div v-if="planning?.goals.length" class="planning-goal-list">
         <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="goal.status">
           <header>
-            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.deadline }} 截止</small></span>
+            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.kind === 'event' ? '活动预算' : '手动目标' }} · {{ goal.deadline }} 截止</small></span>
             <em>{{ statusLabel[goal.status] || goal.status }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
@@ -261,6 +259,8 @@ onMounted(load)
           <span v-if="abacus.keys_total"><small>总目标</small><b>{{ fmt(abacus.keys_total) }} 把钥匙</b></span>
           <span v-if="abacus.runs_needed"><small>预计要跑</small><b>{{ fmt(abacus.runs_needed) }} 圈</b></span>
           <span v-if="abacus.koban_cost != null"><small>预计买票</small><b>{{ fmt(abacus.koban_cost) }} 小判</b></span>
+          <span v-if="abacus.available_now != null"><small>现有小判</small><b>{{ fmt(abacus.available_now) }}</b></span>
+          <span v-if="abacus.shortfall != null"><small>还差</small><b>{{ fmt(abacus.shortfall) }} 小判</b></span>
         </div>
         <div v-if="abacus.keys_total > 0 && abacus.keys_per_run == null" class="planning-question">
           <label>你一圈通常拿几把钥匙？
@@ -268,7 +268,13 @@ onMounted(load)
           </label>
           <button type="button" class="primary" :disabled="estimateSaving === abacus.event" @click="saveEstimate(abacus.event)">{{ estimateSaving === abacus.event ? '计算中……' : '帮我算' }}</button>
         </div>
-        <button v-else-if="abacus.koban_cost && (abacus.start_date || abacus.end_date)" type="button" class="primary planning-event-goal" :disabled="abacusGoalSaving === abacus.event" @click="goalFromAbacus(abacus)">{{ abacusGoalSaving === abacus.event ? '正在立目标……' : `开打前备好 ${fmt(abacus.koban_cost)} 小判` }}</button>
+        <div v-else-if="abacus.koban_cost && abacus.sufficient === true" class="planning-budget-state ready">
+          <b>小判已经备齐</b><span>活动预算 {{ fmt(abacus.koban_cost) }}，不用再立目标。</span>
+        </div>
+        <div v-else-if="abacus.koban_cost && eventGoalNames.has(abacus.event)" class="planning-budget-state">
+          <b>已加入我的目标</b><span v-if="abacus.shortfall != null">目前还差 {{ fmt(abacus.shortfall) }} 小判。</span>
+        </div>
+        <button v-else-if="abacus.koban_cost && (abacus.start_date || abacus.end_date)" type="button" class="primary planning-event-goal" :disabled="abacusGoalSaving === abacus.event" @click="goalFromAbacus(abacus)">{{ abacusGoalSaving === abacus.event ? '正在立目标……' : abacus.shortfall != null ? `还差 ${fmt(abacus.shortfall)} 小判，立成目标` : `把 ${fmt(abacus.koban_cost)} 小判设为目标` }}</button>
         <details v-if="abacus.note">
           <summary>怎么算的</summary>
           <p>{{ abacus.note }}</p>
@@ -337,11 +343,15 @@ onMounted(load)
 .planning-event-card > header b { font-size: 16px; }
 .planning-event-card > header em { color: var(--ink-dim); font-size: 12px; font-style: normal; white-space: nowrap; }
 .planning-event-result { margin: 12px 0 0; font-size: 15px; line-height: 1.65; }
-.planning-event-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.planning-event-metrics { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 .planning-question { display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; padding: 11px 12px; background: var(--fox-gold-pale); border-radius: 8px; }
 .planning-question label { flex: 1 1 180px; color: var(--ink); font-size: 13px; }
 .planning-question input { max-width: 180px; background: var(--paper-card); }
 .planning-event-goal { margin-top: 12px; }
+.planning-budget-state { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; padding: 10px 12px; color: var(--ink-dim); background: var(--fox-gold-pale); border-radius: 8px; }
+.planning-budget-state b { color: var(--ink); }
+.planning-budget-state.ready { background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); }
+.planning-budget-state.ready b { color: #426b36; }
 .planning-waiting-event { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; color: var(--ink-dim); border-top: 1px dashed var(--paper-line); }
 .planning-waiting-event b { color: var(--ink); }
 @media (max-width: 700px) {

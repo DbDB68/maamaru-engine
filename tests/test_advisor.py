@@ -420,6 +420,34 @@ class EventGoalTests(unittest.TestCase):
             self.assertIsNone(result["goal"])
             self.assertEqual(advisor.load_goals(path), [])
 
+    def test_repeated_request_updates_the_same_event_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp, 0)
+            path = Path(tmp) / "planning_goals.json"
+            first = advisor.add_event_goal(store, path, "江户城潜入调查")
+            second = advisor.add_event_goal(store, path, "江户城潜入调查")
+            goals = advisor.load_goals(path)
+            self.assertEqual(len(goals), 1)
+            self.assertEqual(first["goal"]["id"], second["goal"]["id"])
+            self.assertEqual(goals[0]["kind"], "event")
+            self.assertEqual(goals[0]["event"], "江户城潜入调查")
+
+    def test_event_goal_uses_the_supplied_real_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, card = self._setup(tmp, 0)
+            path = Path(tmp) / "planning_goals.json"
+            start = date.fromisoformat(card["start_date"])
+            evening = datetime.combine(start, datetime.min.time(),
+                                         tzinfo=advisor._TZ) + timedelta(hours=18)
+            result = advisor.add_event_goal(
+                store, path, "江户城潜入调查", today=start, now=evening)
+            expected = advisor.event_abacus(
+                "江户城潜入调查", card, measured=None,
+                today=start, now=evening)["koban_cost"]
+            self.assertEqual(result["koban_cost"], expected)
+            self.assertEqual(result["goal"]["target"], expected)
+            self.assertEqual(result["goal"]["deadline"], card["end_date"])
+
     def test_unknown_event_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _ = self._setup(tmp, 9000)

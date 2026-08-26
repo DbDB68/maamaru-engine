@@ -106,6 +106,8 @@ export interface InventoryGap {
 
 export interface PlanningGoalAdvice {
   id: number
+  kind?: 'resource' | 'event'
+  event?: string | null
   resource: string
   target: number
   deadline: string
@@ -170,5 +172,17 @@ export interface EventAbacus {
   paid_tickets: number | null
   koban_cost: number | null
   days_left: number | null
+  available_now: number | null
+  sufficient: boolean | null
+  shortfall: number | null
   message: string
+}
+
+export interface EventGoalResult {
+  ok: boolean
+  sufficient: boolean | null
+  goal: Record<string, unknown> | null
+  koban_cost: number
+  available_now: number | null
+  shortfall: number | null
 }
