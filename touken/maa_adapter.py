@@ -170,6 +170,8 @@ class MAAAdapter:
         self.controller: Optional[AdbController] = None
         self.tasker: Optional[Tasker] = None
         self._last_image: Optional[Any] = None  # 缓存上次截图
+        self._mumu_screen = None  # MuMu 显存截图通道（touken/mumu_screen.py）
+        self._mumu_tried = False  # 通道只尝试建一次，建不起来就一辈子 ADB
         self._maa_timeouts = 0  # 连续识别超时计数
         self._revive_attempts = 0  # 本场运行已抢救次数
 
@@ -406,6 +408,26 @@ class MAAAdapter:
 
         if not force and self._last_image is not None:
             return self._last_image
+
+        # MuMu 显存通道优先：共享内存直接读渲染帧，不走 ADB，
+        # 免疫 screencap 流抽风吐半张图（8-25/26 两次炸死根因）。
+        # 通道没建成或抓帧失败都回退裸 ADB 老路。
+        if self._mumu_screen is None and not self._mumu_tried:
+            self._mumu_tried = True
+            try:
+                from .mumu_screen import MumuScreen
+                self._mumu_screen = MumuScreen.from_adb(self.adb_path,
+                                                        self.adb_address)
+            except Exception as exc:
+                print(f"[MuMu截图] 通道初始化失败，用 ADB 截图: {exc}")
+                self._mumu_screen = None
+        if self._mumu_screen is not None:
+            frame = self._mumu_screen.capture()
+            if frame is not None:
+                self._last_image = frame
+                return frame
+            if self._mumu_screen._dead:
+                self._mumu_screen = None  # 通道已自判死刑，别再问了
 
         # 裸 adb 截图：exec-out screencap -p → PNG bytes → numpy BGR
         png = self._adb_run(["exec-out", "screencap", "-p"], timeout=15.0, binary=True)
