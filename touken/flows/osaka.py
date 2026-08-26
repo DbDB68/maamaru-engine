@@ -201,6 +201,8 @@ class OsakaMixin:
         floors = 0
         idle_checks = 0
         drop_credit = None  # 掉落认人去重：获得画面等戳、连帧都在，刚出现才记一次
+        floor_credited = False  # 层末结算页去重：同一画面只记一圈，离场后才放行
+        floor_end_stuck = 0     # 结算页赖着不走的计数，超时才算真卡死
         while idle_checks < 300:
             self.maa.screenshot(force=True)
 
@@ -282,7 +284,28 @@ class OsakaMixin:
 
             # 道中和层末都有“部队恢复 / 返回本丸 / 行军”，三者全部是常驻操作，
             # 不能参与层末判断。只认结算页专有的“当前层数 + 传送凭证”。
-            if self._osaka_floor_done(cfg):
+            floor_done_now = self._osaka_floor_done(cfg)
+            if not floor_done_now:
+                floor_credited = False
+            if floor_done_now and floor_credited:
+                # 同一结算页还没走（转场慢/上一击没生效）：不重复记圈，
+                # 只补点行军等它离场；赖着 ~30 秒不动才算真卡死。
+                # ——2026-08-26 实测：转场慢半拍时同一页被记成两圈，还把整单吓停
+                floor_end_stuck += 1
+                if floor_end_stuck >= 30:
+                    yield ("[挖地] ⚠️ 层末结算页 30 秒没动静，"
+                           "停止点击，请查看卡在哪个画面")
+                    return
+                march = self._find_osaka_march(cfg)
+                if march:
+                    self.maa.click(march)
+                    time.sleep(1.2)
+                else:
+                    time.sleep(1.0)
+                continue
+            if floor_done_now:
+                floor_credited = True
+                floor_end_stuck = 0
                 idle_checks = 0
                 floors += 1
                 total_completed = _completed_floors + floors
@@ -371,8 +394,12 @@ class OsakaMixin:
                     return
                 march = self._wait_for_osaka_march(cfg)
                 if not march:
-                    yield "[挖地] 层末找不到行军按钮，停止点击"
-                    return
+                    # 多半是画面已抢先进下一场（选阵形/过场），回巡逻位让主循环
+                    # 接手；真卡死有 idle_checks 和结算页卡死计数兜底，不再像
+                    # 2026-08-26 那样整单收工、把游戏晾在选阵形画面一整夜。
+                    yield ("[挖地] 层末画面先跑了（多半进了下一场），"
+                           "回巡逻位继续观察（不中止本次任务）")
+                    continue
                 self.maa.click(march)
                 time.sleep(1.2)
                 continue
@@ -387,10 +414,19 @@ class OsakaMixin:
                 )
                 if result == "auto":
                     yield "[挖地] 已开启游戏自动阵形"
+                elif result == "failed":
+                    yield "[挖地] ⚠️ 阵形没选成，下轮巡逻再试"
                 else:
                     chosen = "有利阵形" if result == "advantage" else formation
                     yield f"[挖地] 已选择「{chosen}」"
-                time.sleep(1.0)
+                # 阵形确认后的转场略慢；等页面真正消失，避免下一轮重复选阵
+                # （出阵循环已实测过这个坑；挖地 8-23 整夜每场战斗选两遍阵）。
+                for _ in range(8):
+                    time.sleep(0.4)
+                    self.maa.screenshot(force=True)
+                    if self._formation_mode_state(
+                            allow_auto_without_title=formation_mode != "auto") is None:
+                        break
                 continue
 
             march = self._find_osaka_march(cfg)
