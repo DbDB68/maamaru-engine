@@ -21,8 +21,12 @@ from .telemetry import LEDGER_RESOURCES
 
 PLANNING_SCHEMA_VERSION = 1
 RATE_WINDOW_DAYS = 14
+EVENT_RATE_WINDOW_DAYS = 60
 GOALS_FILENAME = "planning_goals.json"
 _MAX_TARGET = 100_000_000
+
+# 这些天进账结构完全不同（活动图/门票/钥匙），和平常不能一锅端
+_EVENT_SOURCE_HEADS = ("osaka", "edocastle", "raid", "pumpkin")
 
 
 def _today() -> date:
@@ -31,6 +35,10 @@ def _today() -> date:
 
 def _fmt(value: float | int) -> str:
     return f"{int(round(value)):,}"
+
+
+def _local_date(ts: float) -> str:
+    return datetime.fromtimestamp(float(ts), _TZ).date().isoformat()
 
 
 # ── 目标清单存取 ──
@@ -102,20 +110,68 @@ def delete_goal(path: Path, goal_id: int) -> bool:
 
 def estimate_daily_rates(daily_series: list[dict], *,
                          window_days: int = RATE_WINDOW_DAYS,
-                         today: date | None = None) -> dict:
+                         today: date | None = None,
+                         exclude_dates: set[str] | None = None) -> dict:
     """每种资源的日均净收支：窗口内有首末读数的日子取 total_delta 求平均。
 
     没有完整读数的日子跳过（不知道就是不知道，不按 0 算）。
+    exclude_dates 里的日子（活动期）不算进平常速度——活动期间和平常
+    的进账是两码事，混在一起预测必歪。
     """
     today = today or _today()
     cutoff = (today - timedelta(days=window_days - 1)).isoformat()
+    today_iso = today.isoformat()
+    excluded = exclude_dates or set()
+    rates = {}
+    for name in LEDGER_RESOURCES:
+        deltas = [row["total_delta"] for row in daily_series
+                  if row.get("resource") == name
+                  and row.get("total_delta") is not None
+                  and cutoff <= str(row.get("date", "")) <= today_iso
+                  and str(row.get("date", "")) not in excluded]
+        rates[name] = {
+            "daily": (sum(deltas) / len(deltas)) if deltas else None,
+            "days_observed": len(deltas),
+        }
+    return rates
+
+
+def event_day_dates(attributions: list[dict], *,
+                    window_days: int = EVENT_RATE_WINDOW_DAYS,
+                    today: date | None = None) -> set[str]:
+    """哪些日子是「活动期间」：归因里出现活动来源（大阪城/江户城/联队战/南瓜）的日子。"""
+    today = today or _today()
+    cutoff = (today - timedelta(days=window_days - 1)).isoformat()
+    dates: set[str] = set()
+    for item in attributions:
+        head = str(item.get("source") or "").split(".", 1)[0].split("/", 1)[0]
+        if head not in _EVENT_SOURCE_HEADS:
+            continue
+        ts = item.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        day = _local_date(ts)
+        if cutoff <= day <= today.isoformat():
+            dates.add(day)
+    return dates
+
+
+def estimate_event_rates(daily_series: list[dict], event_dates: set[str], *,
+                         today: date | None = None) -> dict:
+    """活动期间的日均净收支：只取活动日的 total_delta 求平均。
+
+    活动样本本来就少，不设观察天数下限，但 days_observed 会如实带出去，
+    让前端/建议文案知道这是几场活动的手气。
+    """
+    today = today or _today()
     today_iso = today.isoformat()
     rates = {}
     for name in LEDGER_RESOURCES:
         deltas = [row["total_delta"] for row in daily_series
                   if row.get("resource") == name
                   and row.get("total_delta") is not None
-                  and cutoff <= str(row.get("date", "")) <= today_iso]
+                  and str(row.get("date", "")) in event_dates
+                  and str(row.get("date", "")) <= today_iso]
         rates[name] = {
             "daily": (sum(deltas) / len(deltas)) if deltas else None,
             "days_observed": len(deltas),
@@ -160,9 +216,63 @@ def koban_floor_yield(events: list[dict], *,
 # ── 目标评估 ──
 
 
+def _split_goal_days(today: date, deadline: date,
+                     event_windows: list[dict] | None) -> tuple[int, int, list[str]]:
+    """今天到截止日之间，平常几天、活动期几天（按活动知识卡的开打/收摊日）。
+
+    返回 (平常天数, 活动期天数, 沾边的活动名)。活动期重叠的日子只算一次。
+    """
+    if isinstance(today, str):
+        today = date.fromisoformat(today)
+    if isinstance(deadline, str):
+        deadline = date.fromisoformat(deadline)
+    event_dates: set[date] = set()
+    names: list[str] = []
+    for window in event_windows or []:
+        try:
+            start = date.fromisoformat(str(window.get("start_date") or ""))
+            end = date.fromisoformat(str(window.get("end_date") or ""))
+        except ValueError:
+            continue
+        # 攒钱从明天算起（days_left 语义），截止日当天也算一天
+        start = max(start, today + timedelta(days=1))
+        end = min(end, deadline)
+        if start > end:
+            continue
+        if window.get("name"):
+            names.append(str(window["name"]))
+        day = start
+        while day <= end:
+            event_dates.add(day)
+            day += timedelta(days=1)
+    total = max((deadline - today).days, 0)
+    return total - len(event_dates), len(event_dates), names
+
+
+def _window_coverage(today: date, deadline: date,
+                     window: dict) -> tuple[int, int]:
+    """活动窗口落在目标期内的天数 + 窗口总天数（用来按比例折算窗口影响）。"""
+    try:
+        start = date.fromisoformat(str(window.get("start_date") or ""))
+        end = date.fromisoformat(str(window.get("end_date") or ""))
+    except ValueError:
+        return 0, 1
+    total = max((end - start).days + 1, 1)
+    covered_start = max(start, today + timedelta(days=1))
+    covered_end = min(end, deadline)
+    covered = max((covered_end - covered_start).days + 1, 0)
+    return covered, total
+
+
 def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
-                  floor_yield: dict | None, today: date | None = None) -> dict:
-    """给一条目标算命。status: done / on_track / behind / expired / unknown。"""
+                  floor_yield: dict | None, today: date | None = None,
+                  event_windows: list[dict] | None = None,
+                  window_impacts: dict | None = None) -> dict:
+    """给一条目标算命。status: done / on_track / behind / expired / unknown。
+
+    rate_info 里 daily 是平常速度、event_daily 是活动期间速度；截止日内
+    落在活动期的天数按活动速度估，其余按平常速度。
+    """
     today = today or _today()
     resource = goal["resource"]
     target = int(goal["target"])
@@ -178,6 +288,8 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         "days_left": max(days_left, 0),
         "current": current,
         "rate": rate,
+        "event_days": 0,
+        "event_rate": None,
         "projected": None,
         "shortfall": None,
         "extra_daily": None,
@@ -203,28 +315,71 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
                              "或者这页就翻篇~")
         return advice
     if rate is None:
-        advice["message"] = (f"最近 {RATE_WINDOW_DAYS} 天没有{resource}的完整"
+        advice["message"] = (f"最近 {RATE_WINDOW_DAYS} 天没有{resource}的平常"
                              "收支记录，还算不出速度——再挂几天机就有了。")
         return advice
 
-    projected = current + rate * days_left
+    normal_days, event_days, event_names = _split_goal_days(today, deadline, event_windows)
+    # 有知识卡机理模型的活动窗口：按模型直接算净影响（江户城门票是负数），
+    # 不再拿「速率 × 天数」猜（§25）；没模型的窗口维持速率兜底。
+    modeled_days = 0
+    modeled_delta = 0.0
+    modeled_notes = []
+    for window in event_windows or []:
+        impact = (window_impacts or {}).get(str(window.get("name") or ""))
+        if not impact or impact.get("resource") != resource:
+            continue
+        covered, total_days = _window_coverage(today, deadline, window)
+        if not covered:
+            continue
+        scaled = impact["delta"] * covered / total_days
+        modeled_days += covered  # 活动重叠很罕见，真重叠时多算几天认了
+        modeled_delta += scaled
+        modeled_notes.append(
+            f"{window['name']}按知识卡估 {int(round(scaled)):+,}")
+    unmodeled_days = max(event_days - modeled_days, 0)
+    event_rate = (rate_info or {}).get("event_daily")
+    if unmodeled_days and event_rate is None:
+        # 活动收益还没实测过，先按平常速度兜底，文案里说清楚
+        event_rate = rate
+        event_guessed = True
+    else:
+        event_guessed = False
+    advice["event_days"] = event_days
+    advice["event_rate"] = event_rate if unmodeled_days else None
+    advice["event_modeled"] = modeled_notes
+    projected = (current + rate * normal_days
+                 + (event_rate or 0) * unmodeled_days + modeled_delta)
     advice["projected"] = int(round(projected))
     advice["shortfall"] = max(0, int(round(target - projected)))
-    pace = f"每天 {int(round(rate)):+,}"
+    if event_days:
+        if unmodeled_days:
+            pace = f"平常每天 {int(round(rate)):+,}、活动期每天 {int(round(event_rate)):+,}"
+        else:
+            pace = f"平常每天 {int(round(rate)):+,}"
+        event_note = f"其中 {event_days} 天撞上{'、'.join(event_names) or '活动'}，"
+        if modeled_notes:
+            event_note += "；".join(modeled_notes) + "。"
+        if unmodeled_days:
+            event_note += ("活动期的收益还没实测过，先按平常速度估。"
+                           if event_guessed else "按活动期间的速度另算。")
+    else:
+        pace = f"平常每天 {int(round(rate)):+,}"
+        event_note = ""
     if projected >= target:
         advice["status"] = "on_track"
-        advice["message"] = (f"按最近 {pace} 的速度，到 {goal['deadline']}"
+        advice["message"] = (f"按{pace}的速度，到 {goal['deadline']}"
                              f"（还有 {days_left} 天）能攒到 {_fmt(projected)}，"
-                             f"目标 {_fmt(target)} 稳的。")
+                             f"目标 {_fmt(target)} 稳的。{event_note}")
         return advice
 
     advice["status"] = "behind"
-    extra_daily = (target - current) / days_left - rate
+    extra_daily = (target - projected) / days_left
     advice["extra_daily"] = int(round(extra_daily))
-    message = (f"照现在的速度（{pace}），到 {goal['deadline']}"
+    message = (f"按{pace}的速度，到 {goal['deadline']}"
                f"（还有 {days_left} 天）大概攒到 {_fmt(projected)}，"
                f"离目标还差 {_fmt(target - projected)}——"
-               f"剩下 {days_left} 天每天得多攒 {_fmt(extra_daily)}。")
+               f"剩下 {days_left} 天每天得多攒 {_fmt(extra_daily)}。{event_note}")
     if (resource == "小判" and floor_yield
             and floor_yield.get("per_floor", 0) > 0):
         floors = extra_daily / floor_yield["per_floor"]
@@ -241,20 +396,43 @@ def get_planning(store, goals_path: Path, *,
     """汇总入口：store 是 telemetry 仓库（resource_ledger / recent_events）。"""
     today = today or _today()
     now = time.time()
-    ledger = store.resource_ledger(now - RATE_WINDOW_DAYS * 86400, now)
+    # 平常速度看最近 14 天；活动速度要回望更久，老活动样本也是样本
+    ledger = store.resource_ledger(now - EVENT_RATE_WINDOW_DAYS * 86400, now)
     current = {}
     for row in ledger.get("per_resource", []):
         value = row.get("closing")
         current[row.get("resource")] = value if value is not None else row.get("opening")
-    rates = estimate_daily_rates(ledger.get("daily_series", []), today=today)
+    event_dates = event_day_dates(ledger.get("attributions", []), today=today)
+    normal_rates = estimate_daily_rates(ledger.get("daily_series", []),
+                                        today=today, exclude_dates=event_dates)
+    event_rates = estimate_event_rates(ledger.get("daily_series", []),
+                                       event_dates, today=today)
+    rates = {}
+    for name in LEDGER_RESOURCES:
+        rates[name] = {**normal_rates[name],
+                       "event_daily": event_rates[name]["daily"],
+                       "event_days_observed": event_rates[name]["days_observed"]}
     floor_yield = koban_floor_yield(
         store.recent_events(limit=50, event_type="osaka.koban_session"))
+    cards = load_event_cards(Path(goals_path).parent)
+    event_windows = [{"name": name, "start_date": card.get("start_date"),
+                      "end_date": card.get("end_date")}
+                     for name, card in cards.items()
+                     if card.get("start_date") and card.get("end_date")]
+    measured = measured_keys_per_run(store)
+    # §25：有机理模型的活动按知识卡直接算窗口净影响，喂给目标评估
+    window_impacts = {}
+    for name, card in cards.items():
+        impact = window_impact(name, card, measured_keys=measured,
+                               floor_yield=floor_yield, today=today)
+        if impact:
+            window_impacts[name] = impact
     goals = [evaluate_goal(goal, current=current.get(goal["resource"]),
                            rate_info=rates.get(goal["resource"]),
-                           floor_yield=floor_yield, today=today)
+                           floor_yield=floor_yield, today=today,
+                           event_windows=event_windows,
+                           window_impacts=window_impacts)
              for goal in load_goals(goals_path)]
-    measured = measured_keys_per_run(store)
-    cards = load_event_cards(Path(goals_path).parent)
     abacuses = [event_abacus(name, card, measured=measured, today=today)
                 for name, card in cards.items()]
     return {
@@ -262,6 +440,7 @@ def get_planning(store, goals_path: Path, *,
         "generated_at": now,
         "today": today.isoformat(),
         "rate_window_days": RATE_WINDOW_DAYS,
+        "event_rate_window_days": EVENT_RATE_WINDOW_DAYS,
         "rates": rates,
         "current": current,
         "koban_per_floor": floor_yield,
@@ -419,3 +598,43 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
             f"到 {card['end_date']}（{max(days_left, 0)} 天）白票能顶 "
             f"{free_runs} 圈，还得补 {paid} 张票 ≈ {paid * ticket_price:,} 小判。")
     return abacus
+
+
+def window_impact(name: str, card: dict, *, measured_keys: dict | None = None,
+                  floor_yield: dict | None = None,
+                  today: date | None = None) -> dict | None:
+    """按知识卡机理算活动窗口的资源净影响（§25 活动感知规划）。
+
+    返回 {"resource", "delta", "detail"} 或 None（没模型/缺数据/没日期）。
+    delta 正数 = 活动净赚，负数 = 活动净花（门票钱）。没数据时返回 None，
+    让目标评估退回速率兜底——宁可少说，不许瞎编。
+    """
+    today = today or _today()
+    mechanics = card.get("mechanics")
+    if mechanics == "edocastle":
+        abacus = event_abacus(name, card, measured=measured_keys, today=today)
+        cost = abacus.get("koban_cost")
+        if cost is None:
+            return None
+        return {"resource": "小判", "delta": -int(cost),
+                "detail": f"{name}门票钱"}
+    if mechanics == "osaka":
+        per_floor = (floor_yield or {}).get("per_floor")
+        if not per_floor:
+            return None
+        try:
+            start = date.fromisoformat(str(card.get("start_date")))
+            end = date.fromisoformat(str(card.get("end_date")))
+        except ValueError:
+            return None
+        days = max((end - max(today, start)).days + 1, 0)
+        if not days:
+            return None
+        hours = float(card.get("hours_per_night") or 6)
+        lap_min = float(card.get("lap_minutes") or 5)
+        if lap_min <= 0:
+            return None
+        floors = hours * 60 / lap_min * days
+        return {"resource": "小判", "delta": int(round(floors * per_floor)),
+                "detail": f"{name}挂机 {days} 晚"}
+    return None

@@ -2,13 +2,21 @@
   "江户城潜入调查": {
     "mechanics": "edocastle",
     "start_date": "2026-08-27",
-    "end_date": null,
+    "end_date": "2026-09-10",
     "ticket_price": 300,
     "daily_free_tickets": 12,
     "keys_total": 1500,
     "keys_per_box": 5,
     "boxes": 300,
     "est_keys_per_run": null,
-    "note": "四座宝库 30+60+90+120 箱全开=1500 钥匙；每天 5:00/17:00 令牌回满（12 张免费票）；脚本打一把买一张票，300 小判/张；虚拟伤害活动"
+    "note": "四座宝库 30+60+90+120 箱全开=1500 钥匙；每天 5:00/17:00 令牌回满（12 张免费票）；脚本打一把买一张票，300 小判/张；虚拟伤害活动。开打日 8/27 以官方公告为准；收摊日 9/10 是按国服两周惯例估的（历届江户城都是整两周），公告正文确认后改这里。"
+  },
+  "大阪城": {
+    "mechanics": "osaka",
+    "start_date": null,
+    "end_date": null,
+    "hours_per_night": 6,
+    "lap_minutes": 5,
+    "note": "无限刷小判。单产不用填，用实测 koban_floor_yield（14 天窗口）；一圈时长默认 5 分钟（8-26 实测 4分58秒）。开打/收摊日等公告确认后填上，窗口影响才会参与规划。"
   }
 }

@@ -35,6 +35,115 @@ class DailyRateTests(unittest.TestCase):
         self.assertIsNone(rates["小判"]["daily"])
         self.assertEqual(rates["小判"]["days_observed"], 0)
 
+    def test_event_days_excluded_from_normal_rate(self):
+        series = _series("小判", [(-2, 9000), (-1, 1000), (0, 1000)])
+        rates = advisor.estimate_daily_rates(series, today=date(2026, 8, 25),
+                                             exclude_dates={_day(-2)})
+        self.assertEqual(rates["小判"]["daily"], 1000)
+        self.assertEqual(rates["小判"]["days_observed"], 2)
+
+
+class EventRateTests(unittest.TestCase):
+    TODAY = date(2026, 8, 25)
+
+    def _ts(self, offset: int) -> float:
+        from datetime import datetime
+        return datetime(2026, 8, 25, 12, tzinfo=advisor._TZ).timestamp() \
+            + offset * 86400
+
+    def test_event_day_dates_from_attributions(self):
+        attributions = [
+            {"ts": self._ts(-2), "source": "osaka.koban_session"},
+            {"ts": self._ts(-2), "source": "edocastle.run_completed"},
+            {"ts": self._ts(-1), "source": "expedition.dispatched"},  # 平常来源不算
+            {"ts": self._ts(0), "source": "raid.round_completed"},
+            {"ts": self._ts(-90), "source": "osaka.koban_session"},   # 超出回望窗口
+        ]
+        dates = advisor.event_day_dates(attributions, today=self.TODAY)
+        self.assertEqual(dates, {_day(-2), _day(0)})
+
+    def test_event_rates_average_only_event_days(self):
+        series = _series("小判", [(-2, 9000), (-1, 1000), (0, 3000)])
+        rates = advisor.estimate_event_rates(series, {_day(-2), _day(0)},
+                                             today=self.TODAY)
+        self.assertEqual(rates["小判"]["daily"], 6000)
+        self.assertEqual(rates["小判"]["days_observed"], 2)
+
+    def test_event_rates_none_without_event_days(self):
+        series = _series("小判", [(-1, 1000)])
+        rates = advisor.estimate_event_rates(series, set(), today=self.TODAY)
+        self.assertIsNone(rates["小判"]["daily"])
+
+
+class SplitGoalDaysTests(unittest.TestCase):
+    TODAY = date(2026, 8, 25)
+
+    def test_event_window_splits_days(self):
+        windows = [{"name": "江户城潜入调查", "start_date": _day(2),
+                    "end_date": _day(7)}]
+        normal, event, names = advisor._split_goal_days(self.TODAY, _day(10), windows)
+        self.assertEqual((normal, event), (4, 6))
+        self.assertEqual(names, ["江户城潜入调查"])
+
+    def test_window_clamped_to_goal_range(self):
+        windows = [{"name": "联队战", "start_date": _day(-5),
+                    "end_date": _day(99)}]
+        normal, event, _ = advisor._split_goal_days(self.TODAY, _day(10), windows)
+        self.assertEqual((normal, event), (0, 10))
+
+    def test_overlapping_windows_counted_once(self):
+        windows = [{"name": "A", "start_date": _day(2), "end_date": _day(6)},
+                   {"name": "B", "start_date": _day(4), "end_date": _day(8)}]
+        normal, event, _ = advisor._split_goal_days(self.TODAY, _day(10), windows)
+        self.assertEqual((normal, event), (3, 7))
+
+    def test_window_missing_dates_ignored(self):
+        windows = [{"name": "无名", "start_date": None, "end_date": _day(5)}]
+        normal, event, _ = advisor._split_goal_days(self.TODAY, _day(10), windows)
+        self.assertEqual((normal, event), (10, 0))
+
+
+class EvaluateGoalEventWindowTests(unittest.TestCase):
+    TODAY = date(2026, 8, 25)
+    WINDOW = [{"name": "江户城潜入调查", "start_date": _day(2),
+               "end_date": _day(7)}]  # 6 天活动期
+
+    def _goal(self, **overrides):
+        goal = {"id": 1, "resource": "小判", "target": 10000,
+                "deadline": _day(10), "note": ""}
+        goal.update(overrides)
+        return goal
+
+    def test_event_days_use_event_rate(self):
+        # 4 平常天 × 100 + 6 活动天 × 1000 = 6400 → 5000 + 6400 = 11400
+        advice = advisor.evaluate_goal(
+            self._goal(), current=5000,
+            rate_info={"daily": 100, "event_daily": 1000},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW)
+        self.assertEqual(advice["status"], "on_track")
+        self.assertEqual(advice["projected"], 11400)
+        self.assertEqual(advice["event_days"], 6)
+        self.assertIn("活动期", advice["message"])
+
+    def test_event_days_fall_back_to_normal_rate_when_unmeasured(self):
+        # 活动收益没实测：全程按平常 100 估，文案明说兜底
+        advice = advisor.evaluate_goal(
+            self._goal(), current=5000,
+            rate_info={"daily": 100, "event_daily": None},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW)
+        self.assertEqual(advice["status"], "behind")
+        self.assertEqual(advice["projected"], 6000)
+        self.assertIn("还没实测", advice["message"])
+
+    def test_no_event_window_keeps_plain_message(self):
+        advice = advisor.evaluate_goal(
+            self._goal(), current=5000,
+            rate_info={"daily": 600, "event_daily": 9999},
+            floor_yield=None, today=self.TODAY)
+        self.assertEqual(advice["projected"], 11000)
+        self.assertEqual(advice["event_days"], 0)
+        self.assertIn("平常每天", advice["message"])
+
 
 class KobanFloorYieldTests(unittest.TestCase):
     NOW = 1787700000.0  # 2026-08-25 附近
@@ -316,3 +425,119 @@ class EventCardStorageTests(unittest.TestCase):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", 0)
         with self.assertRaises(ValueError):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", "不是数")
+
+
+class WindowImpactTests(unittest.TestCase):
+    """§25 活动感知规划：知识卡机理算盘直接算窗口净影响。"""
+
+    TODAY = date(2026, 8, 26)  # 江户城开打前一天
+    EDO_CARD = {
+        "mechanics": "edocastle",
+        "start_date": "2026-08-27", "end_date": "2026-09-10",
+        "ticket_price": 300, "daily_free_tickets": 12,
+        "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
+        "est_keys_per_run": 5,
+    }
+
+    def test_edocastle_impact_is_negative_ticket_cost(self):
+        # 场均 5 把 → 300 圈；白票 12 × 15 天 = 180 → 补 120 张 ≈ -36000
+        impact = advisor.window_impact("江户城潜入调查", self.EDO_CARD,
+                                       today=self.TODAY)
+        self.assertEqual(impact["resource"], "小判")
+        self.assertEqual(impact["delta"], -36000)
+
+    def test_edocastle_free_tickets_cover_all_means_zero_cost(self):
+        card = {**self.EDO_CARD, "est_keys_per_run": 20}  # 75 圈 ≤ 180 白票
+        impact = advisor.window_impact("江户城潜入调查", card, today=self.TODAY)
+        self.assertEqual(impact["delta"], 0)
+
+    def test_edocastle_without_keys_data_returns_none(self):
+        card = {**self.EDO_CARD, "est_keys_per_run": None}
+        self.assertIsNone(advisor.window_impact("江户城潜入调查", card,
+                                                today=self.TODAY))
+
+    def test_measured_keys_override_estimate(self):
+        # 实测场均 10 → 150 圈 ≤ 180 白票 → 一个小判不花
+        impact = advisor.window_impact(
+            "江户城潜入调查", dict(self.EDO_CARD),
+            measured_keys={"per_run": 10, "runs": 3}, today=self.TODAY)
+        self.assertEqual(impact["delta"], 0)
+
+    def test_osaka_impact_is_positive(self):
+        card = {"mechanics": "osaka", "start_date": "2026-08-27",
+                "end_date": "2026-09-02",  # 开打后起 7 天
+                "hours_per_night": 6, "lap_minutes": 5}
+        impact = advisor.window_impact("大阪城", card,
+                                       floor_yield={"per_floor": 400},
+                                       today=self.TODAY)
+        # 每晚 72 层 × 7 天 × 400 = 201600
+        self.assertEqual(impact["delta"], 201600)
+
+    def test_osaka_without_yield_or_dates_returns_none(self):
+        card = {"mechanics": "osaka", "start_date": "2026-08-27",
+                "end_date": "2026-09-02"}
+        self.assertIsNone(advisor.window_impact("大阪城", card,
+                                                floor_yield=None,
+                                                today=self.TODAY))
+        self.assertIsNone(advisor.window_impact(
+            "大阪城", {"mechanics": "osaka"},
+            floor_yield={"per_floor": 400}, today=self.TODAY))
+
+    def test_unknown_mechanics_returns_none(self):
+        self.assertIsNone(advisor.window_impact(
+            "神秘活动", {"mechanics": "???"}, today=self.TODAY))
+
+
+class ModeledWindowGoalTests(unittest.TestCase):
+    """有知识卡模型的活动窗口参与目标预测（§25.5 步骤 2）。"""
+
+    TODAY = date(2026, 8, 26)
+    WINDOW = [{"name": "江户城潜入调查", "start_date": "2026-08-27",
+               "end_date": "2026-09-10"}]  # 目标期内 15 天活动
+    IMPACT = {"江户城潜入调查": {"resource": "小判", "delta": -36000}}
+
+    def _goal(self, deadline="2026-09-10"):
+        return {"id": 1, "resource": "小判", "target": 90000,
+                "deadline": deadline, "note": ""}
+
+    def test_modeled_window_replaces_rate_guess(self):
+        # 全程在活动期：平常 0 天 + 门票影响 -36000，活动段不吃速率
+        advice = advisor.evaluate_goal(
+            self._goal(), current=80000,
+            rate_info={"daily": 100, "event_daily": None},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW,
+            window_impacts=self.IMPACT)
+        self.assertEqual(advice["projected"], 44000)
+        self.assertEqual(advice["status"], "behind")
+        self.assertTrue(advice["event_modeled"])
+        self.assertIn("知识卡", advice["message"])
+        self.assertNotIn("还没实测", advice["message"])
+
+    def test_unmodeled_window_still_uses_rate_fallback(self):
+        # 没模型：15 活动天按平常 100 兜底 → 80000 + 1500
+        advice = advisor.evaluate_goal(
+            self._goal(), current=80000,
+            rate_info={"daily": 100, "event_daily": None},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW,
+            window_impacts={})
+        self.assertEqual(advice["projected"], 81500)
+        self.assertIn("还没实测", advice["message"])
+
+    def test_deadline_mid_window_scales_impact(self):
+        # 截止 9-01：窗口只覆盖 8-27..9-01 = 6 天，影响按 6/15 折算 -14400
+        advice = advisor.evaluate_goal(
+            self._goal(deadline="2026-09-01"), current=80000,
+            rate_info={"daily": 100, "event_daily": None},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW,
+            window_impacts=self.IMPACT)
+        self.assertEqual(advice["projected"], 65600)
+
+    def test_impact_for_other_resource_ignored(self):
+        impact = {"江户城潜入调查": {"resource": "冷却材", "delta": -5000}}
+        advice = advisor.evaluate_goal(
+            self._goal(), current=80000,
+            rate_info={"daily": 100, "event_daily": None},
+            floor_yield=None, today=self.TODAY, event_windows=self.WINDOW,
+            window_impacts=impact)
+        self.assertEqual(advice["projected"], 81500)
+        self.assertFalse(advice["event_modeled"])
