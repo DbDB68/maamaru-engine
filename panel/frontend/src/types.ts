@@ -123,6 +123,12 @@ export interface PlanningGoalAdvice {
   extra_floors: number | null
   floors_needed?: number | null
   floors_per_day?: number | null
+  seconds_per_floor?: number | null
+  speed_sample_floors?: number | null
+  estimated_seconds?: number | null
+  remaining_seconds?: number | null
+  time_margin_seconds?: number | null
+  can_finish?: boolean | null
   status: 'done' | 'on_track' | 'behind' | 'active' | 'expired' | 'unknown'
   message: string
 }
@@ -134,6 +140,7 @@ export interface PlanningReport {
   rate_window_days: number
   rates: Record<string, { daily: number | null; days_observed: number }>
   koban_per_floor: { per_floor: number; sessions: number } | null
+  osaka_floor_speed?: { seconds_per_floor: number; floors: number; run_started_at?: number | null } | null
   current?: Record<string, number | null>
   goals: PlanningGoalAdvice[]
   events?: EventAbacus[]

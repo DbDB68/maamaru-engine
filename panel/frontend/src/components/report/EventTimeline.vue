@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport } from '../../types'
+import type { EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
   abacuses: EventAbacus[]
-  goalNames: string[]
+  goals: PlanningGoalAdvice[]
   loading?: boolean
   error?: string
   estimateSaving?: string
@@ -27,10 +27,17 @@ watch(() => props.abacuses, (items) => {
   }
 }, { immediate: true })
 
+watch(() => props.goals, (items) => {
+  for (const item of items) {
+    if (item.event && item.goal_mode === 'stock_target') targetInputs.value[item.event] = String(item.target)
+  }
+}, { immediate: true })
+
 const abacusByName = computed(() => new Map(props.abacuses.map(item => [item.event, item])))
+const goalByEvent = computed(() => new Map(props.goals.filter(item => item.event).map(item => [item.event!, item])))
 const activeGroups = computed(() => [
-  { key: 'ongoing', title: '正在进行', hint: '先结束的排在前面', items: props.timeline?.ongoing || [] },
-  { key: 'upcoming', title: '即将开始', hint: '未来 7 天', items: props.timeline?.upcoming || [] },
+  { key: 'ongoing', title: '正在进行', items: props.timeline?.ongoing || [] },
+  { key: 'upcoming', title: '即将开始', items: props.timeline?.upcoming || [] },
 ].filter(group => group.items.length))
 const hasFormalEvents = computed(() => activeGroups.value.length > 0 || Boolean(props.timeline?.later.length))
 
@@ -80,6 +87,10 @@ function abacusFor(entry: EventTimelineEntry) {
   return abacusByName.value.get(entry.name)
 }
 
+function goalFor(entry: EventTimelineEntry) {
+  return goalByEvent.value.get(entry.name)
+}
+
 function supportsTokenLearning(entry: EventTimelineEntry) {
   return Boolean(abacusFor(entry)?.keys_total)
 }
@@ -90,13 +101,6 @@ function experienceLabel(entry: EventTimelineEntry) {
   if (source === 'history') return '参考上期'
   if (source === 'estimate') return '临时估计'
   return '第一次参加'
-}
-
-function experienceBasis(entry: EventTimelineEntry) {
-  const abacus = abacusFor(entry)
-  if (abacus?.keys_basis) return abacus.keys_basis
-  if (abacus?.keys_source == null) return '还没有能沿用的活动经验，先问你一个数。'
-  return ''
 }
 
 function submitEstimate(entry: EventTimelineEntry) {
@@ -132,9 +136,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
   <section class="event-timeline-card">
     <header class="timeline-heading">
       <div>
-        <small>近期活动</small>
-        <h4>现在打什么，下一场什么时候来</h4>
-        <p>进行中的先看收摊时间，没开场的按开始时间往下排。</p>
+        <small>活动日程</small>
+        <h4>正在进行和即将开始</h4>
       </div>
       <span v-if="timeline?.calendar_stale" class="timeline-stale">日历可能不是最新</span>
     </header>
@@ -146,7 +149,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
         <section v-for="group in activeGroups" :key="group.key" class="timeline-group">
           <header class="timeline-group-heading">
             <b>{{ group.title }}</b>
-            <span>{{ group.hint }}</span>
           </header>
 
           <article v-for="entry in group.items" :key="entry.name" class="timeline-axis-entry" :class="`is-${group.key}`">
@@ -167,11 +169,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
 
               <p v-if="abacusFor(entry)?.message || entry.note" class="event-summary">{{ abacusFor(entry)?.message || entry.note }}</p>
 
-              <p v-if="supportsTokenLearning(entry) && experienceBasis(entry)" class="event-basis">
-                <b>{{ experienceLabel(entry) }}</b>
-                <span>{{ experienceBasis(entry) }}</span>
-              </p>
-
               <div v-if="entry.budget && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
                   <small>{{ entry.budget.sufficient === true || entry.budget.koban_cost === 0 ? '活动预算' : '预算缺口' }}</small>
@@ -181,15 +178,21 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </div>
 
               <div v-if="abacusFor(entry)?.goal_mode === 'stock_target'" class="event-stock-target">
-                <template v-if="goalNames.includes(entry.name)">
-                  <span class="stock-goal-added">已加入“我的目标”，想改数字可以重新填写。</span>
+                <div v-if="goalFor(entry)" class="stock-goal-linked">
+                  <span><small>已立目标</small><b>{{ fmt(goalFor(entry)?.target) }} {{ goalFor(entry)?.resource }}</b></span>
+                  <details>
+                    <summary>修改</summary>
+                    <div><input v-model="targetInputs[entry.name]" type="number" :min="(abacusFor(entry)?.available_now || 0) + 1" max="100000000" step="10000"><button type="button" class="primary" :disabled="goalSaving === entry.name" @click="submitStockGoal(entry)">{{ goalSaving === entry.name ? '保存中……' : '保存' }}</button></div>
+                  </details>
+                </div>
+                <template v-else>
+                  <label>收摊时想把小判攒到多少？
+                    <input v-model="targetInputs[entry.name]" type="number" :min="(abacusFor(entry)?.available_now || 0) + 1" max="100000000" step="10000" placeholder="例如 1,000,000">
+                  </label>
+                  <button type="button" class="primary" :disabled="goalSaving === entry.name" @click="submitStockGoal(entry)">{{ goalSaving === entry.name ? '正在立目标……' : '立为目标' }}</button>
+                  <p v-if="abacusFor(entry)?.yield_per_floor" class="stock-yield">最近 {{ fmt(abacusFor(entry)?.yield_sessions) }} 次实测，每层约 {{ fmt(abacusFor(entry)?.yield_per_floor) }} 小判。</p>
+                  <p v-else class="stock-yield">还没有单层收益样本；先立目标，挖几层后会自动换算。</p>
                 </template>
-                <label>收摊时想把小判攒到多少？
-                  <input v-model="targetInputs[entry.name]" type="number" :min="(abacusFor(entry)?.available_now || 0) + 1" max="100000000" step="10000" placeholder="例如 1,000,000">
-                </label>
-                <button type="button" class="primary" :disabled="goalSaving === entry.name" @click="submitStockGoal(entry)">{{ goalSaving === entry.name ? '正在立目标……' : goalNames.includes(entry.name) ? '更新目标' : '立为目标' }}</button>
-                <p v-if="abacusFor(entry)?.yield_per_floor" class="stock-yield">最近 {{ fmt(abacusFor(entry)?.yield_sessions) }} 次实测，每层约 {{ fmt(abacusFor(entry)?.yield_per_floor) }} 小判。</p>
-                <p v-else class="stock-yield">还没有单层收益样本；先立目标，挖几层后会自动换算。</p>
               </div>
 
               <div v-else-if="abacusFor(entry)?.keys_total && abacusFor(entry)?.keys_per_run == null" class="event-estimate">
@@ -200,7 +203,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </div>
 
               <div v-else-if="abacusFor(entry)?.koban_cost && entry.budget?.sufficient !== true && entry.budget?.koban_cost !== 0" class="event-actions">
-                <span v-if="goalNames.includes(entry.name)">已加入“我的目标”</span>
+                <span v-if="goalFor(entry)">已加入“当前目标”</span>
                 <button v-else type="button" class="primary" :disabled="goalSaving === entry.name" @click="emit('add-goal', abacusFor(entry)!)">{{ goalSaving === entry.name ? '正在立目标……' : '把缺口立成目标' }}</button>
               </div>
 
@@ -250,7 +253,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .timeline-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .timeline-heading small { color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .timeline-heading h4 { margin: 2px 0 0; font-size: 16px; }
-.timeline-heading p { margin: 3px 0 0; color: var(--ink-dim); font-size: 13px; }
 .timeline-stale { flex: none; padding: 3px 8px; color: #936429; background: var(--fox-gold-pale); border-radius: 999px; font-size: 11px; }
 .timeline-error { margin: 12px 0 0; padding: 10px 12px; color: #9f3d28; background: #f9e6df; border-radius: 8px; font-size: 13px; }
 .timeline-axis { display: grid; gap: 16px; margin-top: 16px; }
@@ -280,8 +282,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-range { flex: none; color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .event-mobile-moment { display: none; }
 .event-summary { margin: 9px 0 0; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
-.event-basis { display: flex; align-items: baseline; gap: 7px; margin: 9px 0 0; padding: 7px 9px; color: var(--ink-dim); background: var(--paper-panel); border-radius: 7px; font-size: 11px; }
-.event-basis b { flex: none; color: var(--ink); }
 .event-budget { display: flex; align-items: center; gap: 14px; margin-top: 11px; padding: 9px 11px; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border-radius: 8px; }
 .event-budget.ready { background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); }
 .event-budget > span { display: grid; flex: 0 0 auto; gap: 1px; min-width: 92px; }
@@ -295,9 +295,15 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-stock-target { display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: end; gap: 7px 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, #dcebd6 62%, var(--paper-card)); border-radius: 8px; }
 .event-stock-target label { display: grid; gap: 4px; color: var(--ink); font-size: 12px; font-weight: 700; }
 .event-stock-target input { width: min(260px, 100%); background: var(--paper-card); font-weight: 400; }
-.event-stock-target .stock-goal-added, .event-stock-target .stock-yield { grid-column: 1 / -1; color: var(--ink-dim); font-size: 11px; }
+.event-stock-target .stock-yield { grid-column: 1 / -1; color: var(--ink-dim); font-size: 11px; }
 .event-stock-target .stock-yield { margin: 0; }
-.event-stock-target .stock-goal-added { color: #426b36; font-weight: 700; }
+.stock-goal-linked { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; }
+.stock-goal-linked > span { display: grid; gap: 1px; }
+.stock-goal-linked small { color: #426b36; font-size: 10px; font-weight: 700; }
+.stock-goal-linked details { margin: 0; }
+.stock-goal-linked details[open] { width: min(330px, 100%); }
+.stock-goal-linked details > div { display: flex; gap: 7px; margin-top: 6px; }
+.stock-goal-linked input { min-width: 0; }
 .event-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 11px; }
 .event-actions span { color: var(--ink-dim); font-size: 12px; }
 .timeline-event-card details { margin-top: 9px; color: var(--ink-dim); font-size: 12px; }
@@ -336,7 +342,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
 }
 @media (max-width: 520px) {
   .timeline-heading { flex-direction: column; gap: 7px; }
-  .timeline-heading p { max-width: 280px; }
   .timeline-axis { gap: 14px; }
   .timeline-group-heading { padding-left: 0; }
   .timeline-axis-entry { grid-template-columns: minmax(0, 1fr); }
@@ -347,7 +352,10 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .event-budget, .event-estimate { align-items: stretch; flex-direction: column; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }
   .event-stock-target { grid-template-columns: 1fr; }
-  .event-stock-target .stock-goal-added, .event-stock-target .stock-yield { grid-column: 1; }
+  .event-stock-target .stock-yield { grid-column: 1; }
+  .stock-goal-linked { align-items: flex-start; flex-direction: column; }
+  .stock-goal-linked details, .stock-goal-linked details[open] { width: 100%; }
+  .stock-goal-linked details > div { align-items: stretch; flex-direction: column; }
   .event-actions { align-items: stretch; flex-direction: column; }
   .event-actions button { width: 100%; }
   .timeline-unverified a { align-items: flex-start; flex-direction: column; gap: 4px; }

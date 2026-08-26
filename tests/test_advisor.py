@@ -481,6 +481,10 @@ class OsakaStockGoalTests(unittest.TestCase):
                     return [{"ts": OsakaStockGoalTests.NOW.timestamp(),
                              "payload": {"delta": 250, "floors": 10}}]
                 return []
+
+            def recent_run_summaries(self, **kwargs):
+                return [{"started_at": OsakaStockGoalTests.NOW.timestamp() - 3600,
+                         "loops": 16, "average_loop_seconds": 300}]
         return _Store(), card
 
     def test_creates_final_stock_goal_with_precise_deadline(self):
@@ -512,6 +516,19 @@ class OsakaStockGoalTests(unittest.TestCase):
             self.assertEqual(first["goal"]["id"], second["goal"]["id"])
             self.assertEqual(goals[0]["target"], 12000)
 
+    def test_planning_connects_latest_floor_speed_to_stock_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp)
+            path = Path(tmp) / "planning_goals.json"
+            advisor.add_event_goal(
+                store, path, "大阪城", target=10000,
+                today=self.NOW.date(), now=self.NOW)
+            planning = advisor.get_planning(
+                store, path, today=self.NOW.date(), now=self.NOW)
+        self.assertEqual(planning["osaka_floor_speed"]["seconds_per_floor"], 300)
+        self.assertEqual(planning["goals"][0]["estimated_seconds"], 12000)
+        self.assertTrue(planning["goals"][0]["can_finish"])
+
     def test_missing_target_and_closed_activity_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _ = self._setup(tmp)
@@ -533,15 +550,59 @@ class OsakaStockGoalTests(unittest.TestCase):
         advice = advisor.evaluate_goal(
             goal, current=9000, rate_info={},
             floor_yield={"per_floor": 25, "sessions": 3},
+            floor_speed={"seconds_per_floor": 300, "floors": 16},
             now=self.NOW)
         self.assertEqual(advice["status"], "active")
         self.assertEqual(advice["floors_needed"], 40)
         self.assertEqual(advice["floors_per_day"], 40)
+        self.assertEqual(advice["seconds_per_floor"], 300)
+        self.assertEqual(advice["speed_sample_floors"], 16)
+        self.assertEqual(advice["estimated_seconds"], 12000)
+        self.assertEqual(advice["remaining_seconds"], 61200)
+        self.assertEqual(advice["time_margin_seconds"], 49200)
+        self.assertTrue(advice["can_finish"])
+        self.assertNotIn("每天", advice["message"])
         expired = advisor.evaluate_goal(
             goal, current=9000, rate_info={},
             floor_yield={"per_floor": 25, "sessions": 3},
             now=datetime(2026, 8, 27, 5, tzinfo=advisor._TZ))
         self.assertEqual(expired["status"], "expired")
+
+    def test_evaluation_says_when_measured_pace_cannot_finish(self):
+        goal = {
+            "id": 1, "kind": "event", "event": "大阪城",
+            "goal_mode": "stock_target", "resource": "小判",
+            "target": 10000, "deadline": "2026-08-27",
+            "deadline_at": "2026-08-27T05:00:00+08:00",
+        }
+        advice = advisor.evaluate_goal(
+            goal, current=9000, rate_info={},
+            floor_yield={"per_floor": 25, "sessions": 3},
+            floor_speed={"seconds_per_floor": 1800, "floors": 4},
+            now=self.NOW)
+        self.assertFalse(advice["can_finish"])
+        self.assertEqual(advice["estimated_seconds"], 72000)
+        self.assertEqual(advice["time_margin_seconds"], -10800)
+
+
+class OsakaFloorSpeedTests(unittest.TestCase):
+    def test_uses_latest_valid_recent_osaka_run(self):
+        class _Store:
+            def recent_run_summaries(self, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    {"started_at": 3, "loops": 0, "average_loop_seconds": None},
+                    {"started_at": 2, "loops": 16, "average_loop_seconds": 359.4},
+                    {"started_at": 1, "loops": 25, "average_loop_seconds": 298.0},
+                ]
+        store = _Store()
+        result = advisor.latest_osaka_floor_speed(store, now=1000000)
+        self.assertEqual(result, {"seconds_per_floor": 359.4, "floors": 16,
+                                  "run_started_at": 2})
+        self.assertEqual(store.kwargs["script"], "osaka")
+
+    def test_store_without_run_summaries_has_no_speed(self):
+        self.assertIsNone(advisor.latest_osaka_floor_speed(object()))
 
 
 if __name__ == "__main__":

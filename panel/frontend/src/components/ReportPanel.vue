@@ -8,12 +8,11 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import ObtainRecords from './report/ObtainRecords.vue'
-import { categoryLabel, categoryOf, dayRange, eventTime, obtainSourceLabel, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
+import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const days = ref(7)
-const honmaruTab = ref<'report' | 'obtains' | 'planning'>('report')
+const honmaruTab = ref<'report' | 'planning'>('report')
 const view = ref<'chart' | 'records'>('chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
@@ -40,7 +39,6 @@ const highlightCategory = ref('')
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
   { value: 'report', label: '成绩单' },
-  { value: 'obtains', label: '入手' },
   { value: 'planning', label: '规划' },
 ]
 const viewItems = [
@@ -121,26 +119,11 @@ const glanceResources = computed(() => resourceRows.value
   .sort((a, b) => Math.abs(b.delta!) - Math.abs(a.delta!))
   .slice(0, 4))
 
-// ---- 刀剑进账（掉落结果）：sword.obtained + 锻刀/南瓜的认人记录，按名字聚合 ----
-
-const swordDrops = computed(() => {
-  const rows = new Map<string, { name: string; count: number; sources: Set<string>; last: number }>()
-  const push = (ts: number, name: string, source: string) => {
-    const row = rows.get(name) || { name, count: 0, sources: new Set<string>(), last: 0 }
-    row.count += 1
-    row.sources.add(source)
-    row.last = Math.max(row.last, ts)
-    rows.set(name, row)
-  }
-  for (const event of events.value) {
-    const payload = event.payload || {}
-    if (event.event_type === 'sword.obtained' && payload.name) push(event.ts, payload.name, obtainSourceLabel(payload.source) || '出阵掉落')
-    else if (event.event_type === 'forge.collected' && payload.name) push(event.ts, payload.name, '锻刀')
-    else if (event.event_type === 'pumpkin.sword_obtained' && payload.name) push(event.ts, payload.name, '南瓜大作战')
-  }
-  return [...rows.values()].sort((a, b) => b.last - a.last)
-})
-const swordDropTotal = computed(() => swordDrops.value.reduce((total, row) => total + row.count, 0))
+// 刀剑明细已经归入“全部记录”，成绩单只保留这个时间段的总数。
+const swordDropTotal = computed(() => events.value.filter(event => (
+  ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
+  && event.payload?.name
+)).length)
 
 // ---- 图表数据 ----
 
@@ -450,10 +433,10 @@ onMounted(() => load())
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" title="本丸" subtitle="账目、入手与接下来的打算">
+    <PanelHeader variant="page" title="本丸" subtitle="账目和接下来的打算">
       <template #actions>
         <div class="report-toolbar-actions">
-          <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'obtains' | 'planning'" />
+          <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
         </div>
       </template>
     </PanelHeader>
@@ -464,15 +447,12 @@ onMounted(() => load())
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="成绩单视图" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
       </div>
-      <div v-else-if="honmaruTab === 'obtains'" class="report-context-toolbar report-context-toolbar-range">
-        <SegmentedControl class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
-      </div>
-
       <template v-if="honmaruTab === 'report'">
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }">
           <p class="report-glance-lead">🦊 {{ glance }}</p>
-          <div v-if="glanceResources.length" class="report-glance-chips">
+          <div v-if="swordDropTotal || glanceResources.length" class="report-glance-chips">
+            <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
             <span v-for="row in glanceResources" :key="row.name" :class="{ gain: row.delta! > 0, loss: row.delta! < 0 }">{{ row.name }} {{ signed(row.delta) }}</span>
           </div>
         </section>
@@ -508,10 +488,6 @@ onMounted(() => load())
           <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
         </section>
 
-        <button v-if="swordDropTotal" type="button" class="report-obtains-link" @click="honmaruTab = 'obtains'">
-          <b>🗡️ {{ rangeLabel }}收获 {{ swordDropTotal }} 振</b><em>查看入手记录 →</em>
-        </button>
-
         <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
           <button v-if="!reportMode" type="button" class="secondary report-proactive" @click="openProactiveReport()">我自己动了家底，主动报备一笔</button>
@@ -520,8 +496,6 @@ onMounted(() => load())
 
       <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
-
-      <ObtainRecords v-else-if="honmaruTab === 'obtains'" :rows="swordDrops" :total="swordDropTotal" :range-label="rangeLabel" :loading="loading" />
 
       <PlanningPanel v-else />
     </div>
@@ -537,6 +511,7 @@ onMounted(() => load())
 .report-glance-chips span { background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
 .report-glance-chips .gain { color: #4d7a3a; }
 .report-glance-chips .loss { color: #b0492e; }
+.report-glance-chips .obtain { color: var(--fox-gold-deep); }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
 .resource-trend > header h3 { margin: 0; }
 .resource-trend > header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
@@ -545,9 +520,6 @@ onMounted(() => load())
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .report-proactive { align-self: flex-start; }
-.report-obtains-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; cursor: pointer; color: var(--ink); font-size: 14px; }
-.report-obtains-link:hover { border-color: var(--fox-gold); }
-.report-obtains-link em { font-style: normal; color: var(--fox-gold-deep); white-space: nowrap; }
 .inventory-gap-panel:empty { display: none; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }

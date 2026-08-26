@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import { api } from '../../api'
 import type { EventAbacus, EventTimelineReport, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
@@ -15,6 +15,33 @@ const goalNotice = ref('')
 const formOpen = ref(false)
 const saving = ref(false)
 const form = ref({ resource: '小判', target: 100000, deadline: '', note: '' })
+
+function applyTimingFallback(report: PlanningReport, runs: any[]) {
+  // 兼容已经启动、暂时不能为了热加载而重启的旧后端。
+  // 新接口给出结构化工时时绝不覆盖；这里只复用成绩单现成的最近层速。
+  const cutoff = Date.now() / 1000 - 14 * 86400
+  const latest = runs.find(run => (
+    run.script === 'osaka'
+    && Number(run.started_at) >= cutoff
+    && Number(run.loops) > 0
+    && Number(run.average_loop_seconds) > 0
+  ))
+  if (!latest) return
+  const secondsPerFloor = Number(latest.average_loop_seconds)
+  for (const goal of report.goals) {
+    if (goal.goal_mode !== 'stock_target' || goal.estimated_seconds != null
+        || goal.floors_needed == null || !goal.deadline_at) continue
+    const remainingSeconds = Math.max(0, Math.round(
+      (new Date(goal.deadline_at).getTime() - Date.now()) / 1000))
+    const estimatedSeconds = Math.ceil(goal.floors_needed * secondsPerFloor)
+    goal.seconds_per_floor = secondsPerFloor
+    goal.speed_sample_floors = Number(latest.loops)
+    goal.estimated_seconds = estimatedSeconds
+    goal.remaining_seconds = remainingSeconds
+    goal.time_margin_seconds = remainingSeconds - estimatedSeconds
+    goal.can_finish = goal.time_margin_seconds >= 0
+  }
+}
 
 function localToday() {
   const now = new Date()
@@ -42,11 +69,11 @@ const statusLabel: Record<string, string> = {
   unknown: '数据不足',
 }
 
-const eventGoalNames = computed(() => (
-  (planning.value?.goals || [])
-    .filter(goal => goal.kind === 'event' && goal.event)
-    .map(goal => String(goal.event))
-))
+function goalStatusLabel(goal: PlanningGoalAdvice) {
+  if (goal.goal_mode === 'stock_target' && goal.can_finish === false) return '来不及'
+  if (goal.goal_mode === 'stock_target' && goal.can_finish === true) return '来得及'
+  return statusLabel[goal.status] || goal.status
+}
 
 function goalHeadline(goal: PlanningGoalAdvice) {
   if (goal.status === 'done') return `已经攒够 ${fmt(goal.target)} ${goal.resource}`
@@ -59,9 +86,37 @@ function goalHeadline(goal: PlanningGoalAdvice) {
   return '需要再加把劲'
 }
 
+function goalProgress(goal: PlanningGoalAdvice) {
+  if (goal.current == null || goal.target <= 0) return 0
+  return Math.min(100, Math.max(0, goal.current / goal.target * 100))
+}
+
+function durationHours(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds)) return ''
+  const minutes = Math.max(0, Math.round(seconds / 60))
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  if (!hours) return `${rest} 分钟`
+  return `${hours} 小时${rest ? ` ${rest} 分` : ''}`
+}
+
+function floorPace(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds)) return ''
+  const value = Math.max(0, Math.round(seconds))
+  return `${Math.floor(value / 60)}分${String(value % 60).padStart(2, '0')}秒`
+}
+
 function goalAction(goal: PlanningGoalAdvice) {
   if (goal.goal_mode === 'stock_target' && goal.status === 'active' && goal.floors_needed != null) {
-    return `结束前还要挖约 ${fmt(goal.floors_needed)} 层，按剩余时间约每天 ${fmt(goal.floors_per_day)} 层。`
+    if (goal.estimated_seconds != null && goal.remaining_seconds != null && goal.can_finish != null) {
+      const margin = durationHours(Math.abs(goal.time_margin_seconds || 0))
+      const verdict = goal.can_finish
+        ? `照当前速度能打完，约余 ${margin}`
+        : `照当前速度来不及，约差 ${margin}`
+      return `按最近一轮 ${floorPace(goal.seconds_per_floor)}/层，预计还要打 ${durationHours(goal.estimated_seconds)}；离收摊还有 ${durationHours(goal.remaining_seconds)}，${verdict}。`
+    }
+    const remaining = goal.remaining_seconds == null ? '' : `，离收摊还有 ${durationHours(goal.remaining_seconds)}`
+    return `结束前还要挖约 ${fmt(goal.floors_needed)} 层${remaining}；最近还没有可用层速，暂时算不出要挂多久。`
   }
   if (goal.goal_mode === 'stock_target' && goal.status === 'unknown') return '再挖几层，单层收益稳定后会自动换算。'
   if (goal.status === 'behind' && goal.extra_daily != null) {
@@ -125,8 +180,11 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
 async function load() {
   loading.value = true
   try {
-    const [planningResult, timelineResult] = await Promise.allSettled([api.planning(), api.eventsTimeline()])
+    const [planningResult, timelineResult, runsResult] = await Promise.allSettled([
+      api.planning(), api.eventsTimeline(), api.dataRuns(10),
+    ])
     if (planningResult.status === 'fulfilled') {
+      if (runsResult.status === 'fulfilled') applyTimingFallback(planningResult.value, runsResult.value.items)
       planning.value = planningResult.value
       error.value = ''
     } else {
@@ -187,12 +245,8 @@ onMounted(load)
 
 <template>
   <section class="planning-panel" :class="{ loading }">
-    <header class="planning-hero">
-      <div>
-        <small>规划</small>
-        <h3>接下来要准备什么</h3>
-        <p>先看差多少，再决定要不要加把劲。</p>
-      </div>
+    <header class="planning-toolbar">
+      <div><h3>当前目标</h3><span v-if="planning?.goals.length">{{ planning.goals.length }} 个</span></div>
       <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
     </header>
 
@@ -226,38 +280,36 @@ onMounted(load)
       </div>
     </form>
 
-    <section v-if="planning?.goals.length" class="planning-section planning-goals-section">
-      <header>
-        <div><h4>我的目标</h4><p>最需要你做决定的事放在最前面。</p></div>
-      </header>
-      <div class="planning-goal-list">
-        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="goal.status">
+    <section v-if="planning?.goals.length" class="planning-goal-list planning-goals-section">
+        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
           <header>
             <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : '手动目标' }} · {{ goalDeadline(goal) }} 截止</small></span>
-            <em>{{ statusLabel[goal.status] || goal.status }}</em>
+            <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
           <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
           <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
-          <div class="planning-goal-metrics">
-            <span><small>当前</small><b>{{ fmt(goal.current) }}</b></span>
-            <span><small>目标</small><b>{{ fmt(goal.target) }}</b></span>
-            <span><small>还剩</small><b>{{ Math.max(0, goal.days_left) }} 天</b></span>
-            <span><small>{{ goal.goal_mode === 'stock_target' ? '还需挖' : '到期预计' }}</small><b>{{ goal.goal_mode === 'stock_target' ? goal.floors_needed == null ? '待实测' : `${fmt(goal.floors_needed)} 层` : fmt(goal.projected) }}</b></span>
+          <div class="planning-goal-progress">
+            <progress v-if="goal.current != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
+            <p><span>当前 <b>{{ fmt(goal.current) }}</b> / {{ fmt(goal.target) }} {{ goal.resource }}</span><span><template v-if="goal.goal_mode === 'stock_target' && goal.remaining_seconds != null">距收摊 {{ durationHours(goal.remaining_seconds) }}</template><template v-else>剩 {{ Math.max(0, goal.days_left) }} 天</template><template v-if="goal.goal_mode === 'stock_target'"> · {{ goal.floors_needed == null ? '待实测' : `还需约 ${fmt(goal.floors_needed)} 层` }}</template><template v-else-if="goal.projected != null"> · 预计 {{ fmt(goal.projected) }}</template></span></p>
           </div>
           <details>
             <summary>查看预测依据</summary>
             <p>{{ goal.message }}</p>
           </details>
         </article>
-      </div>
     </section>
+
+    <div v-else-if="planning" class="planning-empty-state">
+      <span><b>还没有目标</b><small>有想攒的资源或活动预算时，再立一个。</small></span>
+      <button type="button" class="secondary" @click="openCustomForm">＋ 立个目标</button>
+    </div>
 
     <EventTimeline
       id="event-timeline"
       :timeline="timeline"
       :abacuses="planning?.events || []"
-      :goal-names="eventGoalNames"
+      :goals="planning?.goals || []"
       :loading="loading"
       :error="timelineError"
       :estimate-saving="estimateSaving"
@@ -271,28 +323,31 @@ onMounted(load)
 </template>
 
 <style scoped>
-.planning-panel { display: grid; gap: 12px; }
-.planning-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; background: linear-gradient(110deg, var(--fox-gold-pale), var(--paper-card)); border: 1px solid var(--paper-line); border-left: 4px solid var(--fox-gold); border-radius: 12px; }
-.planning-hero small { color: var(--fox-gold-deep); font-weight: 700; letter-spacing: .08em; }
-.planning-hero h3 { margin: 2px 0 0; font-size: 20px; }
-.planning-hero p, .planning-section > header p, .planning-form header p { margin: 3px 0 0; color: var(--ink-dim); font-size: 13px; }
+.planning-panel { display: grid; gap: 10px; }
+.planning-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 0 2px; }
+.planning-toolbar > div { display: flex; align-items: baseline; gap: 8px; }
+.planning-toolbar h3 { margin: 0; font-size: 18px; }
+.planning-toolbar span { color: var(--ink-dim); font-size: 12px; }
 .planning-error { margin: 0; padding: 10px 12px; color: #9f3d28; background: #f9e6df; border: 1px solid #d6a394; border-radius: 10px; }
 .planning-success { margin: 0; padding: 9px 12px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #a8c59c; border-radius: 10px; font-size: 13px; font-weight: 700; }
-.planning-section, .planning-form { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
-.planning-section > header, .planning-form > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.planning-section h4, .planning-form h4 { margin: 0; font-size: 16px; }
+.planning-form { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
+.planning-form > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.planning-form h4 { margin: 0; font-size: 16px; }
+.planning-form header p { margin: 3px 0 0; color: var(--ink-dim); font-size: 13px; }
 .planning-close { padding: 0 5px; color: var(--ink-dim); background: transparent; border: 0; font-size: 20px; cursor: pointer; }
 .planning-form-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
 .planning-form label { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }
 .planning-form input, .planning-form select { width: 100%; min-width: 0; }
 .planning-form-actions { display: flex; gap: 8px; margin-top: 12px; }
-.planning-goal-list { display: grid; gap: 10px; margin-top: 12px; }
+.planning-goal-list { display: grid; gap: 10px; }
 .planning-goals-section { scroll-margin-top: 12px; }
-.planning-goal { padding: 14px 16px; background: var(--paper); border: 1px solid var(--paper-line); border-left: 5px solid var(--paper-line); border-radius: 10px; }
+.planning-goal { padding: 16px 18px; background: linear-gradient(120deg, color-mix(in srgb, var(--fox-gold-pale) 46%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--paper-line); border-left: 5px solid var(--paper-line); border-radius: 12px; }
 .planning-goal.done { border-left-color: #4d7a3a; }
 .planning-goal.on_track { border-left-color: var(--fox-gold); }
 .planning-goal.behind { border-left-color: #b0492e; }
 .planning-goal.active { border-left-color: #5b813f; }
+.planning-goal.pace-behind { border-left-color: #b0492e; }
+.planning-goal.pace-on-track { border-left-color: #5b813f; }
 .planning-goal > header { display: flex; align-items: flex-start; gap: 8px; }
 .planning-goal > header > span { display: grid; gap: 1px; min-width: 0; }
 .planning-goal > header small { color: var(--ink-dim); font-size: 11px; }
@@ -300,28 +355,31 @@ onMounted(load)
 .planning-goal.behind > header em { color: #9f3d28; border-color: #c98673; }
 .planning-goal.on_track > header em { color: var(--fox-gold-deep); border-color: var(--fox-gold); }
 .planning-goal.active > header em { color: #426b36; border-color: #77a164; }
+.planning-goal.pace-behind > header em { color: #9f3d28; border-color: #c98673; }
 .planning-delete { padding: 0 3px; color: var(--ink-dim); background: transparent; border: 0; font-size: 17px; cursor: pointer; }
-.planning-goal-result { display: block; margin-top: 13px; font-size: clamp(22px, 3vw, 30px); line-height: 1.1; }
-.planning-next-action { margin: 7px 0 0; color: #9f3d28; }
-.planning-goal-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px; border: 1px solid var(--paper-line); }
-.planning-goal-metrics span { display: grid; gap: 3px; min-width: 0; padding: 9px 11px; border-left: 1px solid var(--paper-line); }
-.planning-goal-metrics span:first-child { border-left: 0; }
-.planning-goal-metrics small { color: var(--ink-dim); font-size: 11px; }
-.planning-goal-metrics b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planning-goal-result { display: block; margin-top: 14px; font-size: clamp(22px, 3vw, 28px); line-height: 1.15; }
+.planning-next-action { margin: 6px 0 0; color: var(--ink-dim); }
+.planning-goal.behind .planning-next-action, .planning-goal.pace-behind .planning-next-action { color: #9f3d28; }
+.planning-goal-progress { margin-top: 14px; }
+.planning-goal-progress progress { display: block; width: 100%; height: 7px; overflow: hidden; accent-color: var(--fox-gold); border: 0; border-radius: 999px; }
+.planning-goal.done .planning-goal-progress progress, .planning-goal.active .planning-goal-progress progress { accent-color: #5b813f; }
+.planning-goal-progress p { display: flex; justify-content: space-between; gap: 12px; margin: 7px 0 0; color: var(--ink-dim); font-size: 11px; }
+.planning-goal-progress b { color: var(--ink); }
 .planning-panel details { margin-top: 10px; color: var(--ink-dim); font-size: 12px; }
 .planning-panel summary { color: var(--fox-gold-deep); cursor: pointer; }
 .planning-panel details p { margin: 7px 0 0; line-height: 1.6; }
+.planning-empty-state { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.planning-empty-state span { display: grid; gap: 2px; }
+.planning-empty-state b { color: var(--ink); }
+.planning-empty-state small { font-size: 11px; }
 @media (max-width: 700px) {
   .planning-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .planning-goal-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .planning-goal-metrics span:nth-child(odd) { border-left: 0; }
-  .planning-goal-metrics span:nth-child(n+3) { border-top: 1px solid var(--paper-line); }
 }
 @media (max-width: 520px) {
-  .planning-hero { align-items: flex-start; padding: 14px; }
-  .planning-hero h3 { font-size: 18px; }
-  .planning-hero p { max-width: 210px; }
-  .planning-section, .planning-form { padding: 14px; }
+  .planning-form { padding: 14px; }
   .planning-form-fields { grid-template-columns: 1fr; }
+  .planning-goal { padding: 14px; }
+  .planning-goal-progress p { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .planning-empty-state { align-items: flex-start; flex-direction: column; }
 }
 </style>

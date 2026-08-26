@@ -249,6 +249,37 @@ def koban_floor_yield(events: list[dict], *,
     return {"per_floor": delta_total / floors_total, "sessions": sessions}
 
 
+def latest_osaka_floor_speed(store, *, now: float | None = None,
+                             window_days: int = RATE_WINDOW_DAYS) -> dict | None:
+    """取最近一轮有效的大阪城实测层速。
+
+    规划要回答的是「剩余层数还要挂多久」，所以这里沿用成绩单已经算好的
+    average_loop_seconds。失败或手动停止的轮次只要确实跑出了层数，层速仍然
+    是有效样本；零层、脏数字和过期记录不参与。
+    """
+    getter = getattr(store, "recent_run_summaries", None)
+    if not callable(getter):
+        return None
+    now_ts = now if now is not None else time.time()
+    try:
+        runs = getter(limit=10, script="osaka",
+                      from_ts=now_ts - window_days * 86400, to_ts=now_ts + 1)
+    except (TypeError, ValueError):
+        return None
+    for run in runs:
+        seconds = run.get("average_loop_seconds")
+        floors = run.get("loops")
+        if (not isinstance(seconds, (int, float)) or seconds <= 0
+                or not isinstance(floors, (int, float)) or floors <= 0):
+            continue
+        return {
+            "seconds_per_floor": round(float(seconds), 1),
+            "floors": int(floors),
+            "run_started_at": run.get("started_at"),
+        }
+    return None
+
+
 # ── 目标评估 ──
 
 
@@ -304,6 +335,7 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
                   floor_yield: dict | None, today: date | None = None,
                   event_windows: list[dict] | None = None,
                   window_impacts: dict | None = None,
+                  floor_speed: dict | None = None,
                   now: datetime | None = None) -> dict:
     """给一条目标算命。status: done / on_track / behind / expired / unknown。
 
@@ -338,6 +370,12 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         "extra_floors": None,
         "floors_needed": None,
         "floors_per_day": None,
+        "seconds_per_floor": None,
+        "speed_sample_floors": None,
+        "estimated_seconds": None,
+        "remaining_seconds": None,
+        "time_margin_seconds": None,
+        "can_finish": None,
         "status": "unknown",
         "message": "",
     }
@@ -361,6 +399,8 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
             end_dt = datetime.combine(deadline, datetime.max.time(), tzinfo=_TZ)
         if end_dt.tzinfo is None:
             end_dt = end_dt.replace(tzinfo=_TZ)
+        advice["remaining_seconds"] = max(
+            0, int(round((end_dt - now_dt).total_seconds())))
         if now_dt >= end_dt:
             advice["status"] = "expired"
             advice["shortfall"] = int(target - current)
@@ -383,12 +423,21 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         advice["floors_needed"] = floors_needed
         advice["floors_per_day"] = max(1, math.ceil(floors_needed / remaining_days))
         advice["extra_floors"] = advice["floors_per_day"]
+        seconds_per_floor = (floor_speed or {}).get("seconds_per_floor")
+        if isinstance(seconds_per_floor, (int, float)) and seconds_per_floor > 0:
+            estimated_seconds = int(math.ceil(floors_needed * seconds_per_floor))
+            margin_seconds = advice["remaining_seconds"] - estimated_seconds
+            advice["seconds_per_floor"] = round(float(seconds_per_floor), 1)
+            advice["speed_sample_floors"] = int(
+                (floor_speed or {}).get("floors") or 0) or None
+            advice["estimated_seconds"] = estimated_seconds
+            advice["time_margin_seconds"] = margin_seconds
+            advice["can_finish"] = margin_seconds >= 0
         advice["message"] = (
             f"现在有 {_fmt(current)} 小判，收摊前还差 "
             f"{_fmt(target - current)}。按最近 {floor_yield.get('sessions', 0)} 次"
             f"挖地实测（每层约 {per_floor:.0f} 小判），还要挖约 "
-            f"{floors_needed} 层；按剩余时间分摊，约每天 "
-            f"{advice['floors_per_day']} 层。")
+            f"{floors_needed} 层。所需工时按最近一轮有效层速另算。")
         return advice
     if days_left <= 0:
         advice["status"] = "expired"
@@ -636,6 +685,7 @@ def get_planning(store, goals_path: Path, *,
     floor_yield = koban_floor_yield(
         store.recent_events(limit=50, event_type="osaka.koban_session"),
         now=now_ts)
+    floor_speed = latest_osaka_floor_speed(store, now=now_ts)
     cards = load_event_cards(Path(goals_path).parent)
     event_windows = [{"name": name, "start_date": card.get("start_date"),
                       "end_date": card.get("end_date")}
@@ -662,7 +712,8 @@ def get_planning(store, goals_path: Path, *,
                            rate_info=rates.get(goal["resource"]),
                            floor_yield=floor_yield, today=today,
                            event_windows=event_windows,
-                           window_impacts=window_impacts, now=now_dt)
+                           window_impacts=window_impacts,
+                           floor_speed=floor_speed, now=now_dt)
              for goal in load_goals(goals_path)]
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
@@ -690,6 +741,7 @@ def get_planning(store, goals_path: Path, *,
         "rates": rates,
         "current": current,
         "koban_per_floor": floor_yield,
+        "osaka_floor_speed": floor_speed,
         "goals": goals,
         "events": abacuses,
     }
