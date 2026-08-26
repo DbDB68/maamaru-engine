@@ -145,6 +145,18 @@ const reportedDailyTotals = computed(() => {
   }
   return totals
 })
+// 日级认领：没有快照缺口的日子，从「还不知道」入口报备并说明过的，
+// 当天未归因部分视为已说明（只改展示颜色，不改库存数字）
+const claimedDays = computed(() => {
+  const cutoff = Date.now() / 1000 - days.value * 86400
+  const dates = new Set<string>()
+  for (const report of humanReports.value) {
+    if (report.gap_key || Number(report.occurred_at) < cutoff) continue
+    if (!reportExplainsGap(report)) continue
+    dates.add(shanghaiDate(Number(report.occurred_at)))
+  }
+  return dates
+})
 
 const chartDates = computed(() => {
   const names = mode.value === 'single' ? [selectedResource.value] : compareResources.value
@@ -192,7 +204,12 @@ const chartSeries = computed<ChartSeries[]>(() => {
   }
   chartDates.value.forEach((date, index) => {
     const row = book.daily_series.find(item => item.resource === name && item.date === date)
-    if (row?.unattributed_delta != null) byKey.unknown[index] += row.unattributed_delta - (byKey.human[index] || 0)
+    if (row?.unattributed_delta != null) {
+      let unknown = row.unattributed_delta - (byKey.human[index] || 0)
+      // 这天已被审神者认领：剩余的「还不知道」整体挪到「已说明」
+      if (unknown && claimedDays.value.has(date)) { byKey.human[index] += unknown; unknown = 0 }
+      byKey.unknown[index] += unknown
+    }
   })
   return sourceCategories.map(cat => ({
     key: cat.key, name: cat.label, color: cat.color,
@@ -216,7 +233,8 @@ function onChartSelect({ date, key }: { date: string; key: string }) {
     highlightCategory.value = key
     const gap = gapForDay(date)
     if (gap) openGapReport(gap)
-    else openProactiveReport(dayRange(date)[1] * 1000)
+    // 默认时间取当天最后一秒；如果是今天则取现在，避免指到未来
+    else openProactiveReport(Math.min(dayRange(date)[1] * 1000 - 1, Date.now()))
     return
   }
   if (mode.value === 'compare' && resourceNames.includes(key)) selectedResource.value = key
@@ -469,7 +487,7 @@ onMounted(() => load())
             <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
           <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(dayRange(dayDetail.date)[1] * 1000)" @open-records="selectRecordDate" />
+          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" :claimed="claimedDays.has(dayDetail.date)" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openProactiveReport(Math.min(dayRange(dayDetail.date)[1] * 1000 - 1, Date.now()))" @open-records="selectRecordDate" />
           <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
             <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
             <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>

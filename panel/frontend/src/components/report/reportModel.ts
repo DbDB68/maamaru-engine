@@ -59,6 +59,7 @@ export function eventTime(ts: number): string {
 export const scriptNames: Record<string, string> = {
   osaka: '大阪城', sortie: '合战场', yosari: '异去', raid: '联队战',
   pumpkin: '南瓜大作战', daily: '一键日课',
+  inbox_supplies: '收杂物箱', snapshot: '库存盘点',
 }
 
 // ---- 每轮任务（run）展示助手 ----

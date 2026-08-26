@@ -480,6 +480,48 @@ class TelemetryStore:
                              "event_id": row["id"]})
                 attributions.append(item)
 
+        # ── 同 run 前后盘点残差：收杂物箱等没有逐笔记账的流程，
+        # 用 run 自带的 before/after 快照净差认账（扣除该 run 已逐笔确认的部分），
+        # 否则收邮箱这类收益全落进「不知道谁干的」。confidence 用 inferred：
+        # 净差是快照夹出来的推断，不是逐笔实证，不够格把当天置信度顶到 high
+        by_run: dict[str, dict] = {}
+        for row in rows:
+            if row["event_type"] != "inventory.captured" or not row["run_id"]:
+                continue
+            slot = by_run.setdefault(row["run_id"], {"before": None, "after": None,
+                                                     "script": row["script"]})
+            phase = _loads(row["payload"], {}).get("phase")
+            if phase == "before" and slot["before"] is None:
+                slot["before"] = row
+            elif phase == "after":
+                slot["after"] = row
+        for run_id, slot in by_run.items():
+            before_row, after_row = slot["before"], slot["after"]
+            if (before_row is None or after_row is None
+                    or after_row["ts"] <= before_row["ts"]):
+                continue
+            left = _loads(before_row["payload"], {}).get("resources") or {}
+            right = _loads(after_row["payload"], {}).get("resources") or {}
+            run_delta: dict[str, float] = {}
+            for a in attributions:
+                if a["run_id"] == run_id:
+                    run_delta[a["resource"]] = run_delta.get(a["resource"], 0) + a["delta"]
+            for name in left.keys() & right.keys():
+                if not (isinstance(left.get(name), (int, float))
+                        and isinstance(right.get(name), (int, float))):
+                    continue
+                residual = right[name] - left[name] - run_delta.get(name, 0)
+                if not residual:
+                    continue
+                attributions.append({
+                    "id": f"a{len(attributions) + 1}", "ts": after_row["ts"],
+                    "resource": name, "delta": residual,
+                    "source": "inventory.run_delta",
+                    "label": f"盘点净差 {int(residual):+d}",
+                    "confidence": "inferred",
+                    "script": slot["script"], "run_id": run_id,
+                    "event_id": after_row["id"]})
+
         # ── 缺口：跨 run 快照差值 + 人工报备 + 证据冲突 ──
         gaps: list[dict] = []
         report_list = [{"id": r["id"], "occurred_at": r["occurred_at"],

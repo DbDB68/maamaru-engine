@@ -349,6 +349,50 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(koban["closing"], 950)
         self.assertEqual(koban["total_delta"], 50)
 
+    def test_same_run_snapshot_residual_is_attributed(self):
+        # 收杂物箱场景：run 自带 before/after 快照但没有逐笔记账，
+        # 净差要认到这个 run 头上（inferred），不再整笔落进「不知道谁干的」
+        t0 = sh("2026-08-26 18:50:00")
+        self._captured(t0, {"小判": 891256, "木炭": 521000},
+                       phase="before", run_id="run-inbox", script="inbox_supplies")
+        self._captured(t0 + 180, {"小判": 1002256, "木炭": 521792},
+                       phase="after", run_id="run-inbox", script="inbox_supplies")
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 600)
+
+        koban = self._res(ledger, "小判")
+        self.assertEqual(koban["total_delta"], 111000)
+        self.assertEqual(koban["attributed_delta"], 111000)
+        self.assertEqual(koban["unattributed_delta"], 0)
+        attr = next(a for a in ledger["attributions"] if a["resource"] == "小判")
+        self.assertEqual(attr["source"], "inventory.run_delta")
+        self.assertEqual(attr["confidence"], "inferred")
+        self.assertEqual(attr["run_id"], "run-inbox")
+        # inferred 不把置信度顶到 high：快照净差是推断不是逐笔实证
+        self.assertEqual(koban["confidence"], "medium")
+        day = self._day(ledger, "2026-08-26", "小判")
+        self.assertEqual(day["unattributed_delta"], 0)
+        # 同 run 前后差也不算缺口
+        self.assertEqual(ledger["gaps"], [])
+
+    def test_same_run_residual_netts_itemized_changes(self):
+        # run 内有逐笔记账时残差只认差额：快照 +1300，远征已记 +1000 → 残差 +300
+        t0 = sh("2026-08-26 09:00:00")
+        self._captured(t0, {"小判": 5000}, phase="before", run_id="run-exp")
+        self._event(t0 + 60, "resource.change",
+                    {"resource": "小判", "delta": 1000, "source": "expedition.great_success",
+                     "attribution": "confirmed", "note": "远征大成功"},
+                    run_id="run-exp", script="expedition")
+        self._captured(t0 + 600, {"小判": 6300}, phase="after", run_id="run-exp")
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 900)
+
+        koban_attrs = [a for a in ledger["attributions"] if a["resource"] == "小判"]
+        self.assertEqual(sorted(a["delta"] for a in koban_attrs), [300, 1000])
+        residual = next(a for a in koban_attrs if a["source"] == "inventory.run_delta")
+        self.assertEqual(residual["delta"], 300)
+        self.assertEqual(self._res(ledger, "小判")["unattributed_delta"], 0)
+
     def test_api_endpoint_aggregates_server_side(self):
         from panel.server import api_data_resource_ledger
 
