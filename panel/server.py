@@ -846,6 +846,9 @@ register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过�
                 hidden=True)
 register_script("sugar", "炼糖", "收件箱清狗粮 + 习合循环",
                 _wrap_inventory("炼糖", _build_simple("sugar_stream")))
+register_script("inbox_supplies", "收杂物箱",
+                "收件箱只收资源/货币/便利道具/其他物品，刀剑邮件原样躺着",
+                _wrap_inventory("收杂物", _build_simple("inbox_supplies_stream")))
 register_script("snapshot", "库存快照",
                 "手动拍一次完整家底（含小判）刷新看板；日常已由锻刀收工顺手拍+顶栏顺路更新覆盖，想立刻刷新看板才用",
                 _wrap_inventory("库存", _build_simple("status_snapshot_stream"),
@@ -1255,6 +1258,7 @@ _SCRIPT_FLAVOR = {
     "dispatch": "正在流放刀剑男士⛺",
     "forge": "正在盯炉火🔥",
     "sugar": "正在炼糖🍬",
+    "inbox_supplies": "正在收件箱翻杂物📮",
     "snapshot": "正在盘点家底📦",
 }
 

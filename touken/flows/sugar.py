@@ -71,9 +71,39 @@ class SugarMixin:
 
     # ==================== 收件箱 ====================
 
-    def _inbox_claim_stream(self, dry_run: bool):
+    # 筛选面板按钮坐标（真机校准；面板里按钮大，点位取中心即可）
+    _FILTER_OPEN = (990, 126)      # 收件箱列表页「筛选」
+    _FILTER_CLEAR = (803, 157)     # 面板内「取消筛选」
+    _FILTER_SWORDS = (803, 380)    # 「全刀剑」
+    _FILTER_SUPPLIES = [           # 杂物四项：资源/货币/便利道具/其他物品
+        (275, 455), (620, 455), (795, 455), (275, 530)]
+    _FILTER_SORT_BY_KIND = (1011, 305)  # 右侧排序栏「物品种类」
+    _FILTER_OK = (640, 625)        # 「确定」
+
+    def _apply_inbox_filter(self, mode: str):
+        """打开筛选面板并选过滤项。
+        mode: "swords"（全刀剑，炼糖用）/ "supplies"（杂物四项）。
+        supplies 先点「取消筛选」清场再点选，进来什么状态都不挑。"""
+        self.maa.click(Point(*self._FILTER_OPEN))
+        time.sleep(1.0)
+        if mode == "supplies":
+            self.maa.click(Point(*self._FILTER_CLEAR))
+            time.sleep(0.6)
+            for x, y in self._FILTER_SUPPLIES:
+                self.maa.click(Point(x, y))
+                time.sleep(0.5)
+        else:
+            self.maa.click(Point(*self._FILTER_SORT_BY_KIND))
+            time.sleep(0.8)
+            self.maa.click(Point(*self._FILTER_SWORDS))
+            time.sleep(0.8)
+        self.maa.click(Point(*self._FILTER_OK))
+        time.sleep(1.5)
+
+    def _inbox_claim_stream(self, dry_run: bool, filter_mode: str = "swords"):
         """
         收件箱清一波。
+        filter_mode: "swords" 收全刀剑（炼糖默认）/ "supplies" 收杂物。
         Returns: "claimed" 领到了 / "blocked" 所持满领不动 / "empty" 没刀 / "failed" 导航失败 / "dry" 演习
         """
         yield "[炼糖·收件箱] 正在导航到收件箱..."
@@ -88,15 +118,8 @@ class SugarMixin:
             yield "[炼糖·收件箱] （演习模式：不点领取）"
             return "dry"
 
-        # 筛选：物品种类 → 全刀剑 → 确定
-        self.maa.click(Point(990, 126))
-        time.sleep(1.0)
-        self.maa.click(Point(1011, 305))
-        time.sleep(0.8)
-        self.maa.click(Point(803, 380))
-        time.sleep(0.8)
-        self.maa.click(Point(640, 625))
-        time.sleep(1.5)
+        # 筛选（收刀还是收杂物看 filter_mode）→ 确定
+        self._apply_inbox_filter(filter_mode)
 
         # 一键领取（灰的配不上模板，空箱不点）
         self.maa.screenshot(force=True)
@@ -131,6 +154,26 @@ class SugarMixin:
         # 收箱子
         self.maa.click(Point(1248, 32))
         time.sleep(1.0)
+        return result
+
+    def inbox_supplies_stream(self, dry_run: bool = False):
+        """收件箱只收杂物（资源/货币/便利道具/其他物品），不动刀剑邮件。
+
+        从炼糖里拎出来的独立小工具：导航到收件箱 → 筛选杂物四项 →
+        一键领取 → 关弹窗 → 收工。
+        """
+        result = yield from self._inbox_claim_stream(dry_run,
+                                                     filter_mode="supplies")
+        if result == "claimed":
+            yield "[收杂物] 杂物领完收工"
+        elif result == "blocked":
+            yield "[收杂物] 有东西领不动（上限满了），收工"
+        elif result == "empty":
+            yield "[收杂物] 没有能领的杂物，收工"
+        elif result == "dry":
+            yield "[收杂物] 演习完毕（没真点领取）"
+        else:
+            yield "[收杂物] 没到收件箱，收工"
         return result
 
     # ==================== 习合 ====================
