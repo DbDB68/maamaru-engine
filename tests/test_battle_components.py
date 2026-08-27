@@ -275,7 +275,7 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(flow._formation_mode_state(), "manual")
 
     def test_manual_formation_switches_from_auto_then_selects_fixed(self):
-        flow = Flow(FormationPageMaa(title_ttl=1, templates={
+        flow = Flow(FormationPageMaa(title_ttl=3, templates={
             "battle/ui阵形选择.png": Point(640, 24),
             "battle/阵形选择自动.png": Point(910, 32),
         }))
@@ -287,8 +287,27 @@ class BattleComponentTests(unittest.TestCase):
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
                 formation_name="逆行阵", enable_auto=False), "fixed")
-        # 拨开关后双击同一张阵形卡：第一下选中、第二下即确定，不点偏移热点
+        # 拨开关→等标题稳定（吃掉 2 次标题查询）→点两下同一张阵形卡：
+        # 第一下选中、第二下即确定，不点偏移热点
         self.assertEqual(flow.points, [[910, 32], [1034, 420], [1034, 420]])
+
+    def test_manual_formation_never_shows_title_means_game_auto_picked(self):
+        """拨成手动后标题一直不出现 = 游戏已经自动选完开打（江户城实测：
+        auto 模式手快时页面不停留）。这时绝不能盲点卡面，如实按"自动"交差。"""
+        flow = Flow(FormationPageMaa(title_ttl=1, templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择自动.png": Point(910, 32),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="逆行阵", enable_auto=False), "auto")
+        # 只拨了开关，卡面一下都没点
+        self.assertEqual(flow.points, [[910, 32]])
 
     def test_auto_formation_switches_from_manual_without_clicking_fixed(self):
         flow = Flow(FakeMaa(templates={
@@ -652,6 +671,159 @@ class OsakaRouteTests(unittest.TestCase):
         flow.maa = Maa()
         with patch("touken.flows.osaka.time.sleep"):
             self.assertEqual(flow._wait_for_osaka_march({}, attempts=4), button)
+
+
+class _SafeDepartHost(BattleMixin):
+    """通用安全出阵链的最小宿主：组件全部钉死，只看编排。"""
+
+    def __init__(self, injury=None, deny=False, cancel=None, maa=None):
+        from types import SimpleNamespace
+        self.maa = maa or SimpleNamespace(screenshot=lambda force=False: None)
+        self.config = {"team_select": {"teams": {"3": [394, 91]}}}
+        self._injury = injury
+        self._deny = deny
+        self._cancel = cancel
+        self.saved_record = False
+        self.restored = False
+
+    def _pick_team(self, team_no):
+        return True
+
+    def _team_injury_status(self, cfg):
+        return self._injury
+
+    def _click_depart(self, cfg):
+        return True
+
+    def _cancel_equip_warning(self, cfg):
+        return self._cancel
+
+    def _deny_heavy_injury_warning(self, cfg):
+        return self._deny
+
+    def _save_team_record(self, cfg, record_no=1):
+        self.saved_record = True
+        return True
+
+    def _restore_equipment_from_warning(self, cfg, record_no=1):
+        self.restored = True
+        return None  # 恢复后不再有空缺警告
+
+
+def _drain_chain(flow, cfg=None, **kwargs):
+    gen = flow._safe_depart_stream(cfg or {}, 3, "[测试]", **kwargs)
+    msgs = []
+    while True:
+        try:
+            msgs.append(next(gen))
+        except StopIteration as stop:
+            return msgs, stop.value
+
+
+class _RefillMaa:
+    """票尽补票弹窗：确定/取消被点击后才消失；popup_sticks 时确定也点不掉。"""
+
+    CONFIRM = Point(700, 500)
+    CANCEL = Point(500, 500)
+
+    def __init__(self, popup_sticks=False):
+        self.popup = True
+        self.popup_sticks = popup_sticks
+        self.clicked = []
+
+    def screenshot(self, force=False):
+        return None
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if not self.popup:
+            return None
+        if template == "江户城/补票弹窗.png":
+            return Point(640, 300)
+        if template == "通用_确定.png":
+            return self.CONFIRM
+        if template == "通用_取消.png":
+            return self.CANCEL
+        return None
+
+    def click(self, point):
+        self.clicked.append(point)
+        if point == self.CANCEL:
+            self.popup = False
+        elif point == self.CONFIRM and not self.popup_sticks:
+            self.popup = False
+
+
+_REFILL_CFG = {"ticket_refill": {
+    "popup": {"template": "江户城/补票弹窗.png"},
+    "confirm_button": {"template": "通用_确定.png"},
+    "cancel_button": {"template": "通用_取消.png"},
+}}
+
+
+class SafeDepartChainTests(unittest.TestCase):
+    """选队→伤势→刀装→重伤拦截的编排语义：各玩法只准调用，不准手搓。"""
+
+    def test_pre_depart_injury_over_threshold_stops(self):
+        msgs, result = _drain_chain(
+            _SafeDepartHost(injury="重伤"), repair_threshold="heavy")
+        self.assertEqual(result, (False, False))
+        self.assertTrue(any("已达到停止条件" in m for m in msgs), msgs)
+
+    def test_injury_below_threshold_passes(self):
+        """虚拟伤害活动中伤照跑：threshold=heavy 时中伤不拦。"""
+        msgs, result = _drain_chain(
+            _SafeDepartHost(injury="中伤"), repair_threshold="heavy")
+        self.assertEqual(result, (True, False))
+
+    def test_heavy_injury_popup_is_denied_and_stops(self):
+        msgs, result = _drain_chain(_SafeDepartHost(deny=True))
+        self.assertEqual(result, (False, False))
+        self.assertTrue(any("绝不出阵" in m for m in msgs), msgs)
+
+    def test_equip_warning_cancel_without_auto_equip_stops(self):
+        msgs, result = _drain_chain(
+            _SafeDepartHost(cancel=True), auto_equip=False)
+        self.assertEqual(result, (False, False))
+        self.assertTrue(any("刀装未满" in m for m in msgs), msgs)
+
+    def test_auto_equip_saves_record_once_and_restores(self):
+        host = _SafeDepartHost()
+        msgs, result = _drain_chain(host, auto_equip=True)
+        self.assertEqual(result, (True, True))
+        self.assertTrue(host.saved_record)
+        self.assertTrue(host.restored)
+
+    def test_clean_pass_returns_ok(self):
+        msgs, result = _drain_chain(_SafeDepartHost())
+        self.assertEqual(result, (True, False))
+
+    def test_refill_popup_declined_cancels_and_stops(self):
+        """票尽弹窗 + 不补票：点取消收工，不碰确定。"""
+        maa = _RefillMaa()
+        msgs, result = _drain_chain(
+            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=False)
+        self.assertEqual(result, (False, False))
+        self.assertIn(_RefillMaa.CANCEL, maa.clicked)
+        self.assertNotIn(_RefillMaa.CONFIRM, maa.clicked)
+        self.assertTrue(any("不补票" in m for m in msgs), msgs)
+
+    def test_refill_popup_confirmed_then_redeparts(self):
+        """票尽弹窗 + 自动补票：点确定补一张，重新出阵后正常通过。"""
+        maa = _RefillMaa()
+        msgs, result = _drain_chain(
+            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=True)
+        self.assertEqual(result, (True, False))
+        self.assertIn(_RefillMaa.CONFIRM, maa.clicked)
+        self.assertTrue(any("补上一张" in m for m in msgs), msgs)
+
+    def test_refill_popup_sticking_stops_before_double_spend(self):
+        """补完票弹窗还在（没补上）：停手，绝不重复点小判。"""
+        maa = _RefillMaa(popup_sticks=True)
+        msgs, result = _drain_chain(
+            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=True)
+        self.assertEqual(result, (False, False))
+        self.assertEqual(maa.clicked.count(_RefillMaa.CONFIRM), 1)
+        self.assertTrue(any("防止重复消费" in m for m in msgs), msgs)
 
 
 if __name__ == "__main__":

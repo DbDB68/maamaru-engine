@@ -1,10 +1,14 @@
-# まあ丸 `🦊` — 刀剑乱舞国服自动化辅助工具
+# まあ丸 `🦊` — 《刀剑乱舞 ONLINE》国服本丸管家
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
 
-まあ丸用于在 MuMu 模拟器上执行《刀剑乱舞 ONLINE》国服的日课、远征、出阵和活动任务。玩家决定目标、部队、伤势条件、资源消耗和保护名单；まあ丸负责按这些规则执行、观察结果、处理部分中断，并把能够确认的任务与资源变化记进本丸成绩单。
+我玩《刀剑乱舞 ONLINE》九年了。现在还是想玩，只是日课、远征、活动和重复出阵已经无聊到不想再亲手点了。
+
+**まあ丸就是在这种情况下做出来的：一个让我能继续玩下去的本丸管家。** 它会挂机，把重复操作交给自动化，把养成目标、部队安排、伤势底线、资源消耗和保护名单留给玩家自己决定。
+
+具体来说，まあ丸可以执行日课、远征、出阵和活动任务，也会确认任务是否真的完成、在部分中断后尝试恢复，并把能够确认的资源变化和掉落结果记进本丸成绩单。无法确认的事情会保留为未知，不替玩家猜结果。
 
 **入口：** [下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest) · [使用说明](docs/user-manual.md) · [版本记录](docs/releases/) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
 

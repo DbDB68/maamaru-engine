@@ -895,16 +895,35 @@ def _card_window(card: dict):
 
 
 def _count_free_tickets(card: dict, start_dt: datetime, end_dt: datetime) -> int:
-    """按回满点（默认每天 5:00/17:00）与窗口的交集数白票。
+    """按活动窗口计算可免费获取的令牌数。
 
-    回满是重置不是累加：回满时刻起 12 小时内落在活动窗口里的那段，
-    这 6 枚令牌才花得出去。开打前最近一次回满（如 8-27 05:00）的存货
-    靠交集自然算进来；收摊瞬间的回满（9-10 05:00）零交集自然排除。
+    新模型（卡里有 refill_amount）：开场满额 cap 枚，之后每次回票点
+    严格落在活动窗口 (start_dt, end_dt) 内时加 refill_amount 枚；
+    收摊时刻及之后的回票不计，开场前回票不计。
+
+    老模型（无 refill_amount）：维持原 12 小时回满窗口交集逻辑。
     """
     cap = _ticket_cap(card)
     if not cap:
         return 0
     hours = card.get("refill_hours") or [5, 17]
+
+    refill_amount = card.get("refill_amount")
+    if refill_amount is not None:
+        # 新模型：cap + 严格在窗口内的回票点 × refill_amount
+        refill_amount = int(refill_amount)
+        count = 0
+        day = start_dt.date() - timedelta(days=1)
+        while day <= end_dt.date():
+            for hour in hours:
+                refill = (datetime.combine(day, datetime.min.time(), tzinfo=_TZ)
+                          + timedelta(hours=hour))
+                if start_dt < refill < end_dt:
+                    count += 1
+            day += timedelta(days=1)
+        return cap + count * refill_amount
+
+    # 老模型（无 refill_amount）：维持原 12 小时回满窗口交集逻辑
     count = 0
     day = start_dt.date() - timedelta(days=1)
     while day <= end_dt.date():
@@ -999,7 +1018,14 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     abacus["days_left"] = days_left
     if precise:
         free_runs = _count_free_tickets(card, effective_start, end_dt)
-        free_desc = f"回满 {free_runs // _ticket_cap(card)} 次 × {_ticket_cap(card)} 枚"
+        refill_amount = card.get("refill_amount")
+        if refill_amount is not None:
+            # 获得制：开场满额 + 每个回票点加 refill_amount 枚（不是回满）
+            refill_times = (free_runs - _ticket_cap(card)) // int(refill_amount)
+            free_desc = (f"开场满 {_ticket_cap(card)} 枚 + "
+                         f"回票 {refill_times} 次 × {int(refill_amount)} 枚")
+        else:
+            free_desc = f"回满 {free_runs // _ticket_cap(card)} 次 × {_ticket_cap(card)} 枚"
     else:
         free_runs = daily_free * days_left
         free_desc = f"每天 {daily_free} 张 × {days_left} 天"

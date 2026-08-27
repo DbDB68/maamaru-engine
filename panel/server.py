@@ -415,6 +415,14 @@ def _build_pumpkin(agent, config_path, params):
         auto_refill=False)
 
 
+def _build_edocastle(agent, config_path, params):
+    runs = _run_count(params, 0, "max_runs")
+    yield from agent.edocastle_stream(
+        team_no=_i(params, "team_no", 3),
+        use_koban_refill=_bool(params.get("use_koban_refill", False)),
+        max_runs=runs)
+
+
 def _build_sortie(agent, config_path, params):
     yield from agent.sortie_stream(
         chapter=_i(params, "chapter", 1),
@@ -699,6 +707,15 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
                         _run_count_field(ticket=True, default=4),
                         {**_ticket_refill_field(),
                          "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"}])
+register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点、钥匙、王点一套带走",
+                _wrap_inventory("江户城", _build_edocastle),
+                params=[_team_field("3"),
+                        {"key": "max_runs", "type": "number", "label": "最多跑几圈",
+                         "default": 0, "min": 0, "max": 99,
+                         "help": "0 表示把当天通行令牌跑完为止。"},
+                        {"key": "use_koban_refill", "type": "toggle",
+                         "label": "票尽时用小判补票？", "default": False,
+                         "help": "走游戏自己的补票弹窗：出阵→确定补一张→再出阵。弹窗模板待踩点，认不出时安全收工。"}])
 register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
@@ -1250,6 +1267,7 @@ _SCRIPT_FLAVOR = {
     "daily": "正在爆肝日课📋",
     "raid": "正在和时间溯行军搏斗中⚔️",
     "pumpkin": "正在南瓜田里刨剪影🎃",
+    "edocastle": "正在江户城摸黑巡游🏯",
     "sortie": "正在出阵打图🗡",
     "yosari": "正在提灯照耀的异去探索🏮",
     "osaka": "正在大阪城地下咔咔挖土⛏️",

@@ -58,20 +58,16 @@ class OsakaFlow(OsakaMixin):
     def _wait_for_team_select(self, cfg, attempts=15, open_after=5):
         return True
 
-    def _pick_team(self, team_no):
-        pass
+    def _safe_depart_stream(self, cfg, team_no, tag, **kwargs):
+        if False:
+            yield
+        return True, False
 
-    def _click_depart(self, cfg):
+    def _confirm_departure(self, cfg):
         return True
 
     def _deny_heavy_injury_warning(self, cfg):
         return False
-
-    def _cancel_equip_warning(self, cfg):
-        return None
-
-    def _confirm_osaka_departure(self, cfg):
-        return True
 
     # ---- 巡逻循环里的感知/操作：按剧本走 ----
     def _osaka_floor_done(self, cfg):

@@ -479,12 +479,27 @@
         ]
       },
       "maps": {
-        "1": [222, 241],
-        "2": [526, 241],
-        "3": [823, 241],
-        "4": [1126, 241]
+        "1": [
+          222,
+          241
+        ],
+        "2": [
+          526,
+          241
+        ],
+        "3": [
+          823,
+          241
+        ],
+        "4": [
+          1126,
+          241
+        ]
       },
-      "confirm": [1205, 641]
+      "confirm": [
+        1205,
+        641
+      ]
     },
     "活动": {
       "entry": {
@@ -819,7 +834,10 @@
       ]
     },
     "double_click": true,
-    "confirm_offset": [-115, 13]
+    "confirm_offset": [
+      -115,
+      13
+    ]
   },
   "shop": {
     "free_gift": {
@@ -1084,29 +1102,58 @@
     ],
     "max_skips": 4
   },
-  "osaka": {
+  "edocastle": {
     "team_no": 3,
+    "difficulty": 4,
+    "map_archive": "resource/base/maps/edocastle-4.json",
+    "use_koban_refill": false,
+    "max_runs": 0,
+    "repair_threshold": "heavy",
+    "auto_equip": false,
+    "tour": [
+      21,
+      20,
+      19,
+      17,
+      18,
+      6,
+      4,
+      10,
+      14,
+      13,
+      15,
+      16,
+      9,
+      8,
+      11,
+      12,
+      1,
+      7,
+      2
+    ],
     "activity_entry": {
       "template": "活动.png"
     },
-    "event_entry": {
-      "template": "大阪城/挖地.png"
+    "ui_title": {
+      "template": "江户城/ui江户城.png"
     },
-    "floor_title_ocr": {
-      "roi": [75, 155, 555, 225]
-    },
-    "floor_arrows": {
-      "tens_up": [1014, 284],
-      "ones_up": [1084, 284],
-      "tens_down": [1014, 420],
-      "ones_down": [1084, 420]
+    "difficulty_card": {
+      "target": [
+        1118,
+        328
+      ]
     },
     "deploy_button": {
       "template": "team/部队选择.png"
     },
     "team_ui_ocr": {
       "expected": "部队选择",
-      "roi": [506, 1, 774, 77]
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
     },
     "depart_button": {
       "template": "team/即刻出阵.png"
@@ -1118,36 +1165,242 @@
       "template": "否.png"
     },
     "injury_stamps": {
-      "重伤": {"template": "battle/ui重伤.png", "threshold": 0.88},
-      "中伤": {"template": "battle/中伤.png", "threshold": 0.88},
-      "轻伤": {"template": "battle/轻伤.png", "threshold": 0.88}
+      "重伤": {
+        "template": "battle/ui重伤.png",
+        "threshold": 0.88
       },
-      "injury_stamp_roi": [220, 90, 340, 690],
-    "injury_status_roi": [0, 90, 570, 690],
+      "中伤": {
+        "template": "battle/中伤.png",
+        "threshold": 0.88
+      },
+      "轻伤": {
+        "template": "battle/轻伤.png",
+        "threshold": 0.88
+      }
+    },
+    "injury_stamp_roi": [
+      220,
+      90,
+      340,
+      690
+    ],
+    "injury_status_roi": [
+      0,
+      90,
+      570,
+      690
+    ],
     "confirm_ui": {
       "template": "team/ui出阵确认.png"
     },
     "confirm_button": {
       "template": "通用_确定.png",
-      "roi": [536, 565, 842, 637],
-      "target": [780, 603]
+      "roi": [
+        536,
+        565,
+        742,
+        637
+      ]
+    },
+    "map_landmark": {
+      "template": "江户城/地图难度标签.png"
+    },
+    "hud_step_ocr": {
+      "roi": [
+        25,
+        8,
+        225,
+        68
+      ],
+      "upscale": 3
+    },
+    "hud_key_ocr": {
+      "roi": [
+        230,
+        8,
+        360,
+        68
+      ],
+      "upscale": 3
+    },
+    "key_total_ocr": {
+      "roi": [
+        920,
+        185,
+        1085,
+        225
+      ]
+    },
+    "ticket_refill": {
+      "popup": {
+        "template": ""
+      },
+      "confirm_button": {
+        "template": ""
+      },
+      "cancel_button": {
+        "template": ""
+      }
+    },
+    "round_end": {
+      "template": "江户城/调查完了.png"
+    },
+    "retreat": {
+      "tab_point": [
+        1240,
+        595
+      ],
+      "home_button": [
+        1050,
+        429
+      ],
+      "confirm_yes": [
+        497,
+        470
+      ]
+    },
+    "skip_tap": [
+      775,
+      695
+    ]
+  },
+  "osaka": {
+    "team_no": 3,
+    "activity_entry": {
+      "template": "活动.png"
+    },
+    "event_entry": {
+      "template": "大阪城/挖地.png"
+    },
+    "floor_title_ocr": {
+      "roi": [
+        75,
+        155,
+        555,
+        225
+      ]
+    },
+    "floor_arrows": {
+      "tens_up": [
+        1014,
+        284
+      ],
+      "ones_up": [
+        1084,
+        284
+      ],
+      "tens_down": [
+        1014,
+        420
+      ],
+      "ones_down": [
+        1084,
+        420
+      ]
+    },
+    "deploy_button": {
+      "template": "team/部队选择.png"
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [
+        506,
+        1,
+        774,
+        77
+      ]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "injury_deny_button": {
+      "template": "否.png"
+    },
+    "injury_stamps": {
+      "重伤": {
+        "template": "battle/ui重伤.png",
+        "threshold": 0.88
+      },
+      "中伤": {
+        "template": "battle/中伤.png",
+        "threshold": 0.88
+      },
+      "轻伤": {
+        "template": "battle/轻伤.png",
+        "threshold": 0.88
+      }
+    },
+    "injury_stamp_roi": [
+      220,
+      90,
+      340,
+      690
+    ],
+    "injury_status_roi": [
+      0,
+      90,
+      570,
+      690
+    ],
+    "confirm_ui": {
+      "template": "team/ui出阵确认.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png",
+      "roi": [
+        536,
+        565,
+        842,
+        637
+      ],
+      "target": [
+        780,
+        603
+      ]
     },
     "floor_end_ocr": {
       "expected": "当前层数",
-      "roi": [825, 270, 1280, 355]
+      "roi": [
+        825,
+        270,
+        1280,
+        355
+      ]
     },
     "floor_end_witness_ocr": {
       "expected": "传送凭证",
-      "roi": [825, 85, 1280, 285]
+      "roi": [
+        825,
+        85,
+        1280,
+        285
+      ]
     },
     "march_button": {
       "template": "battle/行军.png",
-      "roi": [1030, 500, 1280, 720]
+      "roi": [
+        1030,
+        500,
+        1280,
+        720
+      ]
     },
-    "march_stop_button": {"template": "battle/返回本丸.png"},
-    "return_home_confirm": {"template": "team/是.png"},
-    "home_ui": {"template": "ui本丸.png"},
-    "skip_tap": [775, 695]
+    "march_stop_button": {
+      "template": "battle/返回本丸.png"
+    },
+    "return_home_confirm": {
+      "template": "team/是.png"
+    },
+    "home_ui": {
+      "template": "ui本丸.png"
+    },
+    "skip_tap": [
+      775,
+      695
+    ]
   },
   "naihanka": {
     "start_button": {
@@ -1254,7 +1507,12 @@
     },
     "march_continue_button": {
       "template": "battle/行军.png",
-      "roi": [990, 510, 1280, 720]
+      "roi": [
+        990,
+        510,
+        1280,
+        720
+      ]
     },
     "return_home_confirm": {
       "template": "team/是.png"
@@ -1262,33 +1520,86 @@
   },
   "yosari": {
     "entry": {
-      "target": [978, 93],
+      "target": [
+        978,
+        93
+      ],
       "expected": "归城提灯",
-      "verify_roi": [285, 50, 850, 145]
+      "verify_roi": [
+        285,
+        50,
+        850,
+        145
+      ]
     },
     "departure_confirm": {
       "expected": "归城提灯进行出阵",
-      "roi": [310, 155, 970, 330],
-      "confirm_target": [640, 603]
+      "roi": [
+        310,
+        155,
+        970,
+        330
+      ],
+      "confirm_target": [
+        640,
+        603
+      ]
     },
     "ticket_refill": {
       "purchase_screen": {
         "expected": "补充所需",
-        "roi": [270, 75, 1010, 555],
-        "balance_before_roi": [465, 345, 625, 410],
-        "balance_after_roi": [675, 345, 835, 410],
-        "confirm_target": [638, 611],
-        "close_target": [1040, 48]
+        "roi": [
+          270,
+          75,
+          1010,
+          555
+        ],
+        "balance_before_roi": [
+          465,
+          345,
+          625,
+          410
+        ],
+        "balance_after_roi": [
+          675,
+          345,
+          835,
+          410
+        ],
+        "confirm_target": [
+          638,
+          611
+        ],
+        "close_target": [
+          1040,
+          48
+        ]
       },
       "spend_confirm": {
         "expected": "是否消耗",
-        "roi": [300, 80, 1010, 560],
-        "confirm_target": [784, 604]
+        "roi": [
+          300,
+          80,
+          1010,
+          560
+        ],
+        "confirm_target": [
+          784,
+          604
+        ]
       },
       "completed": {
         "expected": "补充了归城提灯",
-        "roi": [330, 120, 950, 460],
-        "confirm_target": [638, 511]
+        "roi": [
+          330,
+          120,
+          950,
+          460
+        ],
+        "confirm_target": [
+          638,
+          511
+        ]
       }
     }
   },
@@ -1399,13 +1710,38 @@
     },
     "settlement_rewards": {
       "resource_rois": {
-        "木炭": [875, 470, 920, 525],
-        "玉钢": [875, 520, 920, 575],
-        "冷却材": [875, 570, 920, 625],
-        "砥石": [875, 620, 920, 680]
+        "木炭": [
+          875,
+          470,
+          920,
+          525
+        ],
+        "玉钢": [
+          875,
+          520,
+          920,
+          575
+        ],
+        "冷却材": [
+          875,
+          570,
+          920,
+          625
+        ],
+        "砥石": [
+          875,
+          620,
+          920,
+          680
+        ]
       },
       "result": {
-        "roi": [680, 35, 940, 150]
+        "roi": [
+          680,
+          35,
+          940,
+          150
+        ]
       }
     },
     "collect_tap": [
@@ -1459,10 +1795,30 @@
   "repair": {
     "_说明": "手入。blacklist(碰瓷队极化太刀)看到名字就跳过不修；speedup_teams 部队的成员修时勾加速符（要继续打的队）；坐标基于1280x720实测；翻页后行位置不对齐固定网格，所以整列OCR拿文字自带坐标再按y配对，不用row_tops",
     "cost_rois": [
-      [288, 404, 378, 436],
-      [288, 475, 378, 507],
-      [288, 546, 378, 578],
-      [288, 617, 378, 649]
+      [
+        288,
+        404,
+        378,
+        436
+      ],
+      [
+        288,
+        475,
+        378,
+        507
+      ],
+      [
+        288,
+        546,
+        378,
+        578
+      ],
+      [
+        288,
+        617,
+        378,
+        649
+      ]
     ],
     "_cost_rois说明": "选人界面左面板「所需资源」四行成本数字的黑框（顺序 木炭/玉钢/冷却材/砥石），修复开始前 OCR 记账用",
     "blacklist": [

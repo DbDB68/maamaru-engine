@@ -379,6 +379,156 @@ class BattleMixin:
             self.record_event("injury_warning.denied", severity="heavy")
         return True
 
+    # ==================== 通用安全出阵链 ====================
+
+    def _safe_depart_stream(self, cfg: dict, team_no: int, tag: str,
+                            repair_threshold: str = "light",
+                            auto_equip: bool = False,
+                            team_record_saved: bool = False,
+                            auto_refill: bool = False):
+        """通用安全出阵链：部队选择页已打开之后调用，串起——
+
+        选择部队 → 出阵前伤势检查 → （可选）保存记录一 → 即刻出阵 →
+        票尽补票弹窗（可选，异去同款交互：点确定补一张 → 重新出阵）→
+        刀装未满警告处理（自动恢复或安全取消）→ 重伤确认弹窗拦截。
+
+        各玩法只负责把部队选择页打开、以及之后自己的二次确认与入图验证；
+        中间的人身安全语义全在这里，不准各玩法再自己手搓一遍。
+
+        补票弹窗认 cfg["ticket_refill"]：popup/confirm_button/cancel_button
+        三个模板。没配 popup 模板就不认（票尽时二次确认会等不到，安全停）。
+        每圈最多补一张（refill_done），补完又弹说明没补上，停手防重复消费。
+
+        Yields 日志；返回 (ok, team_record_saved)。ok=False 表示已安全
+        停下（没出发），调用方直接收工，不要再点任何确认。
+        """
+        # 调用方已经通过 _wait_for_team_select 确认进入部队选择页，并在
+        # 启动时检查过部队坐标。_pick_team 只负责按坐标点两次，本身无法
+        # 观察游戏是否真的选中；不要把它的返回值冒充真机选队验证。
+        self._pick_team(team_no)
+        self.maa.screenshot(force=True)
+        injury = self._team_injury_status(cfg)
+        if injury and self._injury_reaches_threshold(
+                injury, repair_threshold):
+            yield f"{tag} 出阵前检测到{injury}，已达到停止条件，本次不出阵"
+            return False, team_record_saved
+        if auto_equip and not team_record_saved:
+            yield f"{tag} 自动补充刀装已开启，先把当前部队保存到记录一"
+            if self._save_team_record(cfg, record_no=1):
+                team_record_saved = True
+                yield f"{tag} ✓ 当前部队已保存到记录一"
+            else:
+                yield (f"{tag} ⚠️ 没能安全保存记录一，已停止；"
+                       "请查看是否有确认弹窗未处理")
+                return False, team_record_saved
+
+        equip_retries = 0
+        refill_done = False
+        while True:
+            if not self._click_depart(cfg):
+                yield f"{tag} 找不到即刻出阵按钮"
+                return False, team_record_saved
+            self.maa.screenshot(force=True)
+
+            # 票尽时游戏自己弹补票窗（不用提前数票）：认出来才处理，
+            # 不补就点取消收工；补就点确定，然后重新点即刻出阵。
+            refill = cfg.get("ticket_refill", {})
+            popup_template = refill.get("popup", {}).get("template")
+            if popup_template and self.maa.template_match(popup_template):
+                if not auto_refill or refill_done:
+                    if refill_done:
+                        yield (f"{tag} 补票后仍弹补票窗，停止点击，"
+                               "防止重复消费小判")
+                        return False, team_record_saved
+                    cancel_template = refill.get(
+                        "cancel_button", {}).get("template")
+                    cancel = (self.maa.template_match(cancel_template)
+                              if cancel_template else None)
+                    if cancel:
+                        self.maa.click(cancel)
+                        time.sleep(1.0)
+                        yield f"{tag} 票用完了，不补票，已取消出阵，收工"
+                    else:
+                        yield (f"{tag} 票用完了，不补票；已停止点击，"
+                               "请手动关掉购票弹窗")
+                    return False, team_record_saved
+                confirm_template = refill.get(
+                    "confirm_button", {}).get("template")
+                confirm = (self.maa.template_match(confirm_template)
+                           if confirm_template else None)
+                if not confirm:
+                    yield (f"{tag} 补票弹窗的确定按钮没认出，停止点击，"
+                           "请手动看一眼")
+                    return False, team_record_saved
+                self.maa.click(confirm)
+                time.sleep(1.5)
+                refill_done = True
+                if hasattr(self, "record_event"):
+                    self.record_event("ticket.refilled",
+                                      source=tag.strip("[]"))
+                yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
+                continue
+
+            if auto_equip:
+                equip_result = self._restore_equipment_from_warning(
+                    cfg, record_no=1)
+                if equip_result is None:
+                    break
+                if not equip_result:
+                    yield f"{tag} 刀装有空缺，但从记录一恢复失败，停止出阵"
+                    return False, team_record_saved
+                equip_retries += 1
+                yield f"{tag} 🛡️ 刀装有空缺，已使用记录一自动补齐"
+                if equip_retries >= 2:
+                    yield f"{tag} 恢复刀装后仍出现空缺警告，停止重试"
+                    return False, team_record_saved
+                self.maa.screenshot(force=True)
+                restored_injury = self._team_injury_status(cfg)
+                if restored_injury and self._injury_reaches_threshold(
+                        restored_injury, repair_threshold):
+                    yield f"{tag} 恢复刀装后检测到{restored_injury}，不再出阵"
+                    return False, team_record_saved
+                continue
+            equip_cancelled = self._cancel_equip_warning(cfg)
+            if equip_cancelled is None:
+                break
+            yield (f"{tag} 刀装未满，已进入整备，本次停止" if equip_cancelled
+                   else f"{tag} 刀装未满且无法安全进入整备，停止")
+            return False, team_record_saved
+        if self._deny_heavy_injury_warning(cfg):
+            yield f"{tag} 队员重伤确认弹窗，已点【否】；有重伤绝不出阵"
+            return False, team_record_saved
+        return True, team_record_saved
+
+    def _confirm_departure(self, cfg: dict) -> bool:
+        """通用出阵二次确认：认弹窗标题后点确认按钮。
+
+        已用专属标题确认弹窗后，模板失配时才允许点实测坐标兜底
+        （比如大阪城确认窗的绿色“确定”与通用灰按钮不是同一皮肤）；
+        没配 target 的玩法只用模板，绝不盲点。
+        """
+        prompt = cfg.get("confirm_ui", {})
+        prompt_template = prompt.get("template")
+        for _ in range(10):
+            self.maa.screenshot(force=True)
+            if not prompt_template or self.maa.template_match(prompt_template):
+                confirm = cfg.get("confirm_button", {})
+                template = confirm.get("template")
+                roi_raw = confirm.get("roi")
+                button = self.maa.template_match(
+                    template, roi_4to4(*roi_raw) if roi_raw else None)
+                if button:
+                    self.maa.click(button)
+                    time.sleep(1.5)
+                    return True
+                target = confirm.get("target")
+                if target:
+                    self._click_point(target)
+                    time.sleep(1.5)
+                    return True
+            time.sleep(0.5)
+        return False
+
     def select_team(self, team_no: int, auto_march: bool = False,
                     load_record: int = None, equip: bool = False) -> bool:
         """
@@ -538,6 +688,13 @@ class BattleMixin:
             self._click_point(mode.get("toggle", [910, 32]))
             time.sleep(0.6)
             toggled = True
+            if wanted == "manual":
+                # 拨成手动后阵型页会重绘，等红色大标题稳定两帧再点卡，
+                # 否则点击全落在重绘动画上（江户城实测：双击被吞、页面卡死）。
+                # 等不到说明游戏已经自动选完开打，这时再点卡面就是盲点
+                # 战斗画面，如实交给调用方按"游戏自动阵形"处理。
+                if not self._wait_formation_title_stable():
+                    return "auto"
         if enable_auto:
             if toggled:
                 # 刚拨成自动，剩下的交给游戏，不插手。
@@ -559,12 +716,35 @@ class BattleMixin:
             )
             if point:
                 self.maa.click(Point(point.x, point.y))
-                time.sleep(0.35)
+                time.sleep(0.6)
                 self.maa.click(Point(point.x, point.y))
                 return "advantage"
 
         return ("fixed" if self.select_formation(
             self._formation_name(formation_name), verified=True) else "failed")
+
+    def _wait_formation_title_stable(self, timeout_s: float = 6.0,
+                                     stable_hits: int = 2) -> bool:
+        """等顶部红色「阵形选择」大标题连续命中，确认页面真加载完了。
+
+        进战斗/切模式时页面有进场和重绘动画，单帧命中或未命中都可能是
+        动画中间态（江户城实测：动画期截图标题未命中，被误判成"已离开"）。
+        """
+        verify = self.config.get("formation", {}).get("verify", {})
+        template = verify.get("template", "battle/ui阵形选择.png")
+        roi = roi_4to4(*verify.get("roi", [571, 5, 707, 44]))
+        hits = 0
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(template, roi):
+                hits += 1
+                if hits >= stable_hits:
+                    return True
+            else:
+                hits = 0
+            time.sleep(0.4)
+        return False
 
     def _formation_mode_state(self, allow_auto_without_title: bool = False):
         """先确认阵形选择页，再读取右上角当前模式。"""
@@ -619,20 +799,28 @@ class BattleMixin:
                 time.sleep(0.3)
                 return True
 
-            # 双击同一张阵形卡：第一下选中、第二下即确定（和部队选择同一交互，
+            # 点两下同一张阵形卡：第一下选中、第二下即确定（和部队选择同一交互，
             # 选中不联网、确定才发送）。不再戳卡内"确定"热点的偏移坐标——
             # 旧偏移实测擦着按钮下沿点空，阵形页不走导致整场卡死。
-            # 每轮双击后验一次页面是否离开，没走就再点，三轮还不走如实报错，
-            # 交给调用方停止这场，绝不盲信一次必中。
+            # 两下之间留 0.6s 给页面响应：快速双击会被当成一下吞掉（老大实测）。
+            # 每轮点完验证页面是否离开，要求连续两帧都看不到阵形页才算真走——
+            # 单帧未命中可能只是页面还在动画里（江户城实测误判翻车）。
+            # 三轮还不走如实报错，交给调用方停止这场，绝不盲信一次必中。
             for _ in range(3):
                 self._click_point(target)
-                time.sleep(0.35)
+                time.sleep(0.6)
                 self._click_point(target)
                 time.sleep(0.8)
-                self.maa.screenshot(force=True)
-                if self._formation_mode_state() is None:
+                gone = True
+                for _ in range(2):
+                    self.maa.screenshot(force=True)
+                    if self._formation_mode_state() is not None:
+                        gone = False
+                        break
+                    time.sleep(0.4)
+                if gone:
                     return True
-            print(f"[ERROR] 阵形 {formation_name} 双击后仍未离开选择页")
+            print(f"[ERROR] 阵形 {formation_name} 点两下后仍未离开选择页")
             return False
 
         print(f"[ERROR] 未知阵形: {formation_name}")

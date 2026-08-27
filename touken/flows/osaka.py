@@ -141,59 +141,16 @@ class OsakaMixin:
             yield "[挖地] 部队选择界面没打开"
             return
 
-        self._pick_team(team_no)
-        self.maa.screenshot(force=True)
-        initial_injury = self._team_injury_status(cfg)
-        if initial_injury and self._injury_reaches_threshold(
-                initial_injury, repair_threshold):
-            yield f"[挖地] 出阵前检测到{initial_injury}，已达到停止条件，本次不出阵"
-            return
-        if _auto_equip_active and not _team_record_saved:
-            yield "[挖地] 自动补充刀装已开启，先把当前部队保存到记录一"
-            if self._save_team_record(cfg, record_no=1):
-                _team_record_saved = True
-                yield "[挖地] ✓ 当前部队已保存到记录一"
-            else:
-                yield "[挖地] ⚠️ 没能安全保存记录一，已停止；请查看是否有确认弹窗未处理"
-                return
-
-        equip_retries = 0
-        while True:
-            if not self._click_depart(cfg):
-                yield "[挖地] 找不到即刻出阵按钮"
-                return
-            self.maa.screenshot(force=True)
-            if _auto_equip_active:
-                equip_result = self._restore_equipment_from_warning(cfg, record_no=1)
-                if equip_result is None:
-                    break
-                if not equip_result:
-                    yield "[挖地] 刀装有空缺，但从记录一恢复失败，停止出阵"
-                    return
-                equip_retries += 1
-                yield "[挖地] 🛡️ 刀装有空缺，已使用记录一自动补齐"
-                if equip_retries >= 2:
-                    yield "[挖地] 恢复刀装后仍出现空缺警告，停止重试"
-                    return
-                self.maa.screenshot(force=True)
-                restored_injury = self._team_injury_status(cfg)
-                if restored_injury and self._injury_reaches_threshold(
-                        restored_injury, repair_threshold):
-                    yield f"[挖地] 恢复刀装后检测到{restored_injury}，不再出阵"
-                    return
-                continue
-            equip_cancelled = self._cancel_equip_warning(cfg)
-            if equip_cancelled is None:
-                break
-            yield ("[挖地] 刀装未满，已进入整备，本次停止" if equip_cancelled
-                   else "[挖地] 刀装未满且无法安全进入整备，停止")
-            return
-        if self._deny_heavy_injury_warning(cfg):
-            yield "[挖地] 队员重伤确认弹窗，已点【否】；有重伤绝不出阵"
+        ok, _team_record_saved = yield from self._safe_depart_stream(
+            cfg, team_no, "[挖地]",
+            repair_threshold=repair_threshold,
+            auto_equip=_auto_equip_active,
+            team_record_saved=_team_record_saved)
+        if not ok:
             return
 
         # 大阪城没有手形，也没有自动行军；即刻出阵后只有普通二次确认。
-        if not self._confirm_osaka_departure(cfg):
+        if not self._confirm_departure(cfg):
             yield "[挖地] 没看到出阵二次确认，停止点击"
             return
         yield f"[挖地] 部队{team_no}出发，狐之助的废话交给安全区慢慢跳过"
@@ -548,31 +505,6 @@ class OsakaMixin:
             time.sleep(1.5)
             self.maa.screenshot(force=True)
         return True
-
-    def _confirm_osaka_departure(self, cfg: dict) -> bool:
-        prompt = cfg.get("confirm_ui", {})
-        prompt_template = prompt.get("template")
-        for _ in range(10):
-            self.maa.screenshot(force=True)
-            if not prompt_template or self.maa.template_match(prompt_template):
-                confirm = cfg.get("confirm_button", {})
-                template = confirm.get("template")
-                roi_raw = confirm.get("roi")
-                button = self.maa.template_match(
-                    template, roi_4to4(*roi_raw) if roi_raw else None)
-                if button:
-                    self.maa.click(button)
-                    time.sleep(1.5)
-                    return True
-                # 大阪城确认窗的绿色“确定”与通用灰按钮不是同一皮肤。
-                # 已用专属标题确认弹窗后，模板失配时才允许点实测坐标兜底。
-                target = confirm.get("target")
-                if target:
-                    self._click_point(target)
-                    time.sleep(1.5)
-                    return True
-            time.sleep(0.5)
-        return False
 
     def _read_osaka_floor(self, cfg: dict):
         """读取活动页标题中的层数；不用滚轮数字，避免两个 OCR 结果错序。"""

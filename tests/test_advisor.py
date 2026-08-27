@@ -279,7 +279,7 @@ class GoalStorageTests(unittest.TestCase):
 
     def test_delete_goal(self):
         goal = advisor.add_goal(self.path, resource="小判", target=100,
-                                deadline=_day(1))
+                                deadline=(date.today() + timedelta(days=1)).isoformat())
         self.assertFalse(advisor.delete_goal(self.path, 999))
         self.assertTrue(advisor.delete_goal(self.path, goal["id"]))
         self.assertEqual(advisor.load_goals(self.path), [])
@@ -380,6 +380,7 @@ class EventGoalTests(unittest.TestCase):
                 "start_at": f"{start.isoformat()}T10:00:00+08:00",
                 "end_at": f"{end.isoformat()}T05:00:00+08:00",
                 "ticket_price": 300, "ticket_cap": 6, "refill_hours": [5, 17],
+                "refill_amount": 3,
                 "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
                 "est_keys_per_run": 5}
         patch = {"江户城潜入调查": card}
@@ -610,8 +611,11 @@ if __name__ == "__main__":
 
 
 def _edo_card(**overrides):
-    card = {"mechanics": "edocastle", "start_date": "2026-08-27",
-            "end_date": None, "ticket_price": 300, "daily_free_tickets": 12,
+    card = {"mechanics": "edocastle",
+            "start_at": "2026-08-27T10:00:00+08:00",
+            "end_at": "2026-09-10T05:00:00+08:00",
+            "ticket_price": 300, "daily_free_tickets": 6,
+            "ticket_cap": 6, "refill_hours": [5, 17], "refill_amount": 3,
             "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
             "est_keys_per_run": None, "note": ""}
     card.update(overrides)
@@ -630,20 +634,21 @@ class EventAbacusTests(unittest.TestCase):
 
     def test_estimate_without_end_date_gives_worst_case(self):
         abacus = advisor.event_abacus(
-            "江户城潜入调查", _edo_card(est_keys_per_run=10),
+            "江户城潜入调查",
+            _edo_card(est_keys_per_run=10, start_at=None, end_at=None),
             measured=None, today=self.TODAY)
         self.assertEqual(abacus["runs_needed"], 150)
         self.assertEqual(abacus["koban_cost"], 45000)  # 150 圈 × 300
         self.assertEqual(abacus["keys_source"], "estimate")
 
     def test_free_tickets_can_cover_everything(self):
-        # 8-27 开打 9-10 收摊 = 15 天 × 12 张 = 180 张白票 > 150 圈
+        # 精确口径：开场 6 + 窗口内 27 次回票 × 3 = 87 张白票
         abacus = advisor.event_abacus(
             "江户城潜入调查",
-            _edo_card(est_keys_per_run=10, end_date="2026-09-10"),
+            _edo_card(est_keys_per_run=20),
             measured=None, today=self.TODAY)
         self.assertEqual(abacus["days_left"], 15)
-        self.assertEqual(abacus["free_runs"], 180)
+        self.assertEqual(abacus["free_runs"], 87)
         self.assertEqual(abacus["paid_tickets"], 0)
         self.assertEqual(abacus["koban_cost"], 0)
         self.assertIn("一个小判都不用花", abacus["message"])
@@ -651,11 +656,12 @@ class EventAbacusTests(unittest.TestCase):
     def test_paid_tickets_and_cost(self):
         abacus = advisor.event_abacus(
             "江户城潜入调查",
-            _edo_card(est_keys_per_run=5, end_date="2026-09-10"),
+            _edo_card(est_keys_per_run=5),
             measured=None, today=self.TODAY)
         self.assertEqual(abacus["runs_needed"], 300)
-        self.assertEqual(abacus["paid_tickets"], 120)
-        self.assertEqual(abacus["koban_cost"], 36000)
+        self.assertEqual(abacus["free_runs"], 87)
+        self.assertEqual(abacus["paid_tickets"], 213)
+        self.assertEqual(abacus["koban_cost"], 63900)
 
     def test_measured_overrides_estimate(self):
         measured = {"per_run": 20.0, "runs": 3}
@@ -717,21 +723,23 @@ class WindowImpactTests(unittest.TestCase):
     TODAY = date(2026, 8, 26)  # 江户城开打前一天
     EDO_CARD = {
         "mechanics": "edocastle",
-        "start_date": "2026-08-27", "end_date": "2026-09-10",
-        "ticket_price": 300, "daily_free_tickets": 12,
+        "start_at": "2026-08-27T10:00:00+08:00",
+        "end_at": "2026-09-10T05:00:00+08:00",
+        "ticket_price": 300, "daily_free_tickets": 6,
+        "ticket_cap": 6, "refill_hours": [5, 17], "refill_amount": 3,
         "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
         "est_keys_per_run": 5,
     }
 
     def test_edocastle_impact_is_negative_ticket_cost(self):
-        # 场均 5 把 → 300 圈；白票 12 × 15 天 = 180 → 补 120 张 ≈ -36000
+        # 场均 5 把 → 300 圈；白票 87 → 补 213 张 ≈ -63900
         impact = advisor.window_impact("江户城潜入调查", self.EDO_CARD,
                                        today=self.TODAY)
         self.assertEqual(impact["resource"], "小判")
-        self.assertEqual(impact["delta"], -36000)
+        self.assertEqual(impact["delta"], -63900)
 
     def test_edocastle_free_tickets_cover_all_means_zero_cost(self):
-        card = {**self.EDO_CARD, "est_keys_per_run": 20}  # 75 圈 ≤ 180 白票
+        card = {**self.EDO_CARD, "est_keys_per_run": 20}  # 75 圈 ≤ 87 白票
         impact = advisor.window_impact("江户城潜入调查", card, today=self.TODAY)
         self.assertEqual(impact["delta"], 0)
 
@@ -741,11 +749,11 @@ class WindowImpactTests(unittest.TestCase):
                                                 today=self.TODAY))
 
     def test_measured_keys_override_estimate(self):
-        # 实测场均 10 → 150 圈 ≤ 180 白票 → 一个小判不花
+        # 实测场均 10 → 150 圈；白票 87 → 补 63 张 ≈ -18900
         impact = advisor.window_impact(
             "江户城潜入调查", dict(self.EDO_CARD),
             measured_keys={"per_run": 10, "runs": 3}, today=self.TODAY)
-        self.assertEqual(impact["delta"], 0)
+        self.assertEqual(impact["delta"], -18900)
 
     def test_osaka_impact_is_positive(self):
         card = {"mechanics": "osaka", "start_date": "2026-08-27",
@@ -828,10 +836,9 @@ class ModeledWindowGoalTests(unittest.TestCase):
 
 
 class PreciseWindowAbacusTests(unittest.TestCase):
-    """带时刻的活动卡：白票按回满点交集数，不按整天（牛评审第 6 条）。
+    """带时刻的活动卡：新模型是开场 cap + 严格落在窗口内的回票点 × refill_amount。
 
-    江户城 8-27 10:00 开、9-10 05:00 收：整天口径算 15×12=180 张白票，
-    精确口径是开打前存货（8-27 05:00 回满）+ 窗口内 27 次回满 = 168 张。
+    江户城 8-27 10:00 开、9-10 05:00 收：开场 6 + 窗口内 27 次回票 × 3 = 87 张。
     """
 
     NOW = datetime(2026, 8, 26, 12, tzinfo=advisor._TZ)  # 开打前一天中午
@@ -841,8 +848,8 @@ class PreciseWindowAbacusTests(unittest.TestCase):
             "mechanics": "edocastle",
             "start_at": "2026-08-27T10:00:00+08:00",
             "end_at": "2026-09-10T05:00:00+08:00",
-            "ticket_price": 300, "daily_free_tickets": 12, "ticket_cap": 6,
-            "refill_hours": [5, 17],
+            "ticket_price": 300, "daily_free_tickets": 6,
+            "ticket_cap": 6, "refill_hours": [5, 17], "refill_amount": 3,
             "keys_total": 1500, "keys_per_box": 5, "boxes": 300,
             "est_keys_per_run": 5,
         }
@@ -853,30 +860,49 @@ class PreciseWindowAbacusTests(unittest.TestCase):
         abacus = advisor.event_abacus("江户城潜入调查", self._card(),
                                       measured=None, today=date(2026, 8, 26),
                                       now=self.NOW)
-        self.assertEqual(abacus["free_runs"], 168)  # 28 次回满 × 6
+        self.assertEqual(abacus["free_runs"], 87)  # 6 + 27 × 3
         self.assertEqual(abacus["runs_needed"], 300)
-        self.assertEqual(abacus["paid_tickets"], 132)
-        self.assertEqual(abacus["koban_cost"], 39600)
+        self.assertEqual(abacus["paid_tickets"], 213)
+        self.assertEqual(abacus["koban_cost"], 63900)
 
     def test_mid_event_check_excludes_past_refills(self):
-        # 9-05 中午再看：当天 05:00 回满的票 17:00 前还花得掉（算），
-        # 之后 9-05 17:00 ~ 9-09 17:00 共 9 次 → 10 次 × 6 = 60 张
+        # 9-05 中午再看：9-05 05:00 已过去，窗口内剩余 9 次回票
+        # cap 6 + 9 × 3 = 33 张
         abacus = advisor.event_abacus(
             "江户城潜入调查", self._card(), measured=None,
             today=date(2026, 9, 5),
             now=datetime(2026, 9, 5, 12, tzinfo=advisor._TZ))
-        self.assertEqual(abacus["free_runs"], 60)
+        self.assertEqual(abacus["free_runs"], 33)
 
     def test_precise_window_impact_uses_refill_counting(self):
         impact = advisor.window_impact("江户城潜入调查", self._card(),
                                        today=date(2026, 8, 26))
-        self.assertEqual(impact["delta"], -39600)
+        self.assertEqual(impact["delta"], -63900)
 
     def test_end_refill_at_closing_instant_not_counted(self):
-        # 收摊改到 17:00：9-10 05:00 回满的票白天花得掉（算进来 +6），
-        # 9-10 17:00 收摊瞬间的回满零交集，仍不算
+        # 收摊改到 17:00：9-10 05:00 回票落在窗口内（+3），
+        # 9-10 17:00 收摊瞬间的回满不算
         abacus = advisor.event_abacus(
             "江户城潜入调查",
             self._card(end_at="2026-09-10T17:00:00+08:00"),
             measured=None, today=date(2026, 8, 26), now=self.NOW)
-        self.assertEqual(abacus["free_runs"], 174)
+        self.assertEqual(abacus["free_runs"], 90)  # 6 + 28 × 3
+
+    def test_start_refill_before_open_not_counted(self):
+        # 窗口内没有回票点：8-27 05:00 在开场前，8-27 17:00 在收摊后
+        # 只算开场 cap
+        abacus = advisor.event_abacus(
+            "江户城潜入调查",
+            self._card(start_at="2026-08-27T11:00:00+08:00",
+                       end_at="2026-08-27T16:00:00+08:00"),
+            measured=None, today=date(2026, 8, 26), now=self.NOW)
+        self.assertEqual(abacus["free_runs"], 6)
+
+    def test_legacy_card_without_refill_amount_keeps_old_logic(self):
+        # 无 refill_amount 的老卡维持旧 12 小时回满交集逻辑
+        card = {k: v for k, v in self._card().items() if k != "refill_amount"}
+        card["daily_free_tickets"] = 12
+        abacus = advisor.event_abacus("江户城潜入调查", card,
+                                      measured=None, today=date(2026, 8, 26),
+                                      now=self.NOW)
+        self.assertEqual(abacus["free_runs"], 168)

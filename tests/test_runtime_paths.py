@@ -127,6 +127,87 @@ class RuntimePathsTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), digest_before)
             self.assertEqual(len(list((data / "backups").glob("touken-pre-keyfill-*.json"))), 1)
 
+    def test_old_config_gets_edocastle_keys_filled(self):
+        """江户城新增配置段必须能补进老安装，防止 8-22 式哑跑事故。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "program"
+            (bundle / "panel").mkdir(parents=True)
+            (bundle / "profiles").mkdir()
+            example_cfg = {
+                "edocastle": {
+                    "team_no": 3,
+                    "difficulty": 4,
+                    "map_archive": "resource/base/maps/edocastle-4.json",
+                    "use_koban_refill": False,
+                    "max_runs": 0,
+                }
+            }
+            (bundle / "touken_config.example.json").write_text(
+                json.dumps(example_cfg, ensure_ascii=False), encoding="utf-8")
+            (bundle / "panel" / "panel_config.example.json").write_text('{}', encoding="utf-8")
+            (bundle / "panel" / "expedition_schedule.json").write_text('{}', encoding="utf-8")
+            data = root / "user-data"
+            (data / "config").mkdir(parents=True)
+            target = data / "config" / "touken.json"
+            target.write_text(json.dumps({"old": True}, ensure_ascii=False), encoding="utf-8")
+
+            ensure_runtime_data(data, bundle, legacy_roots=[])
+
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            self.assertIn("edocastle", merged)
+            self.assertEqual(merged["edocastle"]["team_no"], 3)
+            self.assertEqual(merged["edocastle"]["map_archive"],
+                             "resource/base/maps/edocastle-4.json")
+            # 用户旧值保留
+            self.assertTrue(merged["old"])
+            # 有备份
+            self.assertEqual(
+                len(list((data / "backups").glob("touken-pre-keyfill-*.json"))), 1)
+
+    def test_old_edocastle_section_gets_safety_keys_filled(self):
+        """老安装已有 edocastle 段（v1 手搓版）：递归补键必须把通用安全出阵链
+        依赖的伤势/重伤拦截键补齐，且不动用户已有值。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "program"
+            (bundle / "panel").mkdir(parents=True)
+            (bundle / "profiles").mkdir()
+            # 直接拿真实 example 当模板，保证测试跟着配置演进
+            real_example = Path(__file__).resolve().parent.parent / (
+                "touken_config.example.json")
+            example_cfg = json.loads(real_example.read_text(encoding="utf-8-sig"))
+            (bundle / "touken_config.example.json").write_text(
+                json.dumps(example_cfg, ensure_ascii=False), encoding="utf-8")
+            (bundle / "panel" / "panel_config.example.json").write_text('{}', encoding="utf-8")
+            (bundle / "panel" / "expedition_schedule.json").write_text('{}', encoding="utf-8")
+            data = root / "user-data"
+            (data / "config").mkdir(parents=True)
+            target = data / "config" / "touken.json"
+            # 模拟 2026-08-27 中午那版老 edocastle 段：有基础键，没安全键
+            target.write_text(json.dumps({
+                "edocastle": {
+                    "team_no": 4,
+                    "difficulty": 4,
+                    "map_archive": "resource/base/maps/edocastle-4.json",
+                    "max_runs": 2,
+                    "confirm_button": {"template": "通用_确定.png",
+                                       "roi": [536, 565, 742, 637]},
+                },
+            }, ensure_ascii=False), encoding="utf-8")
+
+            ensure_runtime_data(data, bundle, legacy_roots=[])
+
+            merged = json.loads(target.read_text(encoding="utf-8"))["edocastle"]
+            # 安全出阵链依赖的键全部补齐
+            for key in ("repair_threshold", "auto_equip", "injury_deny_button",
+                        "injury_stamps", "injury_stamp_roi", "injury_status_roi"):
+                self.assertIn(key, merged, f"老安装没补到 edocastle.{key}")
+            # 用户已有的值原样保留（递归补键不覆盖）
+            self.assertEqual(merged["team_no"], 4)
+            self.assertEqual(merged["max_runs"], 2)
+            self.assertEqual(merged["confirm_button"]["roi"], [536, 565, 742, 637])
+
     def test_v014_flat_user_directory_migrates_completely_and_is_repeatable(self):
         """Model the writable files produced beside data in the v0.1.4 release."""
         with tempfile.TemporaryDirectory() as tmp:

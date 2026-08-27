@@ -584,17 +584,23 @@ class MAAAdapter:
                              type(exc).__name__)
             return None
 
-    def ocr_all(self, roi: Region) -> list:
+    def ocr_all(self, roi: Region, image=None) -> list:
         """
         识别区域内所有文字（不筛选，全都要）
 
         用途：读取界面上的信息文本（第几部队、地图名、刀名），
         拿到文字后由上层自己做解析判断。
 
+        Args:
+            roi: 识别区域
+            image: 可选，直接对这张预处理过的图（如放大后的裁剪块）识别，
+                   此时 roi 是相对该图的坐标。不给就实时截图。
+
         Returns:
             [(文本, 中心点Point), ...]，识别失败返回 []
         """
-        image = self.screenshot()
+        if image is None:
+            image = self.screenshot()
         if image is None:
             self._record_ocr("all", roi, [], error="screenshot_unavailable")
             return []

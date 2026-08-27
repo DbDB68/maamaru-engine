@@ -33,7 +33,8 @@ SCHEMA_VERSION = 1
 
 # 规则指纹用的关键参数：这些变了就是「规则不同」，上期经验不能直接用
 _RULE_KEYS = ("mechanics", "keys_total", "keys_per_box", "boxes",
-              "ticket_price", "daily_free_tickets", "ticket_cap")
+              "ticket_price", "daily_free_tickets", "ticket_cap",
+              "refill_amount")
 
 
 def period_key(name: str, card: dict) -> str | None:
