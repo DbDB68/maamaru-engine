@@ -39,6 +39,18 @@ class FakeAgent:
 
 
 class PumpkinPlanTests(unittest.TestCase):
+    def test_edocastle_exposes_the_formation_choices_it_actually_uses(self):
+        fields = list_scripts()["edocastle"]["params"]
+        by_key = {field["key"]: field for field in fields}
+        self.assertEqual(by_key["max_runs"]["label"], "出阵次数")
+        self.assertEqual(by_key["use_koban_refill"]["label"], "是否补充手形")
+        self.assertNotIn("help", by_key["use_koban_refill"])
+        self.assertEqual(by_key["formation_mode"]["options"],
+                         [["manual", "手动阵形"], ["auto", "自动阵形"]])
+        self.assertEqual(by_key["formation_strategy"]["visibleWhen"],
+                         {"key": "formation_mode", "is": "manual"})
+        self.assertEqual(by_key["formation"]["options"][-1], ["逆行阵", "逆行阵"])
+
     def test_osaka_formation_mode_matches_the_sortie_panel_semantics(self):
         fields = list_scripts()["osaka"]["params"]
         by_key = {field["key"]: field for field in fields}

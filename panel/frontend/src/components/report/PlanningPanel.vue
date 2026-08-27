@@ -14,7 +14,7 @@ const goalNotice = ref('')
 
 const formOpen = ref(false)
 const saving = ref(false)
-const form = ref({ resource: '小判', target: 100000, deadline: '', note: '' })
+const form = ref({ goal_mode: 'amount_target' as 'amount_target' | 'deadline_target', resource: '小判', target: 100000, deadline: '', note: '' })
 
 function applyTimingFallback(report: PlanningReport, runs: any[]) {
   // 兼容已经启动、暂时不能为了热加载而重启的旧后端。
@@ -53,7 +53,8 @@ function fmt(value: number | null | undefined) {
 }
 
 function goalDeadline(goal: PlanningGoalAdvice) {
-  if (!goal.deadline_at) return goal.deadline
+  if (goal.goal_mode === 'amount_target') return goal.estimated_deadline || '待估算'
+  if (!goal.deadline_at) return goal.deadline || '—'
   return new Intl.DateTimeFormat('zh-CN', {
     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
     hour12: false, timeZone: 'Asia/Shanghai',
@@ -77,6 +78,10 @@ function goalStatusLabel(goal: PlanningGoalAdvice) {
 }
 
 function goalHeadline(goal: PlanningGoalAdvice) {
+  if (goal.goal_mode === 'deadline_target') {
+    return goal.projected == null ? '还缺一些库存记录' : `预计到期有 ${fmt(goal.projected)} ${goal.resource}`
+  }
+  if (goal.goal_mode === 'amount_target' && goal.status === 'active') return `预计 ${goal.estimated_deadline || '稍后'} 攒够`
   if (goal.status === 'done') return `已经攒够 ${fmt(goal.target)} ${goal.resource}`
   if (goal.status === 'on_track') return '照现在的速度来得及'
   if (goal.status === 'expired') return '这个目标已经到期'
@@ -88,7 +93,7 @@ function goalHeadline(goal: PlanningGoalAdvice) {
 }
 
 function goalProgress(goal: PlanningGoalAdvice) {
-  if (goal.current == null || goal.target <= 0) return 0
+  if (goal.current == null || goal.target == null || goal.target <= 0) return 0
   return Math.min(100, Math.max(0, goal.current / goal.target * 100))
 }
 
@@ -112,7 +117,13 @@ function goalProgressMeta(goal: PlanningGoalAdvice) {
   if (goal.status === 'expired') return '已到期'
   const remaining = goal.goal_mode === 'stock_target' && goal.remaining_seconds != null
     ? `距收摊 ${durationHours(goal.remaining_seconds)}`
-    : `剩 ${Math.max(0, goal.days_left)} 天`
+    : goal.goal_mode === 'amount_target'
+      ? `约 ${Math.max(0, goal.days_left || 0)} 天后`
+      : `剩 ${Math.max(0, goal.days_left || 0)} 天`
+  if (goal.goal_mode === 'deadline_target') {
+    return goal.projected == null ? `${remaining} · 待估算` : `到期预计 ${fmt(goal.projected)} ${goal.resource}`
+  }
+  if (goal.goal_mode === 'amount_target') return remaining
   if (goal.goal_mode === 'stock_target') {
     return `${remaining} · ${goal.floors_needed == null ? '待实测' : `还需约 ${fmt(goal.floors_needed)} 层`}`
   }
@@ -232,13 +243,15 @@ async function saveGoal() {
   saving.value = true
   try {
     await api.addPlanningGoal({
+      goal_mode: form.value.goal_mode,
       resource: form.value.resource,
-      target: Number(form.value.target),
-      deadline: form.value.deadline,
+      ...(form.value.goal_mode === 'amount_target'
+        ? { target: Number(form.value.target) }
+        : { deadline: form.value.deadline }),
       note: form.value.note,
     })
     formOpen.value = false
-    form.value = { resource: '小判', target: 100000, deadline: '', note: '' }
+    form.value = { goal_mode: 'amount_target', resource: '小判', target: 100000, deadline: '', note: '' }
     await load()
     goalNotice.value = '目标已保存。'
     await scrollToElement('.planning-success')
@@ -268,19 +281,25 @@ onMounted(load)
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
       <header>
-        <div><h4>自定目标</h4><p>给自己定一个明确的数量和日期。</p></div>
+        <div><h4>自定目标</h4><p>选一个真正想盯住的结果，另一项交给狐之助估算。</p></div>
         <button type="button" class="planning-close" aria-label="关闭目标表单" @click="formOpen = false">×</button>
       </header>
       <div class="planning-form-fields">
+        <label>目标看什么
+          <select v-model="form.goal_mode">
+            <option value="amount_target">攒到多少</option>
+            <option value="deadline_target">到哪一天</option>
+          </select>
+        </label>
         <label>攒什么
           <select v-model="form.resource">
             <option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option>
           </select>
         </label>
-        <label>目标数量
+        <label v-if="form.goal_mode === 'amount_target'">想攒到多少
           <input v-model.number="form.target" type="number" min="0" step="1000" required>
         </label>
-        <label>截止日期
+        <label v-else>想看到哪天
           <input v-model="form.deadline" type="date" :min="localToday()" required>
         </label>
         <label>备注
@@ -296,15 +315,15 @@ onMounted(load)
     <section v-if="planning?.goals.length" class="planning-goal-list planning-goals-section">
         <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
           <header>
-            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : '手动目标' }} · {{ goalDeadline(goal) }} 截止</small></span>
+            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标' }} · {{ goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止` }}</small></span>
             <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
           <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
           <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
           <div class="planning-goal-progress">
-            <progress v-if="goal.current != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
-            <p><span>当前 <b>{{ fmt(goal.current) }}</b> / {{ fmt(goal.target) }} {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
+            <progress v-if="goal.current != null && goal.target != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
+            <p><span>当前 <b>{{ fmt(goal.current) }}</b><template v-if="goal.target != null"> / {{ fmt(goal.target) }}</template> {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
           </div>
           <details>
             <summary>查看预测依据</summary>

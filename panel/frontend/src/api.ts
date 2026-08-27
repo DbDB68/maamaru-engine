@@ -36,7 +36,7 @@ export const api = {
   }),
   deleteHumanReport: (id: number) => request<{ ok: boolean }>(`/api/data/human-reports/${id}`, { method: 'DELETE' }),
   planning: () => request<PlanningReport>('/api/planning'),
-  addPlanningGoal: (value: { resource: string; target: number; deadline: string; note?: string }) => request<{ ok: boolean; goal: any }>('/api/planning/goals', {
+  addPlanningGoal: (value: { resource: string; goal_mode: 'amount_target' | 'deadline_target'; target?: number; deadline?: string; note?: string }) => request<{ ok: boolean; goal: any }>('/api/planning/goals', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   deletePlanningGoal: (id: number) => request<{ ok: boolean }>(`/api/planning/goals/${id}`, { method: 'DELETE' }),

@@ -21,7 +21,7 @@ const timelineLimit = ref(20)
 
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
-  'osaka.floor_completed': '大阪城完成一圈', 'sortie.completed': '出阵完成',
+  'osaka.floor_completed': '大阪城完成一圈', 'edocastle.run_completed': '江户城完成一圈', 'sortie.completed': '出阵完成',
   'sortie.retreated_before_boss': '王点前撤退完成',
   'raid.round_completed': '联队战完成一圈', 'pumpkin.sortie_completed': '南瓜活动出阵完成',
   'pumpkin.board_completed': '南瓜活动完成一块板子', 'pumpkin.token_used': '南瓜活动使用更新令牌',
@@ -55,6 +55,7 @@ function eventTitle(item: any) {
 function eventDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed') return p.selected_floor == null ? '未指定层数 · 完成 1 圈' : `${p.selected_floor}F · 完成 1 圈`
+  if (item.event_type === 'edocastle.run_completed') return `带回 ${Number(p.keys || 0).toLocaleString()} 把钥匙`
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
   if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
@@ -98,6 +99,7 @@ function activityTitle(item: any) {
   if (item.event_type === 'sortie.completed') return `完成出阵 ${count} 次`
   if (item.event_type === 'sortie.retreated_before_boss') return `王点前撤退 ${count} 次`
   if (item.event_type === 'osaka.floor_completed') return `大阪城完成 ${count} 圈`
+  if (item.event_type === 'edocastle.run_completed') return `江户城完成 ${count} 圈`
   if (item.event_type === 'raid.round_completed') return `联队战完成 ${count} 圈`
   if (item.event_type === 'practice.result') return `完成演练 ${count} 场`
   if (item.event_type === 'forge.collected') return `领取锻刀结果 ${count} 次`
@@ -119,6 +121,10 @@ function activityDetail(item: any) {
   if (item.event_type === 'osaka.floor_completed') {
     const koban = props.events.find((entry: any) => entry.run_id === item.run_id && entry.event_type === 'osaka.koban_session')?.payload?.delta
     return `${p.selected_floor ?? '？'}F · 共 ${items.length} 圈${Number.isFinite(Number(koban)) ? ` · 小判 ${Number(koban) > 0 ? '+' : ''}${Number(koban).toLocaleString()}` : ''}`
+  }
+  if (item.event_type === 'edocastle.run_completed') {
+    const keys = items.reduce((total: number, entry: any) => total + Number(entry.payload?.keys || 0), 0)
+    return `共带回 ${keys.toLocaleString()} 把钥匙`
   }
   if (item.event_type === 'practice.result') {
     const wins = items.filter((entry: any) => isWin(entry.payload)).length
@@ -142,6 +148,7 @@ function activityDetail(item: any) {
 function instanceDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed' && p.completed != null) return `第 ${p.completed} 圈 · ${p.selected_floor == null ? '未指定层数' : `${p.selected_floor}F`}`
+  if (item.event_type === 'edocastle.run_completed') return `第 ${p.run_no ?? '？'} 圈 · ${Number(p.keys || 0).toLocaleString()} 把钥匙`
   if (item.event_type === 'pumpkin.sortie_completed' && p.sequence != null) return `第 ${p.sequence} 次出阵`
   if (item.event_type === 'forge.collected') {
     const parts = []
@@ -194,6 +201,7 @@ function activityGroupKey(item: any) {
   if (item.event_type === 'sortie.completed') return `${prefix}:sortie:${p.mode}:${p.chapter}:${p.map_no}`
   if (item.event_type === 'sortie.retreated_before_boss') return `${prefix}:retreat:${p.chapter}:${p.map_no}`
   if (item.event_type === 'osaka.floor_completed') return `${prefix}:osaka:${p.selected_floor}`
+  if (item.event_type === 'edocastle.run_completed') return `${prefix}:edocastle`
   if (item.event_type === 'practice.result') return `${prefix}:practice`
   if (item.event_type.startsWith('task_rewards.')) return `${prefix}:${item.event_type}`
   if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${prefix}:${item.event_type}`

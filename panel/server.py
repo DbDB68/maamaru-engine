@@ -201,6 +201,26 @@ def _march_and_injury_fields():
     ]
 
 
+def _formation_fields():
+    """不使用自动行军、但每场仍需选择阵形的玩法共用。"""
+    return [
+        {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
+         "options": [["manual", "手动阵形"], ["auto", "自动阵形"]],
+         "default": "manual"},
+        {"key": "formation_strategy", "type": "select", "label": "阵形策略",
+         "options": [["fixed", "固定阵形"],
+                     ["advantage", "优先选择有利阵形"]],
+         "default": "fixed",
+         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+        {"key": "formation", "type": "select",
+         "label": "固定或识别失败时的兜底阵形",
+         "options": [[name, name] for name in
+                     ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
+         "default": "鱼鳞阵",
+         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+    ]
+
+
 def _sword_names(raw) -> list[str]:
     if isinstance(raw, list):
         return [str(name).strip() for name in raw if str(name).strip()]
@@ -710,12 +730,12 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
 register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点、钥匙、王点一套带走",
                 _wrap_inventory("江户城", _build_edocastle),
                 params=[_team_field("3"),
-                        {"key": "max_runs", "type": "number", "label": "最多跑几圈",
+                        {"key": "max_runs", "type": "number", "label": "出阵次数",
                          "default": 0, "min": 0, "max": 99,
                          "help": "0 表示把当天通行令牌跑完为止。"},
                         {"key": "use_koban_refill", "type": "toggle",
-                         "label": "票尽时用小判补票？", "default": False,
-                         "help": "走游戏自己的补票弹窗：出阵→确定补一张→再出阵。弹窗模板待踩点，认不出时安全收工。"}])
+                          "label": "是否补充手形", "default": False},
+                        *_formation_fields()])
 register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
@@ -1801,6 +1821,7 @@ async def api_add_planning_goal(request: Request):
                                 resource=str(body.get("resource") or ""),
                                 target=body.get("target"),
                                 deadline=str(body.get("deadline") or ""),
+                                goal_mode=str(body.get("goal_mode") or "combined"),
                                 note=str(body.get("note") or ""))
     except ValueError as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)

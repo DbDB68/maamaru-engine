@@ -92,6 +92,23 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["equipment_restores"], 1)
         self.assertEqual(result["resource_delta"], {"小判": 300, "加速符": -2})
 
+    def test_run_summary_counts_edocastle_key_settlements_as_loops(self):
+        self.store.start_run("edo-1", "edocastle", started_at=100)
+        conn = self.store._conn()
+        for ts, run_no, keys in ((160, 1, 17), (260, 2, 26)):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'edo-1', 'edocastle', 'edocastle.run_completed', ?)",
+                (ts, __import__('json').dumps({"run_no": run_no, "keys": keys})),
+            )
+        conn.commit()
+        self.store.finish_run("edo-1", "completed", ended_at=280)
+
+        result = self.store.run_summary("edo-1")
+        self.assertEqual(result["loops"], 2)
+        self.assertEqual(result["play_duration_seconds"], 160)
+        self.assertEqual(result["average_loop_seconds"], 100)
+
     def test_run_summary_does_not_count_empty_repair_visit(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         self.store.record_event("osaka.floor_completed", {"selected_floor": 88})

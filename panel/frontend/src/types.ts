@@ -110,13 +110,14 @@ export interface PlanningGoalAdvice {
   id: number
   kind?: 'resource' | 'event'
   event?: string | null
-  goal_mode?: 'budget' | 'stock_target' | null
+  goal_mode?: 'budget' | 'stock_target' | 'combined' | 'amount_target' | 'deadline_target' | null
   resource: string
-  target: number
-  deadline: string
+  target: number | null
+  deadline: string | null
+  estimated_deadline?: string | null
   deadline_at?: string | null
   note?: string
-  days_left: number
+  days_left: number | null
   current: number | null
   rate: number | null
   projected: number | null

@@ -759,6 +759,7 @@ class TelemetryStore:
         loop_events = [e for e in events if e["event_type"] in {
             "osaka.floor_completed", "sortie.completed", "raid.round_completed",
             "pumpkin.sortie_completed", "sortie.retreated_before_boss",
+            "edocastle.run_completed",
         }]
         osaka = [e for e in loop_events if e["event_type"] == "osaka.floor_completed"]
         intervals = [b["ts"] - a["ts"] for a, b in zip(loop_events, loop_events[1:])

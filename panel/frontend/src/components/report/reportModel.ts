@@ -57,7 +57,7 @@ export function eventTime(ts: number): string {
 }
 
 export const scriptNames: Record<string, string> = {
-  osaka: '大阪城', sortie: '合战场', yosari: '异去', raid: '联队战',
+  osaka: '大阪城', edocastle: '江户城潜入调查', sortie: '合战场', yosari: '异去', raid: '联队战',
   pumpkin: '南瓜大作战', daily: '一键日课',
   expedition: '远征', practice: '演练', smith: '锻刀', repair: '手入',
   sakura: '刷花', sugar: '炼糖', rotate_captain: '换队长', scheduler: '排班',

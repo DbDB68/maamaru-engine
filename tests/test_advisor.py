@@ -213,6 +213,28 @@ class EvaluateGoalTests(unittest.TestCase):
             floor_yield=None, today=self.TODAY)
         self.assertEqual(advice["status"], "unknown")
 
+    def test_amount_target_estimates_when_it_will_be_reached(self):
+        advice = advisor.evaluate_goal(
+            {"id": 2, "kind": "resource", "goal_mode": "amount_target",
+             "resource": "小判", "target": 8000, "note": ""},
+            current=5000, rate_info={"daily": 600},
+            floor_yield=None, today=self.TODAY)
+        self.assertEqual(advice["status"], "active")
+        self.assertEqual(advice["days_left"], 5)
+        self.assertEqual(advice["estimated_deadline"], _day(5))
+        self.assertIsNone(advice["deadline"])
+
+    def test_deadline_target_estimates_the_closing_amount(self):
+        advice = advisor.evaluate_goal(
+            {"id": 3, "kind": "resource", "goal_mode": "deadline_target",
+             "resource": "小判", "deadline": _day(10), "note": ""},
+            current=5000, rate_info={"daily": 600, "event_daily": None},
+            floor_yield=None, today=self.TODAY)
+        self.assertEqual(advice["status"], "active")
+        self.assertEqual(advice["projected"], 11000)
+        self.assertIsNone(advice["target"])
+        self.assertIn(_day(10), advice["message"])
+
     def test_on_track(self):
         advice = advisor.evaluate_goal(
             self._goal(), current=5000, rate_info={"daily": 600},
@@ -283,6 +305,20 @@ class GoalStorageTests(unittest.TestCase):
         self.assertFalse(advisor.delete_goal(self.path, 999))
         self.assertTrue(advisor.delete_goal(self.path, goal["id"]))
         self.assertEqual(advisor.load_goals(self.path), [])
+
+    def test_resource_goal_can_choose_amount_or_deadline_as_the_target(self):
+        amount = advisor.add_goal(
+            self.path, resource="小判", target=300000,
+            goal_mode="amount_target")
+        deadline = advisor.add_goal(
+            self.path, resource="砥石",
+            deadline=(date.today() + timedelta(days=7)).isoformat(),
+            goal_mode="deadline_target")
+        self.assertEqual(amount["target"], 300000)
+        self.assertNotIn("deadline", amount)
+        self.assertEqual(deadline["goal_mode"], "deadline_target")
+        self.assertNotIn("target", deadline)
+        self.assertEqual(len(advisor.load_goals(self.path)), 2)
 
     def _write_v1(self, goals):
         self.path.write_text(json.dumps(goals, ensure_ascii=False),

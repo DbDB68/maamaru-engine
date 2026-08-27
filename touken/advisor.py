@@ -73,10 +73,18 @@ def load_goals(path: Path) -> list[dict]:
         entries = data  # v1：顶层就是数组
     if not isinstance(entries, list):
         return []
-    goals = [g for g in entries if isinstance(g, dict)
-             and g.get("resource") in LEDGER_RESOURCES
-             and isinstance(g.get("target"), (int, float))
-             and isinstance(g.get("deadline"), str)]
+    goals = []
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("resource") not in LEDGER_RESOURCES:
+            continue
+        mode = entry.get("goal_mode") or "combined"
+        has_target = isinstance(entry.get("target"), (int, float))
+        has_deadline = isinstance(entry.get("deadline"), str) and bool(entry.get("deadline"))
+        if ((mode == "amount_target" and has_target)
+                or (mode == "deadline_target" and has_deadline)
+                or (mode not in ("amount_target", "deadline_target")
+                    and has_target and has_deadline)):
+            goals.append(entry)
     for goal in goals:
         goal.setdefault("kind", "resource")  # v1 老目标一律是攒钱目标
     return goals
@@ -100,33 +108,42 @@ def _save_goals(path: Path, goals: list[dict]) -> None:
     os.replace(tmp, path)
 
 
-def add_goal(path: Path, *, resource: str, target, deadline: str,
-             note: str = "") -> dict:
+def add_goal(path: Path, *, resource: str, target=None, deadline: str = "",
+             goal_mode: str = "combined", note: str = "") -> dict:
     """加一条攒钱目标。参数不像话就 ValueError（人话，直接给前端显示）。"""
     if resource not in LEDGER_RESOURCES:
         raise ValueError(f"不认识「{resource}」，目标资源得是账本里的八种之一")
-    try:
-        target = int(target)
-    except (TypeError, ValueError):
-        raise ValueError("目标数量得是个整数")
-    if not 0 < target <= _MAX_TARGET:
-        raise ValueError("目标数量不对劲（得大于 0，也别超过一亿啦）")
-    try:
-        deadline_date = date.fromisoformat(str(deadline).strip())
-    except ValueError:
-        raise ValueError("截止日期得是 年-月-日 这样的日期")
-    if deadline_date < _today():
-        raise ValueError("截止日期已经过去啦，往今天以后挑")
+    if goal_mode not in ("combined", "amount_target", "deadline_target"):
+        raise ValueError("目标方式不认识，请重新选择")
+    parsed_target = None
+    if goal_mode != "deadline_target":
+        try:
+            parsed_target = int(target)
+        except (TypeError, ValueError):
+            raise ValueError("目标数量得是个整数")
+        if not 0 < parsed_target <= _MAX_TARGET:
+            raise ValueError("目标数量不对劲（得大于 0，也别超过一亿啦）")
+    deadline_date = None
+    if goal_mode != "amount_target":
+        try:
+            deadline_date = date.fromisoformat(str(deadline).strip())
+        except ValueError:
+            raise ValueError("截止日期得是 年-月-日 这样的日期")
+        if deadline_date < _today():
+            raise ValueError("截止日期已经过去啦，往今天以后挑")
     goals = load_goals(path)
     goal = {
         "id": max([int(g.get("id") or 0) for g in goals], default=0) + 1,
         "kind": "resource",
+        "goal_mode": goal_mode,
         "resource": resource,
-        "target": target,
-        "deadline": deadline_date.isoformat(),
         "note": str(note or "").strip()[:50],
         "created_at": time.time(),
     }
+    if parsed_target is not None:
+        goal["target"] = parsed_target
+    if deadline_date is not None:
+        goal["deadline"] = deadline_date.isoformat()
     goals.append(goal)
     _save_goals(path, goals)
     return goal
@@ -345,9 +362,11 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
     now_dt = _resolve_now(today, now)
     today = today or now_dt.date()
     resource = goal["resource"]
-    target = int(goal["target"])
-    deadline = date.fromisoformat(goal["deadline"])
-    days_left = (deadline - today).days
+    goal_mode = goal.get("goal_mode") or "combined"
+    target = int(goal["target"]) if goal.get("target") is not None else None
+    deadline = (date.fromisoformat(goal["deadline"])
+                if goal.get("deadline") else None)
+    days_left = (deadline - today).days if deadline else None
     rate = (rate_info or {}).get("daily")
     advice = {
         "id": goal.get("id"),
@@ -356,10 +375,11 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         "goal_mode": goal.get("goal_mode"),
         "resource": resource,
         "target": target,
-        "deadline": goal["deadline"],
+        "deadline": goal.get("deadline"),
+        "estimated_deadline": None,
         "deadline_at": goal.get("deadline_at"),
         "note": goal.get("note") or "",
-        "days_left": max(days_left, 0),
+        "days_left": max(days_left, 0) if days_left is not None else None,
         "current": current,
         "rate": rate,
         "event_days": 0,
@@ -384,7 +404,28 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
         advice["message"] = (f"还没观察到{resource}的库存，跑一趟任务"
                              "让狐之助看一眼家底再算。")
         return advice
-    if current >= target:
+    if goal_mode == "amount_target":
+        if current >= target:
+            advice["status"] = "done"
+            advice["message"] = (f"{resource}已经有 {_fmt(current)}，"
+                                 f"数量目标 {_fmt(target)} 已经达成。")
+            return advice
+        if rate is None or rate <= 0:
+            advice["message"] = (f"最近 {RATE_WINDOW_DAYS} 天还没有稳定的{resource}净进账，"
+                                 "暂时算不出哪天能攒到。")
+            return advice
+        import math
+        days_needed = max(1, math.ceil((target - current) / rate))
+        estimated = today + timedelta(days=days_needed)
+        advice["status"] = "active"
+        advice["days_left"] = days_needed
+        advice["estimated_deadline"] = estimated.isoformat()
+        advice["shortfall"] = int(target - current)
+        advice["message"] = (f"现在有 {_fmt(current)} {resource}，按最近每天 "
+                             f"{int(round(rate)):+,} 的净进账，大约 {estimated.isoformat()}"
+                             f"能攒到 {_fmt(target)}。")
+        return advice
+    if target is not None and current >= target:
         advice["status"] = "done"
         advice["message"] = (f"{resource}已经有 {_fmt(current)}，"
                              f"目标 {_fmt(target)} 稳稳拿下啦🎉")
@@ -439,7 +480,7 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
             f"挖地实测（每层约 {per_floor:.0f} 小判），还要挖约 "
             f"{floors_needed} 层。所需工时按最近一轮有效层速另算。")
         return advice
-    if days_left <= 0:
+    if days_left is not None and days_left <= 0 and goal_mode != "deadline_target":
         advice["status"] = "expired"
         advice["shortfall"] = target - current
         advice["message"] = (f"截止日到了，{resource}还差 "
@@ -483,7 +524,6 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
     projected = (current + rate * normal_days
                  + (event_rate or 0) * unmodeled_days + modeled_delta)
     advice["projected"] = int(round(projected))
-    advice["shortfall"] = max(0, int(round(target - projected)))
     if event_days:
         if unmodeled_days:
             pace = f"平常每天 {int(round(rate)):+,}、活动期每天 {int(round(event_rate)):+,}"
@@ -498,6 +538,12 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
     else:
         pace = f"平常每天 {int(round(rate)):+,}"
         event_note = ""
+    if goal_mode == "deadline_target":
+        advice["status"] = "expired" if days_left <= 0 else "active"
+        advice["message"] = (f"按{pace}的速度，到 {goal['deadline']}"
+                             f"预计有 {_fmt(projected)} {resource}。{event_note}")
+        return advice
+    advice["shortfall"] = max(0, int(round(target - projected)))
     if projected >= target:
         advice["status"] = "on_track"
         advice["message"] = (f"按{pace}的速度，到 {goal['deadline']}"
