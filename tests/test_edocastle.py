@@ -145,6 +145,10 @@ class EdocastleConfigTests(unittest.TestCase):
         self.assertEqual(edo["map_archive"], "resource/base/maps/edocastle-4.json")
         self.assertEqual(edo["tour"], EDOCASTLE_TOUR)
         self.assertIn("team_ui_ocr", edo)
+        self.assertEqual(
+            edo["map_ready"]["template"], "江户城/地图点选择.png")
+        self.assertTrue(
+            (ARCHIVE_PATH.parent.parent / "image" / "江户城" / "地图点选择.png").is_file())
         self.assertIn("hud_step_ocr", edo)
         self.assertIn("ticket_refill", edo)  # 弹窗补票（模板待踩点，留空即不认）
         self.assertNotIn("tokens", edo)  # 数令牌格已拆除，票尽走游戏补票弹窗

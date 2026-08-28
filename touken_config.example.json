@@ -1251,6 +1251,15 @@
     "map_landmark": {
       "template": "江户城/地图难度标签.png"
     },
+    "map_ready": {
+      "template": "江户城/地图点选择.png",
+      "roi": [
+        45,
+        605,
+        245,
+        715
+      ]
+    },
     "hud_step_ocr": {
       "roi": [
         25,

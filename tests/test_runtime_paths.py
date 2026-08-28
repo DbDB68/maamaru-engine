@@ -199,10 +199,13 @@ class RuntimePathsTests(unittest.TestCase):
             ensure_runtime_data(data, bundle, legacy_roots=[])
 
             merged = json.loads(target.read_text(encoding="utf-8"))["edocastle"]
-            # 安全出阵链依赖的键全部补齐
+            # 安全出阵链和地图可操作门闩依赖的键全部补齐
             for key in ("repair_threshold", "auto_equip", "injury_deny_button",
-                        "injury_stamps", "injury_stamp_roi", "injury_status_roi"):
+                        "injury_stamps", "injury_stamp_roi", "injury_status_roi",
+                        "map_ready"):
                 self.assertIn(key, merged, f"老安装没补到 edocastle.{key}")
+            self.assertEqual(
+                merged["map_ready"]["template"], "江户城/地图点选择.png")
             # 用户已有的值原样保留（递归补键不覆盖）
             self.assertEqual(merged["team_no"], 4)
             self.assertEqual(merged["max_runs"], 2)

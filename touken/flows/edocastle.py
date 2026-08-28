@@ -562,13 +562,21 @@ class EdocastleMixin:
         return None
 
     def _wait_map_landmark(self, cfg: dict, timeout_s: float = 15.0) -> bool:
-        """等地标『地图难度标签』出现。"""
+        """等左下角『地图点选择』出现，确认地图已经恢复可操作。
+
+        右侧难度牌在钥匙对话弹窗期间仍然可见，只能证明“人还在地图”，
+        不能作为下一节点可点击的依据。
+        """
+        ready = cfg["map_ready"]
+        roi_raw = ready.get("roi")
+        roi = roi_4to4(*roi_raw) if roi_raw else None
         return self.wait_landmark_skipping(
-            template=cfg["map_landmark"]["template"],
+            template=ready["template"],
+            roi=roi,
             skip_point=cfg.get("skip_tap"),
             timeout_s=timeout_s,
             stable_hits=1,
-            interval=0.8,
+            interval=0.9,
         )
 
     def _wait_round_end(self, cfg: dict, skip_point: list,
@@ -580,11 +588,14 @@ class EdocastleMixin:
     def _wait_battle_return_to_map(self, cfg: dict, skip_point: list,
                                    timeout_s: float = 30.0) -> bool:
         """普通战斗：等战果出现后才逐页点回江户城地图。"""
+        ready = cfg["map_ready"]
         return self._wait_after_battle(
-            cfg["map_landmark"]["template"], skip_point, timeout_s)
+            ready["template"], skip_point, timeout_s,
+            target_roi=ready.get("roi"))
 
     def _wait_after_battle(self, target_template: str, skip_point: list,
-                           timeout_s: float, interval: float = 0.9) -> bool:
+                           timeout_s: float, interval: float = 0.9,
+                           target_roi: list | None = None) -> bool:
         """战斗结束的两阶段门闩。
 
         战斗结果页出现前只观察，绝不点击；出现后每次先看目标地标，没到才
@@ -593,9 +604,10 @@ class EdocastleMixin:
         """
         deadline = time.monotonic() + max(1.0, float(timeout_s))
         result_seen = False
+        roi = roi_4to4(*target_roi) if target_roi else None
         while time.monotonic() < deadline:
             self.maa.screenshot(force=True)
-            if self.maa.template_match(target_template):
+            if self.maa.template_match(target_template, roi=roi):
                 return True
             if not result_seen:
                 result_seen = bool(self.maa.template_match("battle/ui战斗结果.png"))
