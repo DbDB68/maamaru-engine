@@ -4,6 +4,7 @@
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from touken.edo_route import (
     EDOCASTLE_TOUR,
@@ -226,6 +227,51 @@ class EdocastleOcrFallbackTests(unittest.TestCase):
         msgs, result = _run_map(flow)
         self.assertEqual(result, (0, False))
         self.assertTrue(any("太瞎了" in m for m in msgs))
+
+
+class _BattleGateMaa:
+    def __init__(self, frames):
+        self.frames = iter(frames)
+        self.frame = set()
+
+    def screenshot(self, force=False):
+        self.frame = set(next(self.frames, self.frame))
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        return template if template in self.frame else None
+
+
+class _BattleGateHost(EdocastleMixin):
+    def __init__(self, frames):
+        self.maa = _BattleGateMaa(frames)
+        self.clicked = []
+        self.config = {}
+
+    def _click_point(self, point):
+        self.clicked.append(point)
+
+
+class EdocastleBattleGateTests(unittest.TestCase):
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_does_not_tap_until_battle_result_then_stops_on_map(self, _sleep):
+        flow = _BattleGateHost([
+            set(), set(), {"battle/ui战斗结果.png"},
+            {"江户城/获得钥匙.png"}, {"江户城/地图难度标签.png"},
+        ])
+        ok = flow._wait_after_battle(
+            "江户城/地图难度标签.png", [775, 695], timeout_s=10)
+        self.assertTrue(ok)
+        self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_round_end_banner_is_returned_without_extra_tap(self, _sleep):
+        flow = _BattleGateHost([
+            set(), {"battle/ui战斗结果.png"}, {"江户城/调查完了.png"},
+        ])
+        ok = flow._wait_after_battle(
+            "江户城/调查完了.png", [775, 695], timeout_s=10)
+        self.assertTrue(ok)
+        self.assertEqual(flow.clicked, [[775, 695]])
 
 
 if __name__ == "__main__":

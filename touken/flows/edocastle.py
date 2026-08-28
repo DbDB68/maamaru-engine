@@ -318,8 +318,6 @@ class EdocastleMixin:
                 if not self._wait_round_end(cfg, skip_point, timeout_s=30):
                     yield "[江户城] 没等到『调查完了！』横幅，停"
                     return 0, False
-                # 点掉横幅和后续结算动画
-                self.skip_safe(5, point=skip_point)
                 keys_end = self._read_hud_keys(cfg)
                 delta = (keys_end - keys_start) if keys_end is not None else 0
                 return delta, True
@@ -353,13 +351,13 @@ class EdocastleMixin:
                     if not self._wait_round_end(cfg, skip_point, timeout_s=30):
                         yield "[江户城] 王点战后没等到『调查完了！』，停"
                         return 0, False
-                    self.skip_safe(5, point=skip_point)
                     keys_end = self._read_hud_keys(cfg)
                     delta = (keys_end - keys_start) if keys_end is not None else 0
                     return delta, True
 
                 # 非王点战斗后等回地图
-                if not self._wait_map_landmark(cfg, timeout_s=20):
+                if not self._wait_battle_return_to_map(
+                        cfg, skip_point, timeout_s=30):
                     yield "[江户城] 战斗后没回到地图，停"
                     return 0, False
             else:
@@ -426,6 +424,12 @@ class EdocastleMixin:
                 allow_auto_without_title=formation_mode != "auto"
             ) is not None:
                 return True
+            # 自动阵形按钮比顶部标题先出现，而且开打后仍会短暂常驻。
+            # 在“刚点过江户城节点”这个窄上下文里，它足以证明战斗已接管；
+            # 从这一帧开始绝不能再拿安全点催动画，否则会一路点穿战斗结果
+            # 和江户城专属的钥匙/步数横幅。
+            if formation_mode == "auto" and self._formation_auto_marker_visible():
+                return True
             if skip_point:
                 self._click_point(skip_point)
             time.sleep(0.6)
@@ -445,6 +449,10 @@ class EdocastleMixin:
             enable_auto=(formation_mode == "auto"),
         )
         if result == "failed":
+            # 自动阵形可能在顶部标题完全落地前已经自行开打。此时右上角
+            # 自动标志仍在，算“战斗已接管”，后续只等战果，不能倒回去盲点。
+            if formation_mode == "auto" and self._formation_auto_marker_visible():
+                return True
             return False
 
         # 等阵形页消失
@@ -454,6 +462,17 @@ class EdocastleMixin:
             if self._formation_mode_state() is None:
                 return True
         return False
+
+    def _formation_auto_marker_visible(self) -> bool:
+        """只探测右上角自动阵形标志，不把它当成可点击的阵形页。"""
+        formation = self.config.get("formation", {})
+        mode = formation.get("auto_mode", {})
+        roi = roi_4to4(*mode.get("roi", [840, 0, 980, 68]))
+        return bool(self.maa.template_match(
+            mode.get("auto_template", "battle/阵形选择自动.png"),
+            roi,
+            threshold=float(mode.get("threshold", 0.9)),
+        ))
 
     # ---------- 内部：识别与 OCR ----------
 
@@ -554,14 +573,38 @@ class EdocastleMixin:
 
     def _wait_round_end(self, cfg: dict, skip_point: list,
                         timeout_s: float = 30.0) -> bool:
-        """等『调查完了！』结算横幅。"""
-        return self.wait_landmark_skipping(
-            template=cfg["round_end"]["template"],
-            skip_point=skip_point,
-            timeout_s=timeout_s,
-            stable_hits=1,
-            interval=0.8,
-        )
+        """王点战果出现前不点击；战果出现后逐页等『调查完了！』。"""
+        return self._wait_after_battle(
+            cfg["round_end"]["template"], skip_point, timeout_s)
+
+    def _wait_battle_return_to_map(self, cfg: dict, skip_point: list,
+                                   timeout_s: float = 30.0) -> bool:
+        """普通战斗：等战果出现后才逐页点回江户城地图。"""
+        return self._wait_after_battle(
+            cfg["map_landmark"]["template"], skip_point, timeout_s)
+
+    def _wait_after_battle(self, target_template: str, skip_point: list,
+                           timeout_s: float, interval: float = 0.9) -> bool:
+        """战斗结束的两阶段门闩。
+
+        战斗结果页出现前只观察，绝不点击；出现后每次先看目标地标，没到才
+        点一下安全区。这样既能跳过战果和活动横幅，也不会在地图已经回来后
+        多补一枪。0.9 秒位于老大指定的 0.8～1.0 秒区间内。
+        """
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        result_seen = False
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(target_template):
+                return True
+            if not result_seen:
+                result_seen = bool(self.maa.template_match("battle/ui战斗结果.png"))
+                if not result_seen:
+                    time.sleep(0.5)
+                    continue
+            self._click_point(skip_point)
+            time.sleep(interval)
+        return False
 
     def _wait_entry_screen(self, cfg: dict, skip_point: list,
                            timeout_s: float = 30.0) -> bool:
@@ -571,7 +614,7 @@ class EdocastleMixin:
             skip_point=skip_point,
             timeout_s=timeout_s,
             stable_hits=1,
-            interval=0.8,
+            interval=0.9,
         )
 
     # ---------- 内部：地图内撤退 ----------
