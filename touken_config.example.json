@@ -1259,7 +1259,7 @@
       "template": "江户城/地图难度标签.png"
     },
     "map_ready": {
-      "template": "江户城/地图点选择.png",
+      "expected": "地图点选择",
       "roi": [
         45,
         605,

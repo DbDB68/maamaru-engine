@@ -145,10 +145,7 @@ class EdocastleConfigTests(unittest.TestCase):
         self.assertEqual(edo["map_archive"], "resource/base/maps/edocastle-4.json")
         self.assertEqual(edo["tour"], EDOCASTLE_TOUR)
         self.assertIn("team_ui_ocr", edo)
-        self.assertEqual(
-            edo["map_ready"]["template"], "江户城/地图点选择.png")
-        self.assertTrue(
-            (ARCHIVE_PATH.parent.parent / "image" / "江户城" / "地图点选择.png").is_file())
+        self.assertEqual(edo["map_ready"]["expected"], "地图点选择")
         self.assertIn("hud_step_ocr", edo)
         self.assertNotIn("ticket_refill", edo)  # 江户城不是单层确定/取消补票 UI
         recover = cfg["raid"]["ticket_recover"]
@@ -248,6 +245,9 @@ class _BattleGateMaa:
     def template_match(self, template, roi=None, threshold=0.7):
         return template if template in self.frame else None
 
+    def ocr(self, expected, roi=None):
+        return expected if expected in self.frame else None
+
 
 class _BattleGateHost(EdocastleMixin):
     def __init__(self, frames):
@@ -280,6 +280,19 @@ class EdocastleBattleGateTests(unittest.TestCase):
             "江户城/调查完了.png", [775, 695], timeout_s=10)
         self.assertTrue(ok)
         self.assertEqual(flow.clicked, [[775, 695]])
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_map_text_ocr_stops_post_battle_tapping(self, _sleep):
+        flow = _BattleGateHost([
+            set(), {"battle/ui战斗结果.png"}, {"江户城/获得钥匙.png"},
+            {"地图点选择"},
+        ])
+        ok = flow._wait_after_battle(
+            None, [775, 695], timeout_s=10,
+            target_roi=[45, 605, 245, 715],
+            target_ocr_expected="地图点选择")
+        self.assertTrue(ok)
+        self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
 
 
 if __name__ == "__main__":

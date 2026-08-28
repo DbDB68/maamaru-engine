@@ -569,7 +569,7 @@ class EdocastleMixin:
         roi_raw = ready.get("roi")
         roi = roi_4to4(*roi_raw) if roi_raw else None
         return self.wait_landmark_skipping(
-            template=ready["template"],
+            ocr_expected=ready["expected"],
             roi=roi,
             skip_point=cfg.get("skip_tap"),
             timeout_s=timeout_s,
@@ -588,12 +588,14 @@ class EdocastleMixin:
         """普通战斗：等战果出现后才逐页点回江户城地图。"""
         ready = cfg["map_ready"]
         return self._wait_after_battle(
-            ready["template"], skip_point, timeout_s,
-            target_roi=ready.get("roi"))
+            None, skip_point, timeout_s,
+            target_roi=ready.get("roi"),
+            target_ocr_expected=ready["expected"])
 
-    def _wait_after_battle(self, target_template: str, skip_point: list,
+    def _wait_after_battle(self, target_template: str | None, skip_point: list,
                            timeout_s: float, interval: float = 0.9,
-                           target_roi: list | None = None) -> bool:
+                           target_roi: list | None = None,
+                           target_ocr_expected: str | None = None) -> bool:
         """战斗结束的两阶段门闩。
 
         战斗结果页出现前只观察，绝不点击；出现后每次先看目标地标，没到才
@@ -605,7 +607,14 @@ class EdocastleMixin:
         roi = roi_4to4(*target_roi) if target_roi else None
         while time.monotonic() < deadline:
             self.maa.screenshot(force=True)
-            if self.maa.template_match(target_template, roi=roi):
+            target_found = bool(
+                target_template
+                and self.maa.template_match(target_template, roi=roi)
+            )
+            if not target_found and target_ocr_expected:
+                target_found = bool(self.maa.ocr(
+                    expected=target_ocr_expected, roi=roi))
+            if target_found:
                 return True
             if not result_seen:
                 result_seen = bool(self.maa.template_match("battle/ui战斗结果.png"))

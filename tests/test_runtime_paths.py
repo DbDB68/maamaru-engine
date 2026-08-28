@@ -205,7 +205,7 @@ class RuntimePathsTests(unittest.TestCase):
                         "map_ready"):
                 self.assertIn(key, merged, f"老安装没补到 edocastle.{key}")
             self.assertEqual(
-                merged["map_ready"]["template"], "江户城/地图点选择.png")
+                merged["map_ready"]["expected"], "地图点选择")
             # 用户已有的值原样保留（递归补键不覆盖）
             self.assertEqual(merged["team_no"], 4)
             self.assertEqual(merged["max_runs"], 2)
