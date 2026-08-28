@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta, timezone
 
 try:
@@ -51,6 +52,12 @@ def _parse_date(value) -> date | None:
         return date.fromisoformat(value[:10])
     except ValueError:
         return None
+
+
+def _norm_event_name(value) -> str:
+    """活动名归一化：去空白和波浪号。公告候选名常是
+    「战术强化训练 ~南瓜大作战~」这种带前缀/装饰的写法。"""
+    return re.sub(r"[\s~～]+", "", str(value or ""))
 
 
 def _card_window(card: dict):
@@ -189,9 +196,14 @@ def hidden_event_scripts(cards: dict, announcements: list[dict],
             if (start_dt is not None and start_dt <= now
                     and (end_dt is None or now < end_dt)):
                 return True
+        # 公告候选的名字常带前后缀或波浪号（「战术强化训练 ~南瓜大作战~」），
+        # 归一化后按包含关系对，不做精确相等
+        target = _norm_event_name(name)
         for ann in announcements or []:
             for cand in ann.get("schedule_candidates") or []:
-                if cand.get("name") != name:
+                cand_name = _norm_event_name(cand.get("name"))
+                if not cand_name or not (cand_name in target
+                                         or target in cand_name):
                     continue
                 start_dt = _parse_dt(cand.get("start_at"))
                 end_dt = _parse_dt(cand.get("end_at"))

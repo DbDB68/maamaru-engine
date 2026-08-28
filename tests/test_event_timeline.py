@@ -177,6 +177,16 @@ class HiddenEventScriptsTests(unittest.TestCase):
         hidden = event_timeline.hidden_event_scripts({}, anns, now=NOW)
         self.assertIn("pumpkin", hidden)
 
+    def test_candidate_name_with_prefix_and_tildes_matches(self):
+        # 真实数据长这样：「战术强化训练 ~南瓜大作战~」
+        anns = [{"title": "更新公告", "url": "u1",
+                 "schedule_candidates": [
+                     {"section": "2", "name": "战术强化训练 ~南瓜大作战~",
+                      "start_at": "2026-08-25T10:00:00+08:00",
+                      "end_at": "2026-09-08T05:00:00+08:00"}]}]
+        hidden = event_timeline.hidden_event_scripts({}, anns, now=NOW)
+        self.assertNotIn("pumpkin", hidden)
+
 
 if __name__ == "__main__":
     unittest.main()
