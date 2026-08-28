@@ -47,8 +47,9 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertNotIn("help", by_key["use_koban_refill"])
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
-        self.assertEqual(by_key["formation_strategy"]["visibleWhen"],
-                         {"key": "formation_mode", "is": "manual"})
+        # 策略和兜底阵形常显：自动阵形识别失败时会回落到手动按策略选
+        self.assertNotIn("visibleWhen", by_key["formation_strategy"])
+        self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["formation"]["options"][-1], ["逆行阵", "逆行阵"])
 
     def test_osaka_formation_mode_matches_the_sortie_panel_semantics(self):
@@ -56,10 +57,8 @@ class PumpkinPlanTests(unittest.TestCase):
         by_key = {field["key"]: field for field in fields}
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
-        self.assertEqual(by_key["formation_strategy"]["visibleWhen"],
-                         {"key": "formation_mode", "is": "manual"})
-        self.assertEqual(by_key["formation"]["visibleWhen"],
-                         {"key": "formation_mode", "is": "manual"})
+        self.assertNotIn("visibleWhen", by_key["formation_strategy"])
+        self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["repair_threshold"]["options"],
                          [["light", "轻伤时停止"],
                           ["medium", "中伤时停止"],

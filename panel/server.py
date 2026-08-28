@@ -202,7 +202,9 @@ def _march_and_injury_fields():
 
 
 def _formation_fields():
-    """不使用自动行军、但每场仍需选择阵形的玩法共用。"""
+    """不使用自动行军、但每场仍需选择阵形的玩法共用。
+    策略和兜底阵形常显：自动阵形在游戏识别失败（夜战等）时会回落到
+    手动按策略选，兜底阵形照样起作用（choose_formation 的设计）。"""
     return [
         {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
          "options": [["manual", "手动阵形"], ["auto", "自动阵形"]],
@@ -210,14 +212,12 @@ def _formation_fields():
         {"key": "formation_strategy", "type": "select", "label": "阵形策略",
          "options": [["fixed", "固定阵形"],
                      ["advantage", "优先选择有利阵形"]],
-         "default": "fixed",
-         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+         "default": "fixed"},
         {"key": "formation", "type": "select",
          "label": "固定或识别失败时的兜底阵形",
          "options": [[name, name] for name in
                      ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
-         "default": "鱼鳞阵",
-         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+         "default": "鱼鳞阵"},
     ]
 
 
@@ -786,14 +786,12 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                          "label": "阵形策略",
                          "options": [["fixed", "固定阵形"],
                                      ["advantage", "优先选择有利阵形"]],
-                         "default": "fixed",
-                         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+                         "default": "fixed"},
                         {"key": "formation", "type": "select",
                          "label": "固定或识别失败时的兜底阵形",
                          "options": [[name, name] for name in
                                      ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
-                         "default": "鱼鳞阵",
-                         "visibleWhen": {"key": "formation_mode", "is": "manual"}},
+                         "default": "鱼鳞阵"},
                         {"key": "repair_threshold", "type": "select",
                          "label": "伤势停止条件",
                          "options": [["light", "轻伤时停止"],
