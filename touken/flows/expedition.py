@@ -16,7 +16,8 @@
   - 收菜（collect_expedition_stream）支持"收完顺手再派"：读结算界面上的
     "第X部队"和"时代-小图"编号，把回来的队派回去；也可按资源目标
     （小判/加速符等）自动挑时薪最高的图，数据来自 data/expedition_maps.json。
-  - 远征界面底部右侧的"部队选择"按钮与 team/部队选择.png 是同一个样式。
+  - 远征界面底部右侧的"部队选择"按钮用右下角 OCR 双词确认，避免和
+    "即刻出阵"按钮的相似皮肤串台。
 """
 
 import json
@@ -150,7 +151,7 @@ class ExpeditionMixin:
                 break
             # 前两次还没进就找"部队选择"按钮点（远征界面是按钮进入，不是直通）
             if attempt <= 3:
-                deploy = self.maa.template_match(cfg["deploy_button"]["template"])
+                deploy = self._find_deploy_button(cfg)
                 if deploy:
                     self.maa.click(deploy)
                     time.sleep(1.5)

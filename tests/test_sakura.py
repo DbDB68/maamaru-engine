@@ -119,6 +119,9 @@ class SortieRotateHookTests(unittest.TestCase):
         def click(self, point):
             pass
 
+        def ocr(self, expected, roi, match_mode="contains"):
+            return Point(1, 1) if expected in ("部队", "选择") else None
+
         def template_match(self, template, roi=None, threshold=0.7):
             # 只放行"小图页"地标，其它一律不命中，把流程快进到部队选择
             return Point(1, 1) if template == "area.png" else None

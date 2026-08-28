@@ -433,7 +433,7 @@ class PumpkinMixin:
         """
         self._battle_started = False
 
-        deploy = self.maa.template_match(cfg["deploy_button"]["template"])
+        deploy = self._find_deploy_button(cfg)
         if not deploy:
             yield "[南瓜] 没找到部队选择按钮"
             return
@@ -580,7 +580,7 @@ class PumpkinMixin:
             yield "[南瓜] 更新完回不到活动界面"
             return
         self.maa.screenshot(force=True)
-        if self.maa.template_match(cfg["deploy_button"]["template"]):
+        if self._find_deploy_button(cfg):
             self._refresh_ok = True
             yield "[南瓜] 剪影更新完成，新板子就位"
         else:

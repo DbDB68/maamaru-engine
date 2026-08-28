@@ -437,17 +437,35 @@ class BattleComponentTests(unittest.TestCase):
     def test_wait_for_team_select_can_open_the_panel(self):
         deploy = Point(100, 200)
         maa = FakeMaa(
-            ocr_results=[False, False, True],
-            templates={"team/部队选择.png": deploy},
+            ocr_results=[False, False, deploy, deploy, True],
         )
         flow = Flow(maa)
         cfg = {
             "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
-            "deploy_button": {"template": "team/部队选择.png"},
+            "deploy_button": {"ocr": {
+                "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}},
         }
 
         self.assertTrue(flow._wait_for_team_select(cfg, attempts=3, open_after=1))
         self.assertEqual(maa.clicks, [deploy])
+
+    def test_deploy_button_requires_both_ocr_words_and_never_uses_template(self):
+        point = Point(1200, 640)
+        maa = FakeMaa(ocr_results=[point, point])
+        flow = Flow(maa)
+
+        self.assertEqual(flow._find_deploy_button({
+            "deploy_button": {"ocr": {
+                "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}}
+        }), point)
+        self.assertEqual(maa.ocr_calls, ["部队", "选择"])
+        self.assertEqual(maa.template_calls, [])
+
+        maa = FakeMaa(ocr_results=[point, False])
+        self.assertIsNone(flow._find_deploy_button({
+            "deploy_button": {"ocr": {
+                "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}}
+        }))
 
     def test_pick_team_uses_the_shared_team_coordinates(self):
         flow = Flow(FakeMaa())
@@ -517,16 +535,16 @@ class YosariRouteTests(unittest.TestCase):
 
         cfg = {
             "entry": {"expected": "归城提灯", "verify_roi": [0, 0, 10, 10]},
-            "deploy_button": {"template": "team/部队选择.png"},
+            "deploy_button": {"ocr": {
+                "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}},
         }
         flow = Route()
         flow.maa = FakeMaa(
-            ocr_results=[True],
-            templates={"team/部队选择.png": Point(1200, 640)},
+            ocr_results=[True, Point(1200, 640), Point(1200, 640)],
         )
         self.assertTrue(flow._yosari_round_done(cfg))
 
-        flow.maa = FakeMaa(ocr_results=[True])
+        flow.maa = FakeMaa(ocr_results=[True, Point(1200, 640), False])
         self.assertFalse(flow._yosari_round_done(cfg))
 
     def test_manual_march_uses_the_button_template_not_partial_ocr(self):

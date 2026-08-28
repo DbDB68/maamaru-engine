@@ -105,7 +105,7 @@ class RaidMixin:
             time.sleep(0.8)
 
             # 3.2 点"部队选择"，OCR 验证标题
-            deploy = self.maa.template_match(cfg["deploy_button"]["template"])
+            deploy = self._find_deploy_button(cfg)
             if not deploy:
                 yield "[RAID] 找不到部队选择按钮，本圈放弃"
                 continue

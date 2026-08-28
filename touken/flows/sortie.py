@@ -23,6 +23,7 @@ import time
 
 from .. import sword_db
 from ..maa_adapter import roi_4to4
+from .battle import find_deploy_button
 from ..map_read import CV2_AVAILABLE, boss_distance_from_image
 
 
@@ -186,7 +187,7 @@ class SortieMixin:
                 area_ok = False
                 for _ in range(10):
                     self.maa.screenshot(force=True)
-                    if self.maa.template_match(cfg["area_select_ui"]["template"]):
+                    if find_deploy_button(self.maa, cfg):
                         area_ok = True
                         break
                     time.sleep(0.5)
@@ -736,9 +737,7 @@ class SortieMixin:
         expected = marker.get("expected", "归城提灯")
         if not self.maa.ocr(expected, roi_4to4(*roi_raw)):
             return False
-        deploy_cfg = cfg.get("deploy_button", {})
-        template = deploy_cfg.get("template")
-        return bool(template and self.maa.template_match(template))
+        return bool(find_deploy_button(self.maa, cfg))
 
     def _save_map_miss(self, chapter: int, map_no: int, loop_no: int):
         """只保存无法判读的小地图，供用户主动反馈；正常识别不落盘。"""

@@ -595,7 +595,15 @@
   },
   "team_select": {
     "enter_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "teams": {
       "1": [
@@ -932,7 +940,15 @@
       "template": "lulian/ui陆联.png"
     },
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",
@@ -1039,7 +1055,15 @@
       ]
     },
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",
@@ -1144,7 +1168,15 @@
       ]
     },
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",
@@ -1299,7 +1331,15 @@
       ]
     },
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",
@@ -1434,10 +1474,26 @@
       "template": "决定.png"
     },
     "area_select_ui": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",
@@ -1642,7 +1698,15 @@
       580
     ],
     "deploy_button": {
-      "template": "team/部队选择.png"
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [
+          1110,
+          580,
+          1279,
+          710
+        ]
+      }
     },
     "team_ui_ocr": {
       "expected": "部队选择",

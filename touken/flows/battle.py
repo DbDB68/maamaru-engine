@@ -9,6 +9,30 @@ import time
 from ..maa_adapter import roi_4to4, Point
 
 
+def find_deploy_button(maa, cfg: dict):
+    """用右下角 OCR 找“部队选择”，返回可点击的文字中心点。
+
+    不能再用“部队选择”PNG：它和“即刻出阵”按钮皮肤相近，模板
+    全屏搜索会偶发串台。两个词分别命中才算找到，且完全不走模板。
+    """
+    deploy_cfg = cfg.get("deploy_button", {})
+    ocr_cfg = deploy_cfg.get("ocr", {})
+    expected = ocr_cfg.get("expected", ["部队", "选择"])
+    if isinstance(expected, str):
+        expected = [expected]
+    expected = [str(word) for word in expected if word]
+    if not expected:
+        return None
+    roi = roi_4to4(*ocr_cfg.get("roi", [1110, 580, 1279, 710]))
+    points = []
+    for word in expected:
+        point = maa.ocr(expected=word, roi=roi)
+        if not point:
+            return None
+        points.append(point)
+    return points[0]
+
+
 class BattleMixin:
     """地图/部队/阵形选择。依赖宿主类的 _click_point、_click_template_config。"""
 
@@ -276,6 +300,9 @@ class BattleMixin:
 
     # ==================== 部队选择 ====================
 
+    def _find_deploy_button(self, cfg: dict):
+        return find_deploy_button(self.maa, cfg)
+
     def _wait_for_team_select(self, cfg: dict, attempts: int = 10,
                               open_after: int = None) -> bool:
         """等待部队选择页；需要时点击玩法页上的“部队选择”按钮。"""
@@ -291,9 +318,7 @@ class BattleMixin:
             if self.maa.ocr(expected=expected, roi=roi):
                 return True
             if open_after is not None and attempt == open_after:
-                deploy_cfg = cfg.get("deploy_button", {})
-                template = deploy_cfg.get("template")
-                deploy = self.maa.template_match(template) if template else None
+                deploy = self._find_deploy_button(cfg)
                 if deploy:
                     self.maa.click(deploy)
                     time.sleep(1.5)
@@ -547,7 +572,9 @@ class BattleMixin:
 
         # 1. 点击"部队选择"按钮
         enter = team_config["enter_button"]
-        self._click_template_config(enter)
+        deploy = self._find_deploy_button({"deploy_button": enter})
+        if deploy:
+            self.maa.click(deploy)
         time.sleep(1.5)
 
         # 2. 选择部队

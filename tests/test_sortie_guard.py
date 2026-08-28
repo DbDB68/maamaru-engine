@@ -9,6 +9,9 @@ class _Maa:
     def screenshot(self, force=False):
         pass
 
+    def ocr(self, expected, roi, match_mode="contains"):
+        return Point(1, 1) if expected in ("部队", "选择") else None
+
     def template_match(self, template, roi=None, threshold=0.8):
         if template == "area.png":
             return Point(1, 1)

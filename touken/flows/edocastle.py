@@ -236,7 +236,7 @@ class EdocastleMixin:
         time.sleep(1.5)
 
         # 部队选择按钮
-        deploy = self.maa.template_match(cfg["deploy_button"]["template"])
+        deploy = self._find_deploy_button(cfg)
         if not deploy:
             yield "[江户城] 没找到部队选择按钮"
             return False, team_record_saved
