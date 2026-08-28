@@ -12,7 +12,7 @@
 <details>
 <summary>后续计划</summary>
 
-说不定以后会做成绿玩也能用的Excel拉表软件呢（笑）
+说不定以后会做成剔除自动化，纯绿玩也能用的纯Excel拉表软件呢（笑）
 
 </details>
 
