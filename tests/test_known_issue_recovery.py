@@ -260,6 +260,50 @@ class ShopGiftTests(unittest.TestCase):
             self.assertEqual((roi.x, roi.y, roi.w, roi.h), (350, 265, 330, 95))
             self.assertLessEqual(roi.y + roi.h, 360)
 
+    def test_right_top_warm_gift_keeps_left_roi_and_follows_card(self):
+        class Maa:
+            def __init__(self):
+                self.ocr_rois = []
+                self.template_rois = []
+
+            def screenshot(self, force=False):
+                pass
+
+            def ocr(self, expected, roi, match_mode="contains"):
+                self.ocr_rois.append((expected, roi))
+                if expected == "暖心" and roi.x >= 700:
+                    return Point(715, 145)
+                return None
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                self.template_rois.append((template, roi))
+                return None
+
+        class Flow(RewardsMixin):
+            def __init__(self):
+                self.current_location = "万屋"
+                self.maa = Maa()
+                self.config = {"shop": {"free_gift": {
+                    "find_text": {
+                        "expected": "暖心",
+                        "rois": [[0, 100, 700, 650], [700, 100, 1280, 370]],
+                    },
+                    "claim_button": {"template": "领取.png"},
+                }}}
+
+            def navigate_to_stream(self, location):
+                return iter(())
+
+        flow = Flow()
+        list(flow.claim_free_gift_stream())
+        rois = [roi for template, roi in flow.maa.template_rois
+                if template == "领取.png"]
+        self.assertTrue(rois)
+        self.assertEqual((rois[0].x, rois[0].y, rois[0].w, rois[0].h),
+                         (885, 265, 330, 95))
+        self.assertEqual([roi.x for expected, roi in flow.maa.ocr_rois
+                          if expected == "暖心"], [0, 700])
+
 
 class TaskRewardTests(unittest.TestCase):
     class Maa:

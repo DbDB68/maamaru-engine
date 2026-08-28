@@ -59,18 +59,29 @@ class RewardsMixin:
         # 2. 识别"暖心"文字
         yield "[SHOP] 寻找暖心礼包..."
         find_config = shop_config["find_text"]
-        roi_raw = find_config["roi"]
-        roi = roi_4to4(roi_raw[0], roi_raw[1], roi_raw[2], roi_raw[3])
+        raw_rois = find_config.get("rois")
+        if not raw_rois:
+            # 兼容旧配置，同时把右上角活动礼包位置纳入搜索；左侧 ROI
+            # 不能删，常驻礼包仍可能出现在左上或左下。
+            raw_rois = [
+                find_config.get("roi", [0, 100, 700, 650]),
+                [700, 100, 1280, 370],
+            ]
+        rois = [roi_4to4(*raw_roi) for raw_roi in raw_rois]
 
         # 强制刷新截图
         self.maa.screenshot(force=True)
 
-        # OCR 识别暖心
-        result = self.maa.ocr(
-            expected=find_config["expected"],
-            roi=roi,
-            match_mode=find_config.get("match_mode", "contains")
-        )
+        # OCR 依次扫描左侧和右上角；找到哪个位置，后面的领取 ROI 就跟着哪个卡片走。
+        result = None
+        for roi in rois:
+            result = self.maa.ocr(
+                expected=find_config["expected"],
+                roi=roi,
+                match_mode=find_config.get("match_mode", "contains")
+            )
+            if result:
+                break
 
         if not result:
             yield "[SHOP] 未找到暖心礼包，可能已经领过了或界面不对"
@@ -81,11 +92,11 @@ class RewardsMixin:
         # 3. 点击领取按钮
         claim_config = shop_config["claim_button"]
         # 万屋商品会随限时礼包增减而重新排版，不能用旧的固定纵坐标找“领取”。
-        # 以刚识别到的“暖心”标题为锚，只框住它所在的左上商品卡；范围在
-        # 下一行开始前截止，绝不能误点下面的“异去探索道具”。
+        # 以刚识别到的“暖心”标题为锚，只框住它所在的商品卡；范围在
+        # 下一行开始前截止，绝不能误点其它商品。左右两列都按标题位置计算。
         card_left = max(0, result.x - 180)
         card_top = max(90, result.y - 55)
-        card_right = min(700, card_left + 680)
+        card_right = min(1280, card_left + 680)
         card_bottom = min(720, card_top + 270)
         # “领取/售罄”只可能出现在商品卡右下方的按钮条。
         claim_roi = roi_4to4(
