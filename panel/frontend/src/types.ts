@@ -31,6 +31,7 @@ export interface ScriptsResponse {
   running: boolean
   current: string | null
   scripts: Record<string, ScriptInfo>
+  event_hidden?: string[]
 }
 
 export type ScriptParams = Record<string, unknown>

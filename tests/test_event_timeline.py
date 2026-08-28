@@ -132,5 +132,51 @@ class UnverifiedTests(unittest.TestCase):
         self.assertEqual(len(tl["unverified"]), 1)
 
 
+class HiddenEventScriptsTests(unittest.TestCase):
+    """概览页常用功能联动隐藏：封闭式判断，没「正在开放」证据就收起来。"""
+
+    def test_ongoing_card_keeps_script_visible(self):
+        cards = {"江户城潜入调查": _card(start_date="2026-08-20",
+                                       end_date="2026-09-10")}
+        hidden = event_timeline.hidden_event_scripts(cards, [], now=NOW)
+        self.assertNotIn("edocastle", hidden)
+
+    def test_ended_card_hides_script(self):
+        # 大阪城 8-27 收摊，8-26 还在、9-01 就该藏了
+        cards = {"大阪城": _card(start_date="2026-08-13",
+                               end_date="2026-08-27")}
+        self.assertNotIn("osaka",
+                         event_timeline.hidden_event_scripts(cards, [], now=NOW))
+        later = datetime(2026, 9, 1, 15, 0, tzinfo=_TZ)
+        self.assertIn("osaka",
+                      event_timeline.hidden_event_scripts(cards, [], now=later))
+
+    def test_no_card_no_candidate_hides(self):
+        # 联队战/南瓜现状：啥数据都没有 → 藏
+        hidden = event_timeline.hidden_event_scripts({}, [], now=NOW)
+        self.assertEqual(sorted(hidden),
+                         sorted(event_timeline.SCRIPT_EVENT_MAP.keys()))
+
+    def test_candidate_window_counts_as_evidence(self):
+        # 没知识卡，但公告候选的窗口盖住了现在 → 算开放
+        anns = [{"title": "更新公告", "url": "u1",
+                 "schedule_candidates": [
+                     {"section": "1", "name": "联队战",
+                      "start_at": "2026-08-25T10:00:00+08:00",
+                      "end_at": "2026-09-08T05:00:00+08:00"}]}]
+        hidden = event_timeline.hidden_event_scripts({}, anns, now=NOW)
+        self.assertNotIn("raid", hidden)
+        self.assertIn("pumpkin", hidden)
+
+    def test_future_candidate_does_not_open_early(self):
+        anns = [{"title": "预告", "url": "u1",
+                 "schedule_candidates": [
+                     {"section": "1", "name": "南瓜大作战",
+                      "start_at": "2026-10-20T10:00:00+08:00",
+                      "end_at": "2026-11-03T05:00:00+08:00"}]}]
+        hidden = event_timeline.hidden_event_scripts({}, anns, now=NOW)
+        self.assertIn("pumpkin", hidden)
+
+
 if __name__ == "__main__":
     unittest.main()

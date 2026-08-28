@@ -1037,6 +1037,23 @@ async def stream_logs(request: Request):
 
 # ── API：脚本 ──
 
+# 概览页常用功能的活动联动隐藏名单：/api/scripts 每 2 秒被轮询一次，
+# 名单本身按分钟级缓存，别每趟都去读卡片和日历文件。
+_event_hidden_cache = {"ts": 0.0, "value": []}
+
+
+def _event_hidden_scripts() -> list[str]:
+    if time.time() - _event_hidden_cache["ts"] < 60:
+        return _event_hidden_cache["value"]
+    from touken import advisor, event_timeline
+    calendar, _ = _load_events_calendar()
+    value = event_timeline.hidden_event_scripts(
+        advisor.load_event_cards(STATUS_DIR),
+        calendar.get("announcements", []))
+    _event_hidden_cache.update(ts=time.time(), value=value)
+    return value
+
+
 @app.get("/api/scripts")
 async def api_scripts():
     runner = get_runner()
@@ -1044,6 +1061,8 @@ async def api_scripts():
         "scripts": list_scripts(),
         "running": runner.is_running,
         "current": runner.current_script,
+        # 概览页「常用功能」联动：绑活动的脚本没开放就先收起来（配置页不受影响）
+        "event_hidden": _event_hidden_scripts(),
     }
 
 

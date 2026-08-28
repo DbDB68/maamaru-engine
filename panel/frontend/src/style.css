@@ -100,6 +100,7 @@ button { cursor: pointer; }
 .home-functions button:hover { background: #ebe0cc; }
 .home-functions button.active { color: var(--fox-gold-deep); background: var(--fox-gold-pale); border-color: var(--fox-gold); box-shadow: none; font-weight: 700; }
 .home-functions button small { color: #9d3028; }
+.home-functions-hidden-note { margin: 8px 8px 0; color: var(--ink-dim); font-size: 11px; line-height: 1.5; }
 .home-center { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; }
 .home-center .log-panel { min-height: 0; }
 .home-dashboard { overflow: auto; }

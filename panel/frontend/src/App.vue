@@ -45,9 +45,14 @@ const taskIcons: Record<string, string> = {
 
 const selectedInfo = computed(() => scripts.value[selected.value])
 const homeScriptOrder = ['daily', 'sortie', 'yosari', 'osaka', 'edocastle', 'expedition', 'smith', 'pumpkin', 'raid', 'sugar', 'sakura', 'practice', 'snapshot']
+// 活动没开放的脚本从常用功能收起来（后端 /api/scripts 下发，配置页不受影响）
+const eventHidden = ref<string[]>([])
 const homeScripts = computed(() => homeScriptOrder
-  .filter(key => scripts.value[key])
+  .filter(key => scripts.value[key] && !eventHidden.value.includes(key))
   .map(key => [key, scripts.value[key]] as const))
+const eventHiddenLabels = computed(() => eventHidden.value
+  .filter(key => scripts.value[key])
+  .map(key => scripts.value[key].label))
 const homeScriptIndex = computed(() => homeScripts.value.findIndex(([key]) => key === selected.value))
 async function chooseAdjacentHome(direction: -1 | 1) {
   const next = homeScriptIndex.value + direction
@@ -143,6 +148,7 @@ async function load() {
     scripts.value = scriptData.scripts
     running.value = scriptData.running
     current.value = scriptData.current
+    eventHidden.value = scriptData.event_hidden || []
     theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
     applyTheme()
     params.value = Object.fromEntries(Object.entries(scriptData.scripts).map(([key, info]) => [
@@ -170,6 +176,7 @@ async function pollStatus() {
     if (stopping.value && !state.running) stopping.value = false
     running.value = state.running
     current.value = state.running ? state.current : null
+    if (state.event_hidden) eventHidden.value = state.event_hidden
     if (wasRunning && !state.running) message.value = '任务已结束'
   } catch (_) {}
 }
@@ -306,6 +313,7 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
         </nav>
           <button type="button" class="home-functions-arrow next" aria-label="下一个常用功能" :disabled="homeScriptIndex < 0 || homeScriptIndex >= homeScripts.length - 1" @click="chooseAdjacentHome(1)">›</button>
         </div>
+        <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
         <OverviewTaskCard

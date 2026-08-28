@@ -24,6 +24,15 @@ except Exception:  # pragma: no cover - 老 Python 兜底
 
 UPCOMING_DAYS = 7
 
+# 绑活动的脚本 → 活动名（知识卡/公告候选里的名字）。不在表里的脚本
+# （日课、合战场、远征等常驻功能）永远不受活动开关联动影响。
+SCRIPT_EVENT_MAP = {
+    "raid": ["联队战"],
+    "pumpkin": ["南瓜大作战"],
+    "osaka": ["大阪城"],
+    "edocastle": ["江户城潜入调查"],
+}
+
 
 def _parse_dt(value) -> datetime | None:
     """ISO 带时刻 → datetime；没有就 None。"""
@@ -157,3 +166,39 @@ def build_timeline(cards: dict, abacuses: list[dict],
         "later": later,
         "unverified": unverified,
     }
+
+
+def hidden_event_scripts(cards: dict, announcements: list[dict],
+                         *, now: datetime | None = None) -> list[str]:
+    """概览页「常用功能」的联动隐藏：绑活动的脚本，没有「正在开放」的
+    证据就先收起来（封闭式判断，默认藏，证据说话）。
+
+    证据两条路，任一算数：
+    1. 知识卡窗口覆盖当前时间（已核实）；
+    2. 公告时间候选窗口覆盖当前时间（爬虫抓的，没核实但有明确日期）。
+    活动没卡也没候选、日历拉不动 → 都算没证据，藏。
+    """
+    now = now or datetime.now(_TZ)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=_TZ)
+
+    def _open_now(name: str) -> bool:
+        card = (cards or {}).get(name)
+        if card:
+            start_dt, end_dt, _ = _card_window(card)
+            if (start_dt is not None and start_dt <= now
+                    and (end_dt is None or now < end_dt)):
+                return True
+        for ann in announcements or []:
+            for cand in ann.get("schedule_candidates") or []:
+                if cand.get("name") != name:
+                    continue
+                start_dt = _parse_dt(cand.get("start_at"))
+                end_dt = _parse_dt(cand.get("end_at"))
+                if (start_dt is not None and start_dt <= now
+                        and (end_dt is None or now < end_dt)):
+                    return True
+        return False
+
+    return [script for script, names in SCRIPT_EVENT_MAP.items()
+            if not any(_open_now(name) for name in names)]
