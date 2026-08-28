@@ -324,8 +324,9 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(flow.points, [[910, 32]])
 
     def test_auto_formation_stuck_on_selection_page_falls_back_to_fixed(self):
-        """夜战图敌方阵形「不明」：游戏自动阵形没东西可选，页面挂着不动，
-        已经是自动模式时脚本必须兜底手动点兜底阵形（6-2 实战卡死修复）。"""
+        """索敌失败敌方阵形「不明」：游戏自动阵形没东西可选，页面挂着不动，
+        已经是自动模式时脚本必须兜底——没有「有利」标记可认就点兜底阵形
+        （6-2 实战卡死修复）。"""
         flow = Flow(FormationPageMaa(title_ttl=2, templates={
             "battle/ui阵形选择.png": Point(640, 24),
             "battle/阵形选择自动.png": Point(910, 32),
@@ -337,10 +338,28 @@ class BattleComponentTests(unittest.TestCase):
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
-                strategy="advantage", formation_name="逆行阵",
-                enable_auto=True), "fixed")
-        # 没有有利标（夜图），双击兜底阵形卡；没有去拨自动/手动开关
+                formation_name="逆行阵", enable_auto=True), "fixed")
+        # 没有有利标（认不出），双击兜底阵形卡；没有去拨自动/手动开关
         self.assertEqual(flow.points, [[1034, 420], [1034, 420]])
+
+    def test_auto_stuck_with_advantage_marker_picks_advantage(self):
+        """自动模式兜底时页面上有「有利」标记：优先点有利，不动兜底阵形。"""
+        flow = Flow(FormationPageMaa(title_ttl=2, templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择自动.png": Point(910, 32),
+            "battle/ui有利.png": Point(500, 300),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="逆行阵", enable_auto=True), "advantage")
+        # 双击落在有利标记上，兜底阵形卡一下没碰
+        self.assertEqual(flow.points, [])
+        self.assertEqual(len(flow.maa.clicks), 2)
 
     def test_formation_double_click_gives_up_when_page_never_leaves(self):
         """双击三轮阵形页都不走：如实报失败，让调用方停止这场，绝不盲点。"""

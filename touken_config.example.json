@@ -1909,7 +1909,6 @@
   "practice": {
     "team_no": 2,
     "formation_mode": "manual",
-    "formation_strategy": "fixed",
     "formation": "逆行阵",
     "max_wins": 3
   },

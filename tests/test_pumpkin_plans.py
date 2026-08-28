@@ -47,8 +47,9 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertNotIn("help", by_key["use_koban_refill"])
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
-        # 策略和兜底阵形常显：自动阵形识别失败时会回落到手动按策略选
-        self.assertNotIn("visibleWhen", by_key["formation_strategy"])
+        # 阵形策略选项已拆：手动=固定点所选阵形，自动=游戏选、抓瞎时
+        # 脚本先认有利标记再落兜底
+        self.assertNotIn("formation_strategy", by_key)
         self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["formation"]["options"][-1], ["逆行阵", "逆行阵"])
 
@@ -57,7 +58,7 @@ class PumpkinPlanTests(unittest.TestCase):
         by_key = {field["key"]: field for field in fields}
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
-        self.assertNotIn("visibleWhen", by_key["formation_strategy"])
+        self.assertNotIn("formation_strategy", by_key)
         self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["repair_threshold"]["options"],
                          [["light", "轻伤时停止"],
@@ -72,7 +73,7 @@ class PumpkinPlanTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent):
             list(wrap(_build_osaka)("config.json", {
                 "team_no": "3", "runs": "2", "formation_mode": "auto",
-                "formation_strategy": "fixed", "formation": "逆行阵",
+                "formation": "逆行阵",
                 "repair_threshold": "medium", "repair_on_injury": "repair_stop",
             }))
         self.assertEqual(agent.osaka_args["formation_mode"], "auto")

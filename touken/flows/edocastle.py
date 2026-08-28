@@ -37,7 +37,6 @@ class EdocastleMixin:
         use_koban_refill: bool = None,
         max_runs: int = None,
         formation_mode: str = "manual",
-        formation_strategy: str = "fixed",
         formation: str = "鱼鳞阵",
         repair_threshold: str = None,
         auto_equip: bool = None,
@@ -53,7 +52,6 @@ class EdocastleMixin:
                 出阵→确定补一张→再出阵），默认读配置 edocastle.use_koban_refill
             max_runs: 最多跑几圈（0=票尽为止），默认读配置 edocastle.max_runs
             formation_mode: "manual"/"auto"，复用合战场阵型选择
-            formation_strategy: "fixed"/"advantage"
             formation: 固定阵型名
             repair_threshold: 出阵前伤势停止线（light/medium/heavy），
                 默认读配置 edocastle.repair_threshold（"heavy"：虚拟伤害活动
@@ -160,7 +158,7 @@ class EdocastleMixin:
             # ========== 4. 地图巡游 ==========
             run_keys, ok = yield from self._map_run_stream(
                 cfg, archive, tour, boss, skip_point,
-                formation_mode, formation_strategy, formation,
+                formation_mode, formation,
                 debug_dir,
             )
 
@@ -175,7 +173,7 @@ class EdocastleMixin:
                     # 这会页面早过了进场动画，再试一次选阵型通常能成。
                     yield "[江户城] 卡在阵型选择页，再试一次把这场打完"
                     if self._fight_one_battle(
-                            cfg, formation_mode, formation_strategy,
+                            cfg, formation_mode,
                             formation, skip_point):
                         if self._wait_map_landmark(cfg, timeout_s=30):
                             yield from self._bail_out_stream(cfg)
@@ -281,7 +279,6 @@ class EdocastleMixin:
         boss: int,
         skip_point: list,
         formation_mode: str,
-        formation_strategy: str,
         formation: str,
         debug_dir: str = None,
     ):
@@ -345,7 +342,7 @@ class EdocastleMixin:
             if formation_appeared:
                 yield "[江户城] 紫点战斗，选阵型开打"
                 if not self._fight_one_battle(
-                    cfg, formation_mode, formation_strategy, formation, skip_point
+                    cfg, formation_mode, formation, skip_point
                 ):
                     yield "[江户城] 战斗处理失败，停"
                     return 0, False
@@ -374,7 +371,7 @@ class EdocastleMixin:
                     ) is not None:
                         yield "[江户城] 原来是战斗点，只是 formation 出现慢了"
                         if not self._fight_one_battle(
-                            cfg, formation_mode, formation_strategy, formation, skip_point
+                            cfg, formation_mode, formation, skip_point
                         ):
                             yield "[江户城] 战斗处理失败，停"
                             return 0, False
@@ -431,7 +428,7 @@ class EdocastleMixin:
         return False
 
     def _fight_one_battle(self, cfg: dict, formation_mode: str,
-                          formation_strategy: str, formation: str,
+                          formation: str,
                           skip_point: list) -> bool:
         """处理一场合战场式战斗：索敌→选阵型→等战斗结束。"""
         # 等阵形页稳一点
@@ -439,7 +436,6 @@ class EdocastleMixin:
             return False
 
         result = self.choose_formation(
-            strategy=formation_strategy,
             formation_name=formation,
             enable_auto=(formation_mode == "auto"),
         )

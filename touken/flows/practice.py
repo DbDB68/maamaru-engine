@@ -41,7 +41,6 @@ class PracticeMixin:
 
     def practice_stream(self, dry_run: bool = True, max_wins: int = None,
                         team_no: int = None, formation_mode: str = None,
-                        formation_strategy: str = None,
                         formation: str = None):
         """
         流式演练：扫描 5 个对手，逐个认人，挑软柿子打
@@ -58,12 +57,10 @@ class PracticeMixin:
         if team_no is not None:
             cfg = dict(cfg)
             cfg["team_no"] = team_no
-        if any(v is not None for v in (formation_mode, formation_strategy, formation)):
+        if any(v is not None for v in (formation_mode, formation)):
             cfg = dict(cfg)
             if formation_mode is not None:
                 cfg["formation_mode"] = formation_mode
-            if formation_strategy is not None:
-                cfg["formation_strategy"] = formation_strategy
             if formation is not None:
                 cfg["formation"] = formation
         if max_wins is None:
@@ -373,7 +370,6 @@ class PracticeMixin:
         team_no = cfg.get("team_no", 2)
         formation = self._formation_name(cfg.get("formation", "逆行阵"))
         formation_mode = cfg.get("formation_mode", "manual")
-        formation_strategy = cfg.get("formation_strategy", "fixed")
         yield f"[演练] 动手！（部队{_CN_NUM.get(team_no, team_no)}，{formation}）"
 
         # ---- 部队选择 ----
@@ -403,7 +399,6 @@ class PracticeMixin:
 
         if got_formation:
             result = self.choose_formation(
-                strategy=formation_strategy,
                 formation_name=formation,
                 enable_auto=formation_mode == "auto",
             )

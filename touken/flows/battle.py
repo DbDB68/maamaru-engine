@@ -672,10 +672,11 @@ class BattleMixin:
         value = str(name or "逆行阵")
         return value if value.endswith("阵") else value + "阵"
 
-    def choose_formation(self, strategy: str = "fixed",
-                         formation_name: str = "逆行阵",
+    def choose_formation(self, formation_name: str = "逆行阵",
                          enable_auto: bool = False) -> str:
-        """读取右上角状态，按需要切换自动/手动；手动时再选择阵形。"""
+        """读取右上角状态，按需要切换自动/手动；轮到脚本选阵形时：
+        手动模式固定点指定阵形；自动模式（游戏抓瞎、脚本兜底时）先认
+        「有利」标记，认不出再点指定阵形。"""
         cfg = self.config.get("formation", {})
         mode = cfg.get("auto_mode", {})
         current = self._formation_mode_state(
@@ -699,17 +700,16 @@ class BattleMixin:
             if toggled:
                 # 刚拨成自动，剩下的交给游戏，不插手。
                 return "auto"
-            # 已经是自动、选择页却还挂着：游戏自动阵形 = 优先选有利，
-            # 夜战图敌方阵形「不明」时游戏没东西可选，会卡在页面上等手动。
-            # 这时脚本兜底按策略手动点（夜图没有有利标，自然落到兜底阵形）。
+            # 已经是自动、选择页却还挂着：索敌失败时敌方阵形「不明」，
+            # 游戏没东西可选，会卡在页面上等手动（索敌看数值，白天图也会
+            # 失败，不是夜战专利）。这时脚本兜底：先认「有利」标记，
+            # 认不出（没有利可认）再点兜底阵形。
             verify = cfg.get("verify", {})
             title_visible = bool(self.maa.template_match(
                 verify.get("template", "battle/ui阵形选择.png"),
                 roi_4to4(*verify.get("roi", [571, 5, 707, 44]))))
             if not title_visible:
                 return "auto"
-
-        if strategy == "advantage":
             point = self.maa.template_match(
                 cfg.get("advantage_template", "battle/ui有利.png"),
                 threshold=0.7,

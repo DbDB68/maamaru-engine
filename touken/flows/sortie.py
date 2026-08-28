@@ -32,7 +32,6 @@ class SortieMixin:
     def sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
                       auto_march: bool = True, max_loops: int = 1,
                       formation_mode: str = "manual",
-                      formation_strategy: str = "fixed",
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
                       injury_action: str = "continue",
@@ -44,7 +43,7 @@ class SortieMixin:
             chapter=chapter, map_no=map_no, team_no=team_no,
             auto_march=auto_march, max_loops=max_loops,
             formation_mode=formation_mode,
-            formation_strategy=formation_strategy, formation=formation,
+            formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
             auto_equip=auto_equip,
             retreat_before_boss=retreat_before_boss,
@@ -56,7 +55,6 @@ class SortieMixin:
                       auto_march: bool = True, max_loops: int = 1,
                       auto_refill: bool = False,
                       formation_mode: str = "manual",
-                      formation_strategy: str = "fixed",
                       formation: str = "鱼鳞阵",
                       repair_threshold: str = "light",
                       injury_action: str = "continue",
@@ -69,7 +67,7 @@ class SortieMixin:
             auto_march=auto_march, max_loops=max_loops,
             auto_refill=auto_refill,
             formation_mode=formation_mode,
-            formation_strategy=formation_strategy, formation=formation,
+            formation=formation,
             repair_threshold=repair_threshold, injury_action=injury_action,
             auto_equip=auto_equip,
             rotate_captain=rotate_captain,
@@ -80,7 +78,6 @@ class SortieMixin:
     def _map_sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
                            auto_march: bool = True, max_loops: int = 1,
                            formation_mode: str = "manual",
-                           formation_strategy: str = "fixed",
                            formation: str = "鱼鳞阵",
                            repair_threshold: str = "light",
                            injury_action: str = "continue",
@@ -397,7 +394,6 @@ class SortieMixin:
                 if self._formation_mode_state(
                         allow_auto_without_title=formation_mode != "auto") is not None:
                     result = self.choose_formation(
-                        strategy=formation_strategy,
                         formation_name=formation,
                         enable_auto=formation_mode == "auto",
                     )
