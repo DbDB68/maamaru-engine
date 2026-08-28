@@ -1035,7 +1035,14 @@
         "template": "通用_确定.png"
       },
       "popup_button": {
-        "template": "team/补充.png"
+        "template": "team/补充.png",
+        "roi": [
+          350,
+          400,
+          650,
+          530
+        ],
+        "threshold": 0.9
       },
       "close_button": {
         "template": "team/关闭.png"

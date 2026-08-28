@@ -864,6 +864,11 @@ class _RecoverMaa:
             return self.RECOVER
         if self.state == "recover" and template == "通用_确定.png":
             return self.CONFIRM
+        if self.state == "confirm" and template == "team/ui出阵确认.png":
+            return Point(640, 72)
+        # 复现 8-29 真机：确认页绿色“确定”以 0.706 擦线命中“补充”。
+        if self.state == "confirm" and template == "team/补充.png":
+            return Point(639, 603) if threshold <= 0.706 else None
         return None
 
     def click(self, point):
@@ -881,11 +886,23 @@ _REFILL_CFG = {"ticket_refill": {
 }}
 
 _RECOVER_CFG = {"ticket_recover": {
-    "popup_button": {"template": "team/补充.png"},
+    "popup_button": {"template": "team/补充.png", "threshold": 0.9},
     "close_button": {"template": "team/关闭.png"},
     "recover_button": {"template": "team/恢复一个.png"},
     "confirm_button": {"template": "通用_确定.png"},
 }}
+
+
+class _RecoverDepartHost(_SafeDepartHost):
+    def __init__(self, maa):
+        super().__init__(maa=maa)
+        self.departs = 0
+
+    def _click_depart(self, cfg):
+        self.departs += 1
+        if self.departs >= 2:
+            self.maa.state = "confirm"
+        return True
 
 
 class SafeDepartChainTests(unittest.TestCase):
@@ -969,6 +986,18 @@ class SafeDepartChainTests(unittest.TestCase):
         self.assertEqual(result, (False, False))
         self.assertEqual(maa.clicked, [_RecoverMaa.CLOSE])
         self.assertTrue(any("不补票" in m for m in msgs), msgs)
+
+    def test_depart_confirm_wins_over_false_refill_match(self):
+        maa = _RecoverMaa()
+        cfg = {
+            **_RECOVER_CFG,
+            "confirm_ui": {"template": "team/ui出阵确认.png"},
+        }
+        host = _RecoverDepartHost(maa)
+        msgs, result = _drain_chain(host, cfg, auto_refill=True)
+        self.assertEqual(result, (True, False))
+        self.assertEqual(host.departs, 2)
+        self.assertFalse(any("防止重复消费" in m for m in msgs), msgs)
 
 
 if __name__ == "__main__":

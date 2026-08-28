@@ -67,6 +67,16 @@ class BattleMixin:
             time.sleep(0.4)
         return False
 
+    def _match_template_config(self, item: dict):
+        """按配置中的 template/roi/threshold 识别，避免相似按钮全屏擦线。"""
+        template = item.get("template") if isinstance(item, dict) else None
+        if not template:
+            return None
+        roi_raw = item.get("roi")
+        roi = roi_4to4(*roi_raw) if roi_raw else None
+        return self.maa.template_match(
+            template, roi, threshold=float(item.get("threshold", 0.7)))
+
     def _wait_for_team_record_page(self, record_config: dict,
                                    attempts: int = 10) -> bool:
         """部队记录页同时有“进行记录”和“使用记录”，认任意一个即可。"""
@@ -220,7 +230,7 @@ class BattleMixin:
         rec_cfg = cfg["ticket_recover"]
 
         self.maa.screenshot(force=True)
-        refill = self.maa.template_match(rec_cfg["popup_button"]["template"])
+        refill = self._match_template_config(rec_cfg["popup_button"])
         if not refill:
             yield f"{tag} 找不到补充按钮"
             return
@@ -228,7 +238,7 @@ class BattleMixin:
         time.sleep(1.5)
 
         self.maa.screenshot(force=True)
-        recover = self.maa.template_match(rec_cfg["recover_button"]["template"])
+        recover = self._match_template_config(rec_cfg["recover_button"])
         if not recover:
             yield f"{tag} 找不到恢复1个按钮"
             return
@@ -236,7 +246,7 @@ class BattleMixin:
         time.sleep(1.5)
 
         self.maa.screenshot(force=True)
-        confirm = self.maa.template_match(rec_cfg["confirm_button"]["template"])
+        confirm = self._match_template_config(rec_cfg["confirm_button"])
         if not confirm:
             yield f"{tag} 找不到恢复完毕的确定按钮"
             return
@@ -461,23 +471,27 @@ class BattleMixin:
                 return False, team_record_saved
             self.maa.screenshot(force=True)
 
+            # 明确的出阵确认标题优先级最高。江户城二次出阵确认页的绿色
+            # “确定”曾以 0.706 擦线命中绿色“补充”，若先查补票会被误判成
+            # 又缺票并触发防重复消费。看到标题就结束补票分支，交给调用方
+            # 的 _confirm_departure 正常点击确定。
+            confirm_ui = cfg.get("confirm_ui", {})
+            if self._match_template_config(confirm_ui):
+                break
+
             # 江户城/联队战同款两层令牌恢复 UI：不足弹窗先点“补充”，
             # 再在补充页选择“恢复一个”，最后确认。直接复用已经实战验证的
             # _recover_ticket_stream，不另造江户城模板和点击顺序。
             recover = cfg.get("ticket_recover", {})
-            recover_popup_template = recover.get(
-                "popup_button", {}).get("template")
-            if (recover_popup_template
-                    and self.maa.template_match(recover_popup_template)):
+            recover_popup = recover.get("popup_button", {})
+            if self._match_template_config(recover_popup):
                 if not auto_refill or refill_done:
                     if refill_done:
                         yield (f"{tag} 补票后仍弹补票窗，停止点击，"
                                "防止重复消费小判")
                         return False, team_record_saved
-                    close_template = recover.get(
-                        "close_button", {}).get("template")
-                    close = (self.maa.template_match(close_template)
-                             if close_template else None)
+                    close = self._match_template_config(
+                        recover.get("close_button", {}))
                     if close:
                         self.maa.click(close)
                         time.sleep(1.0)
