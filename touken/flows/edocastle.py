@@ -150,7 +150,9 @@ class EdocastleMixin:
             entered, team_record_saved = yield from self._enter_map_stream(
                 cfg, team_no, skip_point,
                 repair_threshold, auto_equip, team_record_saved,
-                auto_refill=use_koban_refill)
+                auto_refill=use_koban_refill,
+                formation_mode=formation_mode,
+                formation=formation)
             if not entered:
                 yield "[江户城] 没能进地图，安全收工"
                 break
@@ -225,7 +227,9 @@ class EdocastleMixin:
     def _enter_map_stream(self, cfg: dict, team_no: int,
                           skip_point: list, repair_threshold: str,
                           auto_equip: bool, team_record_saved: bool,
-                          auto_refill: bool = False):
+                          auto_refill: bool = False,
+                          formation_mode: str = "manual",
+                          formation: str = "鱼鳞阵"):
         """在入场屏点击难度卡片→部队选择→通用安全出阵链→二次确认，直到地图屏。
 
         选队、伤势检查、刀装处理、重伤拦截全部走 BattleMixin 的
@@ -261,8 +265,21 @@ class EdocastleMixin:
             yield "[江户城] 没看到出阵二次确认，停止点击"
             return False, team_record_saved
 
-        # 验证进地图
-        if not self._wait_map_landmark(cfg, timeout_s=15):
+        # 江户城入场有时会先打一场，再落到地图。此处必须同时等地图和
+        # 阵形选择共同标题；只等地图会把阵形页误当过场一直点安全区。
+        entry_state = self._wait_entry_map_or_formation(
+            cfg, skip_point, formation_mode, timeout_s=15)
+        if entry_state == "formation":
+            yield "[江户城] 入场先遇敌，停止跳过并处理阵形"
+            if not self._fight_one_battle(
+                    cfg, formation_mode, formation, skip_point):
+                yield "[江户城] 入场战斗处理失败，停"
+                return False, team_record_saved
+            if not self._wait_battle_return_to_map(
+                    cfg, skip_point, timeout_s=30):
+                yield "[江户城] 入场战斗后没回到地图，停"
+                return False, team_record_saved
+        elif entry_state != "map":
             yield "[江户城] 没进地图屏，停"
             return False, team_record_saved
         return True, team_record_saved
@@ -576,6 +593,34 @@ class EdocastleMixin:
             stable_hits=1,
             interval=0.9,
         )
+
+    def _wait_entry_map_or_formation(
+            self, cfg: dict, skip_point: list, formation_mode: str,
+            timeout_s: float = 15.0) -> str | None:
+        """出阵确认后等地图或入场战斗，识别到任一状态立即停止跳过。"""
+        ready = cfg["map_ready"]
+        ready_roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
+        verify = self.config.get("formation", {}).get("verify", {})
+        formation_roi = roi_4to4(
+            *verify.get("roi", [571, 5, 707, 44]))
+        formation_template = verify.get(
+            "template", "battle/ui阵形选择.png")
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+                return "map"
+            if self.maa.template_match(
+                    formation_template, roi=formation_roi):
+                return "formation"
+            # 自动标志比共同标题略早出现；这里只在刚确认出阵的窄上下文
+            # 使用它提前刹车。手动模式仍依赖自动/手动共有的红色标题。
+            if (formation_mode == "auto"
+                    and self._formation_auto_marker_visible()):
+                return "formation"
+            self._click_point(skip_point)
+            time.sleep(0.9)
+        return None
 
     def _wait_round_end(self, cfg: dict, skip_point: list,
                         timeout_s: float = 30.0) -> bool:

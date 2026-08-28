@@ -271,6 +271,50 @@ class EdocastleBattleGateTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
 
+
+class _EntryGateHost(_BattleGateHost):
+    def __init__(self, frames, auto_marker=False):
+        super().__init__(frames)
+        self.config = {
+            "formation": {
+                "verify": {
+                    "template": "battle/ui阵形选择.png",
+                    "roi": [571, 5, 707, 44],
+                }
+            }
+        }
+        self.auto_marker = auto_marker
+
+    def _formation_auto_marker_visible(self):
+        return self.auto_marker
+
+
+class EdocastleEntryGateTests(unittest.TestCase):
+    CFG = {
+        "map_ready": {
+            "expected": "地图点选择",
+            "roi": [45, 605, 245, 715],
+        }
+    }
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_common_formation_title_stops_manual_mode_tapping(self, _sleep):
+        flow = _EntryGateHost([
+            set(), {"battle/ui阵形选择.png"},
+        ])
+        state = flow._wait_entry_map_or_formation(
+            self.CFG, [775, 695], "manual", timeout_s=10)
+        self.assertEqual(state, "formation")
+        self.assertEqual(flow.clicked, [[775, 695]])
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_auto_marker_stops_before_common_title(self, _sleep):
+        flow = _EntryGateHost([set()], auto_marker=True)
+        state = flow._wait_entry_map_or_formation(
+            self.CFG, [775, 695], "auto", timeout_s=10)
+        self.assertEqual(state, "formation")
+        self.assertEqual(flow.clicked, [])
+
     @patch("touken.flows.edocastle.time.sleep")
     def test_round_end_banner_is_returned_without_extra_tap(self, _sleep):
         flow = _BattleGateHost([
