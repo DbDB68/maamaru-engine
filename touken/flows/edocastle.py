@@ -336,7 +336,8 @@ class EdocastleMixin:
 
             # 判断是战斗还是非战斗
             formation_appeared = self._wait_formation_page(
-                cfg, timeout_s=5, skip_point=skip_point
+                cfg, timeout_s=5, skip_point=skip_point,
+                formation_mode=formation_mode,
             )
 
             if formation_appeared:
@@ -413,13 +414,16 @@ class EdocastleMixin:
     # ---------- 内部：单场战斗 ----------
 
     def _wait_formation_page(self, cfg: dict, timeout_s: float = 5.0,
-                             skip_point: list = None) -> bool:
-        """等阵形选择页出现；等不到返回 False。"""
+                             skip_point: list = None,
+                             formation_mode: str = "manual") -> bool:
+        """等阵形选择页出现；等不到返回 False。
+        formation_mode 必须传运行时值：配置文件 edocastle 段没有这个键，
+        读 cfg 永远拿到默认 manual（曾导致自动模式下也放行无标题判定）。"""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             self.maa.screenshot(force=True)
             if self._formation_mode_state(
-                allow_auto_without_title=cfg.get("formation_mode", "manual") != "auto"
+                allow_auto_without_title=formation_mode != "auto"
             ) is not None:
                 return True
             if skip_point:
@@ -432,7 +436,8 @@ class EdocastleMixin:
                           skip_point: list) -> bool:
         """处理一场合战场式战斗：索敌→选阵型→等战斗结束。"""
         # 等阵形页稳一点
-        if not self._wait_formation_page(cfg, timeout_s=10, skip_point=skip_point):
+        if not self._wait_formation_page(cfg, timeout_s=10, skip_point=skip_point,
+                                         formation_mode=formation_mode):
             return False
 
         result = self.choose_formation(

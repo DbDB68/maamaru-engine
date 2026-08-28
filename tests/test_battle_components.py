@@ -62,6 +62,22 @@ class FormationPageMaa(FakeMaa):
         return super().template_match(template, roi, threshold)
 
 
+class LaggyTitleMaa(FormationPageMaa):
+    """红色标题横幅晚渲染：前 delay 次标题查询未命中，之后按 title_ttl
+    正常命中（阵形页进场动画，江户城 8-28 实测标题比模式按钮晚到）。"""
+
+    def __init__(self, delay=2, **kwargs):
+        super().__init__(**kwargs)
+        self.lag = delay
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if template == "battle/ui阵形选择.png" and self.lag > 0:
+            self.lag -= 1
+            self.template_calls.append((template, roi))
+            return None
+        return super().template_match(template, roi, threshold)
+
+
 class BattleComponentTests(unittest.TestCase):
     @staticmethod
     def _record_flow(start="team", save_auto_return=True, yes_template=True):
@@ -360,6 +376,24 @@ class BattleComponentTests(unittest.TestCase):
         # 双击落在有利标记上，兜底阵形卡一下没碰
         self.assertEqual(flow.points, [])
         self.assertEqual(len(flow.maa.clicks), 2)
+
+    def test_formation_state_waits_for_lagging_title(self):
+        """进场动画里红色标题比模式按钮晚渲染：刚进页面读不到状态不能秒报
+        failed，要等标题落地再判（江户城 8-28 一秒误判中止战斗修复）。"""
+        flow = Flow(LaggyTitleMaa(delay=2, title_ttl=2, templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择自动.png": Point(910, 32),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="逆行阵", enable_auto=True), "fixed")
+        # 本来就是自动模式不拨开关；标题落地后无有利标，双击兜底阵形
+        self.assertEqual(flow.points, [[1034, 420], [1034, 420]])
 
     def test_formation_double_click_gives_up_when_page_never_leaves(self):
         """双击三轮阵形页都不走：如实报失败，让调用方停止这场，绝不盲点。"""

@@ -178,7 +178,8 @@ class _MapRunHost(EdocastleMixin):
     def _read_hud_steps(self, cfg):
         return next(self._step_reads, None)
 
-    def _wait_formation_page(self, cfg, timeout_s=5.0, skip_point=None):
+    def _wait_formation_page(self, cfg, timeout_s=5.0, skip_point=None,
+                             formation_mode="manual"):
         return False  # 全是空点，没有战斗
 
     def _wait_map_landmark(self, cfg, timeout_s=15.0):

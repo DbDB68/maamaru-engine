@@ -682,7 +682,17 @@ class BattleMixin:
         current = self._formation_mode_state(
             allow_auto_without_title=not enable_auto)
         if current is None:
-            return "failed"
+            # 阵形页进场动画里，顶部红色大标题比右上角模式按钮晚渲染一两秒，
+            # 刚侦测到页面就读状态会空手而归（江户城实测：页面明明卡在
+            # 选择页，标题未到 → 一秒误判 failed 中止战斗）。给几秒重试。
+            deadline = time.monotonic() + 5.0
+            while current is None and time.monotonic() < deadline:
+                time.sleep(0.5)
+                self.maa.screenshot(force=True)
+                current = self._formation_mode_state(
+                    allow_auto_without_title=not enable_auto)
+            if current is None:
+                return "failed"
         wanted = "auto" if enable_auto else "manual"
         toggled = False
         if current != wanted:
