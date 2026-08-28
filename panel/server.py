@@ -440,7 +440,10 @@ def _build_edocastle(agent, config_path, params):
     yield from agent.edocastle_stream(
         team_no=_i(params, "team_no", 3),
         use_koban_refill=_bool(params.get("use_koban_refill", False)),
-        max_runs=runs)
+        max_runs=runs,
+        formation_mode=params.get("formation_mode") or "manual",
+        formation_strategy=params.get("formation_strategy") or "fixed",
+        formation=params.get("formation") or "鱼鳞阵")
 
 
 def _build_sortie(agent, config_path, params):
