@@ -4,12 +4,18 @@ import time
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from touken import advisor
 
 
 def _day(offset: int) -> str:
     return (date(2026, 8, 25) + timedelta(days=offset)).isoformat()
+
+
+def _future_day(offset: int) -> str:
+    """需要通过真实“不得早于今天”校验的存储测试使用动态未来日期。"""
+    return (date.today() + timedelta(days=offset)).isoformat()
 
 
 def _series(resource: str, deltas: list) -> list[dict]:
@@ -275,23 +281,23 @@ class GoalStorageTests(unittest.TestCase):
 
     def test_add_and_reload_roundtrip(self):
         goal = advisor.add_goal(self.path, resource="小判", target=300000,
-                                deadline=_day(20), note="江户城门票钱")
+                                deadline=_future_day(20), note="江户城门票钱")
         self.assertEqual(goal["id"], 1)
         loaded = advisor.load_goals(self.path)
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0]["resource"], "小判")
         self.assertEqual(loaded[0]["note"], "江户城门票钱")
         second = advisor.add_goal(self.path, resource="砥石", target=5000,
-                                  deadline=_day(5))
+                                  deadline=_future_day(5))
         self.assertEqual(second["id"], 2)
 
     def test_add_rejects_bad_input(self):
         with self.assertRaises(ValueError):
             advisor.add_goal(self.path, resource="钻石", target=100,
-                             deadline=_day(1))
+                             deadline=_future_day(1))
         with self.assertRaises(ValueError):
             advisor.add_goal(self.path, resource="小判", target=0,
-                             deadline=_day(1))
+                             deadline=_future_day(1))
         with self.assertRaises(ValueError):
             advisor.add_goal(self.path, resource="小判", target=100,
                              deadline="不是日期")
@@ -338,7 +344,7 @@ class GoalStorageTests(unittest.TestCase):
                "deadline": _day(20), "note": "老目标"}]
         self._write_v1(v1)
         advisor.add_goal(self.path, resource="砥石", target=5000,
-                         deadline=_day(5))
+                         deadline=_future_day(5))
         # 新文件是 v2 信封，新老目标都在
         data = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(data["schema_version"], advisor.GOALS_SCHEMA_VERSION)
@@ -349,13 +355,13 @@ class GoalStorageTests(unittest.TestCase):
         self.assertEqual(json.loads(backup.read_text(encoding="utf-8")), v1)
         # 再写一次还是 v2，不重复备份
         advisor.add_goal(self.path, resource="小判", target=100,
-                         deadline=_day(3))
+                         deadline=_future_day(3))
         data = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(len(data["goals"]), 3)
 
     def test_v2_file_roundtrip(self):
         advisor.add_goal(self.path, resource="小判", target=100,
-                         deadline=_day(3))
+                         deadline=_future_day(3))
         data = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(data["schema_version"], advisor.GOALS_SCHEMA_VERSION)
         self.assertFalse(self.path.with_name(self.path.name + ".v1.bak")
@@ -381,8 +387,9 @@ class GetPlanningTests(unittest.TestCase):
     def test_end_to_end_with_fake_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "goals.json"
-            advisor.add_goal(path, resource="小判", target=100000,
-                             deadline=_day(10))
+            with patch("touken.advisor._today", return_value=date(2026, 8, 25)):
+                advisor.add_goal(path, resource="小判", target=100000,
+                                 deadline=_day(10))
             planning = advisor.get_planning(_FakeStore(), path,
                                             today=date(2026, 8, 25))
         self.assertEqual(planning["schema_version"],
