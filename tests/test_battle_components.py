@@ -15,8 +15,10 @@ class FakeMaa:
         self.ocr_calls = []
         self.template_calls = []
         self.template_thresholds = []
+        self.screenshot_calls = []
 
     def screenshot(self, force=False):
+        self.screenshot_calls.append(force)
         return None
 
     def ocr(self, expected, roi):
@@ -460,12 +462,26 @@ class BattleComponentTests(unittest.TestCase):
         }), point)
         self.assertEqual(maa.ocr_calls, ["部队", "选择"])
         self.assertEqual(maa.template_calls, [])
+        self.assertTrue(maa.screenshot_calls[0])
 
         maa = FakeMaa(ocr_results=[point, False])
         self.assertIsNone(flow._find_deploy_button({
             "deploy_button": {"ocr": {
                 "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}}
         }))
+
+    def test_team_select_already_open_never_clicks_bottom_right(self):
+        maa = FakeMaa(ocr_results=[Point(640, 29)])
+        flow = Flow(maa)
+        cfg = {
+            "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
+            "deploy_button": {"ocr": {
+                "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}},
+        }
+
+        self.assertTrue(flow._wait_for_team_select(cfg, attempts=2, open_after=0))
+        self.assertEqual(maa.clicks, [])
+        self.assertEqual(maa.ocr_calls, ["部队选择"])
 
     def test_pick_team_uses_the_shared_team_coordinates(self):
         flow = Flow(FakeMaa())
@@ -824,10 +840,51 @@ class _RefillMaa:
             self.popup = False
 
 
+class _RecoverMaa:
+    """联队战式两层补充：不足弹窗→恢复一个页→补充完成。"""
+
+    REFILL = Point(490, 470)
+    CLOSE = Point(780, 470)
+    RECOVER = Point(200, 200)
+    CONFIRM = Point(300, 300)
+
+    def __init__(self):
+        self.state = "popup"
+        self.clicked = []
+
+    def screenshot(self, force=False):
+        return None
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if self.state == "popup" and template == "team/补充.png":
+            return self.REFILL
+        if self.state == "popup" and template == "team/关闭.png":
+            return self.CLOSE
+        if self.state == "recover" and template == "team/恢复一个.png":
+            return self.RECOVER
+        if self.state == "recover" and template == "通用_确定.png":
+            return self.CONFIRM
+        return None
+
+    def click(self, point):
+        self.clicked.append(point)
+        if point == self.REFILL:
+            self.state = "recover"
+        elif point in (self.CLOSE, self.CONFIRM):
+            self.state = "done"
+
+
 _REFILL_CFG = {"ticket_refill": {
     "popup": {"template": "江户城/补票弹窗.png"},
     "confirm_button": {"template": "通用_确定.png"},
     "cancel_button": {"template": "通用_取消.png"},
+}}
+
+_RECOVER_CFG = {"ticket_recover": {
+    "popup_button": {"template": "team/补充.png"},
+    "close_button": {"template": "team/关闭.png"},
+    "recover_button": {"template": "team/恢复一个.png"},
+    "confirm_button": {"template": "通用_确定.png"},
 }}
 
 
@@ -895,6 +952,23 @@ class SafeDepartChainTests(unittest.TestCase):
         self.assertEqual(result, (False, False))
         self.assertEqual(maa.clicked.count(_RefillMaa.CONFIRM), 1)
         self.assertTrue(any("防止重复消费" in m for m in msgs), msgs)
+
+    def test_raid_style_recover_is_reused_by_safe_depart_chain(self):
+        maa = _RecoverMaa()
+        msgs, result = _drain_chain(
+            _SafeDepartHost(maa=maa), _RECOVER_CFG, auto_refill=True)
+        self.assertEqual(result, (True, False))
+        self.assertEqual(maa.clicked, [
+            _RecoverMaa.REFILL, _RecoverMaa.RECOVER, _RecoverMaa.CONFIRM])
+        self.assertTrue(any("手形补充完成" in m for m in msgs), msgs)
+
+    def test_raid_style_recover_declined_uses_close(self):
+        maa = _RecoverMaa()
+        msgs, result = _drain_chain(
+            _SafeDepartHost(maa=maa), _RECOVER_CFG, auto_refill=False)
+        self.assertEqual(result, (False, False))
+        self.assertEqual(maa.clicked, [_RecoverMaa.CLOSE])
+        self.assertTrue(any("不补票" in m for m in msgs), msgs)
 
 
 if __name__ == "__main__":

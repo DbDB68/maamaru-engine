@@ -1286,17 +1286,6 @@
         225
       ]
     },
-    "ticket_refill": {
-      "popup": {
-        "template": ""
-      },
-      "confirm_button": {
-        "template": ""
-      },
-      "cancel_button": {
-        "template": ""
-      }
-    },
     "round_end": {
       "template": "江户城/调查完了.png"
     },

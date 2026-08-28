@@ -150,7 +150,11 @@ class EdocastleConfigTests(unittest.TestCase):
         self.assertTrue(
             (ARCHIVE_PATH.parent.parent / "image" / "江户城" / "地图点选择.png").is_file())
         self.assertIn("hud_step_ocr", edo)
-        self.assertIn("ticket_refill", edo)  # 弹窗补票（模板待踩点，留空即不认）
+        self.assertNotIn("ticket_refill", edo)  # 江户城不是单层确定/取消补票 UI
+        recover = cfg["raid"]["ticket_recover"]
+        self.assertEqual(recover["popup_button"]["template"], "team/补充.png")
+        self.assertEqual(recover["recover_button"]["template"], "team/恢复一个.png")
+        self.assertEqual(recover["confirm_button"]["template"], "通用_确定.png")
         self.assertNotIn("tokens", edo)  # 数令牌格已拆除，票尽走游戏补票弹窗
         # 通用安全出阵链依赖的键必须在配置契约里
         self.assertEqual(edo["repair_threshold"], "heavy")  # 虚拟伤害，中伤照跑

@@ -235,22 +235,20 @@ class EdocastleMixin:
         self._click_point(cfg["difficulty_card"]["target"])
         time.sleep(1.5)
 
-        # 部队选择按钮
-        deploy = self._find_deploy_button(cfg)
-        if not deploy:
-            yield "[江户城] 没找到部队选择按钮"
-            return False, team_record_saved
-        self.maa.click(deploy)
-        time.sleep(1.5)
-
-        if not self._wait_for_team_select(cfg, attempts=10):
+        # 先看顶部标题：难度卡切页较快时可能已经在部队选择，绝不能再拿
+        # 上一帧的“部队选择”坐标去点当前帧同位置的“即刻出阵”。只有确认
+        # 尚未进选队页时，才在强制新截图上找并点击入口。
+        if not self._wait_for_team_select(cfg, attempts=10, open_after=1):
             yield "[江户城] 部队选择界面没打开"
             # 驱散可能弹窗
             self.skip_safe(2, point=skip_point)
             return False, team_record_saved
 
+        departure_cfg = dict(cfg)
+        departure_cfg["ticket_recover"] = self.config.get(
+            "raid", {}).get("ticket_recover", {})
         ok, team_record_saved = yield from self._safe_depart_stream(
-            cfg, team_no, "[江户城]",
+            departure_cfg, team_no, "[江户城]",
             repair_threshold=repair_threshold,
             auto_equip=auto_equip,
             team_record_saved=team_record_saved,

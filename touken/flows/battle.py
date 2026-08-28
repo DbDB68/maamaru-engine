@@ -23,6 +23,10 @@ def find_deploy_button(maa, cfg: dict):
     expected = [str(word) for word in expected if word]
     if not expected:
         return None
+    # OCR 默认复用 MaaAdapter._last_image。页面切换后的固定 sleep 不会让
+    # 缓存失效：旧图上的“部队选择”和新图上的“即刻出阵”恰好同坐标，
+    # 曾造成识别完全正确、点击却落在下一页按钮上的跨帧竞态。
+    maa.screenshot(force=True)
     roi = roi_4to4(*ocr_cfg.get("roi", [1110, 580, 1279, 710]))
     points = []
     for word in expected:
@@ -420,8 +424,10 @@ class BattleMixin:
         各玩法只负责把部队选择页打开、以及之后自己的二次确认与入图验证；
         中间的人身安全语义全在这里，不准各玩法再自己手搓一遍。
 
-        补票弹窗认 cfg["ticket_refill"]：popup/confirm_button/cancel_button
-        三个模板。没配 popup 模板就不认（票尽时二次确认会等不到，安全停）。
+        两种补票 UI 都支持：
+        - cfg["ticket_refill"]：单层 popup/confirm_button/cancel_button；
+        - cfg["ticket_recover"]：联队战式“补充→恢复1个→确定”。
+        没配对应模板就不认（票尽时二次确认会等不到，安全停）。
         每圈最多补一张（refill_done），补完又弹说明没补上，停手防重复消费。
 
         Yields 日志；返回 (ok, team_record_saved)。ok=False 表示已安全
@@ -454,6 +460,43 @@ class BattleMixin:
                 yield f"{tag} 找不到即刻出阵按钮"
                 return False, team_record_saved
             self.maa.screenshot(force=True)
+
+            # 江户城/联队战同款两层令牌恢复 UI：不足弹窗先点“补充”，
+            # 再在补充页选择“恢复一个”，最后确认。直接复用已经实战验证的
+            # _recover_ticket_stream，不另造江户城模板和点击顺序。
+            recover = cfg.get("ticket_recover", {})
+            recover_popup_template = recover.get(
+                "popup_button", {}).get("template")
+            if (recover_popup_template
+                    and self.maa.template_match(recover_popup_template)):
+                if not auto_refill or refill_done:
+                    if refill_done:
+                        yield (f"{tag} 补票后仍弹补票窗，停止点击，"
+                               "防止重复消费小判")
+                        return False, team_record_saved
+                    close_template = recover.get(
+                        "close_button", {}).get("template")
+                    close = (self.maa.template_match(close_template)
+                             if close_template else None)
+                    if close:
+                        self.maa.click(close)
+                        time.sleep(1.0)
+                        yield f"{tag} 票用完了，不补票，已关闭弹窗，收工"
+                    else:
+                        yield (f"{tag} 票用完了，不补票；已停止点击，"
+                               "请手动关闭补充弹窗")
+                    return False, team_record_saved
+                for recover_msg in self._recover_ticket_stream(cfg, tag=tag):
+                    yield recover_msg
+                if not self._recover_ok:
+                    yield f"{tag} 手形补充失败，停止出阵"
+                    return False, team_record_saved
+                refill_done = True
+                if hasattr(self, "record_event"):
+                    self.record_event("ticket.refilled",
+                                      source=tag.strip("[]"))
+                yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
+                continue
 
             # 票尽时游戏自己弹补票窗（不用提前数票）：认出来才处理，
             # 不补就点取消收工；补就点确定，然后重新点即刻出阵。
