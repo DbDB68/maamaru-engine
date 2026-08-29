@@ -46,7 +46,7 @@ const honmaruItems = [
   { value: 'planning', label: '规划' },
 ]
 const viewItems = [
-  { value: 'chart', label: '资源对账图' },
+  { value: 'chart', label: '概览' },
   { value: 'records', label: '全部记录' },
 ]
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
@@ -118,11 +118,6 @@ const glance = computed(() => {
   if (practiceTotal.value) parts.push(`演练 ${practiceWins.value} 胜 ${practiceLosses.value} 负`)
   return `${parts.join('，')}。`
 })
-const glanceResources = computed(() => resourceRows.value
-  .filter(row => row.delta != null && row.delta !== 0)
-  .sort((a, b) => Math.abs(b.delta!) - Math.abs(a.delta!))
-  .slice(0, 4))
-
 // 刀剑明细已经归入“全部记录”，成绩单只保留这个时间段的总数。
 const swordDropTotal = computed(() => events.value.filter(event => (
   ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
@@ -532,9 +527,8 @@ onMounted(() => load())
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }">
           <p class="report-glance-lead">🦊 {{ glance }}</p>
-          <div v-if="swordDropTotal || glanceResources.length" class="report-glance-chips">
+          <div v-if="swordDropTotal" class="report-glance-chips">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
-            <span v-for="row in glanceResources" :key="row.name" :class="{ gain: row.delta! > 0, loss: row.delta! < 0 }">{{ row.name }} {{ signed(row.delta) }}</span>
           </div>
         </section>
 
@@ -543,7 +537,7 @@ onMounted(() => load())
         </button>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
+          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
             <header><div><h4>手动记家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭手动记家底" @click="inventoryFormOpen = false">×</button></header>
@@ -556,6 +550,7 @@ onMounted(() => load())
             </article>
           </div>
           <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
+          <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
         </section>
 
         <section class="resource-trend">
@@ -577,7 +572,7 @@ onMounted(() => load())
           </form>
         </section>
 
-        <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" aria-label="库存差值说明">
+        <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" :class="{ 'proactive-only': !unreportedGaps.length }" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
           <button v-if="!reportMode" type="button" class="secondary report-proactive" @click="openProactiveReport()">我自己动了家底，主动报备一笔</button>
         </section>
@@ -610,6 +605,9 @@ onMounted(() => load())
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .report-proactive { align-self: flex-start; }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.ledger-evidence { margin-top: 8px; color: var(--ink-dim); font-size: 11px; }
+.ledger-evidence summary { color: var(--fox-gold-deep); cursor: pointer; }
+.ledger-evidence p { margin: 6px 0 0; }
 .inventory-notice { margin: 0 0 10px; padding: 8px 10px; color: #426b35; background: #edf5e8; border-radius: 8px; }
 .manual-inventory-form { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .manual-inventory-form > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
@@ -620,6 +618,8 @@ onMounted(() => load())
 .manual-inventory-grid label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
 .manual-inventory-grid input { width: 100%; min-width: 0; }
 .inventory-gap-panel:empty { display: none; }
+.inventory-gap-panel.proactive-only { margin-bottom: 0; padding: 0; background: transparent; border: 0; }
+.inventory-gap-panel.proactive-only .report-proactive { align-self: flex-end; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .report-claim-summary { margin: 0; padding: 9px 11px; color: var(--ink); background: var(--fox-gold-pale); border-radius: 8px; }
 .report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
