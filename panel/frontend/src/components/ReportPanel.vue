@@ -36,6 +36,7 @@ const compareResources = ref(['小判', '加速符'])
 const selectedDate = ref('')
 const highlightCategory = ref('')
 const inventoryFormOpen = ref(false)
+const manualActionsOpen = ref(false)
 const inventorySaving = ref(false)
 const inventoryNotice = ref('')
 const inventoryForm = ref<Record<string, number | null | ''>>({})
@@ -344,9 +345,14 @@ const reportClaimInvalid = computed(() => {
   if (!reportForm.value.resource) return false
   const value = Number(reportForm.value.claimed_delta)
   const limit = Number(reportForm.value.claim_limit)
-  return !Number.isFinite(value) || !value || !Number.isFinite(limit) || !limit
-    || Math.sign(value) !== Math.sign(limit) || Math.abs(value) > Math.abs(limit)
+  if (!Number.isFinite(value) || !value) return true
+  if (reportForm.value.claim_limit == null) return false
+  return !Number.isFinite(limit) || !limit || Math.sign(value) !== Math.sign(limit) || Math.abs(value) > Math.abs(limit)
 })
+const reportHasPreciseClaim = computed(() => Boolean(
+  reportForm.value.resource && Number.isFinite(Number(reportForm.value.claimed_delta))
+  && Number(reportForm.value.claimed_delta) && !reportClaimInvalid.value,
+))
 const humanActivities = ['领邮箱', '手动领奖', '手动出阵', '锻刀', '手入', '万屋购买', '其他操作']
 function localDateTime(timestamp = Date.now()) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
@@ -357,6 +363,8 @@ function scrollToReportForm() {
   void nextTick(() => reportFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
 }
 function openProactiveReport(timestamp?: number, resource = '', claimedDelta: number | null = null) {
+  manualActionsOpen.value = false
+  inventoryFormOpen.value = false
   reportMode.value = 'proactive'
   reportGap.value = null
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp), resource, claimed_delta: claimedDelta, claim_limit: claimedDelta }
@@ -418,6 +426,9 @@ function gapDelta(gap: InventoryGap) {
 }
 
 function openInventoryForm() {
+  manualActionsOpen.value = false
+  reportMode.value = ''
+  reportGap.value = null
   inventoryNotice.value = ''
   inventoryForm.value = Object.fromEntries(resourceNames.map(name => [name, null]))
   inventoryFormOpen.value = true
@@ -526,7 +537,7 @@ onMounted(() => load())
       <template v-if="honmaruTab === 'report'">
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }">
-          <p class="report-glance-lead">🦊 {{ glance }}</p>
+          <div class="report-glance-copy"><p class="report-glance-lead">🦊 {{ glance }}</p><p>{{ foxSummary }}</p></div>
           <div v-if="swordDropTotal" class="report-glance-chips">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
           </div>
@@ -537,21 +548,38 @@ onMounted(() => load())
         </button>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
+          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 自己补记</button></div></header>
+          <div v-if="manualActionsOpen" class="manual-action-picker">
+            <button type="button" @click="openInventoryForm"><b>抄下当前库存</b><small>刚看过游戏里的数字，记一份现在的家底快照</small></button>
+            <button type="button" @click="openProactiveReport()"><b>补记一笔收支</b><small>在まあ丸之外花了或领了资源，把数额补进账里</small></button>
+          </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
-            <header><div><h4>手动记家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭手动记家底" @click="inventoryFormOpen = false">×</button></header>
+            <header><div><h4>抄下当前库存</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭库存快照" @click="inventoryFormOpen = false">×</button></header>
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '保存库存快照' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
           </form>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
             </article>
           </div>
-          <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
           <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
         </section>
+
+        <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
+          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '补记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
+          <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
+          <template v-if="!reportGap && reportForm.claim_limit == null">
+            <label>哪种资源<select v-model="reportForm.resource" required><option value="" disabled>请选择</option><option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option></select></label>
+            <label>收支数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" placeholder="获得填正数，消耗填负数" required></label>
+          </template>
+          <label v-if="reportForm.resource && reportForm.claim_limit != null">认领数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多认领当前灰色部分 {{ signed(reportForm.claim_limit) }}</small></label>
+          <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
+          <fieldset><legend>{{ reportGap ? '这个时间段你做过什么？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
+          <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportHasPreciseClaim && !reportForm.activities.length && !reportForm.note.trim()) || reportClaimInvalid">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">取消</button></div>
+        </form>
 
         <section class="resource-trend">
           <header>
@@ -562,19 +590,10 @@ onMounted(() => load())
           </header>
           <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
           <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
-          <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
-            <p v-if="reportForm.resource && reportForm.claimed_delta" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
-            <label v-if="reportForm.resource">认领数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多认领当前灰色部分 {{ signed(reportForm.claim_limit) }}</small></label>
-            <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
-            <fieldset><legend>这个时间段你做过什么？</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
-            <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim()) || reportClaimInvalid">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">先不说了</button></div>
-          </form>
         </section>
 
-        <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" :class="{ 'proactive-only': !unreportedGaps.length }" aria-label="库存差值说明">
+        <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
-          <button v-if="!reportMode" type="button" class="secondary report-proactive" @click="openProactiveReport()">我自己动了家底，主动报备一笔</button>
         </section>
       </template>
 
@@ -591,6 +610,8 @@ onMounted(() => load())
 .report-context-toolbar-range { justify-content: flex-end; }
 .report-glance { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
 .report-glance-lead { margin: 0; font-size: 15px; }
+.report-glance-copy { display: grid; gap: 3px; }
+.report-glance-copy > p:last-child { margin: 0; color: var(--ink-dim); font-size: 12px; }
 .report-glance-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .report-glance-chips span { background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
 .report-glance-chips .gain { color: #4d7a3a; }
@@ -603,8 +624,11 @@ onMounted(() => load())
 .resource-trend nav button { border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
-.report-proactive { align-self: flex-start; }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.manual-action-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; padding: 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.manual-action-picker button { display: grid; gap: 3px; padding: 10px 12px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; text-align: left; cursor: pointer; }
+.manual-action-picker button:hover { border-color: var(--fox-gold); }
+.manual-action-picker small { color: var(--ink-dim); font-size: 11px; line-height: 1.45; }
 .ledger-evidence { margin-top: 8px; color: var(--ink-dim); font-size: 11px; }
 .ledger-evidence summary { color: var(--fox-gold-deep); cursor: pointer; }
 .ledger-evidence p { margin: 6px 0 0; }
@@ -618,12 +642,13 @@ onMounted(() => load())
 .manual-inventory-grid label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
 .manual-inventory-grid input { width: 100%; min-width: 0; }
 .inventory-gap-panel:empty { display: none; }
-.inventory-gap-panel.proactive-only { margin-bottom: 0; padding: 0; background: transparent; border: 0; }
-.inventory-gap-panel.proactive-only .report-proactive { align-self: flex-end; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
+.report-form-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.report-form-heading h4, .report-form-heading p { margin: 0; }
+.report-form-heading p { margin-top: 3px; color: var(--ink-dim); font-size: 12px; }
 .report-claim-summary { margin: 0; padding: 9px 11px; color: var(--ink); background: var(--fox-gold-pale); border-radius: 8px; }
 .report-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-dim); }
-.report-form input { max-width: 260px; }
+.report-form input, .report-form select { width: min(320px, 100%); }
 .report-form fieldset { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; border: 0; }
 .report-form legend { font-size: 13px; color: var(--ink-dim); margin-bottom: 4px; }
 .report-form fieldset button { border: 1px solid var(--paper-line); background: var(--paper); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
@@ -631,6 +656,7 @@ onMounted(() => load())
 .report-form-actions { display: flex; gap: 8px; }
 @media (max-width: 520px) {
   .manual-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .manual-action-picker { grid-template-columns: 1fr; }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }
