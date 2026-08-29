@@ -411,7 +411,27 @@ class RewardsMixin:
                             match_mode="contains"):
             return None
         items, notes = [], []
+        seen_resources = set()
+        ambiguous_resources = set()
         unknown_frame_saved = False
+
+        def _save_unknown_frame() -> bool:
+            nonlocal unknown_frame_saved
+            if unknown_frame_saved:
+                return True
+            save_screenshot = getattr(self.maa, "save_screenshot", None)
+            if not callable(save_screenshot):
+                return False
+            try:
+                from ..runtime_paths import DEBUG_DIR
+                sample = DEBUG_DIR / (
+                    f"reward-unknown-{time.strftime('%Y%m%d-%H%M%S')}.png")
+                unknown_frame_saved = bool(
+                    save_screenshot(str(sample), force=False))
+            except Exception:
+                pass
+            return unknown_frame_saved
+
         for i in range(_POPUP_MAX_CELLS):
             x = _POPUP_CELL_X + i * _POPUP_CELL_PITCH
             icon_roi = roi_4to4(x, _POPUP_ICON_Y[0],
@@ -426,26 +446,31 @@ class RewardsMixin:
             if resource is None and qty is None:
                 break  # 空格 = 这一页奖励到此为止
             if resource is None:
-                sample_note = ""
-                if qty is not None and not unknown_frame_saved:
-                    save_screenshot = getattr(self.maa, "save_screenshot", None)
-                    if callable(save_screenshot):
-                        try:
-                            from ..runtime_paths import DEBUG_DIR
-                            sample = DEBUG_DIR / (
-                                f"reward-unknown-{time.strftime('%Y%m%d-%H%M%S')}.png")
-                            unknown_frame_saved = bool(
-                                save_screenshot(str(sample), force=False))
-                            if unknown_frame_saved:
-                                sample_note = "，已留取同源运行截图"
-                        except Exception:
-                            pass
+                sample_note = ("，已留取同源运行截图"
+                               if qty is not None and _save_unknown_frame() else "")
                 notes.append(
                     f"第{i + 1}格图标不认识（数量 {qty}）{sample_note}，跳过")
                 continue
             if qty is None:
                 notes.append(f"第{i + 1}格 {resource} 数量读取失败，跳过")
                 continue
+            if resource in ambiguous_resources:
+                notes.append(f"第{i + 1}格又像{resource}，继续按不确定跳过")
+                continue
+            if resource in seen_resources:
+                # 同一奖励弹窗通常会合并同种资源。两格都命中一个模板说明
+                # 模板发生近邻类别碰撞（实测加速符会撞委托符），哪格是真货
+                # 无法确认：撤掉先前那格，两个都不入账并保存同源帧。
+                items = [(name, amount) for name, amount in items
+                         if name != resource]
+                ambiguous_resources.add(resource)
+                sample_note = ("，已留取同源运行截图"
+                               if _save_unknown_frame() else "")
+                notes.append(
+                    f"第{i + 1}格与前一格都像{resource}，疑似图标模板撞车"
+                    f"{sample_note}；两格均不入账")
+                continue
+            seen_resources.add(resource)
             items.append((resource, qty))
         return items, notes
 

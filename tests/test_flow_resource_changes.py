@@ -269,6 +269,20 @@ class RewardPopupTests(unittest.TestCase):
         self.assertEqual(len(host.maa.saved), 1)
         self.assertFalse(host.maa.saved[0][1])
 
+    def test_duplicate_resource_match_is_ambiguous_and_captures_frame(self):
+        cells = {
+            0: ("资源/icon委托符.png", "4"),
+            1: ("资源/icon委托符.png", "3"),
+        }
+        host = _Host({})
+        host.maa = _RewardFakeMaa(cells)
+
+        items, notes = host._read_reward_popup()
+
+        self.assertEqual(items, [])
+        self.assertTrue(any("模板撞车" in note for note in notes), notes)
+        self.assertEqual(len(host.maa.saved), 1)
+
     def test_popup_absent_returns_none(self):
         host = _Host({})
         host.maa = _RewardFakeMaa({}, title_found=False)

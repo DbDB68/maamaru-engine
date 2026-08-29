@@ -131,6 +131,27 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(len(attrs), 6)
         self.assertTrue(all(a["confidence"] == "confirmed" for a in attrs))
 
+    def test_duplicate_task_reward_resource_is_not_falsely_attributed(self):
+        # 加速符撞委托符模板的真机形态：同一 claimed 事件下冒出两笔委托符。
+        # 奖励弹窗会合并同种资源，所以两笔都应视为类别冲突，不挑一笔猜。
+        t0 = sh("2026-08-29 11:00:00")
+        claimed_id = self._event(
+            t0, "task_rewards.claimed", {"tab": "日常"}, script="daily")
+        for delta in (4, 3):
+            self._event(
+                t0 + 1, "resource.change",
+                {"resource": "委托符", "delta": delta,
+                 "source": "task_rewards.reward_popup",
+                 "source_event_id": claimed_id, "attribution": "confirmed"},
+                script="daily")
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 600)
+
+        token = self._res(ledger, "委托符")
+        self.assertEqual(token["attributed_delta"], 0)
+        self.assertFalse(any(
+            a["resource"] == "委托符" for a in ledger["attributions"]))
+
     def test_cross_midnight_run_booked_by_observation_day(self):
         # 跨日 run：收益按观察发生日记账，首日只有单点观察无法结账
         t0 = sh("2026-08-20 23:30:00")

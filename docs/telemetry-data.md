@@ -174,7 +174,7 @@
 | 途中顶栏 | `inventory.peek` | 游戏 OCR | 只观察木炭、玉钢、冷却材、砥石、甲州金，不拿单点读数算收益 |
 | 锻刀点火 | `forge.started` + `resource.change` | 已知配方 | 已覆盖四资源与委托符，已接统一入口 |
 | 手入 | `resource.change` | 确认页 OCR；加速符为已知操作 | 已覆盖；OCR 失败时明确记 unknown，不猜金额 |
-| 任务奖励 | `task_rewards.claimed` + `resource.change` | 奖励弹窗图标 + 数量 OCR | 已接统一入口；现有模板覆盖四资源、委托符、小判，缺加速符模板；陌生图标会在本地 `debug/` 自动留取同源运行帧 |
+| 任务奖励 | `task_rewards.claimed` + `resource.change` | 奖励弹窗图标 + 数量 OCR | 已接统一入口；现有模板覆盖四资源、委托符、小判，缺加速符模板；陌生图标或同种资源重复命中时不猜类别，并在本地 `debug/` 自动留取同源运行帧 |
 | 远征结算 | `expedition.settled` + `resource.change` | 结算页 OCR | 四项基础资源已覆盖；附带小判、委托符、加速符尚未逐笔识别 |
 | 刀解 | 无标准流水 | 游戏结算结果 | 缺口：刀解返还的基础资源尚未读取，只能在后续库存差值中出现 |
 | 异去补提灯 | `yosari.ticket_refilled` + `resource.change` | 购买页前后小判 | 读全时已覆盖；读不全只留补充事实，不猜金额 |

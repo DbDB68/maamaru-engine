@@ -509,6 +509,7 @@ class TelemetryStore:
         # 没有逐笔记录的老数据照常靠 session_completed 归因
         per_repair_runs: set = set()
         per_repair_any = False
+        reward_change_groups: dict[tuple, list[int]] = {}
         for row in rows:
             if row["event_type"] == "resource.change":
                 rc_payload = _loads(row["payload"], {})
@@ -520,6 +521,18 @@ class TelemetryStore:
                     per_repair_any = True
                     if row["run_id"]:
                         per_repair_runs.add(row["run_id"])
+                if (rc_payload.get("source") == "task_rewards.reward_popup"
+                        and isinstance(source_event_id, (int, float))
+                        and rc_payload.get("resource")):
+                    key = (int(source_event_id), str(rc_payload["resource"]))
+                    reward_change_groups.setdefault(key, []).append(row["id"])
+        # 2026-08-29 实测：加速符会撞上委托符模板，导致同一奖励弹窗
+        # 同一资源出现两条。弹窗会合并同类奖励，因此这种重复代表类别冲突；
+        # 两条都不归因，保留原始事件等待同源模板补齐，不能挑一条猜。
+        ambiguous_reward_changes = {
+            event_id for event_ids in reward_change_groups.values()
+            if len(event_ids) > 1 for event_id in event_ids
+        }
         attributions: list[dict] = []
         for row in rows:
             payload = _loads(row["payload"], {})
@@ -541,7 +554,8 @@ class TelemetryStore:
                             "source": event_type,
                             "label": f"手入加速符 {-int(speedups):+d}",
                             "confidence": "confirmed"}
-            elif event_type == "resource.change":
+            elif (event_type == "resource.change"
+                  and row["id"] not in ambiguous_reward_changes):
                 delta = payload.get("delta")
                 resource = str(payload.get("resource") or "")
                 if resource and isinstance(delta, (int, float)) and delta:
