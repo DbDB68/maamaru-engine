@@ -3,6 +3,10 @@ defineProps<{
   variant: 'overview' | 'tasks' | 'single'
   pageClass?: string
 }>()
+
+const emit = defineEmits<{
+  (event: 'scroll', value: Event): void
+}>()
 </script>
 
 <template>
@@ -11,7 +15,7 @@ defineProps<{
     金边是底座被上层面板遮住后露出的部分，不可“优化”为 border、outline 或伪元素，
     否则滚动内容会被浮在线上的描边切穿。
   -->
-  <main class="maamaru-frame" :class="[`${variant}-frame`, pageClass]">
+  <main class="maamaru-frame" :class="[`${variant}-frame`, pageClass]" @scroll="emit('scroll', $event)">
     <div class="maamaru-surface">
       <slot />
     </div>

@@ -32,6 +32,8 @@ let pollTimer = 0
 let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
+const reportMode = ref<'report' | 'planning'>('report')
+const reportStageCollapsed = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
@@ -182,6 +184,19 @@ async function pollStatus() {
   } catch (_) {}
 }
 function onSchedulerWarning(event: Event) { schedulerWarning.value = String((event as CustomEvent).detail || '') }
+function onReportModeChange(value: 'report' | 'planning') {
+  reportMode.value = value
+  if (value !== 'report') reportStageCollapsed.value = false
+}
+function onReportScroll(event: Event) {
+  if (reportMode.value !== 'report') return
+  const scrollTop = (event.currentTarget as HTMLElement | null)?.scrollTop || 0
+  if (reportStageCollapsed.value) {
+    if (scrollTop < 12) reportStageCollapsed.value = false
+  } else if (scrollTop > 56) {
+    reportStageCollapsed.value = true
+  }
+}
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
 async function save() {
@@ -220,10 +235,11 @@ watch(message, value => {
 onMounted(() => { load(); pollStatus(); pollTimer = window.setInterval(pollStatus, 2000); window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
+watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false })
 </script>
 
 <template>
-  <div class="shell">
+  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>本丸自动管家</small></div>
       <div class="stage-fox" aria-hidden="true"></div>
@@ -339,7 +355,7 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page"><ReportPanel /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel @mode-change="onReportModeChange" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>

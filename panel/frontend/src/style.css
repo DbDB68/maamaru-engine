@@ -33,7 +33,9 @@ button { cursor: pointer; }
   position: relative; flex: 0 0 198px; height: 198px; margin: 0 20px;
   overflow: hidden; background: #e8dfca url('/static/img/honmaru_garden_stage.png') center 72% / cover no-repeat;
   border: 1px solid #bd8b47; border-bottom: 0; border-radius: 12px 12px 0 0; image-rendering: pixelated;
+  transition: flex-basis .2s ease, height .2s ease, margin .2s ease, opacity .14s ease;
 }
+.shell.report-stage-collapsed .honmaru-stage { flex-basis: 0; height: 0; margin-block: 0; border-width: 0; opacity: 0; pointer-events: none; }
 .honmaru-stage.working { background-image: url('/static/img/honmaru_sortie_stage.png'); background-position: center 58%; }
 .stage-brand { position: absolute; z-index: 2; top: 10px; left: 10px; display: grid; min-width: 132px; padding: 8px 16px 7px; place-items: center; color: #f7dc8a; background: #34231c; border: 2px solid #e7b943; outline: 2px solid rgba(39,29,24,.82); box-shadow: 3px 3px 0 rgba(32,44,53,.48); line-height: 1.05; }
 .stage-brand::before { content: ''; position: absolute; top: -6px; left: 14px; right: 14px; height: 3px; background: #b33e4a; border: 1px solid #34231c; }
