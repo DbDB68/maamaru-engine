@@ -173,6 +173,16 @@ function experienceLabel(entry: EventTimelineEntry) {
   return '第一次参加'
 }
 
+function eventSummary(entry: EventTimelineEntry) {
+  const abacus = abacusFor(entry)
+  if (!abacus) return entry.note
+  if (abacus.runs_needed != null) {
+    const ticketNote = entry.budget?.koban_cost === 0 ? ' · 免费手形够目标' : ''
+    return `全开预计 ${fmt(abacus.runs_needed)} 圈${ticketNote}`
+  }
+  return abacus.message || entry.note
+}
+
 function submitEstimate(entry: EventTimelineEntry) {
   const value = Number(estimateInputs.value[entry.name])
   emit('save-estimate', entry.name, value)
@@ -186,10 +196,18 @@ function submitStockGoal(entry: EventTimelineEntry) {
 function budgetText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget) return ''
-  if (budget.koban_cost === 0) return '免费票够用，不需要额外准备小判。'
+  if (budget.koban_cost === 0) return ''
   if (budget.sufficient === true) return `预计需要 ${fmt(budget.koban_cost)} 小判，家底已经备齐。`
   if (budget.shortfall != null) return `目前还差 ${fmt(budget.shortfall)} 小判。`
   return budget.message
+}
+
+function budgetHeadline(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (!budget) return ''
+  if (budget.koban_cost === 0) return '无需额外小判'
+  if (budget.sufficient === true) return '已经备齐'
+  return `${fmt(budget.shortfall)} 小判`
 }
 
 function candidateName(candidate: EventTimelineCandidate) {
@@ -206,8 +224,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
   <section class="event-timeline-card">
     <header class="timeline-heading">
       <div>
-        <small>活动日程</small>
-        <h4>正在进行和即将开始</h4>
+        <small>近期活动</small>
+        <h4>活动日程</h4>
       </div>
       <span v-if="timeline?.calendar_stale" class="timeline-stale">日历可能不是最新</span>
     </header>
@@ -229,7 +247,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
               <header>
                 <div>
                   <span class="event-tags">
-                    <span class="event-state">{{ group.key === 'ongoing' ? '进行中' : '即将开始' }}</span>
+                    <span v-if="group.key !== 'ongoing'" class="event-state">即将开始</span>
                     <span v-if="supportsTokenLearning(entry)" class="experience-tag" :class="`source-${abacusFor(entry)?.keys_source || 'new'}`">{{ experienceLabel(entry) }}</span>
                   </span>
                   <h5>{{ entry.name }}</h5>
@@ -237,12 +255,12 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <span class="event-range">{{ eventRange(entry) }}</span>
               </header>
 
-              <p v-if="abacusFor(entry)?.message || entry.note" class="event-summary">{{ abacusFor(entry)?.message || entry.note }}</p>
+              <p v-if="eventSummary(entry)" class="event-summary">{{ eventSummary(entry) }}</p>
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
                 <header>
                   <span><small>按{{ paceSourceLabel(paceFor(entry)!.source) }}</small><b>{{ loopPace(paceFor(entry)!.secondsPerLoop) }}</b></span>
-                  <span><small>{{ selectedPaceWindow(entry) === 'event' ? '活动结束前' : `接下来 ${paceDuration(availablePaceSeconds(entry))}` }}</small><strong>还能打 {{ fmt(possibleLoops(entry)) }} 圈</strong></span>
+                  <span><small>{{ selectedPaceWindow(entry) === 'event' ? '活动结束前' : `接下来 ${paceDuration(availablePaceSeconds(entry))}` }}</small><strong>{{ selectedPaceWindow(entry) === 'event' ? '纯按时间最多' : '约' }} {{ fmt(possibleLoops(entry)) }} 圈</strong></span>
                 </header>
                 <div v-if="paceOptions(entry).length > 1" class="pace-source-buttons" aria-label="选择圈速来源">
                   <button v-for="pace in paceOptions(entry)" :key="pace.source" type="button" :class="{ active: paceFor(entry)?.source === pace.source }" @click="setPaceSource(entry, pace.source)">{{ paceSourceLabel(pace.source) }} · {{ loopPace(pace.secondsPerLoop) }}</button>
@@ -252,15 +270,15 @@ function candidateRange(candidate: EventTimelineCandidate) {
                   <button type="button" :class="{ active: selectedPaceWindow(entry) === '1h' }" @click="setPaceWindow(entry, '1h')">1 小时</button>
                   <button type="button" :class="{ active: selectedPaceWindow(entry) === '3h' }" @click="setPaceWindow(entry, '3h')">3 小时</button>
                 </div>
-                <p>{{ selectedPaceWindow(entry) === 'event' ? `还剩 ${paceDuration(availablePaceSeconds(entry))}，按连续挂机到活动关闭计算。` : '按连续挂机、不额外预留时间计算。' }} 样本来自 {{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 的 {{ fmt(paceFor(entry)!.loops) }} 圈。</p>
+                <p>{{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 实测 {{ fmt(paceFor(entry)!.loops) }} 圈 · {{ selectedPaceWindow(entry) === 'event' ? '只算时间，手形另算' : '连续挂机，不预留收尾时间' }}</p>
               </section>
 
               <div v-if="entry.budget && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
                   <small>{{ entry.budget.sufficient === true || entry.budget.koban_cost === 0 ? '活动预算' : '预算缺口' }}</small>
-                  <b>{{ entry.budget.sufficient === true || entry.budget.koban_cost === 0 ? '已经备齐' : `${fmt(entry.budget.shortfall)} 小判` }}</b>
+                  <b>{{ budgetHeadline(entry) }}</b>
                 </span>
-                <p>{{ budgetText(entry) }}</p>
+                <p v-if="budgetText(entry)">{{ budgetText(entry) }}</p>
               </div>
 
               <div v-if="abacusFor(entry)?.goal_mode === 'stock_target'" class="event-stock-target">
