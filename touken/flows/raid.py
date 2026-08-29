@@ -160,6 +160,9 @@ class RaidMixin:
                     yield "[RAID] 手形补充失败，停"
                     return
                 self._ticket_buys = buys + 1
+                # 当前没有同源画面证据能确认这套 UI 的实际小判金额；先保留
+                # “确实补过票”的玩法事实，等活动开放实测后再接标准流水。
+                self._record_ticket_refill(cfg, "[RAID]")
 
                 # 补充完重新点即刻出阵
                 self._click_depart(cfg)

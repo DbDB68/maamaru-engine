@@ -449,9 +449,12 @@ class RewardsMixin:
         if not hasattr(self, "record_event"):
             return
         for resource, qty in items:
-            payload = {"resource": resource, "delta": qty,
-                       "source": "task_rewards.reward_popup", "script": "task",
+            payload = {"source": "task_rewards.reward_popup", "script": "task",
                        "attribution": "confirmed", "evidence": "reward_popup_ocr"}
             if isinstance(claimed_event_id, int):
                 payload["source_event_id"] = claimed_event_id
-            self.record_event("resource.change", **payload)
+            if hasattr(self, "record_resource_change"):
+                self.record_resource_change(resource, qty, **payload)
+            else:
+                self.record_event(
+                    "resource.change", resource=resource, delta=qty, **payload)

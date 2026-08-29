@@ -39,6 +39,12 @@ class _Host(SmithMixin, RepairMixin, RewardsMixin):
             return self.store.record_event(event_type, payload)
         return len(self.events)
 
+    def record_resource_change(self, resource, delta, *, source,
+                               attribution="confirmed", **evidence):
+        return self.record_event(
+            "resource.change", resource=resource, delta=delta, source=source,
+            attribution=attribution, **evidence)
+
 
 class ResourceChangeContractTests(unittest.TestCase):
     def test_agent_emits_one_normalized_resource_change(self):

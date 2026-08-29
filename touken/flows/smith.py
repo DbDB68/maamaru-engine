@@ -289,8 +289,16 @@ class SmithMixin:
         if isinstance(started_event_id, int):
             payload["source_event_id"] = started_event_id
         for name, cost in zip(_FORGE_RES, self._forge_recipe()):
-            self.record_event("resource.change", resource=name, delta=-cost, **payload)
-        self.record_event("resource.change", resource="委托符", delta=-1, **payload)
+            if hasattr(self, "record_resource_change"):
+                self.record_resource_change(name, -cost, **payload)
+            else:
+                self.record_event(
+                    "resource.change", resource=name, delta=-cost, **payload)
+        if hasattr(self, "record_resource_change"):
+            self.record_resource_change("委托符", -1, **payload)
+        else:
+            self.record_event(
+                "resource.change", resource="委托符", delta=-1, **payload)
 
     def _read_countdown(self, cy: int):
         """读这炉的剩余时间，返回 ("01:27:30", 秒数) 或 None。

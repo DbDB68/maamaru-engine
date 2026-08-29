@@ -1001,6 +1001,13 @@ class SafeDepartChainTests(unittest.TestCase):
             "source_event_id": 1,
         }), host.events)
 
+    def test_unknown_ticket_price_keeps_fact_without_guessing_resource_change(self):
+        host = _SafeDepartHost()
+
+        host._record_ticket_refill({}, "[RAID]")
+
+        self.assertEqual(host.events, [("ticket.refilled", {"source": "RAID"})])
+
     def test_raid_style_recover_declined_uses_close(self):
         maa = _RecoverMaa()
         msgs, result = _drain_chain(

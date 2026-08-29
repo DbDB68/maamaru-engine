@@ -555,6 +555,8 @@ class PumpkinMixin:
                     if not self._recover_ok:
                         yield "[南瓜] 手形补充失败，收工"
                         return
+                    # 旧活动没有已验证票价；先落补票事实，不猜小判金额。
+                    self._record_ticket_refill(recovery, "[南瓜]")
                     recovered = True
                     break
                 time.sleep(0.8)
