@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
 
 const props = defineProps<{
@@ -10,6 +10,7 @@ const props = defineProps<{
   error?: string
   estimateSaving?: string
   goalSaving?: string
+  activityPaces?: Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }>
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,14 @@ const emit = defineEmits<{
 
 const estimateInputs = ref<Record<string, string>>({})
 const targetInputs = ref<Record<string, string>>({})
+const paceWindows = ref<Record<string, 'event' | '1h' | '3h'>>({})
+const nowMs = ref(Date.now())
+let clockTimer: number | undefined
+
+onMounted(() => {
+  clockTimer = window.setInterval(() => { nowMs.value = Date.now() }, 60_000)
+})
+onBeforeUnmount(() => window.clearInterval(clockTimer))
 
 watch(() => props.abacuses, (items) => {
   for (const item of items) {
@@ -89,6 +98,51 @@ function abacusFor(entry: EventTimelineEntry) {
 
 function goalFor(entry: EventTimelineEntry) {
   return goalByEvent.value.get(entry.name)
+}
+
+function paceFor(entry: EventTimelineEntry) {
+  return props.activityPaces?.[entry.name]
+}
+
+function selectedPaceWindow(entry: EventTimelineEntry) {
+  return paceWindows.value[entry.name] || 'event'
+}
+
+function setPaceWindow(entry: EventTimelineEntry, value: 'event' | '1h' | '3h') {
+  paceWindows.value[entry.name] = value
+}
+
+function availablePaceSeconds(entry: EventTimelineEntry) {
+  const selected = selectedPaceWindow(entry)
+  if (selected === '1h') return 3600
+  if (selected === '3h') return 10800
+  if (!entry.end_at) return 0
+  return Math.max(0, Math.floor((parseDate(entry.end_at).getTime() - nowMs.value) / 1000))
+}
+
+function possibleLoops(entry: EventTimelineEntry) {
+  const pace = paceFor(entry)
+  if (!pace) return null
+  return Math.max(0, Math.floor(availablePaceSeconds(entry) / pace.secondsPerLoop))
+}
+
+function paceDuration(seconds: number) {
+  const value = Math.max(0, Math.round(seconds))
+  const hours = Math.floor(value / 3600)
+  const minutes = Math.floor((value % 3600) / 60)
+  if (!hours) return `${minutes} 分钟`
+  return `${hours} 小时${minutes ? ` ${minutes} 分` : ''}`
+}
+
+function loopPace(seconds: number) {
+  const value = Math.max(0, Math.round(seconds))
+  return `${Math.floor(value / 60)}分${String(value % 60).padStart(2, '0')}秒/圈`
+}
+
+function paceSampleDate(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric', day: 'numeric', timeZone: 'Asia/Shanghai',
+  }).format(new Date(timestamp * 1000))
 }
 
 function supportsTokenLearning(entry: EventTimelineEntry) {
@@ -168,6 +222,19 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </header>
 
               <p v-if="abacusFor(entry)?.message || entry.note" class="event-summary">{{ abacusFor(entry)?.message || entry.note }}</p>
+
+              <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
+                <header>
+                  <span><small>按最近实测</small><b>{{ loopPace(paceFor(entry)!.secondsPerLoop) }}</b></span>
+                  <span><small>{{ selectedPaceWindow(entry) === 'event' ? '活动结束前' : `接下来 ${paceDuration(availablePaceSeconds(entry))}` }}</small><strong>还能打 {{ fmt(possibleLoops(entry)) }} 圈</strong></span>
+                </header>
+                <div class="pace-window-buttons" aria-label="试算挂机时长">
+                  <button type="button" :class="{ active: selectedPaceWindow(entry) === 'event' }" :disabled="!entry.end_at" @click="setPaceWindow(entry, 'event')">活动结束前</button>
+                  <button type="button" :class="{ active: selectedPaceWindow(entry) === '1h' }" @click="setPaceWindow(entry, '1h')">1 小时</button>
+                  <button type="button" :class="{ active: selectedPaceWindow(entry) === '3h' }" @click="setPaceWindow(entry, '3h')">3 小时</button>
+                </div>
+                <p>{{ selectedPaceWindow(entry) === 'event' ? `还剩 ${paceDuration(availablePaceSeconds(entry))}，按连续挂机到活动关闭计算。` : '按连续挂机、不额外预留时间计算。' }} 样本来自 {{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 的 {{ fmt(paceFor(entry)!.loops) }} 圈。</p>
+              </section>
 
               <div v-if="entry.budget && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
@@ -282,6 +349,18 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-range { flex: none; color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .event-mobile-moment { display: none; }
 .event-summary { margin: 9px 0 0; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
+.event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
+.event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
+.event-pace-calculator > header > span { display: grid; gap: 1px; }
+.event-pace-calculator > header > span:last-child { text-align: right; }
+.event-pace-calculator small { color: var(--ink-dim); font-size: 10px; }
+.event-pace-calculator b { font-size: 14px; }
+.event-pace-calculator strong { color: var(--fox-gold-deep); font-size: 18px; }
+.pace-window-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.pace-window-buttons button { padding: 5px 10px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 11px; cursor: pointer; }
+.pace-window-buttons button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
+.pace-window-buttons button:disabled { cursor: not-allowed; opacity: .45; }
+.event-pace-calculator > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
 .event-budget { display: flex; align-items: center; gap: 14px; margin-top: 11px; padding: 9px 11px; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border-radius: 8px; }
 .event-budget.ready { background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); }
 .event-budget > span { display: grid; flex: 0 0 auto; gap: 1px; min-width: 92px; }
@@ -350,6 +429,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .is-ongoing .event-mobile-moment { color: #4d7137; }
   .timeline-event-card { padding: 12px; }
   .event-budget, .event-estimate { align-items: stretch; flex-direction: column; }
+  .event-pace-calculator > header { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .event-pace-calculator > header > span:last-child { text-align: left; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }
   .event-stock-target { grid-template-columns: 1fr; }
   .event-stock-target .stock-yield { grid-column: 1; }

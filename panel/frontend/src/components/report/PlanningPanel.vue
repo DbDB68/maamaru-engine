@@ -11,6 +11,7 @@ const loading = ref(false)
 const error = ref('')
 const timelineError = ref('')
 const goalNotice = ref('')
+const activityPaces = ref<Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }>>({})
 
 const formOpen = ref(false)
 const saving = ref(false)
@@ -41,6 +42,28 @@ function applyTimingFallback(report: PlanningReport, runs: any[]) {
     goal.time_margin_seconds = remainingSeconds - estimatedSeconds
     goal.can_finish = goal.time_margin_seconds >= 0
   }
+}
+
+function collectActivityPaces(runs: any[]) {
+  const definitions = [
+    { event: '大阪城', script: 'osaka' },
+    { event: '联队战', script: 'raid' },
+  ]
+  const result: Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }> = {}
+  for (const definition of definitions) {
+    const latest = runs.find(run => (
+      run.script === definition.script
+      && Number(run.loops) > 0
+      && Number(run.average_loop_seconds) > 0
+    ))
+    if (!latest) continue
+    result[definition.event] = {
+      secondsPerLoop: Number(latest.average_loop_seconds),
+      loops: Number(latest.loops),
+      runStartedAt: Number(latest.started_at),
+    }
+  }
+  activityPaces.value = result
 }
 
 function localToday() {
@@ -205,10 +228,13 @@ async function load() {
   loading.value = true
   try {
     const [planningResult, timelineResult, runsResult] = await Promise.allSettled([
-      api.planning(), api.eventsTimeline(), api.dataRuns(10),
+      api.planning(), api.eventsTimeline(), api.dataRuns(100),
     ])
     if (planningResult.status === 'fulfilled') {
-      if (runsResult.status === 'fulfilled') applyTimingFallback(planningResult.value, runsResult.value.items)
+      if (runsResult.status === 'fulfilled') {
+        applyTimingFallback(planningResult.value, runsResult.value.items)
+        collectActivityPaces(runsResult.value.items)
+      }
       planning.value = planningResult.value
       error.value = ''
     } else {
@@ -346,6 +372,7 @@ onMounted(load)
       :error="timelineError"
       :estimate-saving="estimateSaving"
       :goal-saving="abacusGoalSaving"
+      :activity-paces="activityPaces"
       @save-estimate="saveEstimate"
       @add-goal="goalFromAbacus"
       @add-stock-goal="goalFromStockTarget"
