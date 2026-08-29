@@ -542,9 +542,25 @@ onMounted(() => load())
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>
         </button>
 
+        <section class="resource-ledger" :class="{ loading }">
+          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
+          <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
+          <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
+            <header><div><h4>手动记家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭手动记家底" @click="inventoryFormOpen = false">×</button></header>
+            <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
+          </form>
+          <div class="resource-ledger-grid">
+            <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
+              <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
+            </article>
+          </div>
+          <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
+        </section>
+
         <section class="resource-trend">
           <header>
-            <div><h3>资源统计</h3></div>
+            <div><h3>变化趋势</h3></div>
             <nav v-if="mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
             <nav v-else aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
@@ -559,22 +575,6 @@ onMounted(() => load())
             <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
             <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportForm.activities.length && !reportForm.note.trim()) || reportClaimInvalid">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">先不说了</button></div>
           </form>
-        </section>
-
-        <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>资源变化</h3><p>{{ ledgerDateRange }}</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
-          <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
-          <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
-            <header><div><h4>手动记家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭手动记家底" @click="inventoryFormOpen = false">×</button></header>
-            <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
-          </form>
-          <div class="resource-ledger-grid">
-            <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
-              <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
-            </article>
-          </div>
-          <p class="fox-summary"><b>狐之助小结</b>{{ foxSummary }}</p>
         </section>
 
         <section v-if="unreportedGaps.length || !reportMode" class="inventory-gap-panel" aria-label="库存差值说明">
