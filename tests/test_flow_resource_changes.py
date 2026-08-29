@@ -656,6 +656,20 @@ class _DelayedRefreshClaimFakeMaa(_ClaimFakeMaa):
         return super().template_match(template, roi, threshold)
 
 
+class _GrayClaimButtonFakeMaa(_ClaimFakeMaa):
+    """灰按钮会以 0.846 串中蓝模板，但灰模板本身是 1.000。"""
+
+    def template_match(self, template, roi=None, threshold=0.8):
+        if template == "一键领取.png":
+            return Point(1130, 480) if threshold <= 0.846 else None
+        if template == "一键领取_灰.png":
+            return Point(1130, 480) if threshold <= 1.0 else None
+        return None
+
+    def exists(self, template, roi=None, threshold=0.8):
+        return False
+
+
 class _RewardsHost(RewardsMixin):
     """claim_task_rewards_stream 最小宿主"""
 
@@ -717,6 +731,20 @@ class StalePopupRetryTests(unittest.TestCase):
         self.assertTrue(any("补点一键领取" in message for message in messages))
         self.assertTrue(any(event == "task_rewards.claimed"
                             for event, _ in host.events))
+
+    def test_gray_claim_button_wins_over_blue_template_crosstalk(self):
+        maa = _GrayClaimButtonFakeMaa()
+        host = _RewardsHost(maa)
+
+        messages = list(host.claim_task_rewards_stream())
+
+        self.assertEqual(maa.claim_clicks, 0)
+        self.assertTrue(any("已确认没有可领奖励" in message
+                            for message in messages))
+        self.assertTrue(any(event == "task_rewards.none"
+                            for event, _ in host.events))
+        self.assertFalse(any(event == "task_rewards.unconfirmed"
+                             for event, _ in host.events))
 
 
 if __name__ == "__main__":

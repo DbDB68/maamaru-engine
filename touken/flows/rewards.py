@@ -20,6 +20,9 @@ _POPUP_CELL_W = 104
 _POPUP_ICON_Y = (150, 256)
 _POPUP_QTY_Y = (260, 296)
 _POPUP_MAX_CELLS = 8
+# 同源 MuMu 运行帧实测：真按钮为 1.000；蓝/灰模板互相串台约
+# 0.838~0.846。任务页必须越过串台分数，不能用通用的宽松门槛。
+_CLAIM_BUTTON_THRESHOLD = 0.95
 _POPUP_ICONS = (("资源/icon木炭.png", "木炭"), ("资源/icon玉钢.png", "玉钢"),
                 ("资源/icon冷却材.png", "冷却材"), ("资源/icon砥石.png", "砥石"),
                 ("资源/icon委托符.png", "委托符"), ("资源/icon小判.png", "小判"))
@@ -233,14 +236,15 @@ class RewardsMixin:
             claim_result = self.maa.template_match(
                 template=claim_config["template"],
                 roi=None,
-                threshold=0.7
+                threshold=_CLAIM_BUTTON_THRESHOLD
             )
             inactive_template = claim_config.get(
                 "inactive_template", "一键领取_灰.png")
             inactive_result = None
             if not claim_result:
                 inactive_result = self.maa.template_match(
-                    template=inactive_template, roi=None, threshold=0.7)
+                    template=inactive_template, roi=None,
+                    threshold=_CLAIM_BUTTON_THRESHOLD)
 
             if claim_result:
                 yield f"[TASK] {tab_name} 有奖励可领，点击一键领取..."
@@ -276,7 +280,7 @@ class RewardsMixin:
                         self.maa.screenshot(force=True)
                         retry = self.maa.template_match(
                             template=claim_config["template"], roi=None,
-                            threshold=0.7)
+                            threshold=_CLAIM_BUTTON_THRESHOLD)
                         if retry:
                             break
                     if retry:
@@ -304,9 +308,11 @@ class RewardsMixin:
                 for _ in range(6):
                     self.maa.screenshot(force=True)
                     still_active = self.maa.template_match(
-                        template=claim_config["template"], roi=None, threshold=0.7)
+                        template=claim_config["template"], roi=None,
+                        threshold=_CLAIM_BUTTON_THRESHOLD)
                     now_inactive = self.maa.template_match(
-                        template=inactive_template, roi=None, threshold=0.7)
+                        template=inactive_template, roi=None,
+                        threshold=_CLAIM_BUTTON_THRESHOLD)
                     if now_inactive and not still_active:
                         button_confirmed = True
                         break
