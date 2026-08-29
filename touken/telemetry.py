@@ -204,6 +204,46 @@ class TelemetryStore:
         except Exception:
             return None
 
+    def add_manual_inventory(self, resources: dict,
+                             observed_at: float | None = None) -> dict:
+        """记录一份不依赖游戏截图的库存观察；允许只填写部分资源。"""
+        if not isinstance(resources, dict):
+            raise ValueError("家底格式不对")
+        unknown = set(resources) - set(LEDGER_RESOURCES)
+        if unknown:
+            raise ValueError(f"不认识的资源：{next(iter(sorted(unknown)))}")
+        clean = {}
+        for name, value in resources.items():
+            if value in (None, ""):
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"{name}数量要填非负整数")
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name}数量要填非负整数") from None
+            if number < 0 or number != float(value):
+                raise ValueError(f"{name}数量要填非负整数")
+            clean[name] = number
+        if not clean:
+            raise ValueError("至少填一项家底")
+        ts = float(observed_at or time.time())
+        if not math.isfinite(ts) or ts <= 0 or ts > time.time() + 300:
+            raise ValueError("记录时间不正确")
+        payload = {
+            "captured_at": datetime.fromtimestamp(ts, _LEDGER_TZ).strftime(
+                "%Y-%m-%d %H:%M:%S"),
+            "source": "manual_entry",
+            "resources": clean,
+        }
+        cursor = self._conn().execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (?, NULL, 'manual', 'inventory.captured', ?)",
+            (ts, _json(payload)),
+        )
+        self._conn().commit()
+        return {"id": cursor.lastrowid, "ts": ts, **payload}
+
     def attach_inventory_snapshot(self, run_id: str, snapshot: dict,
                                   captured_ts: float | None = None) -> dict:
         """Attach a later standalone inventory snapshot as a run's closing snapshot.

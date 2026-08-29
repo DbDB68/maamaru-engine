@@ -63,6 +63,34 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual([e["event_type"] for e in events], ["repair.completed"])
         self.assertEqual([o["expected"] for o in misses], ["登录"])
 
+    def test_manual_inventory_accepts_partial_resources_and_feeds_ledger(self):
+        first = self.store.add_manual_inventory(
+            {"小判": 1000, "木炭": 500}, observed_at=100)
+        second = self.store.add_manual_inventory(
+            {"小判": 1250}, observed_at=200)
+
+        self.assertEqual(first["source"], "manual_entry")
+        self.assertEqual(second["resources"], {"小判": 1250})
+        events = self.store.recent_events(event_type="inventory.captured")
+        self.assertTrue(all(event["run_id"] is None for event in events))
+        ledger = self.store.resource_ledger(50, 250)
+        koban = next(row for row in ledger["per_resource"]
+                     if row["resource"] == "小判")
+        charcoal = next(row for row in ledger["per_resource"]
+                        if row["resource"] == "木炭")
+        self.assertEqual(koban["opening"], 1000)
+        self.assertEqual(koban["closing"], 1250)
+        self.assertEqual(koban["total_delta"], 250)
+        self.assertIsNone(charcoal["total_delta"])
+
+    def test_manual_inventory_rejects_empty_unknown_negative_and_future(self):
+        for resources, observed_at in (
+                ({}, 100), ({"不存在": 1}, 100), ({"小判": -1}, 100),
+                ({"小判": 1}, time.time() + 600)):
+            with self.subTest(resources=resources, observed_at=observed_at):
+                with self.assertRaises(ValueError):
+                    self.store.add_manual_inventory(resources, observed_at)
+
     def test_run_summary_counts_upkeep_speed_and_resource_delta(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         conn = self.store._conn()

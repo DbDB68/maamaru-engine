@@ -35,6 +35,10 @@ const selectedResource = ref('小判')
 const compareResources = ref(['小判', '加速符'])
 const selectedDate = ref('')
 const highlightCategory = ref('')
+const inventoryFormOpen = ref(false)
+const inventorySaving = ref(false)
+const inventoryNotice = ref('')
+const inventoryForm = ref<Record<string, number | null | ''>>({})
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -418,6 +422,31 @@ function gapDelta(gap: InventoryGap) {
     .map(name => `${name} ${signed(Number(gap.resource_delta![name]))}`).join(' · ')
 }
 
+function openInventoryForm() {
+  inventoryNotice.value = ''
+  inventoryForm.value = Object.fromEntries(resourceNames.map(name => [name, null]))
+  inventoryFormOpen.value = true
+}
+
+async function saveManualInventory() {
+  const resources = Object.fromEntries(resourceNames.flatMap(name => {
+    const value = inventoryForm.value[name]
+    return value == null || value === '' ? [] : [[name, Number(value)]]
+  }))
+  if (!Object.keys(resources).length) {
+    error.value = '至少填一项家底。'
+    return
+  }
+  inventorySaving.value = true
+  try {
+    await api.addManualInventory(resources)
+    inventoryFormOpen.value = false
+    inventoryNotice.value = `已记录 ${Object.keys(resources).length} 项家底。`
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '家底记录失败' }
+  finally { inventorySaving.value = false }
+}
+
 // ---- 数据加载 ----
 
 async function load(nextDays = days.value) {
@@ -533,7 +562,13 @@ onMounted(() => load())
         </section>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>资源变化</h3><p>{{ ledgerDateRange }}</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span></header>
+          <header><div><h3>资源变化</h3><p>{{ ledgerDateRange }}</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b>{{ confidence.detail }}</span><button v-if="!inventoryFormOpen" type="button" class="secondary" @click="openInventoryForm">手动记家底</button></div></header>
+          <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
+          <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
+            <header><div><h4>手动记家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭手动记家底" @click="inventoryFormOpen = false">×</button></header>
+            <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
+          </form>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
@@ -574,6 +609,16 @@ onMounted(() => load())
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .report-proactive { align-self: flex-start; }
+.ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.inventory-notice { margin: 0 0 10px; padding: 8px 10px; color: #426b35; background: #edf5e8; border-radius: 8px; }
+.manual-inventory-form { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
+.manual-inventory-form > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.manual-inventory-form h4, .manual-inventory-form p { margin: 0; }
+.manual-inventory-form p { margin-top: 3px; color: var(--ink-dim); font-size: 12px; }
+.inventory-close { min-width: 32px; min-height: 32px; padding: 0; color: var(--ink-dim); background: transparent; border: 0; font-size: 20px; }
+.manual-inventory-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
+.manual-inventory-grid label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
+.manual-inventory-grid input { width: 100%; min-width: 0; }
 .inventory-gap-panel:empty { display: none; }
 .report-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .report-claim-summary { margin: 0; padding: 9px 11px; color: var(--ink); background: var(--fox-gold-pale); border-radius: 8px; }
@@ -585,6 +630,8 @@ onMounted(() => load())
 .report-form fieldset button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .report-form-actions { display: flex; gap: 8px; }
 @media (max-width: 520px) {
+  .manual-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }
   .report-context-toolbar .segmented-control button { flex: 1 1 0; min-width: 0; padding-inline: 7px; }

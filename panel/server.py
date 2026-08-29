@@ -1706,6 +1706,19 @@ async def api_data_resource_ledger(days: int = 7,
     return get_telemetry_store().resource_ledger(start, to_ts)
 
 
+@app.post("/api/data/manual-inventory")
+async def api_add_manual_inventory(request: Request):
+    """手动记家底：只把实际填写的资源作为当前时刻的库存观察。"""
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        snapshot = get_telemetry_store().add_manual_inventory(
+            body.get("resources") or {}, observed_at=body.get("observed_at"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "snapshot": snapshot}
+
+
 @app.get("/api/data/human-reports")
 async def api_human_reports(limit: int = 200):
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
