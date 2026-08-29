@@ -56,3 +56,25 @@ class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMi
             return record_event(event_type, payload)
         except Exception:
             return None
+
+    def record_resource_change(self, resource: str, delta: int | float, *,
+                               source: str, attribution: str = "confirmed",
+                               **evidence):
+        """统一资源流水入口；玩法事件只说明事实，资源收支都从这里交账。"""
+        try:
+            from .telemetry import LEDGER_RESOURCES
+            if resource not in LEDGER_RESOURCES or isinstance(delta, bool):
+                return None
+            amount = float(delta)
+            if not amount or not amount.is_integer():
+                return None
+            payload = {
+                "resource": resource,
+                "delta": int(amount),
+                "source": source,
+                "attribution": attribution,
+                **evidence,
+            }
+            return self.record_event("resource.change", **payload)
+        except Exception:
+            return None

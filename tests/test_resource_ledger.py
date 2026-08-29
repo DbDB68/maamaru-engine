@@ -110,6 +110,15 @@ class ResourceLedgerTests(unittest.TestCase):
         self._event(t0 + 2400, "ticket.refilled",
                     {"source": "江户城", "resource": "小判", "delta": -300,
                      "ticket_price": 300}, run_id="run-new", script="edocastle")
+        linked_id = self._event(
+            t0 + 2700, "ticket.refilled",
+            {"source": "江户城", "resource": "小判", "delta": -300,
+             "ticket_price": 300}, run_id="run-linked", script="edocastle")
+        self._event(t0 + 2701, "resource.change",
+                    {"resource": "小判", "delta": -300,
+                     "source": "ticket.refilled", "source_event_id": linked_id,
+                     "attribution": "confirmed", "evidence": "confirmed_refill_flow"},
+                    run_id="run-linked", script="edocastle")
         self._event(t0 + 3000, "ticket.refilled", {"source": "RAID"},
                     run_id="run-raid", script="raid")
 
@@ -117,9 +126,9 @@ class ResourceLedgerTests(unittest.TestCase):
 
         koban = self._res(ledger, "小判")
         self.assertIsNone(koban["total_delta"])
-        self.assertEqual(koban["attributed_delta"], -1500)
+        self.assertEqual(koban["attributed_delta"], -1800)
         attrs = [a for a in ledger["attributions"] if a["resource"] == "小判"]
-        self.assertEqual(len(attrs), 5)
+        self.assertEqual(len(attrs), 6)
         self.assertTrue(all(a["confidence"] == "confirmed" for a in attrs))
 
     def test_cross_midnight_run_booked_by_observation_day(self):

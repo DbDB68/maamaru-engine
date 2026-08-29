@@ -549,7 +549,7 @@ class TelemetryStore:
                             "source": str(payload.get("source") or event_type),
                             "label": str(payload.get("note") or f"{resource} {int(delta):+d}"),
                             "confidence": str(payload.get("attribution") or "confirmed")}
-            elif event_type == "ticket.refilled":
+            elif event_type == "ticket.refilled" and row["id"] not in shadowed:
                 # v0.4.1 的江户城已经稳定记录“补过一张”，但没把固定的
                 # 300 小判写进 payload。兼容这些旧事实，让历史统计即时补账；
                 # 新事件优先使用自身携带的 resource/delta，不猜其他活动票价。

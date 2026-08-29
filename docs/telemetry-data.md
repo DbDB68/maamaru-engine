@@ -159,6 +159,13 @@
 - `resource.change` / `task_rewards.reward_popup`：任务「报酬一览」弹窗按格
   图标模板匹配 + 数量 OCR 确认的收益（evidence `reward_popup_ocr`）。
 
+### 统一资源流水约定
+
+玩法事件负责说明“发生了什么”，所有能确认的八资源收支另写一条
+`resource.change`。新流程应通过 `ToukenAgent.record_resource_change()` 交账，并在
+`source_event_id` 中关联玩法事件；库存快照只负责首末余额核对。统计器可以保留旧事件
+兼容读取，但不得继续把玩法专用事件当作新记账接口。
+
 **双写兼容**：未来玩法流程可发射 `resource.change` 事件；payload 带
 `source_event_id` 指向旧事件 id 时，聚合层跳过旧事件那一份，不重复聚合。
 

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from touken.agent import ToukenAgent
 from touken.flows.repair import RepairMixin
 from touken.flows.rewards import RewardsMixin
 from touken.flows.smith import SmithMixin
@@ -37,6 +38,39 @@ class _Host(SmithMixin, RepairMixin, RewardsMixin):
         if self.store is not None:
             return self.store.record_event(event_type, payload)
         return len(self.events)
+
+
+class ResourceChangeContractTests(unittest.TestCase):
+    def test_agent_emits_one_normalized_resource_change(self):
+        agent = ToukenAgent.__new__(ToukenAgent)
+        events = []
+        agent.record_event = lambda event_type, **payload: (
+            events.append((event_type, payload)) or 7)
+
+        event_id = agent.record_resource_change(
+            "小判", -300, source="ticket.refilled",
+            source_event_id=6, evidence="confirmed_refill_flow")
+
+        self.assertEqual(event_id, 7)
+        self.assertEqual(events, [("resource.change", {
+            "resource": "小判", "delta": -300,
+            "source": "ticket.refilled", "attribution": "confirmed",
+            "source_event_id": 6, "evidence": "confirmed_refill_flow",
+        })])
+
+    def test_agent_rejects_unknown_zero_and_fractional_changes(self):
+        agent = ToukenAgent.__new__(ToukenAgent)
+        events = []
+        agent.record_event = lambda event_type, **payload: events.append(
+            (event_type, payload))
+
+        self.assertIsNone(agent.record_resource_change(
+            "不存在", -1, source="test"))
+        self.assertIsNone(agent.record_resource_change(
+            "小判", 0, source="test"))
+        self.assertIsNone(agent.record_resource_change(
+            "小判", 1.5, source="test"))
+        self.assertEqual(events, [])
 
 
 class _RepairFakeMaa:

@@ -776,6 +776,12 @@ class _SafeDepartHost(BattleMixin):
 
     def record_event(self, event_type, **payload):
         self.events.append((event_type, payload))
+        return len(self.events)
+
+    def record_resource_change(self, resource, delta, **payload):
+        return self.record_event(
+            "resource.change", resource=resource, delta=delta,
+            attribution="confirmed", **payload)
 
     def _pick_team(self, team_no):
         return True
@@ -987,6 +993,12 @@ class SafeDepartChainTests(unittest.TestCase):
         self.assertIn(("ticket.refilled", {
             "source": "测试", "resource": "小判", "delta": -300,
             "ticket_price": 300,
+        }), host.events)
+        self.assertIn(("resource.change", {
+            "resource": "小判", "delta": -300,
+            "attribution": "confirmed", "source": "ticket.refilled",
+            "evidence": "confirmed_refill_flow", "note": "测试补手形",
+            "source_event_id": 1,
         }), host.events)
 
     def test_raid_style_recover_declined_uses_close(self):

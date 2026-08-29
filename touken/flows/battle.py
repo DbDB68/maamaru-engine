@@ -224,6 +224,33 @@ class BattleMixin:
 
     _recover_ok: bool = False
 
+    def _record_ticket_refill(self, cfg: dict, tag: str):
+        """补票事实与标准资源流水双写；无明确票价时只保留玩法事实。"""
+        if not hasattr(self, "record_event"):
+            return
+        source = tag.strip("[]")
+        price = int(cfg["ticket_price"]) if cfg.get("ticket_price") else None
+        refill_payload = {"source": source}
+        if price:
+            refill_payload.update(
+                resource="小判", delta=-price, ticket_price=price)
+        refill_id = self.record_event("ticket.refilled", **refill_payload)
+        if not price:
+            return
+        change = {
+            "source": "ticket.refilled",
+            "evidence": "confirmed_refill_flow",
+            "note": f"{source}补手形",
+        }
+        if isinstance(refill_id, int):
+            change["source_event_id"] = refill_id
+        if hasattr(self, "record_resource_change"):
+            self.record_resource_change("小判", -price, **change)
+        else:
+            self.record_event(
+                "resource.change", resource="小判", delta=-price,
+                attribution="confirmed", **change)
+
     def _recover_ticket_stream(self, cfg: dict, tag: str = "[出阵]"):
         """通用手形补充：补充 → 恢复1个 → 确定。"""
         self._recover_ok = False
@@ -506,14 +533,7 @@ class BattleMixin:
                     yield f"{tag} 手形补充失败，停止出阵"
                     return False, team_record_saved
                 refill_done = True
-                if hasattr(self, "record_event"):
-                    refill_payload = {"source": tag.strip("[]")}
-                    if cfg.get("ticket_price"):
-                        refill_payload.update(
-                            resource="小判",
-                            delta=-int(cfg["ticket_price"]),
-                            ticket_price=int(cfg["ticket_price"]))
-                    self.record_event("ticket.refilled", **refill_payload)
+                self._record_ticket_refill(cfg, tag)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
 
@@ -550,14 +570,7 @@ class BattleMixin:
                 self.maa.click(confirm)
                 time.sleep(1.5)
                 refill_done = True
-                if hasattr(self, "record_event"):
-                    refill_payload = {"source": tag.strip("[]")}
-                    if cfg.get("ticket_price"):
-                        refill_payload.update(
-                            resource="小判",
-                            delta=-int(cfg["ticket_price"]),
-                            ticket_price=int(cfg["ticket_price"]))
-                    self.record_event("ticket.refilled", **refill_payload)
+                self._record_ticket_refill(cfg, tag)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
 
