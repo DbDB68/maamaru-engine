@@ -659,6 +659,10 @@ class _DelayedRefreshClaimFakeMaa(_ClaimFakeMaa):
 class _GrayClaimButtonFakeMaa(_ClaimFakeMaa):
     """灰按钮会以 0.846 串中蓝模板，但灰模板本身是 1.000。"""
 
+    def __init__(self, activity_available=False):
+        super().__init__()
+        self.activity_available = activity_available
+
     def template_match(self, template, roi=None, threshold=0.8):
         if template == "一键领取.png":
             return Point(1130, 480) if threshold <= 0.846 else None
@@ -668,6 +672,11 @@ class _GrayClaimButtonFakeMaa(_ClaimFakeMaa):
 
     def exists(self, template, roi=None, threshold=0.8):
         return False
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if expected == "活动":
+            return Point(52, 615) if self.activity_available else None
+        return super().ocr(expected, roi, match_mode)
 
 
 class _RewardsHost(RewardsMixin):
@@ -745,6 +754,32 @@ class StalePopupRetryTests(unittest.TestCase):
                             for event, _ in host.events))
         self.assertFalse(any(event == "task_rewards.unconfirmed"
                              for event, _ in host.events))
+
+    def test_missing_activity_tab_is_skipped_instead_of_clicking_main_tab(self):
+        maa = _GrayClaimButtonFakeMaa()
+        host = _RewardsHost(maa)
+        host.config["task_reward"]["tabs"] = {"活动": [52, 615]}
+
+        messages = list(host.claim_task_rewards_stream())
+
+        self.assertTrue(any("当前没有活动任务标签" in message
+                            for message in messages))
+        self.assertTrue(any("不领取主线" in message for message in messages))
+        self.assertEqual(maa.claim_clicks, 0)
+        self.assertEqual(host.events, [])
+
+    def test_activity_tab_is_still_processed_when_it_returns(self):
+        maa = _GrayClaimButtonFakeMaa(activity_available=True)
+        host = _RewardsHost(maa)
+        host.config["task_reward"]["tabs"] = {"活动": [52, 615]}
+
+        messages = list(host.claim_task_rewards_stream())
+
+        self.assertTrue(any("切换到 活动" in message for message in messages))
+        self.assertTrue(any("已确认没有可领奖励" in message
+                            for message in messages))
+        self.assertTrue(any(event == "task_rewards.none"
+                            for event, _ in host.events))
 
 
 if __name__ == "__main__":

@@ -201,7 +201,7 @@ class RewardsMixin:
 
     def claim_task_rewards_stream(self):
         """
-        流式领取任务奖励（日常、月常、活动）
+        流式领取任务奖励（日常、月常，以及当前存在时的活动）
         主线不领（长线成就，不会过期）
 
         Yields:
@@ -223,6 +223,19 @@ class RewardsMixin:
         # 2. 领取各标签页奖励
         tabs = task_config.get("tabs", {})
         for tab_name, tab_coord in tabs.items():
+            # 活动任务标签会随运营开放/撤下，不能永久删配置。点击前只在旧活动
+            # 按钮自己的局部区域确认纵排“活动”；不能全屏搜，弹窗背后的出阵
+            # 菜单也有“活动”。标签不存在时旧坐标会落到主线，必须禁止点击。
+            if tab_name == "活动":
+                self.maa.screenshot(force=True)
+                tab_x, tab_y = map(int, tab_coord)
+                activity_roi = roi_4to4(
+                    max(0, tab_x - 28), max(0, tab_y - 70),
+                    min(1280, tab_x + 28), min(720, tab_y + 70))
+                if not self.maa.ocr("活动", activity_roi,
+                                    match_mode="contains"):
+                    yield "[TASK] 当前没有活动任务标签，跳过（不领取主线）"
+                    continue
             yield f"[TASK] 切换到 {tab_name}..."
 
             # 点击标签
