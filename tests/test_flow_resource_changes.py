@@ -108,6 +108,7 @@ class _RewardFakeMaa:
     def __init__(self, cells, title_found=True):
         self.cells = cells  # {格号: (匹配模板 or None, 数量文本 or None)}
         self.title_found = title_found
+        self.saved = []
 
     def screenshot(self, force=False):
         return None
@@ -133,6 +134,10 @@ class _RewardFakeMaa:
         if cell and cell[1] is not None and y1 == 260:
             return [(cell[1], Point(x1 + 50, 278))]
         return []
+
+    def save_screenshot(self, path, force=True):
+        self.saved.append((path, force))
+        return True
 
 
 class ForgeResourceChangeTests(unittest.TestCase):
@@ -260,6 +265,9 @@ class RewardPopupTests(unittest.TestCase):
         self.assertEqual(items, [("木炭", 1050), ("小判", 650)])
         self.assertEqual(len(notes), 1)
         self.assertIn("图标不认识", notes[0])
+        self.assertIn("已留取同源运行截图", notes[0])
+        self.assertEqual(len(host.maa.saved), 1)
+        self.assertFalse(host.maa.saved[0][1])
 
     def test_popup_absent_returns_none(self):
         host = _Host({})

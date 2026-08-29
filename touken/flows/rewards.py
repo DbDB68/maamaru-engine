@@ -411,6 +411,7 @@ class RewardsMixin:
                             match_mode="contains"):
             return None
         items, notes = [], []
+        unknown_frame_saved = False
         for i in range(_POPUP_MAX_CELLS):
             x = _POPUP_CELL_X + i * _POPUP_CELL_PITCH
             icon_roi = roi_4to4(x, _POPUP_ICON_Y[0],
@@ -425,7 +426,22 @@ class RewardsMixin:
             if resource is None and qty is None:
                 break  # 空格 = 这一页奖励到此为止
             if resource is None:
-                notes.append(f"第{i + 1}格图标不认识（数量 {qty}），跳过")
+                sample_note = ""
+                if qty is not None and not unknown_frame_saved:
+                    save_screenshot = getattr(self.maa, "save_screenshot", None)
+                    if callable(save_screenshot):
+                        try:
+                            from ..runtime_paths import DEBUG_DIR
+                            sample = DEBUG_DIR / (
+                                f"reward-unknown-{time.strftime('%Y%m%d-%H%M%S')}.png")
+                            unknown_frame_saved = bool(
+                                save_screenshot(str(sample), force=False))
+                            if unknown_frame_saved:
+                                sample_note = "，已留取同源运行截图"
+                        except Exception:
+                            pass
+                notes.append(
+                    f"第{i + 1}格图标不认识（数量 {qty}）{sample_note}，跳过")
                 continue
             if qty is None:
                 notes.append(f"第{i + 1}格 {resource} 数量读取失败，跳过")
