@@ -272,6 +272,19 @@ class EdocastleBattleGateTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
 
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_auto_formation_hands_battle_to_result_gate_without_timeout(self, _sleep):
+        flow = _BattleGateHost([])
+        flow._wait_formation_page = lambda *args, **kwargs: True
+        flow.choose_formation = lambda **kwargs: "auto"
+        flow._formation_mode_state = lambda *args, **kwargs: self.fail(
+            "自动阵形接管后不该再等待阵形标题消失"
+        )
+
+        self.assertTrue(flow._fight_one_battle(
+            {}, "auto", "鱼鳞阵", [775, 695]
+        ))
+
 
 class _EntryGateHost(_BattleGateHost):
     def __init__(self, frames, auto_marker=False):

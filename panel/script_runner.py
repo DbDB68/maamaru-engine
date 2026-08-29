@@ -36,7 +36,8 @@ _SCRIPTS: dict[str, dict] = {}
 # 子进程多久一行输出都没有 = 判定卡死
 SILENCE_TIMEOUT_SEC = 300
 
-# 工人进程约定退出码：MAA 连续识别超时后自我了断
+# 工人进程约定退出码：玩法安全中止 / MAA 连续识别超时后自我了断
+EXIT_FLOW_ABORTED = 42
 EXIT_MAA_DEAD = 43
 
 
@@ -180,6 +181,8 @@ class ScriptRunner:
             final = f"[脚本] 看门狗已处决卡死的工人进程 — run {run_id}"
         elif rc == 0:
             final = f"[脚本] 完成 — run {run_id}"
+        elif rc == EXIT_FLOW_ABORTED:
+            final = f"[脚本] 玩法遇到异常，已安全停止且未计作完成 — run {run_id}"
         elif rc == EXIT_MAA_DEAD:
             final = (f"[脚本] MAA 连续超时，工人进程自我了断 — run {run_id}。"
                      "建议重启模拟器后再跑")

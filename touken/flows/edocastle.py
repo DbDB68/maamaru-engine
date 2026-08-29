@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from ..edo_route import EDOCASTLE_TOUR, decide_next, load_archive
+from ..flow_control import FlowAborted
 from ..maa_adapter import roi_4to4
 
 
@@ -196,26 +197,37 @@ class EdocastleMixin:
             delta = keys_after - keys_before
             total_keys += delta
             period = f"江户城潜入调查@{time.strftime('%Y-%m-%d')}"
-            if hasattr(self, "record_event"):
-                self.record_event(
-                    "edocastle.run_completed",
-                    keys=delta,
-                    period=period,
-                    difficulty=4,
-                    run_no=runs_done + 1,
-                    team_no=team_no,
-                )
             if ok:
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "edocastle.run_completed",
+                        keys=delta,
+                        period=period,
+                        difficulty=4,
+                        run_no=runs_done + 1,
+                        team_no=team_no,
+                    )
                 yield (
                     f"[江户城] ✓ 第 {runs_done + 1} 圈收工，本圈钥匙 {delta:+d} "
                     f"（累计 {total_keys} 把）"
                 )
             else:
+                if hasattr(self, "record_event"):
+                    self.record_event(
+                        "edocastle.run_aborted",
+                        keys_retained=delta,
+                        period=period,
+                        difficulty=4,
+                        attempted_run_no=runs_done + 1,
+                        team_no=team_no,
+                    )
                 yield (
                     f"[江户城] ⚠️ 第 {runs_done + 1} 圈意外结束，本圈钥匙 {delta:+d}，"
                     "先停下了"
                 )
-                return
+                raise FlowAborted(
+                    f"江户城第 {runs_done + 1} 圈战斗状态异常，已主动回城"
+                )
             runs_done += 1
 
         yield (
@@ -472,6 +484,12 @@ class EdocastleMixin:
             if formation_mode == "auto" and self._formation_auto_marker_visible():
                 return True
             return False
+
+        # 自动阵形已经把这场交给游戏。这里不能再要求阵形页在固定 5 秒内
+        # 消失：索敌/演出稍慢时标题和“自动”标志会继续留在画面上，后面的
+        # 战果门闩本来就会安静等到战斗结果出现，再开始点击跳过。
+        if result == "auto":
+            return True
 
         # 等阵形页消失
         for _ in range(10):

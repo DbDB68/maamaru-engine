@@ -68,6 +68,7 @@ def main():
     # 所以要从 script_runner 拿，不能 from .server import _SCRIPTS（会 ImportError）
     from . import server as _server  # noqa: F401
     from .script_runner import _SCRIPTS
+    from touken.flow_control import FlowAborted
     info = _SCRIPTS.get(script_name)
     if not info:
         print(f"[工人] 不认识的脚本: {script_name}", flush=True)
@@ -77,6 +78,9 @@ def main():
     try:
         for msg in info["fn"](config_path, params):
             print(msg, flush=True)
+    except FlowAborted as exc:
+        print(f"[工人] 安全停止：{exc}", flush=True)
+        sys.exit(42)
     except SystemExit:
         raise
     except Exception as exc:
