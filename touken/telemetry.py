@@ -405,7 +405,8 @@ class TelemetryStore:
             from_ts, to_ts = to_ts, from_ts
         conn = self._conn()
         event_types = ("inventory.captured", "inventory.peek", "osaka.koban_session",
-                       "repair.session_completed", "resource.change")
+                       "repair.session_completed", "resource.change",
+                       "ticket.refilled")
         marks = ",".join("?" * len(event_types))
         rows = conn.execute(
             "SELECT id, ts, run_id, script, event_type, payload FROM events "
@@ -548,6 +549,20 @@ class TelemetryStore:
                             "source": str(payload.get("source") or event_type),
                             "label": str(payload.get("note") or f"{resource} {int(delta):+d}"),
                             "confidence": str(payload.get("attribution") or "confirmed")}
+            elif event_type == "ticket.refilled":
+                # v0.4.1 的江户城已经稳定记录“补过一张”，但没把固定的
+                # 300 小判写进 payload。兼容这些旧事实，让历史统计即时补账；
+                # 新事件优先使用自身携带的 resource/delta，不猜其他活动票价。
+                resource = str(payload.get("resource") or "")
+                delta = payload.get("delta")
+                if (not resource and row["script"] == "edocastle"
+                        and payload.get("source") == "江户城"):
+                    resource, delta = "小判", -300
+                if resource and isinstance(delta, (int, float)) and delta:
+                    item = {"resource": resource, "delta": delta,
+                            "source": "ticket.refilled",
+                            "label": f"{payload.get('source') or '活动'}补手形 {int(delta):+d}",
+                            "confidence": "confirmed"}
             if item:
                 item.update({"id": f"a{len(attributions) + 1}", "ts": row["ts"],
                              "script": row["script"], "run_id": row["run_id"],

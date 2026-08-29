@@ -772,6 +772,10 @@ class _SafeDepartHost(BattleMixin):
         self._cancel = cancel
         self.saved_record = False
         self.restored = False
+        self.events = []
+
+    def record_event(self, event_type, **payload):
+        self.events.append((event_type, payload))
 
     def _pick_team(self, team_no):
         return True
@@ -972,12 +976,18 @@ class SafeDepartChainTests(unittest.TestCase):
 
     def test_raid_style_recover_is_reused_by_safe_depart_chain(self):
         maa = _RecoverMaa()
+        cfg = {**_RECOVER_CFG, "ticket_price": 300}
+        host = _SafeDepartHost(maa=maa)
         msgs, result = _drain_chain(
-            _SafeDepartHost(maa=maa), _RECOVER_CFG, auto_refill=True)
+            host, cfg, auto_refill=True)
         self.assertEqual(result, (True, False))
         self.assertEqual(maa.clicked, [
             _RecoverMaa.REFILL, _RecoverMaa.RECOVER, _RecoverMaa.CONFIRM])
         self.assertTrue(any("手形补充完成" in m for m in msgs), msgs)
+        self.assertIn(("ticket.refilled", {
+            "source": "测试", "resource": "小判", "delta": -300,
+            "ticket_price": 300,
+        }), host.events)
 
     def test_raid_style_recover_declined_uses_close(self):
         maa = _RecoverMaa()

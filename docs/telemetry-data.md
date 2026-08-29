@@ -70,6 +70,7 @@
 - `inventory.captured`、`inventory.peek`、`osaka.koban_session`
 - `resource.change`（通用资源流水，见下文）
 - `yosari.ticket_refilled`（归城提灯补充完成；金额识别失败时仍保留事实）
+- `ticket.refilled`（活动手形补充完成；江户城记录固定票价并计入小判支出，v0.4.1 的江户城旧事件按 300 小判/张兼容回算）
 
 新增事件应使用 `领域.过去式动作`，payload 只放数据，不放展示文案。轻量的玩法事件和
 审神者报备长期保留，用于跨月、跨年的成绩单；体积较大的 OCR 观察明细默认保留 90 天。

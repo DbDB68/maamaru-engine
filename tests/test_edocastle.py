@@ -143,6 +143,7 @@ class EdocastleConfigTests(unittest.TestCase):
         edo = cfg["edocastle"]
         self.assertEqual(edo["difficulty"], 4)
         self.assertEqual(edo["map_archive"], "resource/base/maps/edocastle-4.json")
+        self.assertEqual(edo["ticket_price"], 300)
         self.assertEqual(edo["tour"], EDOCASTLE_TOUR)
         self.assertIn("team_ui_ocr", edo)
         self.assertEqual(edo["map_ready"]["expected"], "地图点选择")

@@ -202,10 +202,11 @@ class RuntimePathsTests(unittest.TestCase):
             # 安全出阵链和地图可操作门闩依赖的键全部补齐
             for key in ("repair_threshold", "auto_equip", "injury_deny_button",
                         "injury_stamps", "injury_stamp_roi", "injury_status_roi",
-                        "map_ready"):
+                        "map_ready", "ticket_price"):
                 self.assertIn(key, merged, f"老安装没补到 edocastle.{key}")
             self.assertEqual(
                 merged["map_ready"]["expected"], "地图点选择")
+            self.assertEqual(merged["ticket_price"], 300)
             # 用户已有的值原样保留（递归补键不覆盖）
             self.assertEqual(merged["team_no"], 4)
             self.assertEqual(merged["max_runs"], 2)

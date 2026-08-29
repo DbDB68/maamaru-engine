@@ -251,6 +251,9 @@ class EdocastleMixin:
         departure_cfg = dict(cfg)
         departure_cfg["ticket_recover"] = self.config.get(
             "raid", {}).get("ticket_recover", {})
+        # 当前江户城每次恢复一个手形固定消耗 300 小判。老配置还没有这个
+        # 字段时也要记得上账；example 的补键迁移会为后续安装补齐显式配置。
+        departure_cfg["ticket_price"] = int(cfg.get("ticket_price", 300))
         ok, team_record_saved = yield from self._safe_depart_stream(
             departure_cfg, team_no, "[江户城]",
             repair_threshold=repair_threshold,

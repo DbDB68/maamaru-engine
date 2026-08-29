@@ -507,8 +507,13 @@ class BattleMixin:
                     return False, team_record_saved
                 refill_done = True
                 if hasattr(self, "record_event"):
-                    self.record_event("ticket.refilled",
-                                      source=tag.strip("[]"))
+                    refill_payload = {"source": tag.strip("[]")}
+                    if cfg.get("ticket_price"):
+                        refill_payload.update(
+                            resource="小判",
+                            delta=-int(cfg["ticket_price"]),
+                            ticket_price=int(cfg["ticket_price"]))
+                    self.record_event("ticket.refilled", **refill_payload)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
 
@@ -546,8 +551,13 @@ class BattleMixin:
                 time.sleep(1.5)
                 refill_done = True
                 if hasattr(self, "record_event"):
-                    self.record_event("ticket.refilled",
-                                      source=tag.strip("[]"))
+                    refill_payload = {"source": tag.strip("[]")}
+                    if cfg.get("ticket_price"):
+                        refill_payload.update(
+                            resource="小判",
+                            delta=-int(cfg["ticket_price"]),
+                            ticket_price=int(cfg["ticket_price"]))
+                    self.record_event("ticket.refilled", **refill_payload)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
 

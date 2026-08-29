@@ -100,6 +100,28 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertIsNone(day["total_delta"])
         self.assertEqual(day["attributed_delta"], -3)
 
+    def test_edocastle_ticket_refills_include_legacy_events(self):
+        # v0.4.1 只记了补票事实，没带金额；当前江户城旧事件固定按 300/张补账。
+        t0 = sh("2026-08-28 20:00:00")
+        for offset in (0, 600, 1200, 1800):
+            self._event(t0 + offset, "ticket.refilled", {"source": "江户城"},
+                        run_id=f"run-{offset}", script="edocastle")
+        # 新事件自身带金额；未知活动的无金额事件不能瞎猜。
+        self._event(t0 + 2400, "ticket.refilled",
+                    {"source": "江户城", "resource": "小判", "delta": -300,
+                     "ticket_price": 300}, run_id="run-new", script="edocastle")
+        self._event(t0 + 3000, "ticket.refilled", {"source": "RAID"},
+                    run_id="run-raid", script="raid")
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 3600)
+
+        koban = self._res(ledger, "小判")
+        self.assertIsNone(koban["total_delta"])
+        self.assertEqual(koban["attributed_delta"], -1500)
+        attrs = [a for a in ledger["attributions"] if a["resource"] == "小判"]
+        self.assertEqual(len(attrs), 5)
+        self.assertTrue(all(a["confidence"] == "confirmed" for a in attrs))
+
     def test_cross_midnight_run_booked_by_observation_day(self):
         # 跨日 run：收益按观察发生日记账，首日只有单点观察无法结账
         t0 = sh("2026-08-20 23:30:00")

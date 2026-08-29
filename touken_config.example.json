@@ -1152,6 +1152,7 @@
     "difficulty": 4,
     "map_archive": "resource/base/maps/edocastle-4.json",
     "use_koban_refill": false,
+    "ticket_price": 300,
     "max_runs": 0,
     "repair_threshold": "heavy",
     "auto_equip": false,
