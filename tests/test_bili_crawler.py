@@ -30,6 +30,8 @@ class ExtractScheduleTests(unittest.TestCase):
         cands = crawler.extract_schedule_candidates(_SAMPLE_TEXT, self.PUB)
         self.assertEqual(len(cands), 2)
         self.assertEqual(cands[0]["section"], "1")
+        self.assertEqual(cands[0]["section_title"],
+                         "全新活动「江户城潜入调查」开启")
         self.assertEqual(cands[0]["name"], "江户城潜入调查")
         self.assertEqual(cands[0]["start_at"], "2026-08-27T10:00:00+08:00")
         self.assertEqual(cands[0]["end_at"], "2026-09-10T05:00:00+08:00")
@@ -77,14 +79,23 @@ class NeedsFetchTests(unittest.TestCase):
         item = {"update_date": "2026-08-27",
                 "url": "https://www.bilibili.com/read/cv1",
                 "schedule_candidates": [{"name": "x"}],
+                "candidate_schema_version": crawler.CANDIDATE_SCHEMA_VERSION,
                 "candidates_extracted_at": self.NOW - 3600}
         self.assertFalse(crawler._needs_schedule_fetch(item, self.NOW))
+
+    def test_old_candidate_schema_refetches_immediately(self):
+        item = {"update_date": "2026-08-27",
+                "url": "https://www.bilibili.com/read/cv1",
+                "schedule_candidates": [{"name": "x"}],
+                "candidates_extracted_at": self.NOW - 3600}
+        self.assertTrue(crawler._needs_schedule_fetch(item, self.NOW))
 
     def test_stale_candidates_refetch(self):
         # 候选超过一周：公告可能修订过，重抓自愈
         item = {"update_date": "2026-08-27",
                 "url": "https://www.bilibili.com/read/cv1",
                 "schedule_candidates": [{"name": "x"}],
+                "candidate_schema_version": crawler.CANDIDATE_SCHEMA_VERSION,
                 "candidates_extracted_at": self.NOW - 8 * 86400}
         self.assertTrue(crawler._needs_schedule_fetch(item, self.NOW))
 

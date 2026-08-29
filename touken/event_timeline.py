@@ -35,6 +35,34 @@ SCRIPT_EVENT_MAP = {
     "edocastle": ["江户城潜入调查"],
 }
 
+# “待确认日期”只承担可规划活动的兜底，不展示景趣、礼包、便利道具等
+# 同样带活动时间的公告小节。旧缓存没有 section_title，需靠活动名保守判断；
+# 新版爬虫会带完整小节标题，可用“活动/开启”等语义进一步确认。
+_PLANNABLE_NAME_RE = re.compile(
+    r"江户城|大阪城|联队战|秘宝之里|战术强化训练|大作战|地下城|"
+    r"特命调查|夜花夺还|对大侵寇|连队战")
+_PLANNABLE_SECTION_RE = re.compile(
+    r"活动|开启|调查|联队战|大阪城|秘宝之里|战术强化训练|大作战")
+_NON_PLANNABLE_RE = re.compile(
+    r"庭院|景趣|登录|礼包|福袋|便利道具|刀装|锻刀|内番|兑换所|商店")
+
+
+def _is_plannable_candidate(cand: dict) -> bool:
+    """公告时间段是否值得进入玩家的活动规划。
+
+    宁可暂不展示模糊的道具/景趣，也不把公告目录编号冒充活动；真正已知的
+    活动系列按名字保留，新抓取数据还会结合完整小节标题判断。
+    """
+    name = str(cand.get("name") or "").strip()
+    if not name or name.isdigit() or _NON_PLANNABLE_RE.search(name):
+        return False
+    if _PLANNABLE_NAME_RE.search(name):
+        return True
+    section_title = str(cand.get("section_title") or "").strip()
+    return bool(section_title
+                and not _NON_PLANNABLE_RE.search(section_title)
+                and _PLANNABLE_SECTION_RE.search(section_title))
+
 
 def _parse_dt(value) -> datetime | None:
     """ISO 带时刻 → datetime；没有就 None。"""
@@ -149,6 +177,8 @@ def build_timeline(cards: dict, abacuses: list[dict],
     seen = set()
     for ann in announcements or []:
         for cand in ann.get("schedule_candidates") or []:
+            if not _is_plannable_candidate(cand):
+                continue
             if cand.get("name") and cand["name"] in (cards or {}):
                 continue  # 已有正式卡，不重复进待确认
             end_dt = _parse_dt(cand.get("end_at"))

@@ -103,13 +103,29 @@ class UnverifiedTests(unittest.TestCase):
     def test_unknown_candidate_stays_unverified(self):
         anns = [{"title": "8月27日更新公告", "url": "u1",
                  "schedule_candidates": [
-                     {"section": "6", "name": "幸运草",
+                     {"section": "6", "name": "秘宝之里",
+                      "section_title": "新活动「秘宝之里」开启",
                       "start_at": "2026-08-27T10:00:00+08:00",
                       "end_at": "2026-09-03T10:00:00+08:00"}]}]
         tl = event_timeline.build_timeline({}, [], anns, now=NOW)
         self.assertEqual(len(tl["unverified"]), 1)
-        self.assertEqual(tl["unverified"][0]["name"], "幸运草")
+        self.assertEqual(tl["unverified"][0]["name"], "秘宝之里")
         self.assertEqual(tl["unverified"][0]["announcement"], "8月27日更新公告")
+
+    def test_catalog_numbers_scenery_and_items_are_not_candidates(self):
+        anns = [{"title": "8月27日更新公告", "url": "u1",
+                 "schedule_candidates": [
+                     {"section": "2", "name": None,
+                      "start_at": "2026-08-27T10:00:00+08:00",
+                      "end_at": "2026-09-10T05:00:00+08:00"},
+                     {"section": "6", "name": "夏日庭院·繁秾",
+                      "start_at": "2026-08-27T10:00:00+08:00",
+                      "end_at": "2026-09-03T10:00:00+08:00"},
+                     {"section": "7", "name": "幸运草",
+                      "start_at": "2026-08-27T10:00:00+08:00",
+                      "end_at": "2026-09-03T10:00:00+08:00"}]}]
+        tl = event_timeline.build_timeline({}, [], anns, now=NOW)
+        self.assertEqual(tl["unverified"], [])
 
     def test_ended_candidates_dropped(self):
         anns = [{"title": "老公告", "url": "u0",
@@ -121,7 +137,7 @@ class UnverifiedTests(unittest.TestCase):
         self.assertEqual(tl["unverified"], [])
 
     def test_duplicate_candidates_across_announcements_kept_once(self):
-        cand = {"section": "9", "name": "夏夜庭院·七夕",
+        cand = {"section": "9", "name": "秘宝之里",
                 "start_at": "2026-08-13T10:00:00+08:00",
                 "end_at": "2026-09-10T10:00:00+08:00"}
         anns = [{"title": "公告甲", "url": "u1",

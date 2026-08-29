@@ -34,6 +34,7 @@ WBI_MIXIN_TAB = [46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
                  37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
                  22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52]
 KEEP_WEEKS = 12
+CANDIDATE_SCHEMA_VERSION = 2
 
 _UPDATE_RE = re.compile(r"(\d{1,2})月(\d{1,2})日更新公告")
 _EVENT_RE = re.compile(r"「([^」]+)」")
@@ -136,16 +137,19 @@ def extract_schedule_candidates(text: str, publish_time: float) -> list[dict]:
         end = _to_iso(pub, m2, d2, h2, mi2)
         if not start or not end:
             continue
-        section, name = None, None
+        section, section_title, name = None, None, None
         for prev in reversed(lines[:idx]):
             sec = _SECTION_RE.match(prev)
             if sec:
                 section = sec.group(1)
-                names = _EVENT_RE.findall(sec.group(2))
+                section_title = sec.group(2).strip()
+                names = _EVENT_RE.findall(section_title)
                 if names:
                     name = names[-1]
                 break
-        candidates.append({"section": section, "name": name,
+        candidates.append({"section": section,
+                           "section_title": section_title,
+                           "name": name,
                            "start_at": start, "end_at": end})
     return candidates
 
@@ -198,6 +202,8 @@ def _needs_schedule_fetch(item: dict, now: float) -> bool:
     candidates = item.get("schedule_candidates")
     if not candidates:
         return True
+    if item.get("candidate_schema_version") != CANDIDATE_SCHEMA_VERSION:
+        return True
     return now - float(item.get("candidates_extracted_at") or 0) > CANDIDATES_TTL
 
 
@@ -247,6 +253,7 @@ def main() -> int:
             found = extract_schedule_candidates(text, item["publish_time"])
             if found:
                 item["schedule_candidates"] = found
+                item["candidate_schema_version"] = CANDIDATE_SCHEMA_VERSION
                 item["candidates_extracted_at"] = time.time()
         except Exception as exc:  # 单篇失败不拖垮整批
             print(f"[爬虫] cv{cvid} 正文抓取失败：{exc}", file=sys.stderr)
