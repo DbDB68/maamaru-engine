@@ -32,7 +32,6 @@ let pollTimer = 0
 let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
-const reportMode = ref<'report' | 'planning'>('report')
 const reportStageCollapsed = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
@@ -184,12 +183,7 @@ async function pollStatus() {
   } catch (_) {}
 }
 function onSchedulerWarning(event: Event) { schedulerWarning.value = String((event as CustomEvent).detail || '') }
-function onReportModeChange(value: 'report' | 'planning') {
-  reportMode.value = value
-  if (value !== 'report') reportStageCollapsed.value = false
-}
 function onReportScroll(event: Event) {
-  if (reportMode.value !== 'report') return
   const scrollTop = (event.currentTarget as HTMLElement | null)?.scrollTop || 0
   if (reportStageCollapsed.value) {
     if (scrollTop < 12) reportStageCollapsed.value = false
@@ -355,7 +349,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel @mode-change="onReportModeChange" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>

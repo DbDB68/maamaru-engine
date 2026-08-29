@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, ManualSession, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
@@ -13,10 +13,6 @@ import type { ChartSeries } from './report/reportModel'
 
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>('report')
-const emit = defineEmits<{
-  (event: 'mode-change', value: 'report' | 'planning'): void
-}>()
-watch(honmaruTab, value => emit('mode-change', value), { immediate: true })
 const view = ref<'chart' | 'records'>('chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
