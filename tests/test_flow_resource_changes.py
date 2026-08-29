@@ -283,6 +283,21 @@ class RewardPopupTests(unittest.TestCase):
         self.assertTrue(any("模板撞车" in note for note in notes), notes)
         self.assertEqual(len(host.maa.saved), 1)
 
+    def test_unknown_icon_with_nonnumeric_ocr_captures_frame(self):
+        cells = {
+            0: ("资源/icon木炭.png", "500"),
+            1: (None, "a"),  # 实机：加速符格的数量 1 被 OCR 成字母 a
+        }
+        host = _Host({})
+        host.maa = _RewardFakeMaa(cells)
+
+        items, notes = host._read_reward_popup()
+
+        self.assertEqual(items, [("木炭", 500)])
+        self.assertTrue(any("OCR 未读成数字" in note for note in notes), notes)
+        self.assertEqual(len(host.maa.saved), 1)
+        self.assertFalse(host.maa.saved[0][1])
+
     def test_popup_absent_returns_none(self):
         host = _Host({})
         host.maa = _RewardFakeMaa({}, title_found=False)

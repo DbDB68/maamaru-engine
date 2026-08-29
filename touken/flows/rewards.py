@@ -448,15 +448,17 @@ class RewardsMixin:
                 if self.maa.template_match(template, roi=icon_roi, threshold=0.8):
                     resource = name
                     break
-            qty = self._read_popup_qty(roi_4to4(
-                x, _POPUP_QTY_Y[0], x + _POPUP_CELL_W, _POPUP_QTY_Y[1]))
-            if resource is None and qty is None:
+            qty, qty_observed = self._read_popup_qty(roi_4to4(
+                x, _POPUP_QTY_Y[0], x + _POPUP_CELL_W, _POPUP_QTY_Y[1]),
+                with_presence=True)
+            if resource is None and qty is None and not qty_observed:
                 break  # 空格 = 这一页奖励到此为止
             if resource is None:
                 sample_note = ("，已留取同源运行截图"
-                               if qty is not None and _save_unknown_frame() else "")
+                               if _save_unknown_frame() else "")
+                qty_label = qty if qty is not None else "OCR 未读成数字"
                 notes.append(
-                    f"第{i + 1}格图标不认识（数量 {qty}）{sample_note}，跳过")
+                    f"第{i + 1}格图标不认识（数量 {qty_label}）{sample_note}，跳过")
                 continue
             if qty is None:
                 notes.append(f"第{i + 1}格 {resource} 数量读取失败，跳过")
@@ -481,16 +483,19 @@ class RewardsMixin:
             items.append((resource, qty))
         return items, notes
 
-    def _read_popup_qty(self, roi):
-        """数量黑框 OCR：洗掉千分位逗号，读不出返回 None"""
+    def _read_popup_qty(self, roi, with_presence=False):
+        """数量黑框 OCR；可同时返回框内是否出现过任何 OCR 内容。"""
+        observed = False
+        value = None
         try:
             tokens = self.maa.ocr_all(roi)
+            observed = any(str(text).strip() for text, _ in tokens)
             m = re.search(r"[\d,]+", "".join(t for t, _ in tokens))
             if m:
-                return int(m.group(0).replace(",", ""))
+                value = int(m.group(0).replace(",", ""))
         except Exception:
             pass
-        return None
+        return (value, observed) if with_presence else value
 
     def _emit_reward_popup_changes(self, items, claimed_event_id):
         """报酬弹窗识别成功的物品各记一条 resource.change（正 delta）"""
