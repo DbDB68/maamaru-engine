@@ -184,11 +184,16 @@ async function pollStatus() {
 }
 function onSchedulerWarning(event: Event) { schedulerWarning.value = String((event as CustomEvent).detail || '') }
 function onReportScroll(event: Event) {
-  const scrollTop = (event.currentTarget as HTMLElement | null)?.scrollTop || 0
+  const scroller = event.currentTarget as HTMLElement | null
+  const scrollTop = scroller?.scrollTop || 0
   if (reportStageCollapsed.value) {
     if (scrollTop < 12) reportStageCollapsed.value = false
   } else if (scrollTop > 56) {
-    reportStageCollapsed.value = true
+    // 短规划页收掉舞台后可能立刻失去滚动空间，scrollTop 被压回顶部，
+    // 继而触发“展开 → 又可滚 → 再收起”的抖动。只有收起后仍有余量才动舞台。
+    const stageHeight = document.querySelector<HTMLElement>('.honmaru-stage')?.getBoundingClientRect().height || 0
+    const scrollRange = scroller ? scroller.scrollHeight - scroller.clientHeight : 0
+    if (scrollRange > stageHeight + 56) reportStageCollapsed.value = true
   }
 }
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
