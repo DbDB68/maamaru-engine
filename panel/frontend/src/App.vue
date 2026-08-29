@@ -34,6 +34,7 @@ const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
+const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
 const clock = ref(Date.now())
 
 const taskIcons: Record<string, string> = {
@@ -184,8 +185,15 @@ function onSchedulerWarning(event: Event) { schedulerWarning.value = String((eve
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
 async function save() {
-  await api.saveSettings(params.value)
-  message.value = '配置已保存'
+  try {
+    await Promise.all([
+      api.saveSettings(params.value),
+      selected.value === 'expedition' ? immediateExpedition.value?.save() : Promise.resolve(),
+    ])
+    message.value = selected.value === 'expedition' ? '配置和远征安排已保存' : '配置已保存'
+  } catch (error) {
+    message.value = error instanceof Error ? `保存失败：${error.message}` : '保存失败，请重试'
+  }
 }
 
 async function run() {
@@ -274,7 +282,7 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
           @stop="stop"
         >
           <template #advanced>
-            <ImmediateExpeditionFields v-if="selected === 'expedition'" />
+            <ImmediateExpeditionFields v-if="selected === 'expedition'" ref="immediateExpedition" />
             <AdvancedSettingLink
               v-else-if="selected === 'pumpkin'"
               title="南瓜目标名单"
