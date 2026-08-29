@@ -299,7 +299,7 @@ onMounted(load)
   <section class="planning-panel" :class="{ loading }">
     <header class="planning-toolbar">
       <div><h3>当前目标</h3><span v-if="planning?.goals.length">{{ planning.goals.length }} 个</span></div>
-      <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
+      <button v-if="!formOpen && planning?.goals.length" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
     </header>
 
     <p v-if="error" class="planning-error">{{ error }}</p>
