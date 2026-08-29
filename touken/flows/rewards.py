@@ -267,11 +267,18 @@ class RewardsMixin:
                 if confirm_point:
                     self.maa.click(confirm_point)
                     yield "[TASK] 任务信息已失效，刷新"
-                    time.sleep(0.5)
-                    self.maa.screenshot(force=True)
-                    retry = self.maa.template_match(
-                        template=claim_config["template"], roi=None,
-                        threshold=0.7)
+                    # 点确定后任务列表会自行刷新；实机并不保证 0.5 秒内就把
+                    # 一键领取按钮画回来。这里必须等页面就绪，不能只截一帧，
+                    # 否则随后按钮明明恢复了，状态机却已经放弃补点。
+                    retry = None
+                    for _ in range(8):
+                        time.sleep(0.5)
+                        self.maa.screenshot(force=True)
+                        retry = self.maa.template_match(
+                            template=claim_config["template"], roi=None,
+                            threshold=0.7)
+                        if retry:
+                            break
                     if retry:
                         yield f"[TASK] {tab_name} 补点一键领取..."
                         self.maa.click(retry)

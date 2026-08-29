@@ -622,6 +622,25 @@ class _ClaimFakeMaa:
         return []
 
 
+class _DelayedRefreshClaimFakeMaa(_ClaimFakeMaa):
+    """失效弹窗确认后，任务页需要数帧才重新画出一键领取。"""
+
+    def __init__(self):
+        super().__init__()
+        self.refresh_frames = 0
+
+    def screenshot(self, force=False):
+        if self.stale_dismissed and self.claim_clicks == 1:
+            self.refresh_frames += 1
+        return None
+
+    def template_match(self, template, roi=None, threshold=0.8):
+        if (template == "一键领取.png" and self.stale_dismissed
+                and self.claim_clicks == 1 and self.refresh_frames < 3):
+            return None
+        return super().template_match(template, roi, threshold)
+
+
 class _RewardsHost(RewardsMixin):
     """claim_task_rewards_stream 最小宿主"""
 
@@ -671,6 +690,18 @@ class StalePopupRetryTests(unittest.TestCase):
         self.assertEqual(changes[0]["source"], "task_rewards.reward_popup")
         # claimed 是宿主记录的第 1 条事件，source_event_id 应指向它
         self.assertEqual(changes[0]["source_event_id"], 1)
+
+    def test_stale_popup_waits_for_claim_button_after_refresh(self):
+        maa = _DelayedRefreshClaimFakeMaa()
+        host = _RewardsHost(maa)
+
+        messages = list(host.claim_task_rewards_stream())
+
+        self.assertGreaterEqual(maa.refresh_frames, 3)
+        self.assertEqual(maa.claim_clicks, 2)
+        self.assertTrue(any("补点一键领取" in message for message in messages))
+        self.assertTrue(any(event == "task_rewards.claimed"
+                            for event, _ in host.events))
 
 
 if __name__ == "__main__":
