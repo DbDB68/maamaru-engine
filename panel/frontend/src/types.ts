@@ -97,6 +97,27 @@ export interface HumanReport {
   claimed_delta?: number | null
 }
 
+export interface ManualSession {
+  id: number
+  created_at: number
+  script: string
+  activity: string
+  started_at: number
+  ended_at: number
+  loops: number
+  duration_seconds: number
+  average_loop_seconds: number
+  note?: string
+  source: 'manual'
+}
+
+export interface ActivityPace {
+  source: 'maamaru' | 'manual'
+  secondsPerLoop: number
+  loops: number
+  runStartedAt: number
+}
+
 export interface InventoryGap {
   gap_key: string
   started_at: number

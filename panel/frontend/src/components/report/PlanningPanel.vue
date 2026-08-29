@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
 import { api } from '../../api'
-import type { EventAbacus, EventTimelineReport, PlanningGoalAdvice, PlanningReport } from '../../types'
+import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 import EventTimeline from './EventTimeline.vue'
 
@@ -11,7 +11,7 @@ const loading = ref(false)
 const error = ref('')
 const timelineError = ref('')
 const goalNotice = ref('')
-const activityPaces = ref<Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }>>({})
+const activityPaces = ref<Record<string, ActivityPace[]>>({})
 
 const formOpen = ref(false)
 const saving = ref(false)
@@ -44,24 +44,30 @@ function applyTimingFallback(report: PlanningReport, runs: any[]) {
   }
 }
 
-function collectActivityPaces(runs: any[]) {
+function collectActivityPaces(runs: any[], manualSessions: ManualSession[]) {
   const definitions = [
     { event: '大阪城', script: 'osaka' },
     { event: '联队战', script: 'raid' },
+    { event: '江户城潜入调查', script: 'edocastle' },
   ]
-  const result: Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }> = {}
+  const result: Record<string, ActivityPace[]> = {}
   for (const definition of definitions) {
-    const latest = runs.find(run => (
+    const latestMachine = runs.find(run => (
       run.script === definition.script
       && Number(run.loops) > 0
       && Number(run.average_loop_seconds) > 0
     ))
-    if (!latest) continue
-    result[definition.event] = {
-      secondsPerLoop: Number(latest.average_loop_seconds),
-      loops: Number(latest.loops),
-      runStartedAt: Number(latest.started_at),
-    }
+    const latestManual = manualSessions.find(item => item.script === definition.script)
+    const paces: ActivityPace[] = []
+    if (latestMachine) paces.push({
+      source: 'maamaru', secondsPerLoop: Number(latestMachine.average_loop_seconds),
+      loops: Number(latestMachine.loops), runStartedAt: Number(latestMachine.started_at),
+    })
+    if (latestManual) paces.push({
+      source: 'manual', secondsPerLoop: Number(latestManual.average_loop_seconds),
+      loops: Number(latestManual.loops), runStartedAt: Number(latestManual.started_at),
+    })
+    if (paces.length) result[definition.event] = paces
   }
   activityPaces.value = result
 }
@@ -227,13 +233,16 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
 async function load() {
   loading.value = true
   try {
-    const [planningResult, timelineResult, runsResult] = await Promise.allSettled([
-      api.planning(), api.eventsTimeline(), api.dataRuns(100),
+    const [planningResult, timelineResult, runsResult, manualResult] = await Promise.allSettled([
+      api.planning(), api.eventsTimeline(), api.dataRuns(100), api.manualSessions(1000),
     ])
     if (planningResult.status === 'fulfilled') {
       if (runsResult.status === 'fulfilled') {
         applyTimingFallback(planningResult.value, runsResult.value.items)
-        collectActivityPaces(runsResult.value.items)
+        collectActivityPaces(
+          runsResult.value.items,
+          manualResult.status === 'fulfilled' ? manualResult.value.items : [],
+        )
       }
       planning.value = planningResult.value
       error.value = ''

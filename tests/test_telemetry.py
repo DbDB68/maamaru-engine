@@ -91,6 +91,43 @@ class TelemetryStoreTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.store.add_manual_inventory(resources, observed_at)
 
+    def test_manual_sessions_stay_separate_from_machine_runs(self):
+        item = self.store.add_manual_session(
+            script="osaka", started_at=100, ended_at=700, loops=2,
+            note="自己打的",
+        )
+
+        self.assertEqual(item["activity"], "大阪城")
+        self.assertEqual(item["average_loop_seconds"], 300)
+        self.assertEqual(item["source"], "manual")
+        self.assertEqual(self.store.recent_run_summaries(), [])
+        self.assertEqual(self.store.summary(days=365)["runs"]["total"], 0)
+        self.assertEqual(self.store.manual_sessions()[0]["note"], "自己打的")
+
+    def test_manual_session_validates_time_activity_and_loops(self):
+        cases = [
+            {"script": "unknown", "started_at": 100, "ended_at": 200, "loops": 1},
+            {"script": "osaka", "started_at": 200, "ended_at": 100, "loops": 1},
+            {"script": "osaka", "started_at": 100, "ended_at": 200, "loops": 0},
+            {"script": "osaka", "started_at": 100, "ended_at": 200, "loops": 1.5},
+        ]
+        for value in cases:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store.add_manual_session(**value)
+
+    def test_manual_sessions_filter_and_delete(self):
+        first = self.store.add_manual_session(
+            script="raid", started_at=100, ended_at=200, loops=1)
+        second = self.store.add_manual_session(
+            script="osaka", started_at=300, ended_at=500, loops=2)
+
+        self.assertEqual(
+            [item["id"] for item in self.store.manual_sessions(from_ts=250, to_ts=600)],
+            [second["id"]],
+        )
+        self.assertTrue(self.store.delete_manual_session(first["id"]))
+        self.assertFalse(self.store.delete_manual_session(first["id"]))
+
     def test_run_summary_counts_upkeep_speed_and_resource_delta(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         conn = self.store._conn()
@@ -364,6 +401,24 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertIn("current_state", summary)
         self.assertEqual(events["items"][0]["payload"]["name"], "测试刀")
         self.assertEqual(observations["items"][0]["expected"], "确定")
+
+    def test_manual_session_api_roundtrip_keeps_own_contract(self):
+        from panel.server import api_add_manual_session, api_manual_sessions
+
+        class _Req:
+            async def json(self):
+                return {
+                    "script": "raid", "started_at": 100, "ended_at": 400,
+                    "loops": 2, "note": "自己打的",
+                }
+
+        with patch("touken.telemetry._store", self.store):
+            created = asyncio.run(api_add_manual_session(_Req()))
+            listing = asyncio.run(api_manual_sessions(limit=10))
+
+        self.assertTrue(created["ok"])
+        self.assertEqual(created["item"]["average_loop_seconds"], 150)
+        self.assertEqual(listing["items"][0]["source"], "manual")
 
 
 if __name__ == "__main__":

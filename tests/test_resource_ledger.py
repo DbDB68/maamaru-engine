@@ -593,6 +593,9 @@ class ResourceLedgerTests(unittest.TestCase):
             self.assertTrue(ok["ok"])
             self.assertEqual(ok["item"]["resource"], "小判")
             self.assertEqual(ok["item"]["claimed_delta"], 111000)
+            precise_only = asyncio.run(api_add_human_report(_Req({
+                "occurred_at": t0 + 1, "resource": "加速符", "claimed_delta": -2})))
+            self.assertTrue(precise_only["ok"])
             bad = asyncio.run(api_add_human_report(_Req({
                 "occurred_at": t0, "activities": ["领邮箱"],
                 "resource": "元宝", "claimed_delta": 100})))
@@ -604,9 +607,11 @@ class ResourceLedgerTests(unittest.TestCase):
             listing = asyncio.run(api_human_reports(limit=10))
 
         items = listing["items"]
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["resource"], "小判")
-        self.assertEqual(items[0]["claimed_delta"], 111000)
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["resource"], "加速符")
+        self.assertEqual(items[0]["claimed_delta"], -2)
+        self.assertEqual(items[1]["resource"], "小判")
+        self.assertEqual(items[1]["claimed_delta"], 111000)
 
 
 if __name__ == "__main__":

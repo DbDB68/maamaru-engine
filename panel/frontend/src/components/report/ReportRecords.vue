@@ -3,11 +3,13 @@ import { computed, ref, watch } from 'vue'
 import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
+import type { ManualSession } from '../../types'
 import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runStatusLabel, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
   events: any[]
   runs: any[]
+  manualSessions: ManualSession[]
   selectedDate: string
   hasMoreEvents: boolean
   hasMoreRuns: boolean
@@ -18,6 +20,7 @@ const props = defineProps<{
 const emit = defineEmits<{ 'load-more': []; refresh: []; 'select-date': [date: string] }>()
 
 const timelineLimit = ref(20)
+const deletingManual = ref(0)
 
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
@@ -222,6 +225,7 @@ const allRecords = computed(() => {
   const runsById = new Map(props.runs.filter(run => run.run_id).map(run => [run.run_id, run]))
   return [
     ...props.runs.map(run => ({ kind: 'run' as const, ts: Number(run.started_at), run })),
+    ...props.manualSessions.map(session => ({ kind: 'manual' as const, ts: Number(session.started_at), session })),
     ...groupedActivityEvents.value
       .filter(item => {
         if (!item.run_id) return true
@@ -235,6 +239,7 @@ const allRecords = computed(() => {
 const selectedRecords = computed(() => allRecords.value.filter(entry => shanghaiDate(entry.ts) === props.selectedDate))
 const visibleRecords = computed(() => selectedRecords.value.slice(0, timelineLimit.value))
 const selectedRunCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'run').length)
+const selectedManualCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'manual').length)
 const selectedActivityCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'activity').length)
 const recordCounts = computed(() => {
   const counts = new Map<string, number>()
@@ -258,7 +263,9 @@ function calendarDayKey(date: { year: number; month: number; day: number }): str
   return `${date.year}-${String(date.month + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`
 }
 function recordKey(entry: any): string {
-  return entry.kind === 'run' ? `run:${entry.run.run_id}` : `event:${entry.item.id}`
+  if (entry.kind === 'run') return `run:${entry.run.run_id}`
+  if (entry.kind === 'manual') return `manual:${entry.session.id}`
+  return `event:${entry.item.id}`
 }
 function recordTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -285,6 +292,17 @@ function runEquipmentTotal(run: any) {
   return Math.max(Number(run.equipment_restores || 0), activityTotal)
 }
 function hasUpkeep(run: any) { return Boolean(runRepairTotal(run) || runSpeedupTotal(run) || runEquipmentTotal(run)) }
+
+async function deleteManualSession(session: ManualSession) {
+  if (!window.confirm(`删掉这条“${session.activity} ${session.loops} 圈”的手动记录吗？`)) return
+  deletingManual.value = session.id
+  try {
+    await api.deleteManualSession(session.id)
+    emit('refresh')
+  } catch (cause) {
+    attachError.value = cause instanceof Error ? cause.message : '手动记录删除失败'
+  } finally { deletingManual.value = 0 }
+}
 
 const attachingRun = ref('')
 const inventoryNotice = ref<Record<string, string>>({})
@@ -339,13 +357,13 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
     <section class="records-day">
       <header class="records-day-header">
         <div><small>{{ selectedDate }}</small><h3>{{ selectedDateLabel }}</h3></div>
-        <p><b>{{ selectedRunCount }}</b> 次任务<template v-if="selectedActivityCount"> · {{ selectedActivityCount }} 条单独记录</template></p>
+        <p><b>{{ selectedRunCount }}</b> 次まあ丸任务<template v-if="selectedManualCount"> · 你手动 {{ selectedManualCount }} 段</template><template v-if="selectedActivityCount"> · {{ selectedActivityCount }} 条单独记录</template></p>
       </header>
       <p v-if="attachError" class="report-error">{{ attachError }}</p>
       <p v-if="loading" class="report-empty">狐之助正在翻这一天的档案……</p>
       <Timeline v-else-if="visibleRecords.length" :value="visibleRecords" align="left" class="day-timeline">
         <template #opposite="slotProps"><time>{{ recordTime(slotProps.item.ts) }}</time></template>
-        <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : '·' }}</span></template>
+        <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : slotProps.item.kind === 'manual' ? '你' : '·' }}</span></template>
         <template #content="slotProps">
           <details v-if="slotProps.item.kind === 'run'" :key="recordKey(slotProps.item)" class="record-run">
             <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ runStatusLabel(slotProps.item.run) }} · {{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
@@ -359,6 +377,10 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
               <div v-if="!slotProps.item.run.has_resource_comparison && canAttachInventory(slotProps.item.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === slotProps.item.run.run_id" @click="attachInventory(slotProps.item.run)">{{ attachingRun === slotProps.item.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[slotProps.item.run.run_id]">{{ inventoryNotice[slotProps.item.run.run_id] }}</em></div>
             </div>
           </details>
+          <article v-else-if="slotProps.item.kind === 'manual'" :key="recordKey(slotProps.item)" class="record-manual">
+            <span><small>审神者手动</small><b>{{ slotProps.item.session.activity }} {{ slotProps.item.session.loops }} 圈</b><em>{{ elapsedTime(slotProps.item.session.duration_seconds) }} · {{ loopTime(slotProps.item.session.average_loop_seconds) }}</em><p v-if="slotProps.item.session.note">{{ slotProps.item.session.note }}</p></span>
+            <button type="button" :disabled="deletingManual === slotProps.item.session.id" @click="deleteManualSession(slotProps.item.session)">{{ deletingManual === slotProps.item.session.id ? '删除中…' : '删除' }}</button>
+          </article>
           <article v-else :key="recordKey(slotProps.item)" class="record-activity"><span><b>{{ activityTitle(slotProps.item.item) }}</b><small>{{ activityDetail(slotProps.item.item) }}</small></span><details v-if="slotProps.item.item.items.length > 1"><summary>查看 {{ slotProps.item.item.items.length }} 条明细</summary><p v-for="child in slotProps.item.item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></article>
         </template>
       </Timeline>
@@ -384,7 +406,14 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
 .calendar-day i { position: absolute; right: 1px; bottom: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--fox-gold); }
 .record-marker { display: grid; width: 28px; height: 28px; place-items: center; border: 2px solid var(--paper-card); border-radius: 50%; color: var(--ink-dim); background: var(--paper-panel); box-shadow: 0 0 0 1px var(--paper-line); font-size: 15px; }
 .record-marker.run { color: var(--ink); background: var(--fox-gold-pale); box-shadow: 0 0 0 1px var(--fox-gold); }
+.record-marker.manual { color: #315875; background: #e6eef4; box-shadow: 0 0 0 1px #7d9ab2; font-size: 11px; font-weight: 700; }
 .record-run, .record-activity { min-width: 0; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.record-manual { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 11px 12px; background: color-mix(in srgb, #e6eef4 70%, var(--paper)); border: 1px solid #a9bccb; border-radius: 10px; }
+.record-manual > span { display: grid; gap: 2px; min-width: 0; }
+.record-manual small, .record-manual em, .record-manual p { color: var(--ink-dim); font-size: 11px; font-style: normal; }
+.record-manual b { font-size: 14px; }
+.record-manual p { margin: 3px 0 0; }
+.record-manual > button { flex: none; padding: 3px 7px; color: var(--danger); background: transparent; border: 0; cursor: pointer; }
 .record-run > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; align-items: center; gap: 10px; padding: 11px 12px; cursor: pointer; list-style: none; }
 .record-run > summary::-webkit-details-marker { display: none; }
 .record-run > summary::after { content: '＋'; color: var(--fox-gold-deep); font-size: 16px; }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
+import type { ActivityPace, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -10,7 +10,7 @@ const props = defineProps<{
   error?: string
   estimateSaving?: string
   goalSaving?: string
-  activityPaces?: Record<string, { secondsPerLoop: number; loops: number; runStartedAt: number }>
+  activityPaces?: Record<string, ActivityPace[]>
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +22,7 @@ const emit = defineEmits<{
 const estimateInputs = ref<Record<string, string>>({})
 const targetInputs = ref<Record<string, string>>({})
 const paceWindows = ref<Record<string, 'event' | '1h' | '3h'>>({})
+const paceSources = ref<Record<string, 'maamaru' | 'manual'>>({})
 const nowMs = ref(Date.now())
 let clockTimer: number | undefined
 
@@ -100,8 +101,23 @@ function goalFor(entry: EventTimelineEntry) {
   return goalByEvent.value.get(entry.name)
 }
 
+function paceOptions(entry: EventTimelineEntry) {
+  return props.activityPaces?.[entry.name] || []
+}
+
 function paceFor(entry: EventTimelineEntry) {
-  return props.activityPaces?.[entry.name]
+  const options = paceOptions(entry)
+  const selected = paceSources.value[entry.name]
+  return options.find(item => item.source === selected)
+    || options.find(item => item.source === 'maamaru') || options[0]
+}
+
+function setPaceSource(entry: EventTimelineEntry, source: 'maamaru' | 'manual') {
+  paceSources.value[entry.name] = source
+}
+
+function paceSourceLabel(source: 'maamaru' | 'manual') {
+  return source === 'maamaru' ? 'まあ丸实测' : '你手动记的'
 }
 
 function selectedPaceWindow(entry: EventTimelineEntry) {
@@ -225,9 +241,12 @@ function candidateRange(candidate: EventTimelineCandidate) {
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
                 <header>
-                  <span><small>按最近实测</small><b>{{ loopPace(paceFor(entry)!.secondsPerLoop) }}</b></span>
+                  <span><small>按{{ paceSourceLabel(paceFor(entry)!.source) }}</small><b>{{ loopPace(paceFor(entry)!.secondsPerLoop) }}</b></span>
                   <span><small>{{ selectedPaceWindow(entry) === 'event' ? '活动结束前' : `接下来 ${paceDuration(availablePaceSeconds(entry))}` }}</small><strong>还能打 {{ fmt(possibleLoops(entry)) }} 圈</strong></span>
                 </header>
+                <div v-if="paceOptions(entry).length > 1" class="pace-source-buttons" aria-label="选择圈速来源">
+                  <button v-for="pace in paceOptions(entry)" :key="pace.source" type="button" :class="{ active: paceFor(entry)?.source === pace.source }" @click="setPaceSource(entry, pace.source)">{{ paceSourceLabel(pace.source) }} · {{ loopPace(pace.secondsPerLoop) }}</button>
+                </div>
                 <div class="pace-window-buttons" aria-label="试算挂机时长">
                   <button type="button" :class="{ active: selectedPaceWindow(entry) === 'event' }" :disabled="!entry.end_at" @click="setPaceWindow(entry, 'event')">活动结束前</button>
                   <button type="button" :class="{ active: selectedPaceWindow(entry) === '1h' }" @click="setPaceWindow(entry, '1h')">1 小时</button>
@@ -357,8 +376,9 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-pace-calculator b { font-size: 14px; }
 .event-pace-calculator strong { color: var(--fox-gold-deep); font-size: 18px; }
 .pace-window-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
-.pace-window-buttons button { padding: 5px 10px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 11px; cursor: pointer; }
-.pace-window-buttons button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
+.pace-source-buttons { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; border-bottom: 1px dashed var(--paper-line); }
+.pace-window-buttons button, .pace-source-buttons button { padding: 5px 10px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 11px; cursor: pointer; }
+.pace-window-buttons button.active, .pace-source-buttons button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
 .pace-window-buttons button:disabled { cursor: not-allowed; opacity: .45; }
 .event-pace-calculator > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
 .event-budget { display: flex; align-items: center; gap: 14px; margin-top: 11px; padding: 9px 11px; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border-radius: 8px; }

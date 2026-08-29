@@ -1719,6 +1719,43 @@ async def api_add_manual_inventory(request: Request):
     return {"ok": True, "snapshot": snapshot}
 
 
+@app.get("/api/data/manual-sessions")
+async def api_manual_sessions(limit: int = 200, from_ts: float | None = None,
+                              to_ts: float | None = None):
+    """审神者手动挂机记录；与まあ丸 runs 分表、分接口返回。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    return {
+        "schema_version": TELEMETRY_SCHEMA_VERSION,
+        "items": get_telemetry_store().manual_sessions(
+            limit=limit, from_ts=from_ts, to_ts=to_ts),
+    }
+
+
+@app.post("/api/data/manual-sessions")
+async def api_add_manual_session(request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        item = get_telemetry_store().add_manual_session(
+            script=body.get("script"),
+            started_at=float(body.get("started_at")),
+            ended_at=float(body.get("ended_at")),
+            loops=body.get("loops"), note=body.get("note", ""),
+        )
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "item": item}
+
+
+@app.delete("/api/data/manual-sessions/{session_id}")
+async def api_delete_manual_session(session_id: int):
+    from touken.telemetry import get_telemetry_store
+    if not get_telemetry_store().delete_manual_session(session_id):
+        return JSONResponse(
+            {"ok": False, "reason": "找不到这条手动挂机记录"}, status_code=404)
+    return {"ok": True}
+
+
 @app.get("/api/data/human-reports")
 async def api_human_reports(limit: int = 200):
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION

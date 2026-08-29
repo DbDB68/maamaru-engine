@@ -20,7 +20,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 5
+TELEMETRY_SCHEMA_VERSION = 6
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -115,6 +115,15 @@ class TelemetryStore:
                 activities TEXT NOT NULL,
                 note TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS manual_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                script TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                ended_at REAL NOT NULL,
+                loops INTEGER NOT NULL,
+                note TEXT NOT NULL DEFAULT ''
+            );
             CREATE INDEX IF NOT EXISTS idx_observations_ts ON observations(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_observations_run ON observations(run_id);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
@@ -124,6 +133,8 @@ class TelemetryStore:
                 ON human_reports(occurred_at DESC);
             CREATE INDEX IF NOT EXISTS idx_human_reports_gap
                 ON human_reports(gap_key);
+            CREATE INDEX IF NOT EXISTS idx_manual_sessions_started
+                ON manual_sessions(started_at DESC);
         """)
         conn.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
@@ -302,8 +313,6 @@ class TelemetryStore:
         note = str(note or "").strip()[:300]
         source = source if source in {"proactive", "gap"} else "proactive"
         gap_key = str(gap_key or "").strip()[:80] or None
-        if not activities and not note:
-            raise ValueError("请至少选一项，或留一句说明")
         # 认领数额必须资源+数额成对出现；缺口报备的金额以缺口快照差为准，
         # 不允许再自带数额（两种语义不许混在一条记录里）
         if gap_key and (resource is not None or claimed_delta is not None):
@@ -324,6 +333,8 @@ class TelemetryStore:
             claimed_delta = int(claimed_delta)
             if not claimed_delta or not -(2 ** 63) <= claimed_delta <= 2 ** 63 - 1:
                 raise ValueError("认领数额超出可记录范围")
+        if not activities and not note and resource is None:
+            raise ValueError("请至少选一项，或留一句说明")
         created_at = time.time()
         cursor = self._conn().execute(
             "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
@@ -351,6 +362,84 @@ class TelemetryStore:
     def delete_human_report(self, report_id: int) -> bool:
         cursor = self._conn().execute(
             "DELETE FROM human_reports WHERE id = ?", (int(report_id),),
+        )
+        self._conn().commit()
+        return cursor.rowcount > 0
+
+    def add_manual_session(self, *, script: str, started_at: float,
+                           ended_at: float, loops: int,
+                           note: str = "") -> dict:
+        """Record player-run activity without inserting a machine ``run``.
+
+        Manual sessions intentionally live in their own table: scorecard totals and
+        automation evidence must never silently absorb player-entered work.
+        """
+        labels = {
+            "osaka": "大阪城", "raid": "联队战", "edocastle": "江户城",
+            "sortie": "合战场", "yosari": "异去", "pumpkin": "季节活动",
+        }
+        script = str(script or "").strip()
+        if script not in labels:
+            raise ValueError("请选择一种支持的玩法")
+        if isinstance(loops, bool) or not isinstance(loops, int) or not 1 <= loops <= 100000:
+            raise ValueError("圈数必须是 1 到 100000 的整数")
+        started_at, ended_at = float(started_at), float(ended_at)
+        if not math.isfinite(started_at) or not math.isfinite(ended_at):
+            raise ValueError("开始和结束时间不正确")
+        if ended_at <= started_at:
+            raise ValueError("结束时间必须晚于开始时间")
+        if ended_at - started_at > 31 * 86400:
+            raise ValueError("一段挂机最多记录 31 天")
+        if ended_at > time.time() + 300:
+            raise ValueError("结束时间不能在未来")
+        note = str(note or "").strip()[:200]
+        created_at = time.time()
+        cursor = self._conn().execute(
+            "INSERT INTO manual_sessions(created_at, script, started_at, ended_at, loops, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (created_at, script, started_at, ended_at, loops, note),
+        )
+        self._conn().commit()
+        return {
+            "id": cursor.lastrowid, "created_at": created_at,
+            "script": script, "activity": labels[script],
+            "started_at": started_at, "ended_at": ended_at, "loops": loops,
+            "duration_seconds": round(ended_at - started_at, 1),
+            "average_loop_seconds": round((ended_at - started_at) / loops, 1),
+            "note": note, "source": "manual",
+        }
+
+    def manual_sessions(self, limit: int = 200, *, from_ts: float | None = None,
+                        to_ts: float | None = None) -> list[dict]:
+        clauses, args = [], []
+        if from_ts is not None:
+            clauses.append("started_at >= ?")
+            args.append(float(from_ts))
+        if to_ts is not None:
+            clauses.append("started_at < ?")
+            args.append(float(to_ts))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        args.append(max(1, min(int(limit), 1000)))
+        rows = self._conn().execute(
+            "SELECT id, created_at, script, started_at, ended_at, loops, note "
+            f"FROM manual_sessions{where} ORDER BY started_at DESC, id DESC LIMIT ?",
+            args,
+        ).fetchall()
+        labels = {
+            "osaka": "大阪城", "raid": "联队战", "edocastle": "江户城",
+            "sortie": "合战场", "yosari": "异去", "pumpkin": "季节活动",
+        }
+        return [{
+            **dict(row), "activity": labels.get(row["script"], row["script"]),
+            "duration_seconds": round(row["ended_at"] - row["started_at"], 1),
+            "average_loop_seconds": round(
+                (row["ended_at"] - row["started_at"]) / row["loops"], 1),
+            "source": "manual",
+        } for row in rows]
+
+    def delete_manual_session(self, session_id: int) -> bool:
+        cursor = self._conn().execute(
+            "DELETE FROM manual_sessions WHERE id = ?", (int(session_id),),
         )
         self._conn().commit()
         return cursor.rowcount > 0

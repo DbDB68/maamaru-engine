@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -30,6 +30,11 @@ export const api = {
   addManualInventory: (resources: Record<string, number>) => request<{ ok: boolean; snapshot: any }>('/api/data/manual-inventory', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources }),
   }),
+  manualSessions: (limit = 200, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: ManualSession[] }>(`/api/data/manual-sessions?limit=${limit}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
+  addManualSession: (value: { script: string; started_at: number; ended_at: number; loops: number; note?: string }) => request<{ ok: boolean; item: ManualSession }>('/api/data/manual-sessions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  deleteManualSession: (id: number) => request<{ ok: boolean }>(`/api/data/manual-sessions/${id}`, { method: 'DELETE' }),
   dataEvents: (limit = 100, beforeId?: number, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/events?limit=${limit}${beforeId == null ? '' : `&before_id=${beforeId}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
   dataRuns: (limit = 20, beforeStartedAt?: number, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/runs?limit=${limit}${beforeStartedAt == null ? '' : `&before_started_at=${beforeStartedAt}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
   attachRunInventory: (runId: string) => request<{ ok: boolean; run: any }>(`/api/data/runs/${encodeURIComponent(runId)}/attach-inventory`, { method: 'POST' }),

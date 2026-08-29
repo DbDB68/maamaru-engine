@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, ResourceLedger } from '../types'
+import type { HumanReport, InventoryGap, ManualSession, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -19,6 +19,7 @@ const ledger = ref<ResourceLedger | null>(null)
 const events = ref<any[]>([])
 const runs = ref<any[]>([])
 const humanReports = ref<HumanReport[]>([])
+const manualSessions = ref<ManualSession[]>([])
 const inventoryGaps = ref<InventoryGap[]>([])
 const loading = ref(false)
 const loadingOlder = ref(false)
@@ -40,6 +41,9 @@ const manualActionsOpen = ref(false)
 const inventorySaving = ref(false)
 const inventoryNotice = ref('')
 const inventoryForm = ref<Record<string, number | null | ''>>({})
+const manualSessionFormOpen = ref(false)
+const manualSessionSaving = ref(false)
+const manualSessionForm = ref({ script: 'osaka', loops: 1, started_at: '', ended_at: '', note: '' })
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -124,6 +128,11 @@ const swordDropTotal = computed(() => events.value.filter(event => (
   ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
   && event.payload?.name
 )).length)
+const manualLoops = computed(() => {
+  const cutoff = Date.now() / 1000 - days.value * 86400
+  return manualSessions.value.filter(item => item.started_at >= cutoff)
+    .reduce((total, item) => total + Number(item.loops || 0), 0)
+})
 
 // ---- 图表数据 ----
 
@@ -264,6 +273,7 @@ function latestRecordDate(): string {
   const timestamps = [
     ...runs.value.map(run => Number(run.started_at)),
     ...events.value.map(event => Number(event.ts)),
+    ...manualSessions.value.map(item => Number(item.started_at)),
   ].filter(Number.isFinite)
   return timestamps.length ? shanghaiDate(Math.max(...timestamps)) : shanghaiDate(Date.now() / 1000)
 }
@@ -434,6 +444,37 @@ function openInventoryForm() {
   inventoryFormOpen.value = true
 }
 
+function openManualSessionForm() {
+  manualActionsOpen.value = false
+  inventoryFormOpen.value = false
+  reportMode.value = ''
+  reportGap.value = null
+  const ended = Date.now()
+  manualSessionForm.value = {
+    script: 'osaka', loops: 1,
+    started_at: localDateTime(ended - 60 * 60 * 1000),
+    ended_at: localDateTime(ended), note: '',
+  }
+  manualSessionFormOpen.value = true
+}
+
+async function saveManualSession() {
+  manualSessionSaving.value = true
+  try {
+    await api.addManualSession({
+      script: manualSessionForm.value.script,
+      loops: Number(manualSessionForm.value.loops),
+      started_at: new Date(manualSessionForm.value.started_at).getTime() / 1000,
+      ended_at: new Date(manualSessionForm.value.ended_at).getTime() / 1000,
+      note: manualSessionForm.value.note,
+    })
+    manualSessionFormOpen.value = false
+    inventoryNotice.value = '已记下这段手动挂机；不会算进まあ丸战绩。'
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '手动挂机记录失败' }
+  finally { manualSessionSaving.value = false }
+}
+
 async function saveManualInventory() {
   const resources = Object.fromEntries(resourceNames.flatMap(name => {
     const value = inventoryForm.value[name]
@@ -458,7 +499,7 @@ async function saveManualInventory() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports()])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400)])
     summary.value = nextSummary
     ledger.value = nextLedger
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
@@ -469,6 +510,7 @@ async function load(nextDays = days.value) {
     runCursor.value = nextRuns.next_cursor
     humanReports.value = nextHuman.items
     inventoryGaps.value = nextHuman.inventory_gaps
+    manualSessions.value = nextManualSessions.items
     if (!recordDate.value) recordDate.value = latestRecordDate()
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
@@ -538,8 +580,9 @@ onMounted(() => load())
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }">
           <div class="report-glance-copy"><p class="report-glance-lead">🦊 {{ glance }}</p><p>{{ foxSummary }}</p></div>
-          <div v-if="swordDropTotal" class="report-glance-chips">
+          <div v-if="swordDropTotal || manualLoops" class="report-glance-chips">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
+            <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
           </div>
         </section>
 
@@ -552,6 +595,7 @@ onMounted(() => load())
           <div v-if="manualActionsOpen" class="manual-action-picker">
             <button type="button" @click="openInventoryForm"><b>抄下当前库存</b><small>刚看过游戏里的数字，记一份现在的家底快照</small></button>
             <button type="button" @click="openProactiveReport()"><b>补记一笔收支</b><small>在まあ丸之外花了或领了资源，把数额补进账里</small></button>
+            <button type="button" @click="openManualSessionForm"><b>补记一段挂机</b><small>记玩法、圈数和时间；与まあ丸战绩分开计算</small></button>
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
@@ -566,6 +610,18 @@ onMounted(() => load())
           </div>
           <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
         </section>
+
+        <form v-if="manualSessionFormOpen" class="manual-session-form" @submit.prevent="saveManualSession">
+          <header><div><h4>补记一段挂机</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动挂机" @click="manualSessionFormOpen = false">×</button></header>
+          <div class="manual-session-fields">
+            <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
+            <label>圈数<input v-model.number="manualSessionForm.loops" type="number" min="1" max="100000" step="1" required></label>
+            <label>开始时间<input v-model="manualSessionForm.started_at" type="datetime-local" required></label>
+            <label>结束时间<input v-model="manualSessionForm.ended_at" type="datetime-local" required></label>
+            <label class="manual-session-note">备注<input v-model="manualSessionForm.note" maxlength="200" placeholder="可不填"></label>
+          </div>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '记录中……' : '记下这段挂机' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false">取消</button></div>
+        </form>
 
         <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
           <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '补记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
@@ -597,7 +653,7 @@ onMounted(() => load())
         </section>
       </template>
 
-      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 
       <PlanningPanel v-else />
@@ -617,6 +673,7 @@ onMounted(() => load())
 .report-glance-chips .gain { color: #4d7a3a; }
 .report-glance-chips .loss { color: #b0492e; }
 .report-glance-chips .obtain { color: var(--fox-gold-deep); }
+.report-glance-chips .manual { color: #536f8a; }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
 .resource-trend > header h3 { margin: 0; }
 .resource-trend > header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
@@ -629,6 +686,14 @@ onMounted(() => load())
 .manual-action-picker button { display: grid; gap: 3px; padding: 10px 12px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; text-align: left; cursor: pointer; }
 .manual-action-picker button:hover { border-color: var(--fox-gold); }
 .manual-action-picker small { color: var(--ink-dim); font-size: 11px; line-height: 1.45; }
+.manual-session-form { display: grid; gap: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid #7d9ab2; border-radius: 12px; }
+.manual-session-form > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.manual-session-form h4, .manual-session-form p { margin: 0; }
+.manual-session-form header p { margin-top: 3px; color: var(--ink-dim); font-size: 12px; }
+.manual-session-fields { display: grid; grid-template-columns: .8fr .55fr 1fr 1fr; gap: 10px; }
+.manual-session-fields label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
+.manual-session-fields input, .manual-session-fields select { width: 100%; min-width: 0; }
+.manual-session-fields .manual-session-note { grid-column: 1 / -1; }
 .ledger-evidence { margin-top: 8px; color: var(--ink-dim); font-size: 11px; }
 .ledger-evidence summary { color: var(--fox-gold-deep); cursor: pointer; }
 .ledger-evidence p { margin: 6px 0 0; }
@@ -657,6 +722,8 @@ onMounted(() => load())
 @media (max-width: 520px) {
   .manual-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manual-action-picker { grid-template-columns: 1fr; }
+  .manual-session-fields { grid-template-columns: 1fr; }
+  .manual-session-fields .manual-session-note { grid-column: 1; }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }
