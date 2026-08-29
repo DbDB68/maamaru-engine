@@ -176,7 +176,7 @@
 | 手入 | `resource.change` | 确认页 OCR；加速符为已知操作 | 已覆盖；OCR 失败时明确记 unknown，不猜金额 |
 | 任务奖励 | `task_rewards.claimed` + `resource.change` | 奖励弹窗图标 + 数量 OCR | 已接统一入口；“完成远征 3 次”等任务确认会给加速符，现有模板覆盖四资源、委托符、小判，缺加速符模板；陌生图标或同种资源重复命中时不猜类别，并在本地 `debug/` 自动留取同源运行帧 |
 | 远征结算 | `expedition.settled` + `resource.change` | 结算页 OCR | 四项基础资源已覆盖；附带小判、委托符、加速符尚未逐笔识别 |
-| 刀解 | 无标准流水 | 游戏结算结果 | 缺口：刀解返还的基础资源尚未读取，只能在后续库存差值中出现 |
+| 刀解 | `dismantle.completed` + `resource.change` | 选择页四资源收益预览 OCR | 已覆盖；只在二次确认完成后落账，单项读不出时明确记 unknown，不猜数值 |
 | 异去补提灯 | `yosari.ticket_refilled` + `resource.change` | 购买页前后小判 | 读全时已覆盖；读不全只留补充事实，不猜金额 |
 | 江户城补手形 | `ticket.refilled` + `resource.change` | 当前活动固定 300 小判/张 | 已覆盖；v0.4.1 历史事实由兼容层回算 |
 | 联队战/南瓜补手形 | `ticket.refilled` | 补充完成流程 | 部分覆盖：先记事实，实际票价和购买数量待活动开放后用同源画面确认 |

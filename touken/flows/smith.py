@@ -47,6 +47,14 @@ _FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
 # 点火配方四资源的名称（顺序固定，对应配置 forge.recipe 的四个数）
 _FORGE_RES = ("木炭", "玉钢", "冷却材", "砥石")
 _DEFAULT_RECIPE = [700, 700, 700, 700]
+# 选中一把刀后，首行切成四资源收益预览；这些 ROI 来自
+# MAAAdapter.screenshot(force=True) 的 1280×720 MuMu 同源运行帧。
+_DISMANTLE_RESOURCE_ROIS = (
+    (590, 196, 635, 235),
+    (730, 196, 775, 235),
+    (870, 196, 915, 235),
+    (1010, 196, 1055, 235),
+)
 
 
 def _mark_dismantled_today():
@@ -389,6 +397,7 @@ class SmithMixin:
 
             self.maa.click(Point(1046, cy))  # 该行选择
             time.sleep(1.5)
+            resource_preview = self._read_dismantle_resources()
             self.maa.click(Point(1200, 615))  # 大刀解（选中后灰变蓝）
             time.sleep(2.0)
             self.maa.screenshot(force=True)
@@ -399,12 +408,60 @@ class SmithMixin:
             time.sleep(2.5)
             dismantled += 1
             _mark_dismantled_today()
+            if hasattr(self, "record_event"):
+                completed_id = self.record_event(
+                    "dismantle.completed", sword=name,
+                    resource_preview=resource_preview)
+                self._emit_dismantle_resources(resource_preview, completed_id)
             yield f"[刀解] 分解完成: {name}（{dismantled}/{max_dismantle}）"
             if dismantled >= max_dismantle:
                 return
             # 列表顶上来了，重扫（不翻页）
 
         yield f"[刀解] 收工：解了 {dismantled} 把" + ("（没找到够的白名单）" if dismantled < max_dismantle else "")
+
+    def _read_dismantle_resources(self):
+        """读取选中刀后首行的四资源收益预览；读不出的位置保留 None。"""
+        self.maa.screenshot(force=True)
+        result = {}
+        for resource, raw_roi in zip(_FORGE_RES, _DISMANTLE_RESOURCE_ROIS):
+            try:
+                tokens = self.maa.ocr_all(roi_4to4(*raw_roi))
+                raw = "".join(str(text).strip() for text, _ in tokens)
+                # 该窄字体的数字 1 在冷却材格实机会稳定读成 i；只在整个
+                # 数量框恰好是单个形似 1 的字符时修复，不污染普通文字。
+                if raw in {"i", "I", "l", "|"}:
+                    raw = "1"
+                match = re.search(r"\d+", raw.replace(",", ""))
+                result[resource] = int(match.group()) if match else None
+            except Exception:
+                result[resource] = None
+        return result
+
+    def _emit_dismantle_resources(self, preview, completed_event_id):
+        """刀解成功后才把选择页预览落账；部分 OCR 失败不猜数值。"""
+        for resource in _FORGE_RES:
+            amount = preview.get(resource) if isinstance(preview, dict) else None
+            payload = {
+                "source": "dismantle.completed",
+                "script": "dismantle",
+                "evidence": "dismantle_preview_ocr",
+            }
+            if isinstance(completed_event_id, int):
+                payload["source_event_id"] = completed_event_id
+            if isinstance(amount, int) and amount > 0:
+                if hasattr(self, "record_resource_change"):
+                    self.record_resource_change(
+                        resource, amount, attribution="confirmed", **payload)
+                else:
+                    self.record_event(
+                        "resource.change", resource=resource, delta=amount,
+                        attribution="confirmed", **payload)
+            else:
+                self.record_event(
+                    "resource.change", resource=resource, delta=None,
+                    attribution="unknown", note="刀解收益预览数量读取失败",
+                    **payload)
 
     def _scan_whitelist_row(self, whitelist_ids: set):
         """

@@ -173,6 +173,56 @@ class ForgeResourceChangeTests(unittest.TestCase):
         self.assertNotIn("source_event_id", by_res["木炭"])
 
 
+class _DismantlePreviewFakeMaa:
+    def __init__(self, values):
+        self.values = values
+
+    def screenshot(self, force=False):
+        return None
+
+    def ocr_all(self, roi):
+        key = tuple(roi.to_list())
+        value = self.values.get(key)
+        return [] if value is None else [(value, Point(key[0] + 10, key[1] + 10))]
+
+
+class DismantleResourceChangeTests(unittest.TestCase):
+    ROIS = (
+        (590, 196, 635, 235),
+        (730, 196, 775, 235),
+        (870, 196, 915, 235),
+        (1010, 196, 1055, 235),
+    )
+
+    def test_preview_reads_four_resources_and_repairs_narrow_one(self):
+        values = {tuple(roi_4to4(*roi).to_list()): value
+                  for roi, value in zip(self.ROIS, ("4", "4", "i", "4"))}
+        host = _Host({})
+        host.maa = _DismantlePreviewFakeMaa(values)
+
+        preview = host._read_dismantle_resources()
+
+        self.assertEqual(preview, {
+            "木炭": 4, "玉钢": 4, "冷却材": 1, "砥石": 4})
+
+    def test_success_emits_confirmed_values_and_unknown_for_failed_roi(self):
+        host = _Host({})
+        host._emit_dismantle_resources(
+            {"木炭": 4, "玉钢": 4, "冷却材": None, "砥石": 4}, 88)
+
+        changes = [payload for event, payload in host.events
+                   if event == "resource.change"]
+        self.assertEqual(len(changes), 4)
+        by_resource = {payload["resource"]: payload for payload in changes}
+        for resource in ("木炭", "玉钢", "砥石"):
+            self.assertEqual(by_resource[resource]["delta"], 4)
+            self.assertEqual(by_resource[resource]["attribution"], "confirmed")
+            self.assertEqual(by_resource[resource]["source_event_id"], 88)
+        self.assertIsNone(by_resource["冷却材"]["delta"])
+        self.assertEqual(by_resource["冷却材"]["attribution"], "unknown")
+        self.assertIn("读取失败", by_resource["冷却材"]["note"])
+
+
 class RepairResourceChangeTests(unittest.TestCase):
     def _run_repair_one(self, cost_tokens, need_speed=False):
         host = _Host({"repair": _REPAIR_CFG})
