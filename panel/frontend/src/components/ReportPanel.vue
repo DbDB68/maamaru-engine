@@ -5,6 +5,7 @@ import type { HumanReport, InventoryGap, ManualSession, ResourceLedger } from '.
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
+import ResourceOverviewChart from './report/ResourceOverviewChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
@@ -295,7 +296,7 @@ const dayResourceOverview = computed(() => {
     if (unknown - claimed) parts.set('unknown', unknown - claimed)
     return {
       resource, total: ledgerRow?.total_delta ?? null,
-      parts: sourceCategories.map(cat => ({ ...cat, value: parts.get(cat.key) || 0 })).filter(item => item.value),
+      parts: sourceCategories.map(cat => ({ ...cat, label: cat.key === 'human' ? '你记的' : cat.label, value: parts.get(cat.key) || 0 })).filter(item => item.value),
     }
   })
 })
@@ -752,18 +753,12 @@ onMounted(() => load())
 
         <section class="resource-trend">
           <header>
-            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每张卡片单独看自己的数，不共用一根比例尺。</p></div>
+            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每行按自己的变化归一显示，柱尾保留真实数额。</p></div>
             <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
             <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
-          <div v-if="days === 1" class="day-resource-overview">
-            <article v-for="row in dayResourceOverview" :key="row.resource">
-              <header><b>{{ row.resource }}</b><strong :class="{ gain: row.total != null && row.total > 0, loss: row.total != null && row.total < 0 }">{{ signed(row.total) }}</strong></header>
-              <div v-if="row.parts.length"><span v-for="part in row.parts" :key="part.key"><i :style="{ background: part.color }"></i>{{ part.key === 'human' ? '你记的' : part.label }} {{ signed(part.value) }}</span></div>
-              <small v-else>{{ row.total == null ? '还没有足够的库存读数' : '这段时间没有变化' }}</small>
-            </article>
-          </div>
+          <ResourceOverviewChart v-if="days === 1" :rows="dayResourceOverview" :loading="loading" />
           <template v-else>
             <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
             <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
@@ -803,16 +798,6 @@ onMounted(() => load())
 .resource-trend nav button { border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
-.day-resource-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.day-resource-overview article { display: grid; gap: 9px; min-width: 0; padding: 12px 14px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 10px; }
-.day-resource-overview article > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.day-resource-overview article strong { font-size: 22px; font-variant-numeric: tabular-nums; }
-.day-resource-overview article strong.gain { color: #47734f; }
-.day-resource-overview article strong.loss { color: var(--danger); }
-.day-resource-overview article > div { display: flex; flex-wrap: wrap; gap: 5px 10px; }
-.day-resource-overview article span { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 11px; }
-.day-resource-overview article span i { width: 8px; height: 8px; border-radius: 2px; }
-.day-resource-overview article > small { color: var(--ink-dim); }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .manual-action-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; padding: 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
 .manual-action-picker button { display: grid; gap: 3px; padding: 10px 12px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; text-align: left; cursor: pointer; }
@@ -877,7 +862,6 @@ onMounted(() => load())
   .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto; }
   .recent-manual-ledger time { grid-column: 1 / -1; }
   .report-form .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .day-resource-overview { grid-template-columns: 1fr; }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }
