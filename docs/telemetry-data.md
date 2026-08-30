@@ -1,4 +1,4 @@
-# 结构化运行数据（Schema v6）
+# 结构化运行数据（Schema v7）
 
 这套数据用于前端统计和后续智能建议。调用方不得解析中文运行日志；日志只给人看，
 稳定机器字段统一来自 `%LOCALAPPDATA%/Maamaru*/logs/telemetry.db` 和以下 API。
@@ -11,6 +11,7 @@
 - `GET /api/data/ocr?limit=100&script=&matched=`：OCR 观测明细。
 - `GET/POST /api/data/manual-sessions`：审神者手动活动记录；与自动任务 `runs`
   分表返回，不参与まあ丸任务次数和圈速聚合。
+- `POST /api/data/human-reports/batch`：同一次手动操作的多资源收支；每种资源仍按独立明细精确归因，共用 `group_id`，可通过 `DELETE /api/data/human-reports/group/{group_id}` 整组撤销。
 - `GET /api/data/resource-ledger?days=7` 或 `?from=<ts>&to=<ts>`：资源总账（见下文），
   from/to（Unix 秒）优先于 days，days 默认 7。聚合全部在服务端完成，
   前端不要拉原始 events 自己算。

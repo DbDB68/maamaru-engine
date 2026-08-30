@@ -95,6 +95,7 @@ export interface HumanReport {
   gap_key?: string | null
   resource?: string | null
   claimed_delta?: number | null
+  group_id?: string | null
 }
 
 export interface ManualSession {

@@ -92,7 +92,14 @@ const foxSummary = computed(() => {
   const entries = [...totals.values()].filter(item => item.delta)
   const gain = entries.filter(item => item.delta > 0).sort((a, b) => b.delta - a.delta)[0]
   const cost = entries.filter(item => item.delta < 0).sort((a, b) => a.delta - b.delta)[0]
-  if (!gain && !cost) return `${rangeLabel.value}还没有能确认玩法来源的资源变化。`
+  if (!gain && !cost) {
+    const cutoff = Date.now() / 1000 - days.value * 86400
+    const manualCount = humanReports.value.filter(report => report.source === 'proactive'
+      && Number(report.occurred_at) >= cutoff && report.claimed_delta).length
+    return manualCount
+      ? `${rangeLabel.value}你手动记了 ${manualCount} 项资源收支；まあ丸还没有能确认来源的自动流水。`
+      : `${rangeLabel.value}还没有能确认玩法来源的资源变化。`
+  }
   const parts: string[] = []
   if (gain) parts.push(`从${categoryLabel(gain.source)}获得的${gain.resource}最多（${signed(gain.delta)}）`)
   if (cost) parts.push(`${categoryLabel(cost.source)}消耗的${cost.resource}最多（${signed(cost.delta)}）`)
@@ -172,7 +179,19 @@ const recentManualReports = computed(() => humanReports.value.filter(report => (
   report.source === 'proactive' && resourceNames.includes(String(report.resource || ''))
   && report.claimed_delta != null && Number.isFinite(Number(report.claimed_delta))
   && Number(report.claimed_delta) !== 0
-)).sort((a, b) => Number(b.occurred_at) - Number(a.occurred_at) || b.id - a.id).slice(0, 5))
+)).sort((a, b) => Number(b.occurred_at) - Number(a.occurred_at) || b.id - a.id))
+const recentManualGroups = computed(() => {
+  const groups = new Map<string, HumanReport[]>()
+  for (const report of recentManualReports.value) {
+    const key = report.group_id || `single:${report.id}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(report)
+  }
+  return [...groups.entries()].slice(0, 5).map(([key, entries]) => {
+    const ordered = [...entries].sort((a, b) => resourceNames.indexOf(String(a.resource)) - resourceNames.indexOf(String(b.resource)))
+    return { key, entries: ordered, head: entries[0] }
+  })
+})
 
 function manualReportTime(timestamp: number) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -182,6 +201,10 @@ function manualReportTime(timestamp: number) {
 
 function manualReportSource(report: HumanReport) {
   return report.activities?.find(value => !['暂不说明', '记不清了', '没有其他操作'].includes(value)) || '未标来源'
+}
+
+function manualGroupAmounts(entries: HumanReport[]) {
+  return entries.map(report => `${report.resource} ${signed(Number(report.claimed_delta))}`).join(' · ')
 }
 
 function claimWithinUnknown(unknown: number, claim: number): number {
@@ -249,6 +272,32 @@ const chartSeries = computed<ChartSeries[]>(() => {
     key: cat.key, name: cat.label, color: cat.color,
     values: byKey[cat.key].map(value => value || null),
   }))
+})
+const dayResourceOverview = computed(() => {
+  if (days.value !== 1 || !ledger.value) return []
+  const from = Number(ledger.value.window?.from || 0)
+  const to = Number(ledger.value.window?.to || Date.now() / 1000)
+  return resourceNames.map(resource => {
+    const ledgerRow = ledger.value!.per_resource.find(item => item.resource === resource)
+    const parts = new Map<string, number>()
+    for (const item of ledger.value!.attributions || []) {
+      if (item.resource !== resource || item.ts < from || item.ts > to) continue
+      const key = categoryOf(item.source)
+      parts.set(key, (parts.get(key) || 0) + Number(item.delta || 0))
+    }
+    const unknown = Number(ledgerRow?.unattributed_delta || 0)
+    const requested = humanReports.value.filter(report => (
+      report.source === 'proactive' && report.resource === resource
+      && Number(report.occurred_at) >= from && Number(report.occurred_at) <= to
+    )).reduce((sum, report) => sum + Number(report.claimed_delta || 0), 0)
+    const claimed = claimWithinUnknown(unknown, requested)
+    if (claimed) parts.set('human', claimed)
+    if (unknown - claimed) parts.set('unknown', unknown - claimed)
+    return {
+      resource, total: ledgerRow?.total_delta ?? null,
+      parts: sourceCategories.map(cat => ({ ...cat, value: parts.get(cat.key) || 0 })).filter(item => item.value),
+    }
+  })
 })
 
 function toggleCompareResource(name: string) {
@@ -367,6 +416,13 @@ const reportMode = ref('')
 const reportGap = ref<InventoryGap | null>(null)
 const reportSaving = ref(false)
 const reportForm = ref<{ activities: string[]; note: string; occurred_at: string; resource: string; claimed_delta: number | null; claim_limit: number | null }>({ activities: [], note: '', occurred_at: '', resource: '', claimed_delta: null, claim_limit: null })
+const manualResourceAmounts = ref<Record<string, number | null | ''>>(Object.fromEntries(resourceNames.map(name => [name, null])))
+const manualResourceEntries = computed(() => Object.fromEntries(resourceNames.flatMap(name => {
+  const value = manualResourceAmounts.value[name]
+  if (value == null || value === '') return []
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount !== 0 ? [[name, amount]] : []
+})))
 const reportClaimInvalid = computed(() => {
   if (!reportForm.value.resource) return false
   const value = Number(reportForm.value.claimed_delta)
@@ -376,9 +432,16 @@ const reportClaimInvalid = computed(() => {
   return !Number.isFinite(limit) || !limit || Math.sign(value) !== Math.sign(limit) || Math.abs(value) > Math.abs(limit)
 })
 const reportHasPreciseClaim = computed(() => Boolean(
-  reportForm.value.resource && Number.isFinite(Number(reportForm.value.claimed_delta))
-  && Number(reportForm.value.claimed_delta) && !reportClaimInvalid.value,
+  reportForm.value.claim_limit == null
+    ? Object.keys(manualResourceEntries.value).length
+    : reportForm.value.resource && Number.isFinite(Number(reportForm.value.claimed_delta))
+      && Number(reportForm.value.claimed_delta) && !reportClaimInvalid.value,
 ))
+const reportSubmitDisabled = computed(() => {
+  if (reportSaving.value || reportClaimInvalid.value) return true
+  if (!reportGap.value && reportForm.value.claim_limit == null) return !Object.keys(manualResourceEntries.value).length
+  return !reportHasPreciseClaim.value && !reportForm.value.activities.length && !reportForm.value.note.trim()
+})
 const humanActivities = ['领邮箱', '手动领奖', '手动出阵', '锻刀', '手入', '万屋购买', '其他操作']
 function localDateTime(timestamp = Date.now()) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
@@ -394,6 +457,7 @@ function openProactiveReport(timestamp?: number, resource = '', claimedDelta: nu
   reportMode.value = 'proactive'
   reportGap.value = null
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp), resource, claimed_delta: claimedDelta, claim_limit: claimedDelta }
+  manualResourceAmounts.value = Object.fromEntries(resourceNames.map(name => [name, null]))
   scrollToReportForm()
 }
 function openDayClaim(date: string, resource: string, unexplained: number | null) {
@@ -422,23 +486,30 @@ async function refreshHumanReports() {
 async function saveHumanReport(skip = false) {
   reportSaving.value = true
   try {
-    const claimedPrecisely = Boolean(!reportGap.value && reportForm.value.resource
-      && reportForm.value.claimed_delta)
+    const isManualBatch = !reportGap.value && reportForm.value.claim_limit == null
+    const claimedPrecisely = Boolean(isManualBatch
+      ? Object.keys(manualResourceEntries.value).length
+      : !reportGap.value && reportForm.value.resource && reportForm.value.claimed_delta)
     const activities = skip ? ['暂不说明'] : reportForm.value.activities
-    await api.addHumanReport({
-      occurred_at: new Date(reportForm.value.occurred_at).getTime() / 1000,
-      activities,
-      note: reportForm.value.note,
-      source: reportGap.value ? 'gap' : 'proactive',
-      gap_key: reportGap.value?.gap_key || null,
-      resource: reportGap.value ? null : reportForm.value.resource || null,
-      claimed_delta: reportGap.value ? null : reportForm.value.claimed_delta,
-    })
+    const occurred_at = new Date(reportForm.value.occurred_at).getTime() / 1000
+    if (isManualBatch) {
+      await api.addHumanReportBatch({ occurred_at, activities, note: reportForm.value.note, entries: manualResourceEntries.value })
+    } else {
+      await api.addHumanReport({
+        occurred_at, activities, note: reportForm.value.note,
+        source: reportGap.value ? 'gap' : 'proactive',
+        gap_key: reportGap.value?.gap_key || null,
+        resource: reportGap.value ? null : reportForm.value.resource || null,
+        claimed_delta: reportGap.value ? null : reportForm.value.claimed_delta,
+      })
+    }
     await refreshHumanReports()
     await load(days.value)
     if (claimedPrecisely) {
       highlightCategory.value = 'human'
-      inventoryNotice.value = `已记下 ${reportForm.value.resource} ${signed(Number(reportForm.value.claimed_delta))}。`
+      inventoryNotice.value = isManualBatch
+        ? `已记下 ${Object.keys(manualResourceEntries.value).length} 种资源的收支。`
+        : `已记下 ${reportForm.value.resource} ${signed(Number(reportForm.value.claimed_delta))}。`
     }
     reportMode.value = ''; reportGap.value = null
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
@@ -446,11 +517,14 @@ async function saveHumanReport(skip = false) {
 }
 
 async function deleteManualReport(report: HumanReport) {
-  if (!window.confirm(`撤销这笔 ${report.resource} ${signed(Number(report.claimed_delta))} 的手账吗？`)) return
+  const group = report.group_id ? recentManualReports.value.filter(item => item.group_id === report.group_id) : [report]
+  const label = group.length > 1 ? `这组 ${group.length} 种资源` : `这笔 ${report.resource} ${signed(Number(report.claimed_delta))}`
+  if (!window.confirm(`撤销${label}的手账吗？`)) return
   deletingManualReport.value = report.id
   try {
-    await api.deleteHumanReport(report.id)
-    inventoryNotice.value = '这笔手账已撤销。'
+    if (report.group_id) await api.deleteHumanReportGroup(report.group_id)
+    else await api.deleteHumanReport(report.id)
+    inventoryNotice.value = group.length > 1 ? '这组手账已撤销。' : '这笔手账已撤销。'
     await load(days.value)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销手账失败' }
   finally { deletingManualReport.value = null }
@@ -628,14 +702,13 @@ onMounted(() => load())
             <button type="button" @click="openInventoryForm"><b>更新当前家底</b><small>把游戏里现在的资源数字抄下来</small></button>
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
-          <section v-if="recentManualReports.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
-            <header><div><h4 id="recent-manual-ledger-title">最近手账</h4><p>这里只列你自己记的收支</p></div><small>最近 {{ recentManualReports.length }} 笔</small></header>
+          <section v-if="recentManualGroups.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
+            <header><div><h4 id="recent-manual-ledger-title">最近手账</h4><p>这里只列你自己记的收支</p></div><small>最近 {{ recentManualGroups.length }} 组</small></header>
             <ul>
-              <li v-for="report in recentManualReports" :key="report.id">
-                <time>{{ manualReportTime(report.occurred_at) }}</time>
-                <span><b>{{ report.resource }}</b><small>{{ manualReportSource(report) }}<template v-if="report.note"> · {{ report.note }}</template></small></span>
-                <strong :class="Number(report.claimed_delta) > 0 ? 'gain' : 'loss'">{{ signed(Number(report.claimed_delta)) }}</strong>
-                <button type="button" :disabled="deletingManualReport === report.id" @click="deleteManualReport(report)">{{ deletingManualReport === report.id ? '撤销中…' : '撤销' }}</button>
+              <li v-for="group in recentManualGroups" :key="group.key">
+                <time>{{ manualReportTime(group.head.occurred_at) }}</time>
+                <span><b>{{ manualReportSource(group.head) }}<template v-if="group.entries.length > 1"> · {{ group.entries.length }} 种资源</template></b><small>{{ manualGroupAmounts(group.entries) }}<template v-if="group.head.note"> · {{ group.head.note }}</template></small></span>
+                <button type="button" :disabled="deletingManualReport === group.head.id" @click="deleteManualReport(group.head)">{{ deletingManualReport === group.head.id ? '撤销中…' : '撤销' }}</button>
               </li>
             </ul>
           </section>
@@ -668,25 +741,33 @@ onMounted(() => load())
           <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
-            <label>哪种资源<select v-model="reportForm.resource" required><option value="" disabled>请选择</option><option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option></select></label>
-            <label>收支数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" placeholder="获得填正数，消耗填负数" required></label>
+            <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
           </template>
           <label v-if="reportForm.resource && reportForm.claim_limit != null">认领数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多认领当前灰色部分 {{ signed(reportForm.claim_limit) }}</small></label>
           <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
           <fieldset><legend>{{ reportGap ? '这个时间段你做过什么？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
           <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
-          <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSaving || (!reportHasPreciseClaim && !reportForm.activities.length && !reportForm.note.trim()) || reportClaimInvalid">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">取消</button></div>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">取消</button></div>
         </form>
 
         <section class="resource-trend">
           <header>
-            <div><h3>变化趋势</h3></div>
-            <nav v-if="mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
-            <nav v-else aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
-            <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
+            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每张卡片单独看自己的数，不共用一根比例尺。</p></div>
+            <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
+            <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
+            <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
-          <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
+          <div v-if="days === 1" class="day-resource-overview">
+            <article v-for="row in dayResourceOverview" :key="row.resource">
+              <header><b>{{ row.resource }}</b><strong :class="{ gain: row.total != null && row.total > 0, loss: row.total != null && row.total < 0 }">{{ signed(row.total) }}</strong></header>
+              <div v-if="row.parts.length"><span v-for="part in row.parts" :key="part.key"><i :style="{ background: part.color }"></i>{{ part.key === 'human' ? '你记的' : part.label }} {{ signed(part.value) }}</span></div>
+              <small v-else>{{ row.total == null ? '还没有足够的库存读数' : '这段时间没有变化' }}</small>
+            </article>
+          </div>
+          <template v-else>
+            <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
+            <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
+          </template>
         </section>
 
         <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
@@ -722,6 +803,16 @@ onMounted(() => load())
 .resource-trend nav button { border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
+.day-resource-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.day-resource-overview article { display: grid; gap: 9px; min-width: 0; padding: 12px 14px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 10px; }
+.day-resource-overview article > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.day-resource-overview article strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.day-resource-overview article strong.gain { color: #47734f; }
+.day-resource-overview article strong.loss { color: var(--danger); }
+.day-resource-overview article > div { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.day-resource-overview article span { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 11px; }
+.day-resource-overview article span i { width: 8px; height: 8px; border-radius: 2px; }
+.day-resource-overview article > small { color: var(--ink-dim); }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .manual-action-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; padding: 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
 .manual-action-picker button { display: grid; gap: 3px; padding: 10px 12px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; text-align: left; cursor: pointer; }
@@ -744,7 +835,7 @@ onMounted(() => load())
 .recent-manual-ledger h4, .recent-manual-ledger p { margin: 0; }
 .recent-manual-ledger header p, .recent-manual-ledger header small { margin-top: 2px; color: var(--ink-dim); font-size: 11px; }
 .recent-manual-ledger ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--paper-card); border-radius: 8px; }
+.recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--paper-card); border-radius: 8px; }
 .recent-manual-ledger time { color: var(--ink-dim); font-size: 11px; }
 .recent-manual-ledger li span { display: grid; min-width: 0; }
 .recent-manual-ledger li span small { overflow: hidden; color: var(--ink-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -772,14 +863,21 @@ onMounted(() => load())
 .report-form legend { font-size: 13px; color: var(--ink-dim); margin-bottom: 4px; }
 .report-form fieldset button { border: 1px solid var(--paper-line); background: var(--paper); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .report-form fieldset button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
+.report-form .multi-resource-entry { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 8px; padding: 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; }
+.report-form .multi-resource-entry legend { grid-column: 1 / -1; }
+.report-form .multi-resource-entry label { gap: 3px; }
+.report-form .multi-resource-entry input { width: 100%; min-width: 0; }
+.report-form .multi-resource-entry > small { grid-column: 1 / -1; color: var(--ink-dim); }
 .report-form-actions { display: flex; gap: 8px; }
 @media (max-width: 520px) {
   .manual-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manual-action-picker { grid-template-columns: 1fr; }
   .manual-session-fields { grid-template-columns: 1fr; }
   .manual-session-fields .manual-session-note { grid-column: 1; }
-  .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto; }
   .recent-manual-ledger time { grid-column: 1 / -1; }
+  .report-form .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .day-resource-overview { grid-template-columns: 1fr; }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }

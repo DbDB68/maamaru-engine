@@ -486,6 +486,24 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertIsNone(found_legacy["resource"])
         self.assertIsNone(found_legacy["claimed_delta"])
 
+    def test_multi_resource_claim_group_roundtrip_and_delete(self):
+        items = self.store.add_human_report_group(
+            occurred_at=sh("2026-08-20 09:00:00"), activities=["领邮箱"],
+            note="一起领的", entries={"小判": 300, "木炭": 500, "加速符": 2})
+        self.assertEqual(len(items), 3)
+        self.assertEqual(len({item["group_id"] for item in items}), 1)
+        rows = [row for row in self.store.human_reports()
+                if row["group_id"] == items[0]["group_id"]]
+        self.assertEqual({row["resource"]: row["claimed_delta"] for row in rows},
+                         {"小判": 300, "木炭": 500, "加速符": 2})
+        self.assertTrue(self.store.delete_human_report_group(items[0]["group_id"]))
+        self.assertEqual(self.store.human_reports(), [])
+        with self.assertRaises(ValueError):
+            self.store.add_human_report_group(
+                occurred_at=sh("2026-08-20 10:00:00"), activities=["领邮箱"],
+                entries={"小判": 100, "元宝": 1})
+        self.assertEqual(self.store.human_reports(), [])
+
     def test_claim_validation_rejects_bad_input(self):
         t0 = sh("2026-08-20 09:00:00")
         bad_calls = [
@@ -545,6 +563,7 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(rows[0]["activities"], ["领邮箱"])
         self.assertIsNone(rows[0]["resource"])
         self.assertIsNone(rows[0]["claimed_delta"])
+        self.assertIsNone(rows[0]["group_id"])
         # 迁移后新认领正常工作
         item = store.add_human_report(
             occurred_at=1700000100, activities=["领邮箱"],
@@ -612,6 +631,28 @@ class ResourceLedgerTests(unittest.TestCase):
         self.assertEqual(items[0]["claimed_delta"], -2)
         self.assertEqual(items[1]["resource"], "小判")
         self.assertEqual(items[1]["claimed_delta"], 111000)
+
+    def test_api_multi_resource_claim_group(self):
+        from panel.server import (api_add_human_report_batch,
+                                  api_delete_human_report_group,
+                                  api_human_reports)
+
+        class _Req:
+            async def json(self):
+                return {"occurred_at": sh("2026-08-20 09:00:00"),
+                        "activities": ["领邮箱"], "note": "邮箱一锅端",
+                        "entries": {"小判": 200, "玉钢": 450, "加速符": 3}}
+
+        with patch("touken.telemetry._store", self.store):
+            created = asyncio.run(api_add_human_report_batch(_Req()))
+            self.assertTrue(created["ok"])
+            self.assertEqual(len(created["items"]), 3)
+            listing = asyncio.run(api_human_reports(limit=10))
+            self.assertEqual({row["resource"] for row in listing["items"]},
+                             {"小判", "玉钢", "加速符"})
+            deleted = asyncio.run(api_delete_human_report_group(created["group_id"]))
+            self.assertTrue(deleted["ok"])
+            self.assertEqual(asyncio.run(api_human_reports(limit=10))["items"], [])
 
 
 if __name__ == "__main__":

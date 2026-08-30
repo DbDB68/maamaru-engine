@@ -1813,6 +1813,31 @@ async def api_add_human_report(request: Request):
     return {"ok": True, "item": item}
 
 
+@app.post("/api/data/human-reports/batch")
+async def api_add_human_report_batch(request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    entries = body.get("entries") or {}
+    if not isinstance(entries, dict):
+        return JSONResponse({"ok": False, "reason": "多资源收支格式不正确"}, status_code=400)
+    try:
+        items = get_telemetry_store().add_human_report_group(
+            occurred_at=float(body.get("occurred_at") or time.time()),
+            activities=body.get("activities") or [], note=body.get("note", ""),
+            entries=entries)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "items": items, "group_id": items[0]["group_id"]}
+
+
+@app.delete("/api/data/human-reports/group/{group_id}")
+async def api_delete_human_report_group(group_id: str):
+    from touken.telemetry import get_telemetry_store
+    if not get_telemetry_store().delete_human_report_group(group_id):
+        return JSONResponse({"ok": False, "reason": "找不到这组手账"}, status_code=404)
+    return {"ok": True}
+
+
 @app.delete("/api/data/human-reports/{report_id}")
 async def api_delete_human_report(report_id: int):
     from touken.telemetry import get_telemetry_store

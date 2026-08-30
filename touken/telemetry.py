@@ -13,6 +13,7 @@ import os
 import sqlite3
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 6
+TELEMETRY_SCHEMA_VERSION = 7
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -147,6 +148,8 @@ class TelemetryStore:
             conn.execute("ALTER TABLE human_reports ADD COLUMN resource TEXT")
         if "claimed_delta" not in report_cols:
             conn.execute("ALTER TABLE human_reports ADD COLUMN claimed_delta REAL")
+        if "group_id" not in report_cols:
+            conn.execute("ALTER TABLE human_reports ADD COLUMN group_id TEXT")
         conn.commit()
 
     def close(self) -> None:
@@ -307,7 +310,8 @@ class TelemetryStore:
                          note: str = "", source: str = "proactive",
                          gap_key: str | None = None,
                          resource: str | None = None,
-                         claimed_delta: float | None = None) -> dict:
+                         claimed_delta: float | None = None,
+                         group_id: str | None = None) -> dict:
         activities = [str(value).strip()[:40] for value in activities
                       if str(value).strip()][:20]
         note = str(note or "").strip()[:300]
@@ -336,23 +340,44 @@ class TelemetryStore:
         if not activities and not note and resource is None:
             raise ValueError("请至少选一项，或留一句说明")
         created_at = time.time()
+        group_id = str(group_id or "").strip()[:80] or None
         cursor = self._conn().execute(
             "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
-            "activities, note, resource, claimed_delta) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "activities, note, resource, claimed_delta, group_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (created_at, float(occurred_at), source, gap_key,
-             _json(activities), note, resource, claimed_delta),
+             _json(activities), note, resource, claimed_delta, group_id),
         )
         self._conn().commit()
         return {"id": cursor.lastrowid, "created_at": created_at,
                 "occurred_at": float(occurred_at), "source": source,
                 "gap_key": gap_key, "activities": activities, "note": note,
-                "resource": resource, "claimed_delta": claimed_delta}
+                "resource": resource, "claimed_delta": claimed_delta,
+                "group_id": group_id}
+
+    def add_human_report_group(self, *, occurred_at: float, activities: list[str],
+                               entries: dict[str, float], note: str = "") -> list[dict]:
+        clean = {str(resource): delta for resource, delta in entries.items()
+                 if delta is not None}
+        if not clean:
+            raise ValueError("请至少填写一种资源的收支")
+        group_id = uuid.uuid4().hex
+        items: list[dict] = []
+        try:
+            for resource, delta in clean.items():
+                items.append(self.add_human_report(
+                    occurred_at=occurred_at, activities=activities, note=note,
+                    source="proactive", resource=resource,
+                    claimed_delta=delta, group_id=group_id))
+        except Exception:
+            self.delete_human_report_group(group_id)
+            raise
+        return items
 
     def human_reports(self, limit: int = 200) -> list[dict]:
         rows = self._conn().execute(
             "SELECT id, created_at, occurred_at, source, gap_key, activities, note, "
-            "resource, claimed_delta "
+            "resource, claimed_delta, group_id "
             "FROM human_reports ORDER BY occurred_at DESC, id DESC LIMIT ?",
             (max(1, min(int(limit), 1000)),),
         ).fetchall()
@@ -362,6 +387,13 @@ class TelemetryStore:
     def delete_human_report(self, report_id: int) -> bool:
         cursor = self._conn().execute(
             "DELETE FROM human_reports WHERE id = ?", (int(report_id),),
+        )
+        self._conn().commit()
+        return cursor.rowcount > 0
+
+    def delete_human_report_group(self, group_id: str) -> bool:
+        cursor = self._conn().execute(
+            "DELETE FROM human_reports WHERE group_id = ?", (str(group_id),),
         )
         self._conn().commit()
         return cursor.rowcount > 0

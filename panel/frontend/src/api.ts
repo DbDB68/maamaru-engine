@@ -43,7 +43,11 @@ export const api = {
   addHumanReport: (value: any) => request<{ ok: boolean; item: any }>('/api/data/human-reports', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
+  addHumanReportBatch: (value: any) => request<{ ok: boolean; items: any[]; group_id: string }>('/api/data/human-reports/batch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
   deleteHumanReport: (id: number) => request<{ ok: boolean }>(`/api/data/human-reports/${id}`, { method: 'DELETE' }),
+  deleteHumanReportGroup: (groupId: string) => request<{ ok: boolean }>(`/api/data/human-reports/group/${encodeURIComponent(groupId)}`, { method: 'DELETE' }),
   planning: () => request<PlanningReport>('/api/planning'),
   addPlanningGoal: (value: { resource: string; goal_mode: 'amount_target' | 'deadline_target'; target?: number; deadline?: string; note?: string }) => request<{ ok: boolean; goal: any }>('/api/planning/goals', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
