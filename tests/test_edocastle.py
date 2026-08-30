@@ -285,6 +285,19 @@ class EdocastleBattleGateTests(unittest.TestCase):
             {}, "auto", "鱼鳞阵", [775, 695]
         ))
 
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_auto_toggle_current_manual_page_is_confirmed_before_result_gate(self, _sleep):
+        """公共阵形层把手动→自动的当前场点完后，江户城仍要确认页面离开。"""
+        flow = _BattleGateHost([])
+        flow._wait_formation_page = lambda *args, **kwargs: True
+        flow.choose_formation = lambda **kwargs: "fixed"
+        states = iter(["manual", None])
+        flow._formation_mode_state = lambda *args, **kwargs: next(states, None)
+
+        self.assertTrue(flow._fight_one_battle(
+            {}, "auto", "鱼鳞阵", [775, 695]
+        ))
+
 
 class _EntryGateHost(_BattleGateHost):
     def __init__(self, frames, auto_marker=False):

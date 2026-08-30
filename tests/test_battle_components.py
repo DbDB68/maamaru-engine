@@ -8,8 +8,9 @@ from touken.maa_adapter import Point
 
 
 class FakeMaa:
-    def __init__(self, ocr_results=None, templates=None):
+    def __init__(self, ocr_results=None, templates=None, ocr_tokens=None):
         self.ocr_results = iter(ocr_results or [])
+        self.ocr_tokens = iter(ocr_tokens or [])
         self.templates = dict(templates or {})
         self.clicks = []
         self.ocr_calls = []
@@ -24,6 +25,9 @@ class FakeMaa:
     def ocr(self, expected, roi):
         self.ocr_calls.append(expected)
         return next(self.ocr_results, False)
+
+    def ocr_all(self, roi):
+        return next(self.ocr_tokens, [])
 
     def template_match(self, template, roi=None, threshold=0.7):
         self.template_calls.append((template, roi))
@@ -327,18 +331,67 @@ class BattleComponentTests(unittest.TestCase):
         # 只拨了开关，卡面一下都没点
         self.assertEqual(flow.points, [[910, 32]])
 
-    def test_auto_formation_switches_from_manual_without_clicking_fixed(self):
-        flow = Flow(FakeMaa(templates={
+    def test_auto_formation_switches_from_manual_but_finishes_current_page(self):
+        """手动→自动只管下一场，当前阵形页仍必须选完（8-30 江户城实测）。"""
+        flow = Flow(FormationPageMaa(title_ttl=5, templates={
             "battle/ui阵形选择.png": Point(640, 24),
             "battle/阵形选择手动.png": Point(910, 32),
         }))
         flow.config["formation"] = {
             "auto_mode": {"toggle": [910, 32]},
             "formations": {"逆行阵": [1034, 420]},
+            "double_click": True,
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertEqual(flow.choose_formation(
-                formation_name="逆行阵", enable_auto=True), "auto")
+                formation_name="逆行阵", enable_auto=True), "fixed")
+        self.assertEqual(flow.points, [[910, 32], [1034, 420], [1034, 420]])
+
+    def test_formation_name_ocr_keeps_current_page_after_auto_toggle(self):
+        """顶部标题闪掉时，“鱼鳞阵”持续存在也不能把选择页当成已开战。"""
+        flow = Flow(FormationPageMaa(
+            title_ttl=1,
+            templates={
+                "battle/ui阵形选择.png": Point(640, 24),
+                "battle/阵形选择手动.png": Point(910, 32),
+            },
+            ocr_tokens=[
+                [("鱼鳞阵", Point(210, 180))],
+                [("鱼鳞阵", Point(210, 180))],
+                [], [],
+            ],
+        ))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"鱼鳞阵": [210, 218]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="鱼鳞阵", enable_auto=True), "fixed")
+        self.assertEqual(flow.points, [[910, 32], [210, 218], [210, 218]])
+
+    def test_auto_toggle_only_hands_off_when_selection_page_really_left(self):
+        """若某次切换后选择页确实消失，连续未见标题/阵形名才交给自动。"""
+        class ToggleFlow(Flow):
+            def _click_point(self, point):
+                super()._click_point(point)
+                if point == [910, 32]:
+                    self.maa.templates.pop("battle/阵形选择手动.png", None)
+                    self.maa.templates["battle/阵形选择自动.png"] = Point(910, 32)
+
+        flow = ToggleFlow(FormationPageMaa(title_ttl=1, templates={
+            "battle/ui阵形选择.png": Point(640, 24),
+            "battle/阵形选择手动.png": Point(910, 32),
+        }))
+        flow.config["formation"] = {
+            "auto_mode": {"toggle": [910, 32]},
+            "formations": {"鱼鳞阵": [210, 218]},
+            "double_click": True,
+        }
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertEqual(flow.choose_formation(
+                formation_name="鱼鳞阵", enable_auto=True), "auto")
         self.assertEqual(flow.points, [[910, 32]])
 
     def test_auto_formation_stuck_on_selection_page_falls_back_to_fixed(self):

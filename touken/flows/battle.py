@@ -815,18 +815,18 @@ class BattleMixin:
                     return "auto"
         if enable_auto:
             if toggled:
-                # 刚拨成自动，剩下的交给游戏，不插手。
-                return "auto"
+                # 游戏的“自动阵形”开关只对下一次阵形选择生效：当前这张
+                # 已经打开的手动选择页仍要点完一张阵形卡。旧逻辑在拨开关
+                # 后立刻返回 auto，江户城会把仍停着的“鱼鳞阵”页面误当成
+                # 已经开战，随后白等战果。这里用标题 + 阵形名 OCR 连续确认
+                # 当前页仍在；只有页面真的消失且自动标志出现才交给游戏。
+                if not self._wait_formation_selection_present():
+                    auto_took_over = self._formation_mode_state(
+                        allow_auto_without_title=True) == "auto"
+                    return "auto" if auto_took_over else "failed"
             # 已经是自动、选择页却还挂着：索敌失败时敌方阵形「不明」，
-            # 游戏没东西可选，会卡在页面上等手动（索敌看数值，白天图也会
-            # 失败，不是夜战专利）。这时脚本兜底：先认「有利」标记，
-            # 认不出（没有利可认）再点兜底阵形。
-            verify = cfg.get("verify", {})
-            title_visible = bool(self.maa.template_match(
-                verify.get("template", "battle/ui阵形选择.png"),
-                roi_4to4(*verify.get("roi", [571, 5, 707, 44]))))
-            if not title_visible:
-                return "auto"
+            # 游戏没东西可选会卡在页面上等手动；或刚从手动拨到自动、当前
+            # 这一场仍归手动处理。两种情况都先认“有利”，认不出再点兜底。
             point = self.maa.template_match(
                 cfg.get("advantage_template", "battle/ui有利.png"),
                 threshold=0.7,
@@ -842,24 +842,87 @@ class BattleMixin:
 
     def _wait_formation_title_stable(self, timeout_s: float = 6.0,
                                      stable_hits: int = 2) -> bool:
-        """等顶部红色「阵形选择」大标题连续命中，确认页面真加载完了。
+        """等阵形选择页连续命中，确认页面真加载完了。
 
         进战斗/切模式时页面有进场和重绘动画，单帧命中或未命中都可能是
-        动画中间态（江户城实测：动画期截图标题未命中，被误判成"已离开"）。
+        动画中间态。优先认顶部标题；标题闪烁时再用“鱼鳞阵”等阵形名
+        OCR 兜底，避免把仍停着的选择页误判成已经开战。
         """
-        verify = self.config.get("formation", {}).get("verify", {})
-        template = verify.get("template", "battle/ui阵形选择.png")
-        roi = roi_4to4(*verify.get("roi", [571, 5, 707, 44]))
         hits = 0
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
+        attempts = max(stable_hits, int(max(0.4, timeout_s) / 0.4))
+        for _ in range(attempts):
             self.maa.screenshot(force=True)
-            if self.maa.template_match(template, roi):
+            if self._formation_selection_visible():
                 hits += 1
                 if hits >= stable_hits:
                     return True
             else:
                 hits = 0
+            time.sleep(0.4)
+        return False
+
+    def _formation_selection_visible(self) -> bool:
+        """标题或任一阵形名出现，都说明当前选择页仍未处理完。
+
+        OCR 只在标题模板未命中时启用，而且只检查阵形选择可能出现的区域；
+        这条门闩只用于已经确认进入阵形流程的窄上下文，不会拿战斗中的
+        右上角自动标志单独判断页面。
+        """
+        formation = self.config.get("formation", {})
+        verify = formation.get("verify", {})
+        if self.maa.template_match(
+                verify.get("template", "battle/ui阵形选择.png"),
+                roi_4to4(*verify.get("roi", [571, 5, 707, 44]))):
+            return True
+
+        ocr_all = getattr(self.maa, "ocr_all", None)
+        if not callable(ocr_all):
+            return False
+        try:
+            roi = roi_4to4(*formation.get(
+                "name_ocr_roi", [0, 80, 1280, 720]))
+            tokens = ocr_all(roi) or []
+        except Exception:
+            return False
+
+        names = [self._formation_name(name)
+                 for name in formation.get("formations", {})]
+        for text, _point in tokens:
+            compact = "".join(str(text or "").split())
+            for name in names:
+                stem = name[:-1] if name.endswith("阵") else name
+                expected = stem if len(stem) >= 2 else name
+                if expected and expected in compact:
+                    return True
+        return False
+
+    def _wait_formation_selection_present(self, attempts: int = 8,
+                                          stable_hits: int = 2) -> bool:
+        """拨动模式后，确认当前阵形选择页仍连续存在。"""
+        hits = 0
+        for _ in range(max(stable_hits, attempts)):
+            self.maa.screenshot(force=True)
+            if self._formation_selection_visible():
+                hits += 1
+                if hits >= stable_hits:
+                    return True
+            else:
+                hits = 0
+            time.sleep(0.4)
+        return False
+
+    def _wait_formation_selection_departed(self, attempts: int = 10,
+                                           stable_misses: int = 2) -> bool:
+        """点阵形后要求标题和阵形名连续消失，才算真正开战。"""
+        misses = 0
+        for _ in range(max(stable_misses, attempts)):
+            self.maa.screenshot(force=True)
+            if self._formation_selection_visible():
+                misses = 0
+            else:
+                misses += 1
+                if misses >= stable_misses:
+                    return True
             time.sleep(0.4)
         return False
 
@@ -928,14 +991,7 @@ class BattleMixin:
                 time.sleep(0.6)
                 self._click_point(target)
                 time.sleep(0.8)
-                gone = True
-                for _ in range(2):
-                    self.maa.screenshot(force=True)
-                    if self._formation_mode_state() is not None:
-                        gone = False
-                        break
-                    time.sleep(0.4)
-                if gone:
+                if self._wait_formation_selection_departed():
                     return True
             print(f"[ERROR] 阵形 {formation_name} 点两下后仍未离开选择页")
             return False
