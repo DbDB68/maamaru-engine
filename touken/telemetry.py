@@ -389,7 +389,7 @@ class TelemetryStore:
         if ended_at <= started_at:
             raise ValueError("结束时间必须晚于开始时间")
         if ended_at - started_at > 31 * 86400:
-            raise ValueError("一段挂机最多记录 31 天")
+            raise ValueError("一段活动最多记录 31 天")
         if ended_at > time.time() + 300:
             raise ValueError("结束时间不能在未来")
         note = str(note or "").strip()[:200]

@@ -469,9 +469,9 @@ async function saveManualSession() {
       note: manualSessionForm.value.note,
     })
     manualSessionFormOpen.value = false
-    inventoryNotice.value = '已记下这段手动挂机；不会算进まあ丸战绩。'
+    inventoryNotice.value = '已记下这段活动；不会算进まあ丸战绩。'
     await load(days.value)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '手动挂机记录失败' }
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '手动活动记录失败' }
   finally { manualSessionSaving.value = false }
 }
 
@@ -591,17 +591,17 @@ onMounted(() => load())
         </button>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 自己补记</button></div></header>
+          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
           <div v-if="manualActionsOpen" class="manual-action-picker">
-            <button type="button" @click="openInventoryForm"><b>抄下当前库存</b><small>刚看过游戏里的数字，记一份现在的家底快照</small></button>
-            <button type="button" @click="openProactiveReport()"><b>补记一笔收支</b><small>在まあ丸之外花了或领了资源，把数额补进账里</small></button>
-            <button type="button" @click="openManualSessionForm"><b>补记一段挂机</b><small>记玩法、圈数和时间；与まあ丸战绩分开计算</small></button>
+            <button type="button" @click="openProactiveReport()"><b>记一笔收支</b><small>记下自己获得或花掉的资源</small></button>
+            <button type="button" @click="openManualSessionForm"><b>补记一段活动</b><small>记玩法、圈数和时间；与まあ丸分开计算</small></button>
+            <button type="button" @click="openInventoryForm"><b>更新当前家底</b><small>把游戏里现在的资源数字抄下来</small></button>
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
-            <header><div><h4>抄下当前库存</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭库存快照" @click="inventoryFormOpen = false">×</button></header>
+            <header><div><h4>更新当前家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false">×</button></header>
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '保存库存快照' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
           </form>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
@@ -612,7 +612,7 @@ onMounted(() => load())
         </section>
 
         <form v-if="manualSessionFormOpen" class="manual-session-form" @submit.prevent="saveManualSession">
-          <header><div><h4>补记一段挂机</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动挂机" @click="manualSessionFormOpen = false">×</button></header>
+          <header><div><h4>补记一段活动</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false">×</button></header>
           <div class="manual-session-fields">
             <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
             <label>圈数<input v-model.number="manualSessionForm.loops" type="number" min="1" max="100000" step="1" required></label>
@@ -620,11 +620,11 @@ onMounted(() => load())
             <label>结束时间<input v-model="manualSessionForm.ended_at" type="datetime-local" required></label>
             <label class="manual-session-note">备注<input v-model="manualSessionForm.note" maxlength="200" placeholder="可不填"></label>
           </div>
-          <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '记录中……' : '记下这段挂机' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false">取消</button></div>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '记录中……' : '记下这段活动' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false">取消</button></div>
         </form>
 
         <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
-          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '补记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
+          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
             <label>哪种资源<select v-model="reportForm.resource" required><option value="" disabled>请选择</option><option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option></select></label>

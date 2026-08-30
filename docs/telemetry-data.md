@@ -9,7 +9,7 @@
   日课、远征、内番状态。
 - `GET /api/data/events?limit=100&event_type=&script=`：最近的结构化玩法事件。
 - `GET /api/data/ocr?limit=100&script=&matched=`：OCR 观测明细。
-- `GET/POST /api/data/manual-sessions`：审神者手动挂机记录；与自动任务 `runs`
+- `GET/POST /api/data/manual-sessions`：审神者手动活动记录；与自动任务 `runs`
   分表返回，不参与まあ丸任务次数和圈速聚合。
 - `GET /api/data/resource-ledger?days=7` 或 `?from=<ts>&to=<ts>`：资源总账（见下文），
   from/to（Unix 秒）优先于 days，days 默认 7。聚合全部在服务端完成，
@@ -78,7 +78,7 @@
 审神者报备长期保留，用于跨月、跨年的成绩单；体积较大的 OCR 观察明细默认保留 90 天。
 当前状态 JSON 仍保留原有接口，便于旧前端渐进迁移。
 
-## 手动挂机（manual-sessions）
+## 手动活动（manual-sessions）
 
 手动记录只保存玩法、圈数、起止时间和可选备注。服务端据此计算总用时与平均圈速，
 但绝不创建 `runs` 或玩法事件。规划页可以单独选用这份圈速，不能与まあ丸实测混合求平均。

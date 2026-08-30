@@ -1755,7 +1755,7 @@ async def api_add_manual_inventory(request: Request):
 @app.get("/api/data/manual-sessions")
 async def api_manual_sessions(limit: int = 200, from_ts: float | None = None,
                               to_ts: float | None = None):
-    """审神者手动挂机记录；与まあ丸 runs 分表、分接口返回。"""
+    """审神者手动活动记录；与まあ丸 runs 分表、分接口返回。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     return {
         "schema_version": TELEMETRY_SCHEMA_VERSION,
@@ -1785,7 +1785,7 @@ async def api_delete_manual_session(session_id: int):
     from touken.telemetry import get_telemetry_store
     if not get_telemetry_store().delete_manual_session(session_id):
         return JSONResponse(
-            {"ok": False, "reason": "找不到这条手动挂机记录"}, status_code=404)
+            {"ok": False, "reason": "找不到这条手动活动记录"}, status_code=404)
     return {"ok": True}
 
 
