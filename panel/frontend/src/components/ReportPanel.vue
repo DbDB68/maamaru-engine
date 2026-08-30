@@ -299,6 +299,26 @@ const dayResourceOverview = computed(() => {
     }
   })
 })
+const displayedChartDates = computed(() => days.value === 1 ? ['24h'] : chartDates.value)
+const displayedChartLabels = computed(() => days.value === 1 ? ['近 24 小时'] : [])
+const displayedChartSeries = computed<ChartSeries[]>(() => {
+  if (days.value !== 1) return chartSeries.value
+  if (mode.value === 'compare') {
+    return compareResources.value.map(resource => ({
+      key: resource,
+      name: resource,
+      color: resourceColors[resource] || '#8a7f72',
+      values: [dayResourceOverview.value.find(row => row.resource === resource)?.total ?? null],
+    }))
+  }
+  const row = dayResourceOverview.value.find(item => item.resource === selectedResource.value)
+  return sourceCategories.map(category => ({
+    key: category.key,
+    name: category.key === 'human' ? '你记的' : category.label,
+    color: category.color,
+    values: [row?.parts.find(part => part.key === category.key)?.value || null],
+  }))
+})
 
 function toggleCompareResource(name: string) {
   if (compareResources.value.includes(name)) {
@@ -752,14 +772,13 @@ onMounted(() => load())
 
         <section class="resource-trend">
           <header>
-            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每柱按自己的变化归一显示，柱顶保留真实数额。</p></div>
-            <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
-            <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
-            <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
+            <div><h3>变化趋势</h3></div>
+            <nav v-if="mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
+            <nav v-else aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
+            <label class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
-          <ResourceChart v-if="days === 1" :dates="[]" :series="[]" :overview-rows="dayResourceOverview" :loading="loading" />
-          <template v-else>
-            <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
+          <ResourceChart :dates="displayedChartDates" :labels="displayedChartLabels" :series="displayedChartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="days !== 1 && onChartSelect($event)" />
+          <template v-if="days !== 1">
             <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
           </template>
         </section>

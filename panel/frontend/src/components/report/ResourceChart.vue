@@ -9,17 +9,14 @@ import type { ChartSeries } from './reportModel'
 
 echarts.use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
-interface OverviewPart { key: string; label: string; color: string; value: number }
-interface OverviewRow { resource: string; total: number | null; parts: OverviewPart[] }
-
 const props = withDefaults(defineProps<{
   dates: string[]
+  labels?: string[]
   series: ChartSeries[]
   stacked?: boolean
   selectedDate?: string
   loading?: boolean
-  overviewRows?: OverviewRow[]
-}>(), { stacked: true, selectedDate: '', loading: false, overviewRows: () => [] })
+}>(), { labels: () => [], stacked: true, selectedDate: '', loading: false })
 
 const emit = defineEmits<{ select: [payload: { date: string; key: string }] }>()
 
@@ -36,60 +33,8 @@ function buildOption() {
   const inkDim = cssVar('--ink-dim', '#8a7f72')
   const line = cssVar('--paper-line', '#ddd6cb')
   const card = cssVar('--paper-card', '#faf6ef')
-  if (props.overviewRows.length) {
-    const compact = (box.value?.clientWidth || 999) < 520
-    const categories = new Map<string, { label: string; color: string }>()
-    for (const row of props.overviewRows) for (const part of row.parts) categories.set(part.key, part)
-    const scales = props.overviewRows.map(row => Math.max(1, row.parts.reduce((sum, part) => sum + Math.abs(part.value), 0)))
-    const overviewSeries: any[] = [...categories.entries()].map(([key, category]) => ({
-      id: key, name: category.label, type: 'bar', stack: 'resource',
-      barWidth: compact ? 18 : 22,
-      itemStyle: { color: category.color, borderRadius: 2 }, emphasis: { focus: 'series' },
-      data: props.overviewRows.map((row, index) => {
-        const actual = row.parts.find(part => part.key === key)?.value || 0
-        return { value: actual / scales[index] * 100, actual, resource: row.resource }
-      }),
-    }))
-    overviewSeries.push({
-      id: 'total-label', name: '', type: 'bar', silent: true,
-      barWidth: compact ? 18 : 22, barGap: '-100%',
-      itemStyle: { color: 'transparent' }, tooltip: { show: false }, z: 10,
-      data: props.overviewRows.map(row => ({
-        value: row.total == null ? 0 : row.total < 0 ? -104 : 104,
-        total: row.total,
-        label: {
-          show: true, position: row.total != null && row.total < 0 ? 'insideBottom' : 'top',
-          color: row.total == null ? inkDim : row.total < 0 ? cssVar('--danger', '#b0492e') : row.total > 0 ? '#47734f' : ink,
-          fontSize: compact ? 10 : 13, fontWeight: 700, rotate: compact ? 38 : 0,
-          formatter: signed(row.total),
-        },
-      })),
-    })
-    return {
-      animationDuration: 650, animationEasing: 'cubicOut' as const,
-      grid: { left: compact ? 24 : 42, right: compact ? 12 : 20, top: compact ? 58 : 44, bottom: compact ? 64 : 40, containLabel: false },
-      legend: { top: 0, icon: 'roundRect', itemWidth: 11, itemHeight: 11, textStyle: { color: inkDim, fontSize: 11 } },
-      tooltip: {
-        trigger: 'item', backgroundColor: card, borderColor: line, textStyle: { color: ink, fontSize: 13 },
-        formatter(params: any) {
-          const data = params?.data || {}
-          if (!data.actual) return `${data.resource || ''}：这项来源没有变化`
-          return `<b>${data.resource}</b><br>${params.marker}${params.seriesName}　<b>${signed(Number(data.actual))}</b>`
-        },
-      },
-      xAxis: {
-        type: 'category', data: props.overviewRows.map(row => row.resource),
-        axisLine: { show: true, lineStyle: { color: line } }, axisTick: { show: false },
-        axisLabel: { color: ink, fontSize: compact ? 10 : 12, fontWeight: 600, interval: 0, rotate: compact ? 38 : 0 },
-      },
-      yAxis: {
-        type: 'value', min: -112, max: 112,
-        axisLabel: { show: false }, axisTick: { show: false }, axisLine: { show: false }, splitLine: { show: false },
-      },
-      series: overviewSeries,
-    }
-  }
   const selected = props.selectedDate
+  const displayLabel = (index: number) => props.labels[index] || dayLabel(props.dates[index] || '')
   return {
     grid: { left: 12, right: 12, top: 30, bottom: 8, containLabel: true },
     legend: { top: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: inkDim, fontSize: 12 } },
@@ -101,17 +46,17 @@ function buildOption() {
       textStyle: { color: ink, fontSize: 13 },
       formatter(params: any) {
         const items = (Array.isArray(params) ? params : [params]).filter((item: any) => item.value != null && item.value !== 0)
-        if (!items.length) return `${dayLabel(props.dates[items[0]?.dataIndex ?? 0] || '')}：这天没有读数变化`
+        if (!items.length) return `${displayLabel(items[0]?.dataIndex ?? 0)}：这段时间没有读数变化`
         const total = items.reduce((sum: number, item: any) => sum + Number(item.value || 0), 0)
         const rows = items.map((item: any) =>
           `<div style="display:flex;justify-content:space-between;gap:16px"><span>${item.marker}${item.seriesName}</span><b>${signed(Number(item.value))}</b></div>`,
         ).join('')
-        return `<div style="min-width:180px"><div style="margin-bottom:4px"><b>${dayLabel(props.dates[items[0].dataIndex] || '')}</b> 合计 <b>${signed(total)}</b></div>${rows}</div>`
+        return `<div style="min-width:180px"><div style="margin-bottom:4px"><b>${displayLabel(items[0].dataIndex)}</b> 合计 <b>${signed(total)}</b></div>${rows}</div>`
       },
     },
     xAxis: {
       type: 'category',
-      data: props.dates.map(dayLabel),
+      data: props.dates.map((_, index) => displayLabel(index)),
       axisLine: { lineStyle: { color: line } },
       axisTick: { show: false },
       axisLabel: { color: inkDim, fontSize: 12 },
@@ -158,7 +103,7 @@ onMounted(() => {
   }
 })
 
-watch(() => [props.dates, props.series, props.stacked, props.selectedDate, props.overviewRows], render, { deep: true })
+watch(() => [props.dates, props.labels, props.series, props.stacked, props.selectedDate], render, { deep: true })
 
 onBeforeUnmount(() => {
   observer?.disconnect()
@@ -168,17 +113,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="resource-echart" :class="{ loading, overview: overviewRows.length }">
-    <div ref="box" class="resource-echart-box" role="img" :aria-label="overviewRows.length ? '24小时八种资源收支统计图' : '资源收支柱状图'"></div>
+  <div class="resource-echart" :class="{ loading }">
+    <div ref="box" class="resource-echart-box" role="img" aria-label="资源收支柱状图"></div>
     <p v-if="loading" class="resource-echart-hint">狐之助正在整理这段时间的收支……</p>
-    <p v-else-if="!dates.length && !overviewRows.length" class="resource-echart-hint">同一时间段至少需要两次库存读数，狐之助再攒一会儿账。</p>
+    <p v-else-if="!dates.length" class="resource-echart-hint">同一时间段至少需要两次库存读数，狐之助再攒一会儿账。</p>
   </div>
 </template>
 
 <style scoped>
 .resource-echart { position: relative; }
 .resource-echart-box { width: 100%; height: 320px; }
-.resource-echart.overview .resource-echart-box { height: 360px; }
 .resource-echart-hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-dim); background: color-mix(in srgb, var(--paper-card) 70%, transparent); margin: 0; }
-@media (max-width: 520px) { .resource-echart.overview .resource-echart-box { height: 390px; } }
 </style>
