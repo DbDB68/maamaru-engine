@@ -576,6 +576,8 @@ class DailyMixin:
             if self.maa.ocr("内番报告", roi_4to4(*naihanka_report.REPORT_TITLE_ROI)):
                 for msg in self._collect_report_gains():
                     print(msg)
+                # 报告已经读完才点穿，避免登录扫地每轮都停在同一张报告上。
+                self.maa.click(Point(993, 690))
                 time.sleep(1.0)
                 continue
             if self.maa.exists("目录.png", threshold=0.7):

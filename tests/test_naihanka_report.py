@@ -9,7 +9,9 @@ import cv2
 import numpy as np
 
 from touken.flows import naihanka_report as nr
+from touken.flows.daily import DailyMixin
 from touken.flows.naihanka import NaihankaMixin
+from touken.maa_adapter import Point
 
 FIXTURE = Path(__file__).parent / "fixtures" / "naihanka_report.png"
 
@@ -177,6 +179,59 @@ class ObserveStreamTests(unittest.TestCase):
             messages = list(flow.naihanka_observe_stream())
         self.assertEqual(messages, [])
         self.assertEqual(flow.clicks, [])
+
+
+class _LoginPopupMaa:
+    """登录扫地剧本：报告屏必须点掉后才会露出本丸目录。"""
+
+    def __init__(self):
+        self.stage = "report"
+        self.clicks = []
+
+    def screenshot(self, force=False):
+        return None
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        return None
+
+    def ocr(self, expected, roi, **kw):
+        if expected == "内番报告" and self.stage == "report":
+            return _pt(640, 340)
+        return None
+
+    def exists(self, template, roi=None, threshold=0.7):
+        return template == "目录.png" and self.stage == "home"
+
+    def click(self, target):
+        self.clicks.append(target)
+        if target == Point(993, 690):
+            self.stage = "home"
+        return True
+
+
+class _LoginPopupFlow(DailyMixin):
+    def __init__(self):
+        self.maa = _LoginPopupMaa()
+        self.report_reads = 0
+
+    def _collect_report_gains(self):
+        self.report_reads += 1
+        return ["[内番] 测试刀剑男士 机动+1"]
+
+    def _probe_nav_ready(self):
+        return self.maa.stage == "home"
+
+
+class LoginPopupSweepTests(unittest.TestCase):
+    def test_report_is_read_then_closed_before_home_is_accepted(self):
+        flow = _LoginPopupFlow()
+
+        with patch("touken.flows.daily.time.sleep"):
+            arrived = flow._popup_sweep(max_rounds=5)
+
+        self.assertTrue(arrived)
+        self.assertEqual(flow.report_reads, 1)
+        self.assertEqual(flow.maa.clicks, [Point(993, 690)])
 
 
 class CollectReportGainsTests(unittest.TestCase):
