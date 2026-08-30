@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, ManualSession, ResourceLedger } from '../types'
+import type { HumanReport, InventoryGap, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -16,6 +16,7 @@ const honmaruTab = ref<'report' | 'planning'>('report')
 const view = ref<'chart' | 'records'>('chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
+const planning = ref<PlanningReport | null>(null)
 const events = ref<any[]>([])
 const runs = ref<any[]>([])
 const humanReports = ref<HumanReport[]>([])
@@ -59,13 +60,58 @@ const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.valu
 
 // ---- 库存总账 ----
 
+const goalStatusRank: Record<PlanningGoalAdvice['status'], number> = {
+  active: 0, behind: 0, on_track: 1, unknown: 2, done: 3, expired: 4,
+}
+
+function goalForResource(resource: string) {
+  return [...(planning.value?.goals || [])]
+    .filter(goal => goal.resource === resource)
+    .sort((left, right) => goalStatusRank[left.status] - goalStatusRank[right.status])[0] || null
+}
+
 const resourceRows = computed(() => resourceNames.map(name => {
   const row = (ledger.value?.per_resource || []).find(item => item.resource === name)
+  const rate = planning.value?.rates?.[name]
   return { name, before: row?.opening ?? null, current: row?.closing ?? null,
     delta: row?.total_delta ?? null, attributed: row?.attributed_delta ?? 0,
     unattributed: row?.unattributed_delta ?? null, observations: row?.observation_count ?? 0,
-    confidence: row?.confidence || 'low' }
+    confidence: row?.confidence || 'low', rate: rate?.daily ?? null,
+    rateDays: rate?.days_observed ?? 0, goal: goalForResource(name) }
 }))
+const rateWindowLabel = computed(() => `近 ${planning.value?.rate_window_days || 14} 天平常日均`)
+
+function goalSummary(goal: PlanningGoalAdvice) {
+  if (goal.status === 'done') return '目标已经达成'
+  if (goal.goal_mode === 'deadline_target' && goal.projected != null) {
+    return `到期预计 ${Math.round(goal.projected).toLocaleString()}`
+  }
+  if (goal.target != null && goal.current != null) {
+    const remaining = Math.max(0, goal.target - goal.current)
+    if (remaining) return `还差 ${Math.round(remaining).toLocaleString()}`
+  }
+  if (goal.shortfall != null && goal.shortfall > 0) return `预计还差 ${Math.round(goal.shortfall).toLocaleString()}`
+  if (goal.status === 'on_track') return '照现在速度来得及'
+  if (goal.status === 'behind') return '需要再加把劲'
+  return '查看目标进度'
+}
+
+function shortGoalDate(value: string | null | undefined) {
+  const match = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})/)
+  return match ? `${Number(match[1])}/${Number(match[2])}` : ''
+}
+
+function goalMeta(goal: PlanningGoalAdvice) {
+  if (goal.goal_mode === 'amount_target' && goal.estimated_deadline) return `预计 ${shortGoalDate(goal.estimated_deadline)}`
+  if (goal.deadline) return `${shortGoalDate(goal.deadline)} 截止`
+  return '规划'
+}
+
+async function openPlanning() {
+  honmaruTab.value = 'planning'
+  await nextTick()
+  document.querySelector('.report-panel')?.scrollIntoView({ block: 'start' })
+}
 const confidence = computed(() => {
   if (loading.value) return { level: 'empty', label: '正在对账', detail: '狐之助正在整理库存记录' }
   const rows = resourceRows.value.filter(row => row.delta != null)
@@ -618,9 +664,10 @@ async function saveManualInventory() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400)])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextPlanning] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.planning().catch(() => null)])
     summary.value = nextSummary
     ledger.value = nextLedger
+    planning.value = nextPlanning
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.started_at >= Date.now() / 1000 - nextDays * 86400)
     hasMoreEvents.value = nextEvents.has_more
@@ -735,6 +782,8 @@ onMounted(() => load())
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
+              <span v-if="row.rate != null" class="resource-rate" :title="`按最近 ${planning?.rate_window_days || 14} 天里 ${row.rateDays} 个有完整记录的平常日计算`">{{ rateWindowLabel }} {{ signed(Math.round(row.rate)) }}/日</span>
+              <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
             </article>
           </div>
           <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
@@ -841,6 +890,11 @@ onMounted(() => load())
 .recent-manual-ledger li strong.gain { color: #47734f; }
 .recent-manual-ledger li strong.loss { color: var(--danger); }
 .recent-manual-ledger li button { padding: 3px 7px; color: var(--danger); background: transparent; border: 0; font-size: 11px; }
+.resource-ledger-grid .resource-rate { margin-top: 5px; color: var(--fox-gold-deep); line-height: 1.35; }
+.resource-goal-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: 7px; padding: 5px 7px; color: var(--ink); background: var(--fox-gold-pale); border: 0; border-left: 3px solid var(--fox-gold); text-align: left; cursor: pointer; }
+.resource-goal-link span { color: var(--ink); line-height: 1.35; }
+.resource-goal-link em { flex: 0 0 auto; color: var(--fox-gold-deep); font-size: 10px; font-style: normal; white-space: nowrap; }
+.resource-goal-link:hover { background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); }
 .manual-inventory-form { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .manual-inventory-form > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .manual-inventory-form h4, .manual-inventory-form p { margin: 0; }
@@ -874,6 +928,8 @@ onMounted(() => load())
   .manual-session-fields .manual-session-note { grid-column: 1; }
   .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto; }
   .recent-manual-ledger time { grid-column: 1 / -1; }
+  .resource-goal-link { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .resource-goal-link span, .resource-goal-link em { white-space: nowrap; }
   .report-form .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
