@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import maamaru_app
 from launcher import app
 
 
@@ -63,6 +64,11 @@ class LauncherMaintenanceTests(unittest.TestCase):
     def test_launcher_offers_manual_emulator_selection(self):
         self.assertIn("选择模拟器", app.HTML)
         self.assertTrue(callable(getattr(app.Api(), "choose_emulator", None)))
+
+    def test_launcher_offers_separate_ledger_entry(self):
+        self.assertIn("只打开账房", app.HTML)
+        self.assertIn("startApp('ledger')", app.HTML)
+        self.assertNotEqual(maamaru_app.LEDGER_PORT, maamaru_app.AUTOMATION_PORT)
 
 
 if __name__ == "__main__":

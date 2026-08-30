@@ -25,6 +25,7 @@ const current = ref<string | null>(null)
 const loading = ref(true)
 const message = ref('')
 const tab = ref<'home' | 'tasks' | 'report' | 'chat' | 'system'>('home')
+const ledgerMode = ref(false)
 const theme = ref<'washi' | 'pixel'>('washi')
 const schedulerWarning = ref('')
 const advancedDrawer = ref<'pumpkin' | 'daily-pumpkin' | null>(null)
@@ -99,6 +100,7 @@ const dailyPumpkinTargets = computed({
 })
 
 const stagePlace = computed(() => {
+  if (ledgerMode.value) return '本丸账房'
   if (!dashboardRun.value?.active) return '本丸庭院'
   const script = String(dashboardRun.value.script || '')
   const step = String(dashboardRun.value.step || '')
@@ -106,9 +108,10 @@ const stagePlace = computed(() => {
   if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|换队长|派遣)/.test(step) || ['raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch', 'osaka'].includes(script)) return '出阵之路'
   return '本丸庭院'
 })
-const stageActive = computed(() => running.value || Boolean(dashboardRun.value?.active))
-const stageFlavor = computed(() => dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
+const stageActive = computed(() => !ledgerMode.value && (running.value || Boolean(dashboardRun.value?.active)))
+const stageFlavor = computed(() => ledgerMode.value ? '今天只算账' : dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
 const stageSub = computed(() => {
+  if (ledgerMode.value) return '不连接游戏 · 手动记录与规划'
   if (!dashboardRun.value?.active) return '庭院无事'
   const label = dashboardRun.value.label || scripts.value[current.value || '']?.label || '本丸任务'
   const started = Number(dashboardRun.value.started || 0)
@@ -146,6 +149,17 @@ function migrateParams(script: string, value: ScriptParams): ScriptParams {
 async function load() {
   loading.value = true
   try {
+    const mode = await api.appMode()
+    ledgerMode.value = mode.mode === 'ledger'
+    if (ledgerMode.value) {
+      const saved = await api.settings()
+      theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
+      applyTheme()
+      tab.value = 'report'
+      scripts.value = {}
+      params.value = {}
+      return
+    }
     const [scriptData, saved] = await Promise.all([api.scripts(), api.settings()])
     scripts.value = scriptData.scripts
     running.value = scriptData.running
@@ -231,16 +245,23 @@ watch(message, value => {
   if (value) toastTimer = window.setTimeout(() => { message.value = '' }, 3200)
 })
 
-onMounted(() => { load(); pollStatus(); pollTimer = window.setInterval(pollStatus, 2000); window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
+onMounted(async () => {
+  await load()
+  if (!ledgerMode.value) {
+    await pollStatus()
+    pollTimer = window.setInterval(pollStatus, 2000)
+    window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning)
+  }
+})
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
 watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false })
 </script>
 
 <template>
-  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed }">
+  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed, 'ledger-mode': ledgerMode }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
-      <div class="stage-brand"><strong>まあ丸</strong><small>本丸自动管家</small></div>
+      <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
       <div class="stage-fox" aria-hidden="true"></div>
       <div class="stage-status">
         <small>{{ stagePlace }}</small>
@@ -250,16 +271,19 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
     </section>
     <header class="topbar">
       <nav class="topnav">
-        <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
-        <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
-        <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
-        <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
-        <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
+        <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
+        <template v-else>
+          <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
+          <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
+          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
+          <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
+          <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
+        </template>
       </nav>
       <div class="top-status">
-        <i :class="{ running: stageActive }"></i><span>{{ stageActive ? '执务中' : '待命中' }}</span>
+        <i :class="{ running: stageActive }"></i><span>{{ ledgerMode ? '纯净模式' : stageActive ? '执务中' : '待命中' }}</span>
         <button class="theme-button" :title="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" :aria-label="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" @click="toggleTheme"></button>
-        <a href="/legacy">旧版备用</a>
+        <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
       </div>
     </header>
     <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout">
@@ -358,7 +382,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>
-    <div v-if="schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
+    <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"
       title="南瓜目标名单"

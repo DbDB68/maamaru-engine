@@ -49,6 +49,9 @@ def main():
         # 工人子进程：跑脚本、把 yield 逐行 print 给父进程（面板）收
         from panel.worker import main as worker_main
         worker_main()
+    elif "--ledger" in sys.argv:
+        from maamaru_app import main as panel_main
+        panel_main(ledger_mode=True)
     elif "--panel" in sys.argv:
         from maamaru_app import main as panel_main
         panel_main()

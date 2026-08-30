@@ -67,11 +67,12 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .status .mark{display:grid;width:26px;height:26px;flex:0 0 26px;place-items:center;color:white;background:var(--gold);border-radius:50%;font-size:14px;font-weight:800}
 .status.blocked .mark{background:var(--red)}.status.ready .mark{background:var(--green)}
 .status b{font-size:14px}.status span{color:var(--muted);font-size:12px}
-.progress-row{display:grid;grid-template-columns:minmax(0,1fr) 200px;gap:14px;align-items:center}
+.progress-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:14px;align-items:center}
 .bar{height:12px;border:1px solid #ddcfb9;border-radius:999px;background:#eee2cc;overflow:hidden}
 .bar-fill{height:100%;width:0;background:linear-gradient(#e6aa0b,#ce8c00);transition:width .4s ease}
 .launch-progress{display:none;margin-top:8px;grid-template-columns:repeat(3,1fr);gap:5px}.launch-progress.show{display:grid}.launch-progress span{padding-top:6px;color:#a49483;border-top:3px solid #ddcfb9;font-size:11px;text-align:center}.launch-progress span.active{color:var(--gold-deep);border-color:var(--gold);font-weight:700}.launch-progress span.done{color:var(--green);border-color:var(--green)}
 .start{width:100%;height:44px;border:0;border-radius:11px;color:white;background:linear-gradient(#e6aa0b,#ce8c00);box-shadow:0 4px 0 #855900,0 8px 14px #a56e1630;font-size:16px;font-weight:800}.start:hover{filter:brightness(1.04)}.start:active{transform:translateY(2px);box-shadow:0 2px 0 #855900}.start:disabled{cursor:not-allowed;filter:grayscale(.65);opacity:.66}
+.start-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.start.ledger{color:#65532d;background:linear-gradient(#f8f1df,#ead9b3);box-shadow:0 4px 0 #b59b67,0 8px 14px #7d672430}
 .note{margin:auto 2px 0;padding-top:8px;color:#918579;font-size:11px}
 @media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.board{grid-template-columns:1fr}.garden{height:150px}.panel{grid-template-columns:1fr}.checks{border-right:0;border-bottom:1px dashed #e2d7c5}.progress-row{grid-template-columns:1fr}}
 </style></head><body>
@@ -87,7 +88,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 <div id="runbar" class="runbar">
 <div class="run-track"><span class="run-fox"></span></div>
 <div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
-<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><button id="start" class="start" onclick="startApp()" disabled>正在检查…</button></div>
+<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="ledgerStart" class="start ledger" onclick="startApp('ledger')" disabled>只打开账房</button><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
 </div>
 </main>
 <script>
@@ -104,14 +105,14 @@ function renderChecks(items){
 }
 async function refresh(){
  setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');setProgress(0);const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
- const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'inline-block':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';
+ const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'inline-block':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';const ledger=document.querySelector('#ledgerStart');ledger.disabled=false;
  const issues=renderChecks(data.items);const warnings=issues.filter(x=>x.state==='warn').length;
  if(data.blocked){setState('blocked','还差一步','先处理上方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
  else if(warnings){setState('ready','准备就绪',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
  else{setState('ready','准备就绪','程序与运行环境均已就绪，可以安心开工。','✓');start.textContent='启动まあ丸';start.disabled=false}
 }
 function setLaunchStep(index){const steps=[...document.querySelectorAll('#launchProgress span')];document.querySelector('#launchProgress').classList.add('show');steps.forEach((step,i)=>step.className=i<index?'done':i===index?'active':'')}
-async function startApp(){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start();clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
+async function startApp(mode){const ledgerMode=mode==='ledger';const b=document.querySelector(ledgerMode?'#ledgerStart':'#start');b.disabled=true;b.textContent='正在启动…';setState('',ledgerMode?'正在打开账房':'正在打开本丸',ledgerMode?'不连接模拟器，只整理家底与规划。':'这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start(mode);clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent=ledgerMode?'重新打开账房':'重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready',ledgerMode?'账房已经打开':'本丸已经打开',ledgerMode?'不会连接游戏，今天只算账。':'启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
 async function update(){
  setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();
@@ -167,24 +168,26 @@ class Api:
             } if cleanup else None),
         }
 
-    def start(self):
+    def start(self, mode="automation"):
         try:
-            if not _port_alive():
+            ledger_mode = mode == "ledger"
+            port = 8082 if ledger_mode else 8080
+            if not _port_alive(port):
                 from maamaru_app import _run_server
                 error = {"traceback": ""}
 
                 def run_server():
                     try:
-                        _run_server()
+                        _run_server(port=port, ledger_mode=ledger_mode)
                     except BaseException:
                         error["traceback"] = traceback.format_exc()
                         _write_launcher_log(error["traceback"])
 
                 threading.Thread(target=run_server, daemon=True).start()
                 deadline = time.time() + 15
-                while time.time() < deadline and not _port_alive() and not error["traceback"]:
+                while time.time() < deadline and not _port_alive(port) and not error["traceback"]:
                     time.sleep(0.2)
-            if not _port_alive():
+            if not _port_alive(port):
                 detail = error["traceback"].strip().splitlines()[-1] if error["traceback"] else "启动等待超时"
                 return {"ok": False, "message": f"面板服务没有成功启动：{detail}\n错误记录：{LOG_DIR / 'launcher.log'}"}
 
@@ -195,10 +198,13 @@ class Api:
                 window = webview.windows[0]
                 # 面板的三栏布局需要 ≥1101px，启动时把窗口调到位
                 window.resize(1280, 860)
-                window.load_url("http://127.0.0.1:8080")
+                window.load_url(f"http://127.0.0.1:{port}")
 
             threading.Thread(target=open_panel, daemon=True).start()
-            return {"ok": True, "message": "まあ丸已启动"}
+            return {
+                "ok": True,
+                "message": "纯净账房已启动" if ledger_mode else "まあ丸已启动",
+            }
         except Exception as exc:
             _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": str(exc)}
@@ -495,9 +501,9 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple((parts + [0, 0, 0])[:3])
 
 
-def _port_alive() -> bool:
+def _port_alive(port: int = 8080) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", 8080), timeout=0.5):
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
             return True
     except OSError:
         return False

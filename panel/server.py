@@ -50,6 +50,13 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 # ── App ──
 app = FastAPI(title="まあ丸 近侍面板")
+
+
+def _ledger_mode() -> bool:
+    """纯净账房模式只开放数据与规划，不启动任何游戏控制设施。"""
+    return os.environ.get("MAAMARU_LEDGER_MODE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
@@ -887,6 +894,12 @@ async def startup():
 
 
 async def _startup():
+    if _ledger_mode():
+        # 账房模式必须能在模拟器、ADB、MAA 全都没开的情况下独立使用。
+        # 广播、远征调度和机器人都可能间接触发自动化或额外网络连接，
+        # 因此这里不初始化；账本、规划与手动录入 API 仍照常可用。
+        return
+
     _start_broadcast()
     runner = get_runner()
     runner.set_message_callback(_on_script_message)
@@ -1008,6 +1021,14 @@ async def stream_logs(request: Request):
 
 # ── API：脚本 ──
 
+
+@app.get("/api/app-mode")
+async def api_app_mode():
+    return {
+        "mode": "ledger" if _ledger_mode() else "automation",
+        "automation_enabled": not _ledger_mode(),
+    }
+
 # 概览页常用功能的活动联动隐藏名单：/api/scripts 每 2 秒被轮询一次，
 # 名单本身按分钟级缓存，别每趟都去读卡片和日历文件。
 _event_hidden_cache = {"ts": 0.0, "value": []}
@@ -1027,6 +1048,13 @@ def _event_hidden_scripts() -> list[str]:
 
 @app.get("/api/scripts")
 async def api_scripts():
+    if _ledger_mode():
+        return {
+            "scripts": {},
+            "running": False,
+            "current": None,
+            "event_hidden": [],
+        }
     runner = get_runner()
     return {
         "scripts": list_scripts(),
@@ -1039,6 +1067,11 @@ async def api_scripts():
 
 @app.post("/api/scripts/run")
 async def api_run_script(request: Request):
+    if _ledger_mode():
+        return JSONResponse(
+            {"ok": False, "reason": "纯净账房模式不连接游戏"},
+            status_code=403,
+        )
     body = await request.json()
     script_name = body.get("script", "")
     params = body.get("params", {})

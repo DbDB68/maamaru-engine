@@ -17,8 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 HOST = "127.0.0.1"
-PORT = 8080
-URL = f"http://{HOST}:{PORT}"
+AUTOMATION_PORT = 8080
+LEDGER_PORT = 8082
 
 
 def _log(*args):
@@ -38,24 +38,33 @@ def _port_alive(host: str, port: int) -> bool:
         return False
 
 
-def _run_server():
+def _run_server(port: int = AUTOMATION_PORT, ledger_mode: bool = False):
+    if ledger_mode:
+        import os
+        os.environ["MAAMARU_LEDGER_MODE"] = "1"
     import uvicorn
     from panel.server import app
     # 单机启动器只服务自己的原生窗口。绑定本机地址可以避开防火墙、
     # 公共网络策略以及部分新装 Windows 对全网监听的限制。
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    uvicorn.run(app, host=HOST, port=port, log_level="warning")
 
 
-def main():
-    if _port_alive(HOST, PORT):
+def main(ledger_mode: bool = False):
+    port = LEDGER_PORT if ledger_mode else AUTOMATION_PORT
+    url = f"http://{HOST}:{port}"
+    if _port_alive(HOST, port):
         # 已经有面板在跑（比如开了终端版），直接开窗看现成的
         _log("[まあ丸] 检测到面板已在运行，直接开窗")
     else:
-        t = threading.Thread(target=_run_server, daemon=True)
+        t = threading.Thread(
+            target=_run_server,
+            kwargs={"port": port, "ledger_mode": ledger_mode},
+            daemon=True,
+        )
         t.start()
         # 等服务把端口监听上，最多等 10 秒
         for _ in range(100):
-            if _port_alive(HOST, PORT):
+            if _port_alive(HOST, port):
                 break
             time.sleep(0.1)
         else:
@@ -64,8 +73,8 @@ def main():
 
     import webview
     webview.create_window(
-        "まあ丸 — 本丸近侍面板",
-        URL,
+        "まあ丸 — 纯净本丸账房" if ledger_mode else "まあ丸 — 本丸近侍面板",
+        url,
         width=1100,
         height=800,
         min_size=(420, 600),

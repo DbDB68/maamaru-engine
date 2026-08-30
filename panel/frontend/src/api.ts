@@ -8,6 +8,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
   settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string }>('/api/saved-settings'),
   saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
