@@ -25,6 +25,7 @@ function buildOption(): any {
   const inkDim = cssVar('--ink-dim', '#8a7f72')
   const line = cssVar('--paper-line', '#ddd6cb')
   const card = cssVar('--paper-card', '#faf6ef')
+  const compact = (box.value?.clientWidth || 999) < 520
   const categories = new Map<string, { label: string; color: string }>()
   for (const row of props.rows) for (const part of row.parts) categories.set(part.key, part)
   const scales = props.rows.map(row => Math.max(1, row.parts.reduce((sum, part) => sum + Math.abs(part.value), 0)))
@@ -33,7 +34,7 @@ function buildOption(): any {
     name: category.label,
     type: 'bar',
     stack: 'resource',
-    barWidth: 22,
+    barWidth: compact ? 18 : 22,
     itemStyle: { color: category.color, borderRadius: 2 },
     emphasis: { focus: 'series' },
     data: props.rows.map((row, index) => {
@@ -42,15 +43,15 @@ function buildOption(): any {
     }),
   }))
   series.push({
-    id: 'total-label', name: '', type: 'bar', silent: true, barWidth: 22,
+    id: 'total-label', name: '', type: 'bar', silent: true, barWidth: compact ? 18 : 22,
     barGap: '-100%', itemStyle: { color: 'transparent' }, tooltip: { show: false }, z: 10,
     data: props.rows.map(row => ({
       value: row.total == null ? 0 : row.total < 0 ? -104 : 104,
       total: row.total,
       label: {
-        show: true, position: row.total != null && row.total < 0 ? 'insideRight' : 'right',
+        show: true, position: row.total != null && row.total < 0 ? 'insideBottom' : 'top',
         color: row.total == null ? inkDim : row.total < 0 ? cssVar('--danger', '#b0492e') : row.total > 0 ? '#47734f' : ink,
-        fontSize: 13, fontWeight: 700,
+        fontSize: compact ? 10 : 13, fontWeight: 700, rotate: compact ? 38 : 0,
         formatter: signed(row.total),
       },
     })),
@@ -58,7 +59,7 @@ function buildOption(): any {
   return {
     animationDuration: 650,
     animationEasing: 'cubicOut',
-    grid: { left: 64, right: 78, top: 38, bottom: 12, containLabel: false },
+    grid: { left: compact ? 24 : 42, right: compact ? 12 : 20, top: compact ? 58 : 44, bottom: compact ? 64 : 40, containLabel: false },
     legend: { top: 0, icon: 'roundRect', itemWidth: 11, itemHeight: 11, textStyle: { color: inkDim, fontSize: 11 } },
     tooltip: {
       trigger: 'item', backgroundColor: card, borderColor: line,
@@ -70,15 +71,14 @@ function buildOption(): any {
       },
     },
     xAxis: {
-      type: 'value', min: -112, max: 112,
-      axisLabel: { show: false }, axisTick: { show: false },
-      axisLine: { show: true, lineStyle: { color: line } },
-      splitLine: { show: false },
+      type: 'category', data: props.rows.map(row => row.resource),
+      axisLine: { show: true, lineStyle: { color: line } }, axisTick: { show: false },
+      axisLabel: { color: ink, fontSize: compact ? 10 : 12, fontWeight: 600, interval: 0, rotate: compact ? 38 : 0 },
     },
     yAxis: {
-      type: 'category', data: props.rows.map(row => row.resource),
-      axisLine: { show: false }, axisTick: { show: false },
-      axisLabel: { color: ink, fontSize: 12, fontWeight: 600 },
+      type: 'value', min: -112, max: 112,
+      axisLabel: { show: false }, axisTick: { show: false }, axisLine: { show: false },
+      splitLine: { show: false },
     },
     series,
   }
@@ -92,7 +92,7 @@ function render() {
 onMounted(() => {
   render()
   if (box.value) {
-    observer = new ResizeObserver(() => chart?.resize())
+    observer = new ResizeObserver(() => { chart?.resize(); render() })
     observer.observe(box.value)
   }
 })

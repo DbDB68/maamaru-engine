@@ -753,7 +753,7 @@ onMounted(() => load())
 
         <section class="resource-trend">
           <header>
-            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每行按自己的变化归一显示，柱尾保留真实数额。</p></div>
+            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3><p v-if="days === 1">八种资源一次摊开；每柱按自己的变化归一显示，柱顶保留真实数额。</p></div>
             <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
             <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
