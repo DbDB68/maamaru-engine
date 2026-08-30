@@ -44,6 +44,7 @@ const inventoryForm = ref<Record<string, number | null | ''>>({})
 const manualSessionFormOpen = ref(false)
 const manualSessionSaving = ref(false)
 const manualSessionForm = ref({ script: 'osaka', loops: 1, started_at: '', ended_at: '', note: '' })
+const deletingManualReport = ref<number | null>(null)
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -167,6 +168,21 @@ const claimedDailyTotals = computed(() => {
   }
   return totals
 })
+const recentManualReports = computed(() => humanReports.value.filter(report => (
+  report.source === 'proactive' && resourceNames.includes(String(report.resource || ''))
+  && report.claimed_delta != null && Number.isFinite(Number(report.claimed_delta))
+  && Number(report.claimed_delta) !== 0
+)).sort((a, b) => Number(b.occurred_at) - Number(a.occurred_at) || b.id - a.id).slice(0, 5))
+
+function manualReportTime(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(timestamp * 1000))
+}
+
+function manualReportSource(report: HumanReport) {
+  return report.activities?.find(value => !['暂不说明', '记不清了', '没有其他操作'].includes(value)) || '未标来源'
+}
 
 function claimWithinUnknown(unknown: number, claim: number): number {
   if (!unknown || !claim || Math.sign(unknown) !== Math.sign(claim)) return 0
@@ -420,10 +436,24 @@ async function saveHumanReport(skip = false) {
     })
     await refreshHumanReports()
     await load(days.value)
-    if (claimedPrecisely) highlightCategory.value = 'human'
+    if (claimedPrecisely) {
+      highlightCategory.value = 'human'
+      inventoryNotice.value = `已记下 ${reportForm.value.resource} ${signed(Number(reportForm.value.claimed_delta))}。`
+    }
     reportMode.value = ''; reportGap.value = null
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
   finally { reportSaving.value = false }
+}
+
+async function deleteManualReport(report: HumanReport) {
+  if (!window.confirm(`撤销这笔 ${report.resource} ${signed(Number(report.claimed_delta))} 的手账吗？`)) return
+  deletingManualReport.value = report.id
+  try {
+    await api.deleteHumanReport(report.id)
+    inventoryNotice.value = '这笔手账已撤销。'
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销手账失败' }
+  finally { deletingManualReport.value = null }
 }
 async function skipGap(gap: InventoryGap) {
   openGapReport(gap)
@@ -598,6 +628,17 @@ onMounted(() => load())
             <button type="button" @click="openInventoryForm"><b>更新当前家底</b><small>把游戏里现在的资源数字抄下来</small></button>
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
+          <section v-if="recentManualReports.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
+            <header><div><h4 id="recent-manual-ledger-title">最近手账</h4><p>这里只列你自己记的收支</p></div><small>最近 {{ recentManualReports.length }} 笔</small></header>
+            <ul>
+              <li v-for="report in recentManualReports" :key="report.id">
+                <time>{{ manualReportTime(report.occurred_at) }}</time>
+                <span><b>{{ report.resource }}</b><small>{{ manualReportSource(report) }}<template v-if="report.note"> · {{ report.note }}</template></small></span>
+                <strong :class="Number(report.claimed_delta) > 0 ? 'gain' : 'loss'">{{ signed(Number(report.claimed_delta)) }}</strong>
+                <button type="button" :disabled="deletingManualReport === report.id" @click="deleteManualReport(report)">{{ deletingManualReport === report.id ? '撤销中…' : '撤销' }}</button>
+              </li>
+            </ul>
+          </section>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
             <header><div><h4>更新当前家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false">×</button></header>
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
@@ -698,6 +739,19 @@ onMounted(() => load())
 .ledger-evidence summary { color: var(--fox-gold-deep); cursor: pointer; }
 .ledger-evidence p { margin: 6px 0 0; }
 .inventory-notice { margin: 0 0 10px; padding: 8px 10px; color: #426b35; background: #edf5e8; border-radius: 8px; }
+.recent-manual-ledger { margin-bottom: 12px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.recent-manual-ledger > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.recent-manual-ledger h4, .recent-manual-ledger p { margin: 0; }
+.recent-manual-ledger header p, .recent-manual-ledger header small { margin-top: 2px; color: var(--ink-dim); font-size: 11px; }
+.recent-manual-ledger ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--paper-card); border-radius: 8px; }
+.recent-manual-ledger time { color: var(--ink-dim); font-size: 11px; }
+.recent-manual-ledger li span { display: grid; min-width: 0; }
+.recent-manual-ledger li span small { overflow: hidden; color: var(--ink-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.recent-manual-ledger li strong { font-variant-numeric: tabular-nums; }
+.recent-manual-ledger li strong.gain { color: #47734f; }
+.recent-manual-ledger li strong.loss { color: var(--danger); }
+.recent-manual-ledger li button { padding: 3px 7px; color: var(--danger); background: transparent; border: 0; font-size: 11px; }
 .manual-inventory-form { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .manual-inventory-form > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .manual-inventory-form h4, .manual-inventory-form p { margin: 0; }
@@ -724,6 +778,8 @@ onMounted(() => load())
   .manual-action-picker { grid-template-columns: 1fr; }
   .manual-session-fields { grid-template-columns: 1fr; }
   .manual-session-fields .manual-session-note { grid-column: 1; }
+  .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .recent-manual-ledger time { grid-column: 1 / -1; }
   .resource-ledger > header, .ledger-actions { align-items: stretch; flex-direction: column; }
   .report-context-toolbar { align-items: stretch; flex-direction: column; }
   .report-context-toolbar .segmented-control { width: 100%; }
