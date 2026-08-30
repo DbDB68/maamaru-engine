@@ -5,7 +5,6 @@ import type { HumanReport, InventoryGap, ManualSession, ResourceLedger } from '.
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
-import ResourceOverviewChart from './report/ResourceOverviewChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
@@ -758,7 +757,7 @@ onMounted(() => load())
             <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
-          <ResourceOverviewChart v-if="days === 1" :rows="dayResourceOverview" :loading="loading" />
+          <ResourceChart v-if="days === 1" :dates="[]" :series="[]" :overview-rows="dayResourceOverview" :loading="loading" />
           <template v-else>
             <ResourceChart :dates="chartDates" :series="chartSeries" :stacked="mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
             <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
