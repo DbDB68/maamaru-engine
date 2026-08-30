@@ -70,6 +70,21 @@ class LauncherMaintenanceTests(unittest.TestCase):
         self.assertIn("startApp('ledger')", app.HTML)
         self.assertNotEqual(maamaru_app.LEDGER_PORT, maamaru_app.AUTOMATION_PORT)
 
+    def test_ledger_port_falls_back_when_preferred_is_occupied(self):
+        with patch.object(app.socket, "socket", wraps=app.socket.socket):
+            occupied = app.socket.socket(app.socket.AF_INET, app.socket.SOCK_STREAM)
+            occupied.bind(("127.0.0.1", 0))
+            preferred = occupied.getsockname()[1]
+            try:
+                selected = app._available_port(preferred)
+            finally:
+                occupied.close()
+        self.assertNotEqual(selected, preferred)
+
+    def test_non_maamaru_service_is_not_accepted_as_panel(self):
+        with patch.object(app.urllib.request, "urlopen", side_effect=OSError):
+            self.assertIsNone(app._panel_mode(8082))
+
 
 if __name__ == "__main__":
     unittest.main()

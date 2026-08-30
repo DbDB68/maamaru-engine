@@ -151,6 +151,7 @@ class Api:
         self._pending_update = None
         self._download_state = None
         self._download_thread = None
+        self._ledger_port = None
 
     def check(self):
         ensure_runtime_data()
@@ -171,8 +172,23 @@ class Api:
     def start(self, mode="automation"):
         try:
             ledger_mode = mode == "ledger"
-            port = 8082 if ledger_mode else 8080
-            if not _port_alive(port):
+            expected_mode = "ledger" if ledger_mode else "automation"
+            if ledger_mode:
+                if self._ledger_port and _panel_mode(self._ledger_port) == "ledger":
+                    port = self._ledger_port
+                else:
+                    port = _available_port(18082)
+                    self._ledger_port = port
+            else:
+                port = 8080
+
+            current_mode = _panel_mode(port)
+            if current_mode != expected_mode:
+                if _port_alive(port):
+                    return {
+                        "ok": False,
+                        "message": f"本机端口 {port} 已被其他程序占用，无法打开面板",
+                    }
                 from maamaru_app import _run_server
                 error = {"traceback": ""}
 
@@ -185,9 +201,11 @@ class Api:
 
                 threading.Thread(target=run_server, daemon=True).start()
                 deadline = time.time() + 15
-                while time.time() < deadline and not _port_alive(port) and not error["traceback"]:
+                while (time.time() < deadline
+                       and _panel_mode(port) != expected_mode
+                       and not error["traceback"]):
                     time.sleep(0.2)
-            if not _port_alive(port):
+            if _panel_mode(port) != expected_mode:
                 detail = error["traceback"].strip().splitlines()[-1] if error["traceback"] else "启动等待超时"
                 return {"ok": False, "message": f"面板服务没有成功启动：{detail}\n错误记录：{LOG_DIR / 'launcher.log'}"}
 
@@ -507,6 +525,35 @@ def _port_alive(port: int = 8080) -> bool:
             return True
     except OSError:
         return False
+
+
+def _panel_mode(port: int) -> str | None:
+    """端口有人不等于那是まあ丸；必须由模式接口验明正身。"""
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/app-mode", timeout=0.8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        mode = payload.get("mode")
+        return mode if mode in {"automation", "ledger"} else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _available_port(preferred: int) -> int:
+    """优先使用稳定端口；被 QQ 等程序占用时自动申请本机空闲端口。"""
+    for candidate in (preferred, 0):
+        if candidate and _port_alive(candidate):
+            continue
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", candidate))
+                probe.listen(1)
+                port = int(probe.getsockname()[1])
+        except OSError:
+            continue
+        if port:
+            return port
+    raise OSError("找不到可用的本机端口")
 
 
 def _write_launcher_log(content: str) -> None:

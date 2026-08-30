@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 HOST = "127.0.0.1"
 AUTOMATION_PORT = 8080
-LEDGER_PORT = 8082
+LEDGER_PORT = 18082
 
 
 def _log(*args):
@@ -38,6 +38,22 @@ def _port_alive(host: str, port: int) -> bool:
         return False
 
 
+def _available_port(preferred: int) -> int:
+    for candidate in (preferred, 0):
+        if candidate and _port_alive(HOST, candidate):
+            continue
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((HOST, candidate))
+                probe.listen(1)
+                port = int(probe.getsockname()[1])
+        except OSError:
+            continue
+        if port:
+            return port
+    raise OSError("找不到可用的本机端口")
+
+
 def _run_server(port: int = AUTOMATION_PORT, ledger_mode: bool = False):
     if ledger_mode:
         import os
@@ -50,7 +66,7 @@ def _run_server(port: int = AUTOMATION_PORT, ledger_mode: bool = False):
 
 
 def main(ledger_mode: bool = False):
-    port = LEDGER_PORT if ledger_mode else AUTOMATION_PORT
+    port = _available_port(LEDGER_PORT) if ledger_mode else AUTOMATION_PORT
     url = f"http://{HOST}:{port}"
     if _port_alive(HOST, port):
         # 已经有面板在跑（比如开了终端版），直接开窗看现成的
