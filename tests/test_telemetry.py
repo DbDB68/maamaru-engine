@@ -91,6 +91,28 @@ class TelemetryStoreTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.store.add_manual_inventory(resources, observed_at)
 
+    def test_manual_inventory_history_can_update_and_delete_only_manual_entries(self):
+        first = self.store.add_manual_inventory({"小判": 1000}, observed_at=100)
+        second = self.store.add_manual_inventory({"小判": 1200}, observed_at=200)
+
+        updated = self.store.update_manual_inventory(
+            first["id"], {"小判": 900, "木炭": 500}, observed_at=90)
+        self.assertEqual(updated["resources"], {"小判": 900, "木炭": 500})
+        self.assertEqual([item["id"] for item in self.store.manual_inventory()],
+                         [second["id"], first["id"]])
+        ledger = self.store.resource_ledger(80, 250)
+        koban = next(row for row in ledger["per_resource"] if row["resource"] == "小判")
+        self.assertEqual((koban["opening"], koban["closing"], koban["total_delta"]),
+                         (900, 1200, 300))
+
+        machine_id = self.store.record_event(
+            "inventory.captured", {"source": "game", "resources": {"小判": 9999}})
+        self.assertFalse(self.store.delete_manual_inventory(machine_id))
+        with self.assertRaises(ValueError):
+            self.store.update_manual_inventory(machine_id, {"小判": 1}, observed_at=50)
+        self.assertTrue(self.store.delete_manual_inventory(first["id"]))
+        self.assertFalse(self.store.delete_manual_inventory(first["id"]))
+
     def test_manual_sessions_stay_separate_from_machine_runs(self):
         item = self.store.add_manual_session(
             script="osaka", started_at=100, ended_at=700, loops=2,
@@ -127,6 +149,20 @@ class TelemetryStoreTests(unittest.TestCase):
         )
         self.assertTrue(self.store.delete_manual_session(first["id"]))
         self.assertFalse(self.store.delete_manual_session(first["id"]))
+
+    def test_manual_session_can_be_corrected_in_place(self):
+        item = self.store.add_manual_session(
+            script="raid", started_at=100, ended_at=400, loops=1, note="写错了")
+        updated = self.store.update_manual_session(
+            item["id"], script="edocastle", started_at=120, ended_at=720,
+            loops=3, note="改好了")
+
+        self.assertEqual(updated["activity"], "江户城")
+        self.assertEqual(updated["average_loop_seconds"], 200)
+        self.assertEqual(self.store.manual_sessions()[0]["note"], "改好了")
+        with self.assertRaises(ValueError):
+            self.store.update_manual_session(
+                9999, script="raid", started_at=100, ended_at=200, loops=1)
 
     def test_run_summary_counts_upkeep_speed_and_resource_delta(self):
         self.store.start_run("run-1", "osaka", started_at=100)
@@ -403,22 +439,58 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(observations["items"][0]["expected"], "确定")
 
     def test_manual_session_api_roundtrip_keeps_own_contract(self):
-        from panel.server import api_add_manual_session, api_manual_sessions
+        from panel.server import (api_add_manual_session, api_manual_sessions,
+                                  api_update_manual_session)
 
         class _Req:
+            def __init__(self, body=None):
+                self.body = body
+
             async def json(self):
-                return {
+                return self.body or {
                     "script": "raid", "started_at": 100, "ended_at": 400,
                     "loops": 2, "note": "自己打的",
                 }
 
         with patch("touken.telemetry._store", self.store):
             created = asyncio.run(api_add_manual_session(_Req()))
+            updated = asyncio.run(api_update_manual_session(created["item"]["id"], _Req({
+                "script": "edocastle", "started_at": 120, "ended_at": 720,
+                "loops": 3, "note": "改好了",
+            })))
             listing = asyncio.run(api_manual_sessions(limit=10))
 
         self.assertTrue(created["ok"])
         self.assertEqual(created["item"]["average_loop_seconds"], 150)
+        self.assertEqual(updated["item"]["activity"], "江户城")
         self.assertEqual(listing["items"][0]["source"], "manual")
+        self.assertEqual(listing["items"][0]["note"], "改好了")
+
+    def test_manual_inventory_api_supports_listing_and_correction(self):
+        from panel.server import (api_add_manual_inventory,
+                                  api_delete_manual_inventory,
+                                  api_manual_inventory,
+                                  api_update_manual_inventory)
+
+        class _Req:
+            def __init__(self, body):
+                self.body = body
+
+            async def json(self):
+                return self.body
+
+        with patch("touken.telemetry._store", self.store):
+            created = asyncio.run(api_add_manual_inventory(
+                _Req({"resources": {"小判": 1000}, "observed_at": 100})))
+            event_id = created["snapshot"]["id"]
+            updated = asyncio.run(api_update_manual_inventory(
+                event_id, _Req({"resources": {"小判": 1200}, "observed_at": 200})))
+            listing = asyncio.run(api_manual_inventory(limit=10))
+            deleted = asyncio.run(api_delete_manual_inventory(event_id))
+
+        self.assertEqual(updated["snapshot"]["resources"], {"小判": 1200})
+        self.assertEqual(listing["items"][0]["id"], event_id)
+        self.assertTrue(deleted["ok"])
 
 
 if __name__ == "__main__":

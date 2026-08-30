@@ -112,6 +112,14 @@ export interface ManualSession {
   source: 'manual'
 }
 
+export interface ManualInventory {
+  id: number
+  ts: number
+  captured_at: string
+  source: 'manual_entry'
+  resources: Record<string, number>
+}
+
 export interface ActivityPace {
   source: 'maamaru' | 'manual'
   secondsPerLoop: number

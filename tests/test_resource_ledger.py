@@ -504,6 +504,33 @@ class ResourceLedgerTests(unittest.TestCase):
                 entries={"小判": 100, "元宝": 1})
         self.assertEqual(self.store.human_reports(), [])
 
+    def test_manual_claim_group_can_be_corrected_atomically(self):
+        items = self.store.add_human_report_group(
+            occurred_at=sh("2026-08-20 09:00:00"), activities=["领邮箱"],
+            note="第一次", entries={"小判": 300, "木炭": 500})
+        group_id = items[0]["group_id"]
+
+        updated = self.store.update_human_report_group(
+            group_id, occurred_at=sh("2026-08-20 10:00:00"),
+            activities=["手动领奖"], note="改好了",
+            entries={"小判": 200, "加速符": 2})
+        self.assertEqual({item["resource"]: item["claimed_delta"] for item in updated},
+                         {"小判": 200, "加速符": 2})
+        rows = [row for row in self.store.human_reports()
+                if row["group_id"] == group_id]
+        self.assertEqual({row["resource"] for row in rows}, {"小判", "加速符"})
+        self.assertTrue(all(row["activities"] == ["手动领奖"] for row in rows))
+        self.assertTrue(all(row["note"] == "改好了" for row in rows))
+
+        with self.assertRaises(ValueError):
+            self.store.update_human_report_group(
+                group_id, occurred_at=sh("2026-08-20 11:00:00"),
+                activities=[], entries={"元宝": 1})
+        rows_after_failure = [row for row in self.store.human_reports()
+                              if row["group_id"] == group_id]
+        self.assertEqual({row["resource"] for row in rows_after_failure},
+                         {"小判", "加速符"})
+
     def test_claim_validation_rejects_bad_input(self):
         t0 = sh("2026-08-20 09:00:00")
         bad_calls = [

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
+import type { HumanReport, InventoryGap, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -21,6 +21,7 @@ const events = ref<any[]>([])
 const runs = ref<any[]>([])
 const humanReports = ref<HumanReport[]>([])
 const manualSessions = ref<ManualSession[]>([])
+const manualInventories = ref<ManualInventory[]>([])
 const inventoryGaps = ref<InventoryGap[]>([])
 const loading = ref(false)
 const loadingOlder = ref(false)
@@ -42,10 +43,15 @@ const manualActionsOpen = ref(false)
 const inventorySaving = ref(false)
 const inventoryNotice = ref('')
 const inventoryForm = ref<Record<string, number | null | ''>>({})
+const inventoryObservedAt = ref('')
+const editingInventoryId = ref<number | null>(null)
 const manualSessionFormOpen = ref(false)
 const manualSessionSaving = ref(false)
 const manualSessionForm = ref({ script: 'osaka', loops: 1, started_at: '', ended_at: '', note: '' })
-const deletingManualReport = ref<number | null>(null)
+const editingManualSessionId = ref<number | null>(null)
+const editingManualReport = ref<{ groupId?: string; reportId?: number } | null>(null)
+const handLedgerExpanded = ref(false)
+const manualEntryBusy = ref('')
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -233,11 +239,52 @@ const recentManualGroups = computed(() => {
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(report)
   }
-  return [...groups.entries()].slice(0, 5).map(([key, entries]) => {
+  return [...groups.entries()].map(([key, entries]) => {
     const ordered = [...entries].sort((a, b) => resourceNames.indexOf(String(a.resource)) - resourceNames.indexOf(String(b.resource)))
     return { key, entries: ordered, head: entries[0] }
   })
 })
+
+type HandLedgerEntry =
+  | { kind: 'resource'; key: string; at: number; entries: HumanReport[]; head: HumanReport }
+  | { kind: 'inventory'; key: string; at: number; item: ManualInventory }
+  | { kind: 'session'; key: string; at: number; item: ManualSession }
+
+const handLedgerEntries = computed<HandLedgerEntry[]>(() => [
+  ...recentManualGroups.value.map(({ key: groupKey, ...group }) => ({
+    kind: 'resource' as const, key: `resource:${groupKey}`,
+    at: Number(group.head.occurred_at), ...group,
+  })),
+  ...manualInventories.value.map(item => ({
+    kind: 'inventory' as const, key: `inventory:${item.id}`, at: Number(item.ts), item,
+  })),
+  ...manualSessions.value.map(item => ({
+    kind: 'session' as const, key: `session:${item.id}`, at: Number(item.started_at), item,
+  })),
+].sort((a, b) => b.at - a.at))
+const displayedHandLedgerEntries = computed(() => handLedgerExpanded.value
+  ? handLedgerEntries.value : handLedgerEntries.value.slice(0, 3))
+
+function inventoryAmounts(item: ManualInventory) {
+  return resourceNames.filter(name => item.resources?.[name] != null)
+    .map(name => `${name} ${Number(item.resources[name]).toLocaleString()}`).join(' · ')
+}
+
+function handEntryTitle(entry: HandLedgerEntry) {
+  if (entry.kind === 'resource') return manualReportSource(entry.head)
+  if (entry.kind === 'inventory') return '家底盘点'
+  return `${entry.item.activity} · ${entry.item.loops} 圈`
+}
+
+function handEntryDetail(entry: HandLedgerEntry) {
+  if (entry.kind === 'resource') {
+    const note = entry.head.note ? ` · ${entry.head.note}` : ''
+    return `${manualGroupAmounts(entry.entries)}${note}`
+  }
+  if (entry.kind === 'inventory') return inventoryAmounts(entry.item)
+  const minutes = Math.max(1, Math.round(Number(entry.item.duration_seconds) / 60))
+  return `用时 ${minutes} 分钟${entry.item.note ? ` · ${entry.item.note}` : ''}`
+}
 
 function manualReportTime(timestamp: number) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -515,10 +562,31 @@ function scrollToReportForm() {
 function openProactiveReport(timestamp?: number, resource = '', claimedDelta: number | null = null) {
   manualActionsOpen.value = false
   inventoryFormOpen.value = false
+  manualSessionFormOpen.value = false
+  editingManualReport.value = null
   reportMode.value = 'proactive'
   reportGap.value = null
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp), resource, claimed_delta: claimedDelta, claim_limit: claimedDelta }
   manualResourceAmounts.value = Object.fromEntries(resourceNames.map(name => [name, null]))
+  scrollToReportForm()
+}
+function editManualReport(entry: Extract<HandLedgerEntry, { kind: 'resource' }>) {
+  manualActionsOpen.value = false
+  inventoryFormOpen.value = false
+  manualSessionFormOpen.value = false
+  reportMode.value = 'proactive-edit'
+  reportGap.value = null
+  editingManualReport.value = entry.head.group_id
+    ? { groupId: entry.head.group_id } : { reportId: entry.head.id }
+  reportForm.value = {
+    activities: [...(entry.head.activities || [])], note: entry.head.note || '',
+    occurred_at: localDateTime(entry.at * 1000), resource: '',
+    claimed_delta: null, claim_limit: null,
+  }
+  manualResourceAmounts.value = Object.fromEntries(resourceNames.map(name => {
+    const report = entry.entries.find(item => item.resource === name)
+    return [name, report?.claimed_delta ?? null]
+  }))
   scrollToReportForm()
 }
 function openDayClaim(date: string, resource: string, unexplained: number | null) {
@@ -554,7 +622,19 @@ async function saveHumanReport(skip = false) {
     const activities = skip ? ['暂不说明'] : reportForm.value.activities
     const occurred_at = new Date(reportForm.value.occurred_at).getTime() / 1000
     if (isManualBatch) {
-      await api.addHumanReportBatch({ occurred_at, activities, note: reportForm.value.note, entries: manualResourceEntries.value })
+      const payload = { occurred_at, activities, note: reportForm.value.note, entries: manualResourceEntries.value }
+      if (editingManualReport.value?.groupId) {
+        await api.updateHumanReportGroup(editingManualReport.value.groupId, payload)
+      } else if (editingManualReport.value?.reportId) {
+        const entries = Object.entries(manualResourceEntries.value)
+        if (entries.length !== 1) throw new Error('这条旧手账一次只能保留一种资源；要记多种请另记一笔。')
+        await api.updateHumanReport(editingManualReport.value.reportId, {
+          occurred_at, activities, note: reportForm.value.note,
+          resource: entries[0][0], claimed_delta: entries[0][1],
+        })
+      } else {
+        await api.addHumanReportBatch(payload)
+      }
     } else {
       await api.addHumanReport({
         occurred_at, activities, note: reportForm.value.note,
@@ -569,26 +649,27 @@ async function saveHumanReport(skip = false) {
     if (claimedPrecisely) {
       highlightCategory.value = 'human'
       inventoryNotice.value = isManualBatch
-        ? `已记下 ${Object.keys(manualResourceEntries.value).length} 种资源的收支。`
+        ? `${editingManualReport.value ? '已修改' : '已记下'} ${Object.keys(manualResourceEntries.value).length} 种资源的收支。`
         : `已记下 ${reportForm.value.resource} ${signed(Number(reportForm.value.claimed_delta))}。`
     }
-    reportMode.value = ''; reportGap.value = null
+    reportMode.value = ''; reportGap.value = null; editingManualReport.value = null
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
   finally { reportSaving.value = false }
 }
 
-async function deleteManualReport(report: HumanReport) {
-  const group = report.group_id ? recentManualReports.value.filter(item => item.group_id === report.group_id) : [report]
+async function deleteManualReport(entry: Extract<HandLedgerEntry, { kind: 'resource' }>) {
+  const report = entry.head
+  const group = entry.entries
   const label = group.length > 1 ? `这组 ${group.length} 种资源` : `这笔 ${report.resource} ${signed(Number(report.claimed_delta))}`
   if (!window.confirm(`撤销${label}的手账吗？`)) return
-  deletingManualReport.value = report.id
+  manualEntryBusy.value = entry.key
   try {
     if (report.group_id) await api.deleteHumanReportGroup(report.group_id)
     else await api.deleteHumanReport(report.id)
     inventoryNotice.value = group.length > 1 ? '这组手账已撤销。' : '这笔手账已撤销。'
     await load(days.value)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销手账失败' }
-  finally { deletingManualReport.value = null }
+  finally { manualEntryBusy.value = '' }
 }
 async function skipGap(gap: InventoryGap) {
   openGapReport(gap)
@@ -604,8 +685,22 @@ function openInventoryForm() {
   manualActionsOpen.value = false
   reportMode.value = ''
   reportGap.value = null
+  manualSessionFormOpen.value = false
+  editingInventoryId.value = null
   inventoryNotice.value = ''
   inventoryForm.value = Object.fromEntries(resourceNames.map(name => [name, null]))
+  inventoryObservedAt.value = localDateTime()
+  inventoryFormOpen.value = true
+}
+
+function editManualInventory(item: ManualInventory) {
+  manualActionsOpen.value = false
+  reportMode.value = ''
+  reportGap.value = null
+  manualSessionFormOpen.value = false
+  editingInventoryId.value = item.id
+  inventoryForm.value = Object.fromEntries(resourceNames.map(name => [name, item.resources?.[name] ?? null]))
+  inventoryObservedAt.value = localDateTime(item.ts * 1000)
   inventoryFormOpen.value = true
 }
 
@@ -614,6 +709,7 @@ function openManualSessionForm() {
   inventoryFormOpen.value = false
   reportMode.value = ''
   reportGap.value = null
+  editingManualSessionId.value = null
   const ended = Date.now()
   manualSessionForm.value = {
     script: 'osaka', loops: 1,
@@ -623,18 +719,36 @@ function openManualSessionForm() {
   manualSessionFormOpen.value = true
 }
 
+function editManualSession(item: ManualSession) {
+  manualActionsOpen.value = false
+  inventoryFormOpen.value = false
+  reportMode.value = ''
+  reportGap.value = null
+  editingManualSessionId.value = item.id
+  manualSessionForm.value = {
+    script: item.script, loops: item.loops,
+    started_at: localDateTime(item.started_at * 1000),
+    ended_at: localDateTime(item.ended_at * 1000), note: item.note || '',
+  }
+  manualSessionFormOpen.value = true
+}
+
 async function saveManualSession() {
   manualSessionSaving.value = true
   try {
-    await api.addManualSession({
+    const payload = {
       script: manualSessionForm.value.script,
       loops: Number(manualSessionForm.value.loops),
       started_at: new Date(manualSessionForm.value.started_at).getTime() / 1000,
       ended_at: new Date(manualSessionForm.value.ended_at).getTime() / 1000,
       note: manualSessionForm.value.note,
-    })
+    }
+    if (editingManualSessionId.value) await api.updateManualSession(editingManualSessionId.value, payload)
+    else await api.addManualSession(payload)
     manualSessionFormOpen.value = false
-    inventoryNotice.value = '已记下这段活动；不会算进まあ丸战绩。'
+    inventoryNotice.value = editingManualSessionId.value
+      ? '这段手动活动已修改。' : '已记下这段活动；不会算进まあ丸战绩。'
+    editingManualSessionId.value = null
     await load(days.value)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '手动活动记录失败' }
   finally { manualSessionSaving.value = false }
@@ -651,12 +765,37 @@ async function saveManualInventory() {
   }
   inventorySaving.value = true
   try {
-    await api.addManualInventory(resources)
+    const observedAt = new Date(inventoryObservedAt.value).getTime() / 1000
+    if (editingInventoryId.value) await api.updateManualInventory(editingInventoryId.value, resources, observedAt)
+    else await api.addManualInventory(resources, observedAt)
     inventoryFormOpen.value = false
-    inventoryNotice.value = `已记录 ${Object.keys(resources).length} 项家底。`
+    inventoryNotice.value = `${editingInventoryId.value ? '已修改' : '已记录'} ${Object.keys(resources).length} 项家底。`
+    editingInventoryId.value = null
     await load(days.value)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '家底记录失败' }
   finally { inventorySaving.value = false }
+}
+
+async function deleteManualInventoryEntry(entry: Extract<HandLedgerEntry, { kind: 'inventory' }>) {
+  if (!window.confirm('撤销这次手动家底盘点吗？撤销后账房会按前后记录重新计算。')) return
+  manualEntryBusy.value = entry.key
+  try {
+    await api.deleteManualInventory(entry.item.id)
+    inventoryNotice.value = '这次手动家底盘点已撤销。'
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销家底记录失败' }
+  finally { manualEntryBusy.value = '' }
+}
+
+async function deleteManualSessionEntry(entry: Extract<HandLedgerEntry, { kind: 'session' }>) {
+  if (!window.confirm(`撤销这段${entry.item.activity}手动活动吗？`)) return
+  manualEntryBusy.value = entry.key
+  try {
+    await api.deleteManualSession(entry.item.id)
+    inventoryNotice.value = '这段手动活动已撤销。'
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销手动活动失败' }
+  finally { manualEntryBusy.value = '' }
 }
 
 // ---- 数据加载 ----
@@ -664,7 +803,7 @@ async function saveManualInventory() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextPlanning] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.planning().catch(() => null)])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null)])
     summary.value = nextSummary
     ledger.value = nextLedger
     planning.value = nextPlanning
@@ -677,6 +816,7 @@ async function load(nextDays = days.value) {
     humanReports.value = nextHuman.items
     inventoryGaps.value = nextHuman.inventory_gaps
     manualSessions.value = nextManualSessions.items
+    manualInventories.value = nextManualInventory.items
     if (!recordDate.value) recordDate.value = latestRecordDate()
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
@@ -764,20 +904,28 @@ onMounted(() => load())
             <button type="button" @click="openInventoryForm"><b>更新当前家底</b><small>把游戏里现在的资源数字抄下来</small></button>
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
-          <section v-if="recentManualGroups.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
-            <header><div><h4 id="recent-manual-ledger-title">最近手账</h4><p>这里只列你自己记的收支</p></div><small>最近 {{ recentManualGroups.length }} 组</small></header>
+          <section v-if="handLedgerEntries.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
+            <header><div><h4 id="recent-manual-ledger-title">我的手账</h4><p>你自己记的收支、家底和活动都在这里</p></div><button v-if="handLedgerEntries.length > 3" type="button" class="hand-ledger-toggle" @click="handLedgerExpanded = !handLedgerExpanded">{{ handLedgerExpanded ? '收起' : `查看全部 ${handLedgerEntries.length} 条` }}</button></header>
             <ul>
-              <li v-for="group in recentManualGroups" :key="group.key">
-                <time>{{ manualReportTime(group.head.occurred_at) }}</time>
-                <span><b>{{ manualReportSource(group.head) }}<template v-if="group.entries.length > 1"> · {{ group.entries.length }} 种资源</template></b><small>{{ manualGroupAmounts(group.entries) }}<template v-if="group.head.note"> · {{ group.head.note }}</template></small></span>
-                <button type="button" :disabled="deletingManualReport === group.head.id" @click="deleteManualReport(group.head)">{{ deletingManualReport === group.head.id ? '撤销中…' : '撤销' }}</button>
+              <li v-for="entry in displayedHandLedgerEntries" :key="entry.key">
+                <time>{{ manualReportTime(entry.at) }}</time>
+                <span><b><em class="hand-entry-kind">{{ entry.kind === 'resource' ? '收支' : entry.kind === 'inventory' ? '家底' : '活动' }}</em>{{ handEntryTitle(entry) }}</b><small>{{ handEntryDetail(entry) }}</small></span>
+                <div class="hand-entry-actions">
+                  <button v-if="entry.kind === 'resource'" type="button" :disabled="manualEntryBusy === entry.key" @click="editManualReport(entry)">修改</button>
+                  <button v-else-if="entry.kind === 'inventory'" type="button" :disabled="manualEntryBusy === entry.key" @click="editManualInventory(entry.item)">修改</button>
+                  <button v-else type="button" :disabled="manualEntryBusy === entry.key" @click="editManualSession(entry.item)">修改</button>
+                  <button v-if="entry.kind === 'resource'" type="button" class="danger" :disabled="manualEntryBusy === entry.key" @click="deleteManualReport(entry)">{{ manualEntryBusy === entry.key ? '处理中…' : '撤销' }}</button>
+                  <button v-else-if="entry.kind === 'inventory'" type="button" class="danger" :disabled="manualEntryBusy === entry.key" @click="deleteManualInventoryEntry(entry)">{{ manualEntryBusy === entry.key ? '处理中…' : '撤销' }}</button>
+                  <button v-else type="button" class="danger" :disabled="manualEntryBusy === entry.key" @click="deleteManualSessionEntry(entry)">{{ manualEntryBusy === entry.key ? '处理中…' : '撤销' }}</button>
+                </div>
               </li>
             </ul>
           </section>
           <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
-            <header><div><h4>更新当前家底</h4><p>时间自动记为现在；不确定的项目可以留空。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false">×</button></header>
+            <header><div><h4>{{ editingInventoryId ? '修改家底记录' : '更新当前家底' }}</h4><p>不确定的项目可以留空，修改后会重新计算前后账目。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false; editingInventoryId = null">×</button></header>
+            <label class="manual-inventory-time">记录时间<input v-model="inventoryObservedAt" type="datetime-local" required></label>
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
-            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '记录中……' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false">取消</button></div>
+            <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '保存中……' : editingInventoryId ? '保存修改' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false; editingInventoryId = null">取消</button></div>
           </form>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
@@ -790,7 +938,7 @@ onMounted(() => load())
         </section>
 
         <form v-if="manualSessionFormOpen" class="manual-session-form" @submit.prevent="saveManualSession">
-          <header><div><h4>补记一段活动</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false">×</button></header>
+          <header><div><h4>{{ editingManualSessionId ? '修改手动活动' : '补记一段活动' }}</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false; editingManualSessionId = null">×</button></header>
           <div class="manual-session-fields">
             <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
             <label>圈数<input v-model.number="manualSessionForm.loops" type="number" min="1" max="100000" step="1" required></label>
@@ -798,11 +946,11 @@ onMounted(() => load())
             <label>结束时间<input v-model="manualSessionForm.ended_at" type="datetime-local" required></label>
             <label class="manual-session-note">备注<input v-model="manualSessionForm.note" maxlength="200" placeholder="可不填"></label>
           </div>
-          <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '记录中……' : '记下这段活动' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false">取消</button></div>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '保存中……' : editingManualSessionId ? '保存修改' : '记下这段活动' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false; editingManualSessionId = null">取消</button></div>
         </form>
 
         <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
-          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : reportForm.claim_limit != null ? '认领这笔变化' : '记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null">×</button></header>
+          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '认领这笔变化' : '记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
             <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
@@ -811,7 +959,7 @@ onMounted(() => load())
           <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
           <fieldset><legend>{{ reportGap ? '这个时间段你做过什么？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
           <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
-          <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '记录中……' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null">取消</button></div>
+          <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '保存中……' : editingManualReport ? '保存修改' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null; editingManualReport = null">取消</button></div>
         </form>
 
         <section class="resource-trend">
@@ -881,15 +1029,20 @@ onMounted(() => load())
 .recent-manual-ledger > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .recent-manual-ledger h4, .recent-manual-ledger p { margin: 0; }
 .recent-manual-ledger header p, .recent-manual-ledger header small { margin-top: 2px; color: var(--ink-dim); font-size: 11px; }
+.hand-ledger-toggle { padding: 3px 7px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; cursor: pointer; }
 .recent-manual-ledger ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--paper-card); border-radius: 8px; }
 .recent-manual-ledger time { color: var(--ink-dim); font-size: 11px; }
 .recent-manual-ledger li span { display: grid; min-width: 0; }
+.recent-manual-ledger li span b { display: flex; align-items: center; gap: 6px; }
 .recent-manual-ledger li span small { overflow: hidden; color: var(--ink-dim); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .recent-manual-ledger li strong { font-variant-numeric: tabular-nums; }
 .recent-manual-ledger li strong.gain { color: #47734f; }
 .recent-manual-ledger li strong.loss { color: var(--danger); }
-.recent-manual-ledger li button { padding: 3px 7px; color: var(--danger); background: transparent; border: 0; font-size: 11px; }
+.hand-entry-kind { padding: 1px 5px; color: #536f8a; background: #edf2f6; border-radius: 4px; font-size: 10px; font-style: normal; font-weight: 500; }
+.hand-entry-actions { display: flex; align-items: center; gap: 2px; }
+.hand-entry-actions button { padding: 3px 6px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; cursor: pointer; }
+.hand-entry-actions button.danger { color: var(--danger); }
 .resource-ledger-grid .resource-rate { margin-top: 5px; color: var(--fox-gold-deep); line-height: 1.35; }
 .resource-goal-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: 7px; padding: 5px 7px; color: var(--ink); background: var(--fox-gold-pale); border: 0; border-left: 3px solid var(--fox-gold); text-align: left; cursor: pointer; }
 .resource-goal-link span { color: var(--ink); line-height: 1.35; }
@@ -899,6 +1052,8 @@ onMounted(() => load())
 .manual-inventory-form > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
 .manual-inventory-form h4, .manual-inventory-form p { margin: 0; }
 .manual-inventory-form p { margin-top: 3px; color: var(--ink-dim); font-size: 12px; }
+.manual-inventory-time { display: grid; grid-template-columns: auto minmax(180px, 320px); align-items: center; gap: 10px; color: var(--ink-dim); font-size: 12px; }
+.manual-inventory-time input { width: 100%; min-width: 0; }
 .inventory-close { min-width: 32px; min-height: 32px; padding: 0; color: var(--ink-dim); background: transparent; border: 0; font-size: 20px; }
 .manual-inventory-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; }
 .manual-inventory-grid label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
@@ -928,6 +1083,8 @@ onMounted(() => load())
   .manual-session-fields .manual-session-note { grid-column: 1; }
   .recent-manual-ledger li { grid-template-columns: minmax(0, 1fr) auto; }
   .recent-manual-ledger time { grid-column: 1 / -1; }
+  .recent-manual-ledger li span small { white-space: normal; }
+  .manual-inventory-time { grid-template-columns: 1fr; }
   .resource-goal-link { align-items: flex-start; flex-direction: column; gap: 2px; }
   .resource-goal-link span, .resource-goal-link em { white-space: nowrap; }
   .report-form .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }

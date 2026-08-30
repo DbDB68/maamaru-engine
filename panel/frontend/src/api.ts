@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -28,12 +28,20 @@ export const api = {
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
   resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
-  addManualInventory: (resources: Record<string, number>) => request<{ ok: boolean; snapshot: any }>('/api/data/manual-inventory', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources }),
+  manualInventory: (limit = 200) => request<{ schema_version: number; items: ManualInventory[] }>(`/api/data/manual-inventory?limit=${limit}`),
+  addManualInventory: (resources: Record<string, number>, observedAt?: number) => request<{ ok: boolean; snapshot: ManualInventory }>('/api/data/manual-inventory', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, observed_at: observedAt }),
   }),
+  updateManualInventory: (id: number, resources: Record<string, number>, observedAt: number) => request<{ ok: boolean; snapshot: ManualInventory }>(`/api/data/manual-inventory/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, observed_at: observedAt }),
+  }),
+  deleteManualInventory: (id: number) => request<{ ok: boolean }>(`/api/data/manual-inventory/${id}`, { method: 'DELETE' }),
   manualSessions: (limit = 200, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: ManualSession[] }>(`/api/data/manual-sessions?limit=${limit}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
   addManualSession: (value: { script: string; started_at: number; ended_at: number; loops: number; note?: string }) => request<{ ok: boolean; item: ManualSession }>('/api/data/manual-sessions', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  updateManualSession: (id: number, value: { script: string; started_at: number; ended_at: number; loops: number; note?: string }) => request<{ ok: boolean; item: ManualSession }>(`/api/data/manual-sessions/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   deleteManualSession: (id: number) => request<{ ok: boolean }>(`/api/data/manual-sessions/${id}`, { method: 'DELETE' }),
   dataEvents: (limit = 100, beforeId?: number, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/events?limit=${limit}${beforeId == null ? '' : `&before_id=${beforeId}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
@@ -45,6 +53,12 @@ export const api = {
   }),
   addHumanReportBatch: (value: any) => request<{ ok: boolean; items: any[]; group_id: string }>('/api/data/human-reports/batch', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  updateHumanReport: (id: number, value: any) => request<{ ok: boolean; item: any }>(`/api/data/human-reports/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  updateHumanReportGroup: (groupId: string, value: any) => request<{ ok: boolean; items: any[]; group_id: string }>(`/api/data/human-reports/group/${encodeURIComponent(groupId)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   deleteHumanReport: (id: number) => request<{ ok: boolean }>(`/api/data/human-reports/${id}`, { method: 'DELETE' }),
   deleteHumanReportGroup: (groupId: string) => request<{ ok: boolean }>(`/api/data/human-reports/group/${encodeURIComponent(groupId)}`, { method: 'DELETE' }),

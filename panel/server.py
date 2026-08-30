@@ -1752,6 +1752,37 @@ async def api_add_manual_inventory(request: Request):
     return {"ok": True, "snapshot": snapshot}
 
 
+@app.get("/api/data/manual-inventory")
+async def api_manual_inventory(limit: int = 200):
+    """列出审神者自己抄入的家底，供“我的手账”纠错。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    return {
+        "schema_version": TELEMETRY_SCHEMA_VERSION,
+        "items": get_telemetry_store().manual_inventory(limit=limit),
+    }
+
+
+@app.put("/api/data/manual-inventory/{event_id}")
+async def api_update_manual_inventory(event_id: int, request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        snapshot = get_telemetry_store().update_manual_inventory(
+            event_id, body.get("resources") or {}, observed_at=body.get("observed_at"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "snapshot": snapshot}
+
+
+@app.delete("/api/data/manual-inventory/{event_id}")
+async def api_delete_manual_inventory(event_id: int):
+    from touken.telemetry import get_telemetry_store
+    if not get_telemetry_store().delete_manual_inventory(event_id):
+        return JSONResponse(
+            {"ok": False, "reason": "找不到这条手动家底记录"}, status_code=404)
+    return {"ok": True}
+
+
 @app.get("/api/data/manual-sessions")
 async def api_manual_sessions(limit: int = 200, from_ts: float | None = None,
                               to_ts: float | None = None):
@@ -1771,6 +1802,22 @@ async def api_add_manual_session(request: Request):
     try:
         item = get_telemetry_store().add_manual_session(
             script=body.get("script"),
+            started_at=float(body.get("started_at")),
+            ended_at=float(body.get("ended_at")),
+            loops=body.get("loops"), note=body.get("note", ""),
+        )
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "item": item}
+
+
+@app.put("/api/data/manual-sessions/{session_id}")
+async def api_update_manual_session(session_id: int, request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        item = get_telemetry_store().update_manual_session(
+            session_id, script=body.get("script"),
             started_at=float(body.get("started_at")),
             ended_at=float(body.get("ended_at")),
             loops=body.get("loops"), note=body.get("note", ""),
@@ -1828,6 +1875,37 @@ async def api_add_human_report_batch(request: Request):
     except (TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
     return {"ok": True, "items": items, "group_id": items[0]["group_id"]}
+
+
+@app.put("/api/data/human-reports/group/{group_id}")
+async def api_update_human_report_group(group_id: str, request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    entries = body.get("entries") or {}
+    if not isinstance(entries, dict):
+        return JSONResponse({"ok": False, "reason": "多资源收支格式不正确"}, status_code=400)
+    try:
+        items = get_telemetry_store().update_human_report_group(
+            group_id, occurred_at=float(body.get("occurred_at") or time.time()),
+            activities=body.get("activities") or [], note=body.get("note", ""),
+            entries=entries)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "items": items, "group_id": group_id}
+
+
+@app.put("/api/data/human-reports/{report_id}")
+async def api_update_human_report(report_id: int, request: Request):
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    try:
+        item = get_telemetry_store().update_human_report(
+            report_id, occurred_at=float(body.get("occurred_at") or time.time()),
+            activities=body.get("activities") or [], note=body.get("note", ""),
+            resource=body.get("resource"), claimed_delta=body.get("claimed_delta"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "item": item}
 
 
 @app.delete("/api/data/human-reports/group/{group_id}")

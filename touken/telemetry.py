@@ -218,9 +218,8 @@ class TelemetryStore:
         except Exception:
             return None
 
-    def add_manual_inventory(self, resources: dict,
-                             observed_at: float | None = None) -> dict:
-        """记录一份不依赖游戏截图的库存观察；允许只填写部分资源。"""
+    def _prepare_manual_inventory(self, resources: dict,
+                                  observed_at: float | None = None) -> tuple[float, dict]:
         if not isinstance(resources, dict):
             raise ValueError("家底格式不对")
         unknown = set(resources) - set(LEDGER_RESOURCES)
@@ -250,6 +249,12 @@ class TelemetryStore:
             "source": "manual_entry",
             "resources": clean,
         }
+        return ts, payload
+
+    def add_manual_inventory(self, resources: dict,
+                             observed_at: float | None = None) -> dict:
+        """记录一份不依赖游戏截图的库存观察；允许只填写部分资源。"""
+        ts, payload = self._prepare_manual_inventory(resources, observed_at)
         cursor = self._conn().execute(
             "INSERT INTO events(ts, run_id, script, event_type, payload) "
             "VALUES (?, NULL, 'manual', 'inventory.captured', ?)",
@@ -257,6 +262,58 @@ class TelemetryStore:
         )
         self._conn().commit()
         return {"id": cursor.lastrowid, "ts": ts, **payload}
+
+    def manual_inventory(self, limit: int = 200) -> list[dict]:
+        """只列玩家手动抄入的家底，不把游戏截图或任务快照混进来。"""
+        rows = self._conn().execute(
+            "SELECT id, ts, payload FROM events "
+            "WHERE run_id IS NULL AND script = 'manual' "
+            "AND event_type = 'inventory.captured' "
+            "ORDER BY ts DESC, id DESC LIMIT ?",
+            (max(1, min(int(limit), 1000)),),
+        ).fetchall()
+        items = []
+        for row in rows:
+            payload = _loads(row["payload"], {})
+            if payload.get("source") != "manual_entry":
+                continue
+            items.append({"id": row["id"], "ts": row["ts"], **payload})
+        return items
+
+    def update_manual_inventory(self, event_id: int, resources: dict,
+                                observed_at: float | None = None) -> dict:
+        ts, payload = self._prepare_manual_inventory(resources, observed_at)
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT run_id, script, event_type, payload FROM events WHERE id = ?",
+            (int(event_id),),
+        ).fetchone()
+        old_payload = _loads(row["payload"], {}) if row else {}
+        if (not row or row["run_id"] is not None or row["script"] != "manual"
+                or row["event_type"] != "inventory.captured"
+                or old_payload.get("source") != "manual_entry"):
+            raise ValueError("找不到这条手动家底记录")
+        conn.execute(
+            "UPDATE events SET ts = ?, payload = ? WHERE id = ?",
+            (ts, _json(payload), int(event_id)),
+        )
+        conn.commit()
+        return {"id": int(event_id), "ts": ts, **payload}
+
+    def delete_manual_inventory(self, event_id: int) -> bool:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT run_id, script, event_type, payload FROM events WHERE id = ?",
+            (int(event_id),),
+        ).fetchone()
+        payload = _loads(row["payload"], {}) if row else {}
+        if (not row or row["run_id"] is not None or row["script"] != "manual"
+                or row["event_type"] != "inventory.captured"
+                or payload.get("source") != "manual_entry"):
+            return False
+        cursor = conn.execute("DELETE FROM events WHERE id = ?", (int(event_id),))
+        conn.commit()
+        return cursor.rowcount > 0
 
     def attach_inventory_snapshot(self, run_id: str, snapshot: dict,
                                   captured_ts: float | None = None) -> dict:
@@ -306,12 +363,12 @@ class TelemetryStore:
         conn.commit()
         return self.run_summary(run_id)
 
-    def add_human_report(self, *, occurred_at: float, activities: list[str],
-                         note: str = "", source: str = "proactive",
-                         gap_key: str | None = None,
-                         resource: str | None = None,
-                         claimed_delta: float | None = None,
-                         group_id: str | None = None) -> dict:
+    def _prepare_human_report(self, *, occurred_at: float, activities: list[str],
+                              note: str = "", source: str = "proactive",
+                              gap_key: str | None = None,
+                              resource: str | None = None,
+                              claimed_delta: float | None = None,
+                              group_id: str | None = None) -> dict:
         activities = [str(value).strip()[:40] for value in activities
                       if str(value).strip()][:20]
         note = str(note or "").strip()[:300]
@@ -339,21 +396,39 @@ class TelemetryStore:
                 raise ValueError("认领数额超出可记录范围")
         if not activities and not note and resource is None:
             raise ValueError("请至少选一项，或留一句说明")
-        created_at = time.time()
         group_id = str(group_id or "").strip()[:80] or None
+        occurred_at = float(occurred_at)
+        if not math.isfinite(occurred_at) or occurred_at <= 0 or occurred_at > time.time() + 300:
+            raise ValueError("记录时间不正确")
+        return {
+            "occurred_at": occurred_at, "source": source,
+            "gap_key": gap_key, "activities": activities, "note": note,
+            "resource": resource, "claimed_delta": claimed_delta,
+            "group_id": group_id,
+        }
+
+    def add_human_report(self, *, occurred_at: float, activities: list[str],
+                         note: str = "", source: str = "proactive",
+                         gap_key: str | None = None,
+                         resource: str | None = None,
+                         claimed_delta: float | None = None,
+                         group_id: str | None = None) -> dict:
+        clean = self._prepare_human_report(
+            occurred_at=occurred_at, activities=activities, note=note,
+            source=source, gap_key=gap_key, resource=resource,
+            claimed_delta=claimed_delta, group_id=group_id)
+        created_at = time.time()
         cursor = self._conn().execute(
             "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
             "activities, note, resource, claimed_delta, group_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (created_at, float(occurred_at), source, gap_key,
-             _json(activities), note, resource, claimed_delta, group_id),
+            (created_at, clean["occurred_at"], clean["source"], clean["gap_key"],
+             _json(clean["activities"]), clean["note"], clean["resource"],
+             clean["claimed_delta"], clean["group_id"]),
         )
         self._conn().commit()
         return {"id": cursor.lastrowid, "created_at": created_at,
-                "occurred_at": float(occurred_at), "source": source,
-                "gap_key": gap_key, "activities": activities, "note": note,
-                "resource": resource, "claimed_delta": claimed_delta,
-                "group_id": group_id}
+                **clean}
 
     def add_human_report_group(self, *, occurred_at: float, activities: list[str],
                                entries: dict[str, float], note: str = "") -> list[dict]:
@@ -362,15 +437,88 @@ class TelemetryStore:
         if not clean:
             raise ValueError("请至少填写一种资源的收支")
         group_id = uuid.uuid4().hex
-        items: list[dict] = []
+        prepared = [self._prepare_human_report(
+            occurred_at=occurred_at, activities=activities, note=note,
+            source="proactive", resource=resource, claimed_delta=delta,
+            group_id=group_id) for resource, delta in clean.items()]
+        conn = self._conn()
+        created_at = time.time()
+        items = []
         try:
-            for resource, delta in clean.items():
-                items.append(self.add_human_report(
-                    occurred_at=occurred_at, activities=activities, note=note,
-                    source="proactive", resource=resource,
-                    claimed_delta=delta, group_id=group_id))
+            for item in prepared:
+                cursor = conn.execute(
+                    "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
+                    "activities, note, resource, claimed_delta, group_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (created_at, item["occurred_at"], item["source"], item["gap_key"],
+                     _json(item["activities"]), item["note"], item["resource"],
+                     item["claimed_delta"], item["group_id"]),
+                )
+                items.append({"id": cursor.lastrowid, "created_at": created_at, **item})
+            conn.commit()
         except Exception:
-            self.delete_human_report_group(group_id)
+            conn.rollback()
+            raise
+        return items
+
+    def update_human_report(self, report_id: int, *, occurred_at: float,
+                            activities: list[str], note: str, resource: str,
+                            claimed_delta: float) -> dict:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, created_at, source, gap_key, group_id FROM human_reports WHERE id = ?",
+            (int(report_id),),
+        ).fetchone()
+        if not row or row["source"] != "proactive" or row["gap_key"] or row["group_id"]:
+            raise ValueError("找不到这笔可修改的手动收支")
+        clean = self._prepare_human_report(
+            occurred_at=occurred_at, activities=activities, note=note,
+            source="proactive", resource=resource, claimed_delta=claimed_delta)
+        conn.execute(
+            "UPDATE human_reports SET occurred_at = ?, activities = ?, note = ?, "
+            "resource = ?, claimed_delta = ? WHERE id = ?",
+            (clean["occurred_at"], _json(clean["activities"]), clean["note"],
+             clean["resource"], clean["claimed_delta"], int(report_id)),
+        )
+        conn.commit()
+        return {"id": row["id"], "created_at": row["created_at"], **clean}
+
+    def update_human_report_group(self, group_id: str, *, occurred_at: float,
+                                  activities: list[str], entries: dict[str, float],
+                                  note: str = "") -> list[dict]:
+        group_id = str(group_id or "").strip()
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT id, created_at, source, gap_key FROM human_reports WHERE group_id = ?",
+            (group_id,),
+        ).fetchall()
+        if not rows or any(row["source"] != "proactive" or row["gap_key"] for row in rows):
+            raise ValueError("找不到这组可修改的手动收支")
+        clean_entries = {str(resource): delta for resource, delta in entries.items()
+                         if delta is not None}
+        if not clean_entries:
+            raise ValueError("请至少填写一种资源的收支")
+        prepared = [self._prepare_human_report(
+            occurred_at=occurred_at, activities=activities, note=note,
+            source="proactive", resource=resource, claimed_delta=delta,
+            group_id=group_id) for resource, delta in clean_entries.items()]
+        created_at = min(float(row["created_at"]) for row in rows)
+        items = []
+        try:
+            conn.execute("DELETE FROM human_reports WHERE group_id = ?", (group_id,))
+            for item in prepared:
+                cursor = conn.execute(
+                    "INSERT INTO human_reports(created_at, occurred_at, source, gap_key, "
+                    "activities, note, resource, claimed_delta, group_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (created_at, item["occurred_at"], item["source"], item["gap_key"],
+                     _json(item["activities"]), item["note"], item["resource"],
+                     item["claimed_delta"], item["group_id"]),
+                )
+                items.append({"id": cursor.lastrowid, "created_at": created_at, **item})
+            conn.commit()
+        except Exception:
+            conn.rollback()
             raise
         return items
 
@@ -398,14 +546,9 @@ class TelemetryStore:
         self._conn().commit()
         return cursor.rowcount > 0
 
-    def add_manual_session(self, *, script: str, started_at: float,
-                           ended_at: float, loops: int,
-                           note: str = "") -> dict:
-        """Record player-run activity without inserting a machine ``run``.
-
-        Manual sessions intentionally live in their own table: scorecard totals and
-        automation evidence must never silently absorb player-entered work.
-        """
+    def _prepare_manual_session(self, *, script: str, started_at: float,
+                                ended_at: float, loops: int,
+                                note: str = "") -> dict:
         labels = {
             "osaka": "大阪城", "raid": "联队战", "edocastle": "江户城",
             "sortie": "合战场", "yosari": "异去", "pumpkin": "季节活动",
@@ -425,21 +568,56 @@ class TelemetryStore:
         if ended_at > time.time() + 300:
             raise ValueError("结束时间不能在未来")
         note = str(note or "").strip()[:200]
-        created_at = time.time()
-        cursor = self._conn().execute(
-            "INSERT INTO manual_sessions(created_at, script, started_at, ended_at, loops, note) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (created_at, script, started_at, ended_at, loops, note),
-        )
-        self._conn().commit()
         return {
-            "id": cursor.lastrowid, "created_at": created_at,
             "script": script, "activity": labels[script],
             "started_at": started_at, "ended_at": ended_at, "loops": loops,
             "duration_seconds": round(ended_at - started_at, 1),
             "average_loop_seconds": round((ended_at - started_at) / loops, 1),
             "note": note, "source": "manual",
         }
+
+    def add_manual_session(self, *, script: str, started_at: float,
+                           ended_at: float, loops: int,
+                           note: str = "") -> dict:
+        """Record player-run activity without inserting a machine ``run``.
+
+        Manual sessions intentionally live in their own table: scorecard totals and
+        automation evidence must never silently absorb player-entered work.
+        """
+        clean = self._prepare_manual_session(
+            script=script, started_at=started_at, ended_at=ended_at,
+            loops=loops, note=note)
+        created_at = time.time()
+        cursor = self._conn().execute(
+            "INSERT INTO manual_sessions(created_at, script, started_at, ended_at, loops, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (created_at, clean["script"], clean["started_at"], clean["ended_at"],
+             clean["loops"], clean["note"]),
+        )
+        self._conn().commit()
+        return {"id": cursor.lastrowid, "created_at": created_at, **clean}
+
+    def update_manual_session(self, session_id: int, *, script: str,
+                              started_at: float, ended_at: float, loops: int,
+                              note: str = "") -> dict:
+        clean = self._prepare_manual_session(
+            script=script, started_at=started_at, ended_at=ended_at,
+            loops=loops, note=note)
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id, created_at FROM manual_sessions WHERE id = ?",
+            (int(session_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("找不到这条手动活动记录")
+        conn.execute(
+            "UPDATE manual_sessions SET script = ?, started_at = ?, ended_at = ?, "
+            "loops = ?, note = ? WHERE id = ?",
+            (clean["script"], clean["started_at"], clean["ended_at"],
+             clean["loops"], clean["note"], int(session_id)),
+        )
+        conn.commit()
+        return {"id": row["id"], "created_at": row["created_at"], **clean}
 
     def manual_sessions(self, limit: int = 200, *, from_ts: float | None = None,
                         to_ts: float | None = None) -> list[dict]:
