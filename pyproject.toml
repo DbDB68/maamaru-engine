@@ -1,10 +1,10 @@
 [project]
 name = "maamaru-engine"
-version = "0.4.2"
-description = "刀剑乱舞自动化引擎 (Touken Ranbu automation engine based on MaaFramework)"
+version = "0.5.0"
+description = "《刀剑乱舞 ONLINE》国服本丸管家与纯净本丸账房"
 requires-python = ">=3.12"
 license = {text = "AGPL-3.0-or-later"}
-keywords = ["touken-ranbu", "maa", "automation", "game"]
+keywords = ["touken-ranbu", "honmaru", "ledger", "maa", "automation"]
 dependencies = [
     "maafw>=5.0",
     "fastapi>=0.115",

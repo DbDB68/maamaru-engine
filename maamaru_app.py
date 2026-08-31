@@ -55,14 +55,12 @@ def _available_port(preferred: int) -> int:
 
 
 def _run_server(port: int = AUTOMATION_PORT, ledger_mode: bool = False):
-    if ledger_mode:
-        import os
-        os.environ["MAAMARU_LEDGER_MODE"] = "1"
     import uvicorn
-    from panel.server import app
+    from panel import server
+    server.configure_app_mode(ledger_mode)
     # 单机启动器只服务自己的原生窗口。绑定本机地址可以避开防火墙、
     # 公共网络策略以及部分新装 Windows 对全网监听的限制。
-    uvicorn.run(app, host=HOST, port=port, log_level="warning")
+    uvicorn.run(server.app, host=HOST, port=port, log_level="warning")
 
 
 def main(ledger_mode: bool = False):

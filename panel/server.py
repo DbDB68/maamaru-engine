@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -51,10 +52,29 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 # ── App ──
 app = FastAPI(title="まあ丸 近侍面板")
+_server_mode = threading.local()
+
+
+def configure_app_mode(ledger_mode: bool | None) -> None:
+    """Pin one Uvicorn server thread to its own mode.
+
+    The launcher can keep the ledger and automation servers alive together.
+    A process-wide environment variable cannot distinguish those two threads.
+    Passing ``None`` restores the environment-backed default used by tests and
+    direct module launches.
+    """
+    if ledger_mode is None:
+        if hasattr(_server_mode, "ledger"):
+            del _server_mode.ledger
+        return
+    _server_mode.ledger = bool(ledger_mode)
 
 
 def _ledger_mode() -> bool:
     """纯净账房模式只开放数据与规划，不启动任何游戏控制设施。"""
+    configured = getattr(_server_mode, "ledger", None)
+    if configured is not None:
+        return configured
     return os.environ.get("MAAMARU_LEDGER_MODE", "").strip().lower() in {
         "1", "true", "yes", "on",
     }

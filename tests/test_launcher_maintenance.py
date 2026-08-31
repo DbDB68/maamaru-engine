@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import maamaru_app
 from launcher import app
+from panel import server
 
 
 class LauncherMaintenanceTests(unittest.TestCase):
@@ -100,9 +102,35 @@ class LauncherMaintenanceTests(unittest.TestCase):
                 occupied.close()
         self.assertNotEqual(selected, preferred)
 
+    def test_server_start_pins_each_mode_without_mutating_process_environment(self):
+        with patch.dict(os.environ, {"MAAMARU_LEDGER_MODE": "1"}), \
+                patch("uvicorn.run") as uvicorn_run, \
+                patch.object(server, "configure_app_mode") as configure_mode:
+            maamaru_app._run_server(port=18082, ledger_mode=True)
+            maamaru_app._run_server(port=8080, ledger_mode=False)
+            self.assertEqual(os.environ["MAAMARU_LEDGER_MODE"], "1")
+
+        self.assertEqual(
+            [call.args[0] for call in configure_mode.call_args_list],
+            [True, False],
+        )
+        self.assertEqual(uvicorn_run.call_count, 2)
+
     def test_non_maamaru_service_is_not_accepted_as_panel(self):
         with patch.object(app.urllib.request, "urlopen", side_effect=OSError):
             self.assertIsNone(app._panel_mode(8082))
+
+    def test_timeout_without_exception_does_not_claim_a_log_exists(self):
+        api = app.Api()
+        with patch.object(app, "_panel_mode", return_value=None), \
+                patch.object(app, "_port_alive", return_value=False), \
+                patch.object(app.time, "time", side_effect=[0, 16, 16]), \
+                patch.object(app.threading, "Thread"):
+            result = api.start("automation")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("启动等待超时", result["message"])
+        self.assertNotIn("launcher.log", result["message"])
 
 
 if __name__ == "__main__":

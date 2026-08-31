@@ -205,9 +205,19 @@ class Api:
                        and _panel_mode(port) != expected_mode
                        and not error["traceback"]):
                     time.sleep(0.2)
-            if _panel_mode(port) != expected_mode:
-                detail = error["traceback"].strip().splitlines()[-1] if error["traceback"] else "启动等待超时"
-                return {"ok": False, "message": f"面板服务没有成功启动：{detail}\n错误记录：{LOG_DIR / 'launcher.log'}"}
+            observed_mode = _panel_mode(port)
+            if observed_mode != expected_mode:
+                if error["traceback"]:
+                    detail = error["traceback"].strip().splitlines()[-1]
+                    message = f"面板服务没有成功启动：{detail}\n错误记录：{LOG_DIR / 'launcher.log'}"
+                elif observed_mode:
+                    message = (
+                        f"面板启动成了{_mode_label(observed_mode)}，"
+                        f"没有进入{_mode_label(expected_mode)}。请关闭启动器后重试"
+                    )
+                else:
+                    message = "面板服务启动等待超时；本次没有产生错误记录，请关闭启动器后重试"
+                return {"ok": False, "message": message}
 
             # pywebview 的 JS 正在等待本次 API 调用返回；此时同步换页会互相等待。
             # 稍后从独立线程切换，先让“启动”调用顺利结束。
@@ -563,6 +573,10 @@ def _panel_mode(port: int) -> str | None:
         return mode if mode in {"automation", "ledger"} else None
     except (OSError, ValueError, json.JSONDecodeError):
         return None
+
+
+def _mode_label(mode: str) -> str:
+    return "纯净账房" if mode == "ledger" else "正常管家模式"
 
 
 def _available_port(preferred: int) -> int:
