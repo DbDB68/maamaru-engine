@@ -227,6 +227,28 @@ class Api:
             _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": str(exc)}
 
+    def return_to_launcher(self):
+        """把同一个桌面窗口切回启动器，不停止仍在运行的面板或任务。"""
+        try:
+            if not webview.windows:
+                raise RuntimeError("启动器窗口已经关闭")
+
+            def open_launcher():
+                try:
+                    # 先让 pywebview 的 API 调用返回，避免换页与当前调用互相等待。
+                    time.sleep(0.15)
+                    window = webview.windows[0]
+                    window.resize(1080, 720)
+                    window.load_html(_launcher_html())
+                except BaseException:
+                    _write_launcher_log(traceback.format_exc())
+
+            threading.Thread(target=open_launcher, daemon=True).start()
+            return {"ok": True, "message": "正在返回启动器"}
+        except Exception as exc:
+            _write_launcher_log(traceback.format_exc())
+            return {"ok": False, "message": str(exc)}
+
     def repair(self):
         try:
             repaired = _repair_runtime_files()
@@ -454,14 +476,18 @@ class Api:
             return {"ok": False, "message": f"暂时没能生成错误反馈包：{exc}"}
 
 
-def main():
-    ensure_runtime_data()
-    html = (HTML
+def _launcher_html() -> str:
+    return (HTML
             .replace("__VERSION__", CURRENT_VERSION)
             .replace("__ICON_URI__", _asset_data_uri("maamaru-launcher-header.png"))
             .replace("__GARDEN_URI__", _asset_data_uri("honmaru_rain_garden.png"))
             .replace("__FOX1_URI__", _asset_data_uri("fox_run_1_alpha.png"))
             .replace("__FOX2_URI__", _asset_data_uri("fox_run_2_alpha.png")))
+
+
+def main():
+    ensure_runtime_data()
+    html = _launcher_html()
     webview.create_window("まあ丸启动器", html=html,
                           js_api=Api(), width=1080, height=720,
                           min_size=(860, 660), resizable=True)

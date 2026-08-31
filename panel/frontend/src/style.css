@@ -71,6 +71,9 @@ button { cursor: pointer; }
 .top-status i.running { background: var(--fox-gold); box-shadow: 0 0 7px var(--fox-gold); }
 .top-status > span { font-size: 13px; }
 .top-status a { font-size: 11px; opacity: .65; }
+.launcher-return { height: 30px; padding: 0 10px; color: var(--fox-gold-deep); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 6px; font-size: 11px; }
+.launcher-return:hover { color: var(--ink); border-color: var(--fox-gold); }
+.launcher-return:disabled { cursor: wait; opacity: .6; }
 .theme-button { --nav-icon: url('/static/img/ui/contrast.png'); display: grid; width: 34px; min-width: 34px; height: 34px; padding: 0; place-items: center; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 6px; }
 .theme-button::before { margin: 0; }
 .topnav a { margin-left: 8px; }

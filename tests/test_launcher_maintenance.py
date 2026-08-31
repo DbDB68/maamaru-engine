@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import maamaru_app
 from launcher import app
@@ -69,6 +69,25 @@ class LauncherMaintenanceTests(unittest.TestCase):
         self.assertIn("只打开账房", app.HTML)
         self.assertIn("startApp('ledger')", app.HTML)
         self.assertNotEqual(maamaru_app.LEDGER_PORT, maamaru_app.AUTOMATION_PORT)
+
+    def test_panel_can_return_to_the_same_launcher_window(self):
+        window = Mock()
+        thread = Mock()
+        with patch.object(app.webview, "windows", [window]), \
+                patch.object(app.threading, "Thread", return_value=thread) as thread_factory, \
+                patch.object(app.time, "sleep"):
+            result = app.Api().return_to_launcher()
+            thread_factory.call_args.kwargs["target"]()
+
+        self.assertTrue(result["ok"])
+        thread.start.assert_called_once_with()
+        window.resize.assert_called_once_with(1080, 720)
+        loaded_html = window.load_html.call_args.args[0]
+        self.assertIn("まあ丸", loaded_html)
+        self.assertNotIn("__ICON_URI__", loaded_html)
+        panel_source = (app._project_root() / "panel" / "frontend" / "src" / "App.vue").read_text(encoding="utf-8")
+        self.assertIn("返回启动器", panel_source)
+        self.assertIn("return_to_launcher", panel_source)
 
     def test_ledger_port_falls_back_when_preferred_is_occupied(self):
         with patch.object(app.socket, "socket", wraps=app.socket.socket):

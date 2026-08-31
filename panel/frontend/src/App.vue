@@ -26,6 +26,8 @@ const loading = ref(true)
 const message = ref('')
 const tab = ref<'home' | 'tasks' | 'report' | 'chat' | 'system'>('home')
 const ledgerMode = ref(false)
+const launcherAvailable = ref(false)
+const returningToLauncher = ref(false)
 const theme = ref<'washi' | 'pixel'>('washi')
 const schedulerWarning = ref('')
 const advancedDrawer = ref<'pumpkin' | 'daily-pumpkin' | null>(null)
@@ -181,6 +183,29 @@ async function load() {
 
 function applyTheme() { document.body.dataset.theme = theme.value }
 async function toggleTheme() { theme.value = theme.value === 'washi' ? 'pixel' : 'washi'; applyTheme(); await api.saveTheme(theme.value) }
+type LauncherWindow = Window & { pywebview?: { api?: { return_to_launcher?: () => Promise<{ ok: boolean; message?: string }> } } }
+function detectLauncherBridge() {
+  launcherAvailable.value = typeof (window as LauncherWindow).pywebview?.api?.return_to_launcher === 'function'
+}
+async function returnToLauncher() {
+  const bridge = (window as LauncherWindow).pywebview?.api
+  if (!bridge?.return_to_launcher) {
+    launcherAvailable.value = false
+    message.value = '这个页面不是从启动器窗口打开的'
+    return
+  }
+  returningToLauncher.value = true
+  try {
+    const result = await bridge.return_to_launcher()
+    if (!result.ok) {
+      message.value = result.message || '暂时没能返回启动器'
+      returningToLauncher.value = false
+    }
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '暂时没能返回启动器'
+    returningToLauncher.value = false
+  }
+}
 async function pollStatus() {
   try {
     const [state, dashboard] = await Promise.all([api.scripts(), api.dashboard()])
@@ -246,6 +271,8 @@ watch(message, value => {
 })
 
 onMounted(async () => {
+  detectLauncherBridge()
+  window.addEventListener('pywebviewready', detectLauncherBridge)
   await load()
   if (!ledgerMode.value) {
     await pollStatus()
@@ -253,7 +280,7 @@ onMounted(async () => {
     window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning)
   }
 })
-onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning) })
+onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
 watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false })
 </script>
@@ -282,6 +309,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       </nav>
       <div class="top-status">
         <i :class="{ running: stageActive }"></i><span>{{ ledgerMode ? '纯净模式' : stageActive ? '执务中' : '待命中' }}</span>
+        <button v-if="launcherAvailable" class="launcher-return" type="button" title="返回启动器，不会停止正在运行的任务" :disabled="returningToLauncher" @click="returnToLauncher">{{ returningToLauncher ? '正在返回…' : '返回启动器' }}</button>
         <button class="theme-button" :title="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" :aria-label="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" @click="toggleTheme"></button>
         <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
       </div>
