@@ -1287,7 +1287,7 @@ class TelemetryStore:
         activity_rows = conn.execute(
             "SELECT event_type, payload FROM events WHERE ts >= ? AND event_type IN "
             "('sortie.completed', 'sortie.retreated_before_boss', "
-            "'osaka.floor_completed', 'raid.round_completed', "
+            "'osaka.floor_completed', 'edocastle.run_completed', 'raid.round_completed', "
             "'pumpkin.sortie_completed', 'practice.result')",
             (since,),
         ).fetchall()
@@ -1311,6 +1311,8 @@ class TelemetryStore:
             activity["sorties"] += 1
             if event_type == "osaka.floor_completed":
                 key = ("osaka", payload.get("selected_floor"))
+            elif event_type == "edocastle.run_completed":
+                key = ("edocastle", payload.get("difficulty"))
             elif event_type in {"sortie.completed", "sortie.retreated_before_boss"}:
                 key = (event_type, payload.get("mode"), payload.get("chapter"),
                        payload.get("map_no"))

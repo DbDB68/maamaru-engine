@@ -393,6 +393,28 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(summary["activity"]["practice"]["wins"], 1)
         self.assertEqual(summary["activity"]["sortie_groups"][0]["count"], 1005)
 
+    def test_summary_counts_edocastle_runs_as_sorties(self):
+        conn = self.store._conn()
+        now = time.time()
+        for run_no in (1, 2):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'edo-1', 'edocastle', 'edocastle.run_completed', ?)",
+                (now - run_no, __import__('json').dumps({
+                    "run_no": run_no, "difficulty": 4, "keys": 10 + run_no,
+                })),
+            )
+        conn.commit()
+
+        summary = self.store.summary(days=1)
+
+        self.assertEqual(summary["activity"]["sorties"], 2)
+        self.assertEqual(summary["activity"]["sortie_groups"], [{
+            "event_type": "edocastle.run_completed",
+            "payload": {"run_no": 1, "difficulty": 4, "keys": 11},
+            "count": 2,
+        }])
+
     def test_record_pages_accept_stable_cursors(self):
         first = self.store.record_event("first", {})
         second = self.store.record_event("second", {})

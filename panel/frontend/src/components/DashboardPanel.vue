@@ -70,6 +70,10 @@ function eventCount(...types: string[]) {
   return activityEvents.value.filter(item => types.includes(item.event_type)).length
 }
 
+// 出阵种类由成绩库统一归口，概览不再自己维护一份活动名单。
+// 这样江户城及以后新增的玩法只需在后端计数规则中登记一次。
+const sortieCount = computed(() => Number(activity.value?.activity?.sorties ?? 0))
+
 onMounted(() => {
   load()
   timer = window.setInterval(() => { now.value = Date.now() }, 1000)
@@ -88,7 +92,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <div class="activity-summary">
           <template v-if="activity">
             <span><strong>{{ eventCount('task_rewards.claimed') }}</strong>次领奖</span>
-            <span><strong>{{ eventCount('sortie.completed', 'sortie.retreated_before_boss', 'osaka.floor_completed', 'raid.round_completed', 'pumpkin.sortie_completed') }}</strong>次出阵</span>
+            <span><strong>{{ sortieCount }}</strong>次出阵</span>
             <span><strong>{{ eventCount('expedition.dispatched') }}</strong>次派遣</span>
           </template>
           <span v-else class="activity-waiting">新任务运行后开始记录</span>
