@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ from touken.ledger_transfer import (
     export_ledger_csv,
     export_ledger_xlsx,
 )
-from touken.telemetry import TelemetryStore
+from touken.telemetry import TelemetryStore, _LEDGER_TZ
 
 
 class LedgerTransferTests(unittest.TestCase):
@@ -38,6 +39,10 @@ class LedgerTransferTests(unittest.TestCase):
             (ts, run_id, script, event_type, json.dumps(payload, ensure_ascii=False)),
         )
         self.store._conn().commit()
+
+    @staticmethod
+    def _ledger_time(ts):
+        return datetime.fromtimestamp(ts, _LEDGER_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     def test_xlsx_exports_player_sheets_and_roundtrips_only_manual_rows(self):
         self._event(self.now, "inventory.captured",
@@ -133,9 +138,9 @@ class LedgerTransferTests(unittest.TestCase):
         source = io.StringIO(newline="")
         writer = csv.writer(source)
         writer.writerow(["记录类型", "时间", "资源", "数额", "备注", "来源"])
-        writer.writerow(["家底", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.now)),
+        writer.writerow(["家底", self._ledger_time(self.now),
                          "小判", 900, "旧表", "你手动"])
-        writer.writerow(["收支", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.now + 60)),
+        writer.writerow(["收支", self._ledger_time(self.now + 60),
                          "木炭", -20, "旧表", "你手动"])
         data = source.getvalue().encode("utf-8-sig")
 
@@ -171,7 +176,7 @@ class LedgerTransferTests(unittest.TestCase):
         self.store.add_human_report(
             occurred_at=self.now, activities=[], note="已有", resource="玉钢", claimed_delta=10)
         source = ("记录类型,时间,资源,数额,备注,来源\n"
-                  f"收支,{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.now))},玉钢,10,已有,你手动\n")
+                  f"收支,{self._ledger_time(self.now)},玉钢,10,已有,你手动\n")
         preview = create_import_preview(self.store, source.encode("utf-8-sig"), "old.csv")
 
         result = apply_import_preview(self.store, preview["preview_id"], self.root / "backups")
@@ -196,7 +201,7 @@ class LedgerTransferTests(unittest.TestCase):
                 return self.payload
 
         source = ("记录类型,时间,资源,数额,备注,来源\n"
-                  f"收支,{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.now))},"
+                  f"收支,{self._ledger_time(self.now)},"
                   "冷却材,12,旧账,你手动\n").encode("utf-8-sig")
         backup_root = self.root / "api-backups"
         with patch("touken.telemetry._store", self.store), \
