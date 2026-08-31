@@ -162,10 +162,14 @@ class DailyMixin:
                     report.append(("登录", "✓"))
                 else:
                     report.append(("登录", "✗ 没到本丸"))
-                    yield "[日课] 登录后没等到本丸，后面大概率连环翻车"
+                    yield "[日课] 登录后仍没到本丸，本次日课停止"
+                    self._flush_report(report, finished=True)
+                    return
             except Exception as exc:
                 report.append(("登录", f"✗ {exc}"))
-                yield f"[日课] 登录翻车: {exc}（可能已在游戏内，继续）"
+                yield f"[日课] 登录翻车: {exc}；未确认进入本丸，本次日课停止"
+                self._flush_report(report, finished=True)
+                return
             self._flush_report(report, finished=False)
             time.sleep(1.0)
 
@@ -571,6 +575,15 @@ class DailyMixin:
                     break
             if acted:
                 clean = 0
+                continue
+            # 冷启动恰逢资源更新时，选完线路后登录页可能晚到或重新出现。
+            # login() 只负责配置里的那一次点击；扫地阶段再看见登录按钮就补点，
+            # 直到真正通过本丸目录探针，不能把“点过登录”当成“已经登录”。
+            login_pt = self.maa.template_match("登录.png", threshold=0.7)
+            if login_pt:
+                self.maa.click(login_pt)
+                clean = 0
+                time.sleep(2.0)
                 continue
             # 内番报告屏：谁+1 在这儿，先读再点穿（自然收工的横幅在本丸随机蹦）
             if self.maa.ocr("内番报告", roi_4to4(*naihanka_report.REPORT_TITLE_ROI)):

@@ -233,6 +233,82 @@ class LoginPopupSweepTests(unittest.TestCase):
         self.assertEqual(flow.report_reads, 1)
         self.assertEqual(flow.maa.clicks, [Point(993, 690)])
 
+    def test_late_login_button_is_clicked_before_waiting_for_home(self):
+        class Maa(_LoginPopupMaa):
+            def __init__(self):
+                super().__init__()
+                self.stage = "login"
+                self.login_point = Point(640, 600)
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                if template == "登录.png" and self.stage == "login":
+                    return self.login_point
+                return None
+
+            def click(self, target):
+                self.clicks.append(target)
+                if target == self.login_point:
+                    self.stage = "home"
+                return True
+
+        flow = _LoginPopupFlow()
+        flow.maa = Maa()
+
+        with patch("touken.flows.daily.time.sleep"):
+            arrived = flow._popup_sweep(max_rounds=5)
+
+        self.assertTrue(arrived)
+        self.assertEqual(flow.maa.clicks, [flow.maa.login_point])
+
+
+class DailyLoginGateTests(unittest.TestCase):
+    class Flow(DailyMixin):
+        def __init__(self, popup_result=False, login_error=None):
+            self.config = {"daily": {}}
+            self.popup_result = popup_result
+            self.login_error = login_error
+            self.flushed = []
+
+        def _daily_update_gate(self):
+            if False:
+                yield None
+            return True
+
+        def _ensure_game_started(self):
+            if False:
+                yield None
+
+        def login(self):
+            if self.login_error:
+                raise self.login_error
+
+        def _popup_sweep(self, max_rounds=30):
+            return self.popup_result
+
+        def _flush_report(self, report, finished):
+            self.flushed.append((list(report), finished))
+
+    def test_daily_stops_when_home_was_not_confirmed(self):
+        flow = self.Flow(popup_result=False)
+
+        with patch("touken.flows.daily.time.sleep"):
+            messages = list(flow.daily_stream())
+
+        self.assertIn("[日课] 登录后仍没到本丸，本次日课停止", messages)
+        self.assertFalse(any("②" in message for message in messages))
+        self.assertEqual(flow.flushed, [([("登录", "✗ 没到本丸")], True)])
+
+    def test_daily_stops_when_login_raises(self):
+        flow = self.Flow(login_error=RuntimeError("登录按钮没点到"))
+
+        with patch("touken.flows.daily.time.sleep"):
+            messages = list(flow.daily_stream())
+
+        self.assertTrue(any("未确认进入本丸，本次日课停止" in message
+                            for message in messages))
+        self.assertEqual(flow.flushed,
+                         [([("登录", "✗ 登录按钮没点到")], True)])
+
 
 class CollectReportGainsTests(unittest.TestCase):
     def test_reads_names_writes_last_report_and_is_idempotent(self):
