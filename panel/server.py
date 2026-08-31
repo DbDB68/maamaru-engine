@@ -1740,6 +1740,32 @@ async def api_data_resource_ledger(days: int = 7,
     return get_telemetry_store().resource_ledger(start, to_ts)
 
 
+@app.get("/api/data/ledger-onboarding")
+async def api_ledger_onboarding():
+    """只给真正空账本的新用户显示一次三步引导。"""
+    from touken.ledger_onboarding import ONBOARDING_FILENAME, get_onboarding
+    from touken.telemetry import get_telemetry_store
+    return get_onboarding(get_telemetry_store(), STATUS_DIR / ONBOARDING_FILENAME)
+
+
+@app.post("/api/data/ledger-onboarding")
+async def api_update_ledger_onboarding(request: Request):
+    """保存引导进度；完成或明确跳过后不再打扰。"""
+    from touken.ledger_onboarding import ONBOARDING_FILENAME, update_onboarding
+    from touken.telemetry import get_telemetry_store
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("引导请求格式不正确")
+        result = update_onboarding(
+            get_telemetry_store(), STATUS_DIR / ONBOARDING_FILENAME,
+            str(body.get("action") or ""), step=body.get("step"),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, **result}
+
+
 @app.get("/api/data/ledger-export")
 async def api_ledger_export(format: str = "xlsx"):
     """导出账房快照：Excel 含完整流水/当前家底/每日汇总，CSV 为完整流水。"""

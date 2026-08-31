@@ -16,6 +16,7 @@
 - `GET /api/data/ledger-export?format=xlsx|csv`：导出账本。Excel 包含使用说明、完整流水、当前家底、每日汇总和可再次导入表；CSV 是带 UTF-8 BOM 的完整流水。
 - `POST /api/data/ledger-import/preview?filename=<name>`：以请求体上传 `.xlsx` / `.csv`，只做解析、重复与冲突预览，不写入账本。
 - `POST /api/data/ledger-import/apply`：提交 `preview_id` 和 `accept_conflicts`。重新检查冲突，确认有可写内容后先用 SQLite backup 生成一致备份，再只增加手动记录。
+- `GET/POST /api/data/ledger-onboarding`：空账本首次设置状态。GET 会检查全历史有效家底观察；老账本直接返回 `not_needed`，空账本才显示。POST 只接受 `start`、`advance`、`complete`、`dismiss`，状态保存在用户数据目录的 `status/ledger_onboarding.json`。
 - `GET /api/data/resource-ledger?days=7` 或 `?from=<ts>&to=<ts>`：资源总账（见下文），
   from/to（Unix 秒）优先于 days，days 默认 7。聚合全部在服务端完成，
   前端不要拉原始 events 自己算。
@@ -93,6 +94,8 @@
 导入边界是“只增手账，不改自动事实”：まあ丸的 `runs`、带 `run_id` 的 events 和自动库存观察只能出现在导出中，不能通过表格回写。まあ丸导出的 Excel 只从“可再次导入”工作表读取；其中的手动收支、手动家底和手动活动都能再次导入。同一时间同一项目已有相同值时跳过，有不同值时标为冲突并要求玩家明确确认。
 
 导入真正写入前，服务端会在用户数据目录的备份区创建 `ledger-import-<时间>/telemetry.db` 和 `manifest.json`。整份文件全是重复项时既不写入，也不制造空备份。预览只在当前进程短期保存，过期后必须重新选择文件。
+
+空账本引导不以最近 7 天是否有数据为准，而是检查全历史家底观察。已有任何有效库存快照、途中观察、带前后余额的资源流水或大阪城小判实验时，都不会打扰老用户。真正开始引导后，抄完家底会继续到可选旧账和可选目标；完成或明确选择“不需要引导”后持久隐藏。
 
 ## 资源总账（resource-ledger，schema_version 1）
 

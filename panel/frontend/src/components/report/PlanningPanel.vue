@@ -5,6 +5,7 @@ import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, Pla
 import { resourceNames } from './reportModel'
 import EventTimeline from './EventTimeline.vue'
 
+const emit = defineEmits<{ goalSaved: [] }>()
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const loading = ref(false)
@@ -205,6 +206,7 @@ async function goalFromAbacus(abacus: EventAbacus) {
     await api.addEventGoal(abacus.event)
     await load()
     goalNotice.value = `「${abacus.event}」目标已保存。`
+    emit('goalSaved')
     await scrollToElement('.planning-success')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { abacusGoalSaving.value = '' }
@@ -225,6 +227,7 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
     await api.addEventGoal(abacus.event, target)
     await load()
     goalNotice.value = `「${abacus.event}」目标已保存。`
+    emit('goalSaved')
     await scrollToElement('.planning-success')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { abacusGoalSaving.value = '' }
@@ -289,6 +292,7 @@ async function saveGoal() {
     form.value = { goal_mode: 'amount_target', resource: '小判', target: 100000, deadline: '', note: '' }
     await load()
     goalNotice.value = '目标已保存。'
+    emit('goalSaved')
     await scrollToElement('.planning-success')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { saving.value = false }
@@ -301,6 +305,7 @@ async function removeGoal(id: number) {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标删除失败' }
 }
 
+defineExpose({ openCustomForm })
 onMounted(load)
 </script>
 

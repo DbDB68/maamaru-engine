@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, LedgerImportPreview, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
+import type { HumanReport, InventoryGap, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -58,6 +58,9 @@ const ledgerImportInput = ref<HTMLInputElement | null>(null)
 const ledgerImportPreview = ref<LedgerImportPreview | null>(null)
 const acceptLedgerConflicts = ref(false)
 const ledgerTransferNotice = ref('')
+const ledgerOnboarding = ref<LedgerOnboarding | null>(null)
+const ledgerOnboardingBusy = ref('')
+const planningPanelRef = ref<{ openCustomForm: () => Promise<void> } | null>(null)
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -123,6 +126,59 @@ async function openPlanning() {
   honmaruTab.value = 'planning'
   await nextTick()
   document.querySelector('.report-panel')?.scrollIntoView({ block: 'start' })
+}
+
+async function beginLedgerOnboarding() {
+  ledgerOnboardingBusy.value = 'inventory'
+  try {
+    ledgerOnboarding.value = await api.updateLedgerOnboarding('start')
+    openInventoryForm()
+    await nextTick()
+    document.querySelector('.manual-inventory-form')?.scrollIntoView({ block: 'start' })
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '首次设置没能开始' }
+  finally { ledgerOnboardingBusy.value = '' }
+}
+
+function openOnboardingImport() {
+  ledgerTransferOpen.value = true
+  chooseLedgerImport()
+  void nextTick().then(() => document.querySelector('.ledger-transfer')?.scrollIntoView({ block: 'start' }))
+}
+
+async function advanceLedgerOnboarding(step: 2 | 3) {
+  ledgerOnboardingBusy.value = `step-${step}`
+  try {
+    ledgerOnboarding.value = await api.updateLedgerOnboarding('advance', step)
+    if (step === 3) {
+      honmaruTab.value = 'planning'
+      await nextTick()
+      document.querySelector('.ledger-onboarding-goal')?.scrollIntoView({ block: 'start' })
+    }
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '首次设置进度保存失败' }
+  finally { ledgerOnboardingBusy.value = '' }
+}
+
+async function openOnboardingGoal() {
+  honmaruTab.value = 'planning'
+  await nextTick()
+  await planningPanelRef.value?.openCustomForm()
+}
+
+async function finishLedgerOnboarding() {
+  if (!ledgerOnboarding.value?.visible || ledgerOnboarding.value.step !== 3) return
+  ledgerOnboardingBusy.value = 'complete'
+  try {
+    ledgerOnboarding.value = await api.updateLedgerOnboarding('complete')
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '首次设置完成状态保存失败' }
+  finally { ledgerOnboardingBusy.value = '' }
+}
+
+async function dismissLedgerOnboarding() {
+  ledgerOnboardingBusy.value = 'dismiss'
+  try {
+    ledgerOnboarding.value = await api.updateLedgerOnboarding('dismiss')
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '首次设置状态保存失败' }
+  finally { ledgerOnboardingBusy.value = '' }
 }
 const confidence = computed(() => {
   if (loading.value) return { level: 'empty', label: '正在对账', detail: '狐之助正在整理库存记录' }
@@ -855,6 +911,14 @@ async function importLedgerPreview() {
       : '没有需要写入的新记录，账本未改动。'
     ledgerImportPreview.value = null
     acceptLedgerConflicts.value = false
+    if (ledgerOnboarding.value?.visible && ledgerOnboarding.value.step === 2) {
+      try {
+        ledgerOnboarding.value = await api.updateLedgerOnboarding('advance', 3)
+        honmaruTab.value = 'planning'
+      } catch (cause) {
+        error.value = cause instanceof Error ? cause.message : '旧账已导入，但首次设置进度保存失败'
+      }
+    }
     await load(days.value)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '旧账导入失败' }
   finally { ledgerTransferBusy.value = '' }
@@ -865,7 +929,7 @@ async function importLedgerPreview() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null)])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null)])
     summary.value = nextSummary
     ledger.value = nextLedger
     planning.value = nextPlanning
@@ -879,6 +943,7 @@ async function load(nextDays = days.value) {
     inventoryGaps.value = nextHuman.inventory_gaps
     manualSessions.value = nextManualSessions.items
     manualInventories.value = nextManualInventory.items
+    ledgerOnboarding.value = nextOnboarding
     if (!recordDate.value) recordDate.value = latestRecordDate()
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
@@ -958,6 +1023,30 @@ onMounted(() => load())
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>
         </button>
 
+        <section v-if="ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
+          <header>
+            <div><small>第一次使用 · {{ ledgerOnboarding.step }}/3</small><h3 id="ledger-onboarding-title">把账房安顿好</h3></div>
+            <button type="button" :disabled="!!ledgerOnboardingBusy" @click="dismissLedgerOnboarding">不需要引导</button>
+          </header>
+          <ol aria-label="首次设置进度">
+            <li :class="{ active: ledgerOnboarding.step === 1, done: ledgerOnboarding.step > 1 }"><span>1</span>抄家底</li>
+            <li :class="{ active: ledgerOnboarding.step === 2, done: ledgerOnboarding.step > 2 }"><span>2</span>带旧账</li>
+            <li :class="{ active: ledgerOnboarding.step === 3 }"><span>3</span>立目标</li>
+          </ol>
+          <div v-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">
+            <div><b>先抄一次现在的家底</b><p>打开游戏看一眼资源数字；不确定的项目可以留空，以后随时能改。</p></div>
+            <button type="button" class="primary" :disabled="ledgerOnboardingBusy === 'inventory'" @click="beginLedgerOnboarding">{{ ledgerOnboardingBusy === 'inventory' ? '正在准备……' : '抄下当前家底' }}</button>
+          </div>
+          <div v-else-if="ledgerOnboarding.step === 2" class="ledger-onboarding-copy">
+            <div><b>有旧表就顺手带回来</b><p>导入前只做预览，不会碰刚抄好的家底；没有旧账直接下一步。</p></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingImport">选旧账预览</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'step-3'" @click="advanceLedgerOnboarding(3)">没有旧账，下一步</button></div>
+          </div>
+          <div v-else class="ledger-onboarding-copy">
+            <div><b>最后立一个真正想盯的目标</b><p>让账房替你算还差多少；暂时没想法也可以直接完成。</p></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">去规划立目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div>
+          </div>
+        </section>
+
         <section class="resource-ledger" :class="{ loading }">
           <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
           <section v-if="ledgerTransferOpen" class="ledger-transfer" aria-labelledby="ledger-transfer-title">
@@ -966,7 +1055,6 @@ onMounted(() => load())
               <button type="button" class="primary" :disabled="!!ledgerTransferBusy" @click="downloadLedger('xlsx')">{{ ledgerTransferBusy === 'export-xlsx' ? '正在整理……' : '导出 Excel 账本' }}</button>
               <button type="button" class="secondary" :disabled="!!ledgerTransferBusy" @click="downloadLedger('csv')">{{ ledgerTransferBusy === 'export-csv' ? '正在整理……' : '导出流水 CSV' }}</button>
               <button type="button" class="secondary" :disabled="!!ledgerTransferBusy" @click="chooseLedgerImport">{{ ledgerTransferBusy === 'preview' ? '正在看旧账……' : '选旧账预览' }}</button>
-              <input ref="ledgerImportInput" class="ledger-file-input" type="file" accept=".xlsx,.csv" @change="previewLedgerFile">
             </div>
             <p class="ledger-transfer-tip">Excel 会带上完整流水、当前家底、每日汇总和一张“可再次导入”表。旧账真正写入前会自动备份。</p>
             <p v-if="ledgerTransferNotice" class="inventory-notice" role="status">✓ {{ ledgerTransferNotice }}</p>
@@ -986,6 +1074,7 @@ onMounted(() => load())
               <button type="button" class="primary" :disabled="ledgerTransferBusy === 'apply' || (!ledgerImportPreview.counts.new && !acceptLedgerConflicts) || (!!ledgerImportPreview.counts.conflict && !acceptLedgerConflicts)" @click="importLedgerPreview">{{ ledgerTransferBusy === 'apply' ? '正在备份并导入……' : '备份后导入' }}</button>
             </section>
           </section>
+          <input ref="ledgerImportInput" class="ledger-file-input" type="file" accept=".xlsx,.csv" @change="previewLedgerFile">
           <div v-if="manualActionsOpen" class="manual-action-picker">
             <button type="button" @click="openProactiveReport()"><b>记一笔收支</b><small>记下自己获得或花掉的资源</small></button>
             <button type="button" @click="openManualSessionForm"><b>补记一段活动</b><small>记玩法、圈数和时间；与まあ丸分开计算</small></button>
@@ -1071,7 +1160,14 @@ onMounted(() => load())
       <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 
-      <PlanningPanel v-else />
+      <template v-else>
+        <section v-if="ledgerOnboarding?.visible && ledgerOnboarding.step === 3" class="ledger-onboarding ledger-onboarding-goal" aria-labelledby="ledger-onboarding-goal-title">
+          <header><div><small>第一次使用 · 3/3</small><h3 id="ledger-onboarding-goal-title">最后，立一个真正想盯的目标</h3></div></header>
+          <ol aria-label="首次设置进度"><li class="done"><span>1</span>抄家底</li><li class="done"><span>2</span>带旧账</li><li class="active"><span>3</span>立目标</li></ol>
+          <div class="ledger-onboarding-copy"><div><b>让账房替你盯结果</b><p>可以选“攒到多少”或“到哪一天”；暂时没想法也可以直接完成。</p></div><div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">立一个目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div></div>
+        </section>
+        <PlanningPanel ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" />
+      </template>
     </div>
   </section>
 </template>
@@ -1079,6 +1175,24 @@ onMounted(() => load())
 <style scoped>
 .report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .report-context-toolbar-range { justify-content: flex-end; }
+.ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 13px; }
+.ledger-onboarding > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ledger-onboarding h3, .ledger-onboarding p { margin: 0; }
+.ledger-onboarding header small { display: block; margin-bottom: 2px; color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; }
+.ledger-onboarding > header > button { padding: 3px 5px; color: var(--ink-dim); background: transparent; border: 0; font-size: 11px; cursor: pointer; }
+.ledger-onboarding ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ledger-onboarding ol li { display: flex; align-items: center; gap: 6px; padding: 7px 9px; color: var(--ink-dim); background: color-mix(in srgb, var(--paper-card) 82%, transparent); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 11px; }
+.ledger-onboarding ol span { display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 auto; background: var(--paper); border-radius: 50%; font-variant-numeric: tabular-nums; }
+.ledger-onboarding ol li.active { color: var(--ink); border-color: var(--fox-gold); font-weight: 700; }
+.ledger-onboarding ol li.active span { color: #fff; background: var(--fox-gold-deep); }
+.ledger-onboarding ol li.done { color: #426b36; border-color: #9bb68f; }
+.ledger-onboarding ol li.done span { color: #fff; background: #5b813f; }
+.ledger-onboarding-copy { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 1px; }
+.ledger-onboarding-copy > div:first-child { display: grid; gap: 3px; }
+.ledger-onboarding-copy b { font-size: 14px; }
+.ledger-onboarding-copy p { color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
+.ledger-onboarding-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.ledger-onboarding-goal { margin-bottom: 12px; }
 .report-glance { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
 .report-glance-lead { margin: 0; font-size: 15px; }
 .report-glance-copy { display: grid; gap: 3px; }
@@ -1192,6 +1306,12 @@ onMounted(() => load())
 .report-form .multi-resource-entry > small { grid-column: 1 / -1; color: var(--ink-dim); }
 .report-form-actions { display: flex; gap: 8px; }
 @media (max-width: 520px) {
+  .ledger-onboarding { padding: 14px; }
+  .ledger-onboarding ol { gap: 5px; }
+  .ledger-onboarding ol li { justify-content: center; padding: 6px 4px; }
+  .ledger-onboarding-copy { align-items: stretch; flex-direction: column; gap: 11px; }
+  .ledger-onboarding-actions { display: grid; }
+  .ledger-onboarding-copy > button, .ledger-onboarding-actions button { width: 100%; }
   .ledger-export-actions { display: grid; }
   .ledger-export-actions button { width: 100%; }
   .ledger-preview-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }

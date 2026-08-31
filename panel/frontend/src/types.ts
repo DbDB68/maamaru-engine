@@ -139,6 +139,15 @@ export interface LedgerImportPreview {
   issues: Array<{ row: number; ignored: boolean; reason: string }>
 }
 
+export interface LedgerOnboarding {
+  schema_version: number
+  visible: boolean
+  status: 'pending' | 'active' | 'completed' | 'dismissed' | 'not_needed'
+  step: 1 | 2 | 3
+  has_inventory: boolean
+  reason: string
+}
+
 export interface ActivityPace {
   source: 'maamaru' | 'manual'
   secondsPerLoop: number
