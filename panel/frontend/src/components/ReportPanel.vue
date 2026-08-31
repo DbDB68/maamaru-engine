@@ -8,7 +8,7 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
+import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const days = ref(7)
@@ -191,35 +191,6 @@ const confidence = computed(() => {
   if (levels.some(level => level === 'low')) return { level: 'rough', label: '仅供参考', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段数据缺口` : ''}` }
   return { level: 'fair', label: '基本可信', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段变化无法完整归因` : ''}` }
 })
-const foxSummary = computed(() => {
-  const changed = resourceRows.value.filter(row => row.delta != null && row.delta !== 0)
-  if (!changed.length) return `${rangeLabel.value}还没有足够的首末库存读数。狐之助会在挂机途中继续留意家底。`
-  const totals = new Map<string, { source: string; resource: string; delta: number }>()
-  for (const item of ledger.value?.attributions || []) {
-    const source = categoryOf(item.source)
-    if (source === 'unknown' || source === 'human') continue
-    const key = `${source}:${item.resource}`
-    const found = totals.get(key) || { source, resource: item.resource, delta: 0 }
-    found.delta += Number(item.delta || 0)
-    totals.set(key, found)
-  }
-  const entries = [...totals.values()].filter(item => item.delta)
-  const gain = entries.filter(item => item.delta > 0).sort((a, b) => b.delta - a.delta)[0]
-  const cost = entries.filter(item => item.delta < 0).sort((a, b) => a.delta - b.delta)[0]
-  if (!gain && !cost) {
-    const cutoff = Date.now() / 1000 - days.value * 86400
-    const manualCount = humanReports.value.filter(report => report.source === 'proactive'
-      && Number(report.occurred_at) >= cutoff && report.claimed_delta).length
-    return manualCount
-      ? `${rangeLabel.value}你手动记了 ${manualCount} 项资源收支；まあ丸还没有能确认来源的自动流水。`
-      : `${rangeLabel.value}还没有能确认玩法来源的资源变化。`
-  }
-  const parts: string[] = []
-  if (gain) parts.push(`从${categoryLabel(gain.source)}获得的${gain.resource}最多（${signed(gain.delta)}）`)
-  if (cost) parts.push(`${categoryLabel(cost.source)}消耗的${cost.resource}最多（${signed(cost.delta)}）`)
-  return `${rangeLabel.value}，${parts.join('；')}。`
-})
-
 // ---- 顶部小结：这段时间狐之助干啥了 ----
 
 function isWin(payload: any) {
@@ -235,16 +206,133 @@ const sortieCount = computed(() => Number(summary.value?.activity?.sorties ?? su
 const practiceWins = computed(() => Number(summary.value?.activity?.practice?.wins ?? 0))
 const practiceLosses = computed(() => Number(summary.value?.activity?.practice?.losses ?? 0))
 const practiceTotal = computed(() => Number(summary.value?.activity?.practice?.total ?? 0))
-const topSortie = computed(() => (summary.value?.activity?.sortie_groups || [])[0]?.label || '')
-const glance = computed(() => {
-  if (loading.value) return '狐之助正在清点这段时间干了多少活……'
-  const total = Number(summary.value?.runs?.total || 0)
-  if (!total && !sortieCount.value) return `${rangeLabel.value}还没有跑过任务，先让小狐狸跑起来吧。`
-  const parts = [`${rangeLabel.value}狐之助跑了 ${total} 次任务`]
-  if (sortieCount.value) parts.push(`出阵 ${sortieCount.value.toLocaleString()} 圈${topSortie.value ? `，主要在${topSortie.value}` : ''}`)
-  if (practiceTotal.value) parts.push(`演练 ${practiceWins.value} 胜 ${practiceLosses.value} 负`)
-  return `${parts.join('，')}。`
+const topSortie = computed(() => {
+  const group = (summary.value?.activity?.sortie_groups || [])[0]
+  if (!group) return ''
+  if (group.label) return String(group.label)
+  if (group.event_type === 'edocastle.run_completed') return '江户城'
+  if (group.event_type === 'osaka.floor_completed') return '大阪城'
+  if (group.event_type === 'raid.round_completed') return '联队战'
+  if (group.event_type === 'pumpkin.sortie_completed') return '南瓜大作战'
+  if (group.event_type === 'sortie.completed') return scriptNames[group.payload?.mode] || '合战场'
+  if (group.event_type === 'sortie.retreated_before_boss') return '合战场'
+  return ''
 })
+type ReportInsight = {
+  key: string
+  title: string
+  detail: string
+  tone: 'plain' | 'gain' | 'cost' | 'alert' | 'goal'
+  score: number
+  resource?: string
+  date?: string
+  target?: 'chart' | 'planning' | 'records'
+}
+
+const sourceLeaders = computed(() => {
+  const totals = new Map<string, { source: string; resource: string; delta: number }>()
+  for (const item of ledger.value?.attributions || []) {
+    const source = categoryOf(item.source)
+    if (source === 'unknown' || source === 'human') continue
+    const key = `${source}:${item.resource}`
+    const found = totals.get(key) || { source, resource: item.resource, delta: 0 }
+    found.delta += Number(item.delta || 0)
+    totals.set(key, found)
+  }
+  const entries = [...totals.values()].filter(item => item.delta)
+  return {
+    gain: entries.filter(item => item.delta > 0).sort((a, b) => b.delta - a.delta)[0] || null,
+    cost: entries.filter(item => item.delta < 0).sort((a, b) => a.delta - b.delta)[0] || null,
+  }
+})
+
+const anomalyInsight = computed<ReportInsight | null>(() => {
+  const candidates: Array<{ resource: string; date: string; delta: number; ratio: number }> = []
+  for (const resource of resourceNames) {
+    const rows = (ledger.value?.daily_series || []).filter(item => item.resource === resource
+      && item.total_delta != null && Number(item.total_delta) !== 0)
+    if (rows.length < 3) continue
+    const ordered = [...rows].sort((left, right) => Math.abs(Number(right.total_delta)) - Math.abs(Number(left.total_delta)))
+    const peak = ordered[0]
+    const baseline = ordered.slice(1).reduce((sum, item) => sum + Math.abs(Number(item.total_delta)), 0) / (ordered.length - 1)
+    if (!baseline) continue
+    const ratio = Math.abs(Number(peak.total_delta)) / baseline
+    if (ratio >= 2) candidates.push({ resource, date: peak.date, delta: Number(peak.total_delta), ratio })
+  }
+  const peak = candidates.sort((left, right) => right.ratio - left.ratio)[0]
+  if (!peak) return null
+  const sourceTotals = new Map<string, number>()
+  for (const item of ledger.value?.attributions || []) {
+    if (item.resource !== peak.resource || shanghaiDate(item.ts) !== peak.date || Math.sign(Number(item.delta)) !== Math.sign(peak.delta)) continue
+    const source = categoryOf(item.source)
+    if (source === 'unknown') continue
+    sourceTotals.set(source, (sourceTotals.get(source) || 0) + Math.abs(Number(item.delta || 0)))
+  }
+  const source = [...sourceTotals].sort((left, right) => right[1] - left[1])[0]?.[0]
+  const date = peak.date.slice(5).replace('-', '/')
+  return {
+    key: `anomaly:${peak.resource}:${peak.date}`, tone: 'alert', score: 82,
+    title: `${date} 的${peak.resource}变化最突出`,
+    detail: `${signed(peak.delta)}，是其余有记录日平均幅度的 ${peak.ratio.toFixed(1)} 倍${source ? `，主要来自${categoryLabel(source)}` : ''}。`,
+    resource: peak.resource, date: peak.date, target: 'chart',
+  }
+})
+
+const reportInsights = computed<ReportInsight[]>(() => {
+  if (loading.value) return [{ key: 'loading', tone: 'plain', score: 1, title: '狐之助正在看账', detail: '稍等一下，马上挑出最值得说的事情。' }]
+  const items: ReportInsight[] = []
+  const completed = Number(summary.value?.runs?.by_status?.completed || 0)
+  const failed = Number(summary.value?.runs?.by_status?.failed || 0)
+  if (failed) items.push({ key: 'failed-runs', tone: 'alert', score: 98,
+    title: `${rangeLabel.value}有 ${failed} 次任务没顺利收工`, detail: '已经停止继续操作；可以到“全部记录”查看是哪一轮。', target: 'records' })
+  if (completed || sortieCount.value) {
+    const details = []
+    if (sortieCount.value) details.push(`出阵 ${sortieCount.value.toLocaleString()} 圈${topSortie.value ? `，主要在${topSortie.value}` : ''}`)
+    if (practiceTotal.value) details.push(`演练 ${practiceWins.value} 胜 ${practiceLosses.value} 负`)
+    items.push({ key: 'activity', tone: 'plain', score: 90,
+      title: completed > 0
+        ? `${rangeLabel.value}完成 ${completed} 次任务`
+        : `${rangeLabel.value}留下 ${sortieCount.value.toLocaleString()} 次出阵记录`,
+      detail: details.join('；') || '任务记录已经整理完成。' })
+  }
+
+  const goal = [...(planning.value?.goals || [])]
+    .filter(item => ['behind', 'on_track', 'active', 'done'].includes(item.status))
+    .sort((left, right) => goalStatusRank[left.status] - goalStatusRank[right.status])[0]
+  if (goal) {
+    const urgent = goal.status === 'behind'
+    items.push({ key: `goal:${goal.id}`, tone: urgent ? 'alert' : 'goal', score: urgent ? 100 : 64,
+      title: urgent ? `${goal.resource}目标需要加把劲` : `${goal.resource}目标${goal.status === 'done' ? '已经达成' : '进展正常'}`,
+      detail: goal.message || goalSummary(goal), target: 'planning' })
+  }
+
+  if (anomalyInsight.value) items.push(anomalyInsight.value)
+  const gain = sourceLeaders.value.gain
+  if (gain) items.push({ key: `gain:${gain.source}:${gain.resource}`, tone: 'gain', score: 72,
+    title: `${gain.resource}是这段时间的进账冠军`,
+    detail: `从${categoryLabel(gain.source)}确认获得 ${signed(gain.delta)}。`, resource: gain.resource, target: 'chart' })
+  const cost = sourceLeaders.value.cost
+  if (cost) items.push({ key: `cost:${cost.source}:${cost.resource}`, tone: 'cost', score: 68,
+    title: `最大支出是${cost.resource}`, detail: `${categoryLabel(cost.source)}消耗 ${signed(cost.delta)}。`, resource: cost.resource, target: 'chart' })
+
+  if (!items.length) items.push({ key: 'empty', tone: 'plain', score: 1,
+    title: '这段时间还没有足够的账', detail: '再跑几次任务或补一次家底，狐之助就能开始替你挑重点。' })
+  return items.sort((left, right) => right.score - left.score).slice(0, 3)
+})
+
+const insightHeading = computed(() => days.value === 7 ? '本周本丸小结' : `${rangeLabel.value}本丸小结`)
+
+async function followInsight(insight: ReportInsight) {
+  if (insight.target === 'planning') return openPlanning()
+  if (insight.target === 'records') return switchView('records')
+  if (insight.target === 'chart' && insight.resource) {
+    mode.value = 'single'
+    chooseResource(insight.resource)
+    if (insight.date) selectedDate.value = insight.date
+    await nextTick()
+    document.querySelector('.resource-trend')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
 // 刀剑明细已经归入“全部记录”，成绩单只保留这个时间段的总数。
 const swordDropTotal = computed(() => events.value.filter(event => (
   ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
@@ -1011,12 +1099,21 @@ onMounted(() => load())
       </div>
       <template v-if="honmaruTab === 'report'">
       <template v-if="view === 'chart'">
-        <section class="report-glance" :class="{ loading }">
-          <div class="report-glance-copy"><p class="report-glance-lead">🦊 {{ glance }}</p><p>{{ foxSummary }}</p></div>
-          <div v-if="swordDropTotal || manualLoops" class="report-glance-chips">
+        <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
+          <header>
+            <div><small>麻麻露已经替你看完账了</small><h2 id="report-insight-title">🦊 {{ insightHeading }}</h2></div>
+            <span>最多只说三件事</span>
+          </header>
+          <ol class="report-insight-list">
+            <li v-for="(insight, index) in reportInsights" :key="insight.key" :class="insight.tone">
+              <i>{{ index + 1 }}</i><div><strong>{{ insight.title }}</strong><p>{{ insight.detail }}</p></div>
+              <button v-if="insight.target" type="button" @click="followInsight(insight)">{{ insight.target === 'planning' ? '看规划' : insight.target === 'records' ? '看记录' : '看证据' }} →</button>
+            </li>
+          </ol>
+          <footer v-if="swordDropTotal || manualLoops">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
-          </div>
+          </footer>
         </section>
 
         <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="openGapReport(unreportedGaps[0])">
@@ -1146,6 +1243,7 @@ onMounted(() => load())
             <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
             <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
           </header>
+          <p v-if="anomalyInsight && (mode === 'compare' ? compareResources.includes(anomalyInsight.resource || '') : selectedResource === anomalyInsight.resource)" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
           <ResourceChart :dates="displayedChartDates" :labels="displayedChartLabels" :series="displayedChartSeries" :stacked="days === 1 || mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="days !== 1 && onChartSelect($event)" />
           <template v-if="days !== 1">
             <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
@@ -1193,22 +1291,40 @@ onMounted(() => load())
 .ledger-onboarding-copy p { color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
 .ledger-onboarding-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .ledger-onboarding-goal { margin-bottom: 12px; }
-.report-glance { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; padding: 12px 16px; }
-.report-glance-lead { margin: 0; font-size: 15px; }
-.report-glance-copy { display: grid; gap: 3px; }
-.report-glance-copy > p:last-child { margin: 0; color: var(--ink-dim); font-size: 12px; }
-.report-glance-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.report-glance-chips span { background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
-.report-glance-chips .gain { color: #4d7a3a; }
-.report-glance-chips .loss { color: #b0492e; }
-.report-glance-chips .obtain { color: var(--fox-gold-deep); }
-.report-glance-chips .manual { color: #536f8a; }
+.report-glance { display: grid; gap: 14px; overflow: hidden; background: linear-gradient(135deg, var(--fox-gold-pale), var(--paper-card) 55%); border: 1px solid var(--fox-gold); border-radius: 14px; padding: 18px 20px; box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 8%, transparent); }
+.report-glance > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.report-glance > header small { display: block; margin-bottom: 3px; color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.report-glance > header h2 { margin: 0; font-size: clamp(20px, 2.5vw, 28px); line-height: 1.2; }
+.report-glance > header > span { color: var(--ink-dim); font-size: 11px; }
+.report-insight-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.report-insight-list li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 11px 12px; background: color-mix(in srgb, var(--paper-card) 88%, transparent); border-left: 4px solid var(--paper-line); }
+.report-insight-list li > i { display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink-dim); background: var(--paper-panel); border-radius: 50%; font-size: 11px; font-style: normal; font-weight: 700; }
+.report-insight-list li > div { display: grid; gap: 3px; min-width: 0; }
+.report-insight-list strong { font-size: 15px; line-height: 1.35; }
+.report-insight-list p { margin: 0; color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
+.report-insight-list button { align-self: stretch; padding: 4px 8px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.report-insight-list li.gain { border-left-color: #6d9262; }
+.report-insight-list li.cost { border-left-color: #b97c67; }
+.report-insight-list li.alert { background: color-mix(in srgb, var(--paper-card) 80%, #f1d9d1); border-left-color: var(--danger); }
+.report-insight-list li.goal { border-left-color: var(--fox-gold); }
+.report-glance > footer { display: flex; gap: 8px; flex-wrap: wrap; }
+.report-glance > footer span { padding: 3px 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 12px; }
+.report-glance > footer .obtain { color: var(--fox-gold-deep); }
+.report-glance > footer .manual { color: #536f8a; }
+.trend-callout { margin: 0 0 8px; padding: 8px 10px; color: var(--ink); background: var(--fox-gold-pale); border-left: 3px solid var(--fox-gold); font-size: 12px; line-height: 1.5; }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
 .resource-trend > header h3 { margin: 0; }
 .resource-trend > header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
 .resource-trend nav { display: flex; gap: 6px; flex-wrap: wrap; }
 .resource-trend nav button { border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
+@media (max-width: 520px) {
+  .report-glance { padding: 15px 13px; }
+  .report-glance > header { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .report-insight-list li { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+  .report-insight-list li > i { width: 21px; height: 21px; }
+  .report-insight-list li > button { grid-column: 2; justify-self: start; min-height: 28px; padding: 0; }
+}
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .ledger-transfer { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }

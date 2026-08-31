@@ -3,12 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
+import { runTitle } from './report/reportModel'
 
 const emit = defineEmits<{ openReport: [] }>()
 
 const data = ref<any>(null)
-const activity = ref<any>(null)
 const activityEvents = ref<any[]>([])
+const recentRuns = ref<any[]>([])
 const error = ref('')
 const now = ref(Date.now())
 let timer = 0
@@ -56,23 +57,52 @@ async function load() {
     error.value = cause instanceof Error ? cause.message : '读取失败'
   }
   try {
-    const [summary, recent] = await Promise.all([api.dataSummary(1), api.dataEvents(200)])
-    activity.value = summary
+    const [recent, runPage] = await Promise.all([api.dataEvents(200), api.dataRuns(5)])
     const since = Date.now() / 1000 - 86400
     activityEvents.value = recent.items.filter(item => item.ts >= since)
+    recentRuns.value = runPage.items
   } catch (_) {
-    activity.value = null
     activityEvents.value = []
+    recentRuns.value = []
   }
 }
 
-function eventCount(...types: string[]) {
-  return activityEvents.value.filter(item => types.includes(item.event_type)).length
+function endedRecently(run: any) {
+  return Number(run?.ended_at || 0) >= Date.now() / 1000 - 86400
 }
 
-// 出阵种类由成绩库统一归口，概览不再自己维护一份活动名单。
-// 这样江户城及以后新增的玩法只需在后端计数规则中登记一次。
-const sortieCount = computed(() => Number(activity.value?.activity?.sorties ?? 0))
+const caretakerBrief = computed(() => {
+  const running = data.value?.running
+  if (running?.active) return {
+    tone: 'working', title: running.flavor || `${running.label || '狐之助'}正在忙`,
+    detail: running.step ? `目前做到：${String(running.step).replace(/^.*?:/, '')}` : '正在准备下一步，不需要你操作。',
+  }
+
+  const latest = recentRuns.value.find(endedRecently)
+  if (latest?.status === 'failed') return {
+    tone: 'alert', title: `${runTitle(latest)}没有顺利收工`,
+    detail: '这轮已经停止操作，具体停在哪里可以去本丸账查看。',
+  }
+  if (latest?.status === 'stopped') return {
+    tone: 'calm', title: '这轮已按你的要求停止',
+    detail: `${runTitle(latest)}没有继续操作游戏，本丸现在是安全的。`,
+  }
+
+  if (latest) {
+    let detail = `${runTitle(latest)}已经完成。`
+    if (latest.script === 'edocastle') {
+      const keys = activityEvents.value.filter(item => item.run_id === latest.run_id
+        && item.event_type === 'edocastle.run_completed')
+        .reduce((sum, item) => sum + Number(item.payload?.keys || 0), 0)
+      if (keys) detail = `${runTitle(latest)}，带回 ${keys.toLocaleString()} 把钥匙。`
+    } else if (latest.script === 'daily' && data.value?.latest_report?.all_green) {
+      detail = `一键日课已经全部跑完，${data.value.latest_report.steps?.length || 0} 项全绿。`
+    }
+    return { tone: 'calm', title: '本丸无事，刚刚顺利收工', detail }
+  }
+
+  return { tone: 'calm', title: '本丸无事', detail: '暂时没有需要你处理的事情，放心让狐之助待命。' }
+})
 
 onMounted(() => {
   load()
@@ -88,14 +118,10 @@ onBeforeUnmount(() => window.clearInterval(timer))
     </PanelHeader>
     <div class="dashboard-grid">
       <PaperCard variant="dashboard" class="activity-card">
-        <h3>📜 今日小结 <small>近 24 小时</small></h3>
-        <div class="activity-summary">
-          <template v-if="activity">
-            <span><strong>{{ eventCount('task_rewards.claimed') }}</strong>次领奖</span>
-            <span><strong>{{ sortieCount }}</strong>次出阵</span>
-            <span><strong>{{ eventCount('expedition.dispatched') }}</strong>次派遣</span>
-          </template>
-          <span v-else class="activity-waiting">新任务运行后开始记录</span>
+        <header class="caretaker-head"><h3>🦊 管家小报</h3><small>只说要紧的</small></header>
+        <div class="caretaker-brief" :class="caretakerBrief.tone">
+          <strong>{{ caretakerBrief.title }}</strong>
+          <p>{{ caretakerBrief.detail }}</p>
         </div>
         <button class="report-link" type="button" @click="emit('openReport')">查看本丸账 →</button>
       </PaperCard>

@@ -1280,12 +1280,14 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .home-dashboard .resource-grid { grid-template-columns: 1fr 1fr; }
 .home-dashboard .resource { align-items: center; }
 .home-dashboard .resource-icon { display: block; margin-inline: auto; }
-.activity-card h3 { display: flex; justify-content: space-between; gap: 8px; }
-.activity-card h3 small { color: var(--ink-dim); font-weight: 400; }
-.activity-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
-.activity-summary span { display: grid; gap: 2px; color: var(--ink-dim); font-size: 11px; text-align: center; }
-.activity-summary strong { color: var(--ink); font-size: 17px; }
-.activity-summary .activity-waiting { grid-column: 1 / -1; padding: 8px 0; }
+.caretaker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.caretaker-head h3 { margin: 0; }
+.caretaker-head small { color: var(--ink-dim); font-size: 10px; font-weight: 400; }
+.caretaker-brief { display: grid; gap: 5px; margin: 10px 0 12px; padding: 10px 11px; background: var(--paper-panel); border-left: 4px solid #7b9b70; }
+.caretaker-brief strong { color: var(--ink); font-size: 14px; line-height: 1.35; }
+.caretaker-brief p { margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.55; }
+.caretaker-brief.working { border-left-color: var(--fox-gold); }
+.caretaker-brief.alert { background: color-mix(in srgb, var(--paper-panel) 78%, #f2d7cf); border-left-color: var(--danger); }
 .report-link { width: 100%; padding: 7px 9px; color: var(--fox-gold-deep); background: var(--fox-gold-pale); border: 1px solid var(--fox-gold); }
 
 .report-page { overflow: auto; }
@@ -1612,7 +1614,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .report-observation { align-self: start; line-height: 1.7; }
 .report-observation small { display: block; margin-top: 12px; }
 .report-empty, .report-error { color: var(--ink-dim); }
-body[data-theme='pixel'] .activity-summary strong { color: #75600f; }
+body[data-theme='pixel'] .caretaker-brief { border-width: 0 0 0 4px; border-radius: 0; }
 body[data-theme='pixel'] .report-view-switch, body[data-theme='pixel'] .report-range-switch, body[data-theme='pixel'] .battle-intro, body[data-theme='pixel'] .battle-kpis, body[data-theme='pixel'] .latest-battle, body[data-theme='pixel'] .top-sorties, body[data-theme='pixel'] .battle-recent { border-width: 2px; border-color: #1a3055; border-radius: 0; box-shadow: 3px 3px 0 #c8bea5; }
 body[data-theme='pixel'] .unified-history, body[data-theme='pixel'] .run-history, body[data-theme='pixel'] .records-sorties { border-width: 2px; border-color: #1a3055; border-radius: 0; box-shadow: 3px 3px 0 #c8bea5; }
 body[data-theme='pixel'] .ledger-attribution { border-width: 2px; border-color: #1a3055; border-radius: 0; box-shadow: 3px 3px 0 #c8bea5; }
