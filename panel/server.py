@@ -10,6 +10,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from urllib.parse import quote
 
 # 确保能找到 touken 包（开发模式）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,7 +24,7 @@ from .log_store import get_store
 from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
 from touken.diagnostics import build_diagnostic_bundle
 from touken.runtime_paths import (
-    BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
+    BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
     ensure_runtime_data,
 )
 
@@ -1737,6 +1738,61 @@ async def api_data_resource_ledger(days: int = 7,
     start = float(from_ts) if from_ts is not None \
         else to_ts - max(1, min(int(days), 365)) * 86400
     return get_telemetry_store().resource_ledger(start, to_ts)
+
+
+@app.get("/api/data/ledger-export")
+async def api_ledger_export(format: str = "xlsx"):
+    """导出账房快照：Excel 含完整流水/当前家底/每日汇总，CSV 为完整流水。"""
+    from touken.ledger_transfer import export_ledger_csv, export_ledger_xlsx
+    from touken.telemetry import get_telemetry_store
+    selected = str(format or "xlsx").strip().lower()
+    if selected not in {"xlsx", "csv"}:
+        return JSONResponse(
+            {"ok": False, "reason": "只支持 xlsx 或 csv"}, status_code=400)
+    store = get_telemetry_store()
+    if selected == "xlsx":
+        body = export_ledger_xlsx(store)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        body = export_ledger_csv(store)
+        media_type = "text/csv; charset=utf-8"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"maamaru-ledger-{stamp}.{selected}"
+    return Response(
+        content=body, media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@app.post("/api/data/ledger-import/preview")
+async def api_ledger_import_preview(request: Request, filename: str = ""):
+    """只解析不落盘；返回新记录、重复、冲突和无法识别行。"""
+    from touken.ledger_transfer import create_import_preview
+    from touken.telemetry import get_telemetry_store
+    try:
+        result = create_import_preview(
+            get_telemetry_store(), await request.body(), Path(filename).name)
+    except (OSError, TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, **result}
+
+
+@app.post("/api/data/ledger-import/apply")
+async def api_ledger_import_apply(request: Request):
+    """重新检查预览内容，先备份 telemetry.db，再只写入玩家手动记录。"""
+    from touken.ledger_transfer import apply_import_preview
+    from touken.telemetry import get_telemetry_store
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("导入请求格式不正确")
+        result = apply_import_preview(
+            get_telemetry_store(), str(body.get("preview_id") or ""), BACKUP_DIR,
+            accept_conflicts=bool(body.get("accept_conflicts")),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=409)
+    return {"ok": True, **result}
 
 
 @app.post("/api/data/manual-inventory")

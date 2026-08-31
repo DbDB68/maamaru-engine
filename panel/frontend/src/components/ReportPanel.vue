@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
+import type { HumanReport, InventoryGap, LedgerImportPreview, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -52,6 +52,12 @@ const editingManualSessionId = ref<number | null>(null)
 const editingManualReport = ref<{ groupId?: string; reportId?: number } | null>(null)
 const handLedgerExpanded = ref(false)
 const manualEntryBusy = ref('')
+const ledgerTransferOpen = ref(false)
+const ledgerTransferBusy = ref('')
+const ledgerImportInput = ref<HTMLInputElement | null>(null)
+const ledgerImportPreview = ref<LedgerImportPreview | null>(null)
+const acceptLedgerConflicts = ref(false)
+const ledgerTransferNotice = ref('')
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -798,6 +804,62 @@ async function deleteManualSessionEntry(entry: Extract<HandLedgerEntry, { kind: 
   finally { manualEntryBusy.value = '' }
 }
 
+async function downloadLedger(format: 'xlsx' | 'csv') {
+  ledgerTransferBusy.value = `export-${format}`
+  ledgerTransferNotice.value = ''
+  try {
+    const result = await api.ledgerExport(format)
+    const url = URL.createObjectURL(result.blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = result.filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    ledgerTransferNotice.value = format === 'xlsx'
+      ? '账本已导出：完整流水、当前家底和每日汇总都在里面。'
+      : '完整流水 CSV 已导出。'
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '账本导出失败' }
+  finally { ledgerTransferBusy.value = '' }
+}
+
+function chooseLedgerImport() {
+  ledgerImportInput.value?.click()
+}
+
+async function previewLedgerFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  ledgerTransferBusy.value = 'preview'
+  ledgerTransferNotice.value = ''
+  ledgerImportPreview.value = null
+  acceptLedgerConflicts.value = false
+  try {
+    ledgerImportPreview.value = await api.previewLedgerImport(file)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '旧账预览失败' }
+  finally { ledgerTransferBusy.value = '' }
+}
+
+async function importLedgerPreview() {
+  const preview = ledgerImportPreview.value
+  if (!preview) return
+  ledgerTransferBusy.value = 'apply'
+  ledgerTransferNotice.value = ''
+  try {
+    const result = await api.applyLedgerImport(preview.preview_id, acceptLedgerConflicts.value)
+    ledgerTransferNotice.value = result.imported
+      ? `已导入 ${result.imported} 条手动记录，写入前备份已保存。`
+      : '没有需要写入的新记录，账本未改动。'
+    ledgerImportPreview.value = null
+    acceptLedgerConflicts.value = false
+    await load(days.value)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '旧账导入失败' }
+  finally { ledgerTransferBusy.value = '' }
+}
+
 // ---- 数据加载 ----
 
 async function load(nextDays = days.value) {
@@ -897,7 +959,33 @@ onMounted(() => load())
         </button>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
+          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
+          <section v-if="ledgerTransferOpen" class="ledger-transfer" aria-labelledby="ledger-transfer-title">
+            <header><div><h4 id="ledger-transfer-title">带走或带回账本</h4><p>自动流水只导出；导入只增加你的手动记录。</p></div><button type="button" class="inventory-close" aria-label="关闭账本进出" @click="ledgerTransferOpen = false">×</button></header>
+            <div class="ledger-export-actions">
+              <button type="button" class="primary" :disabled="!!ledgerTransferBusy" @click="downloadLedger('xlsx')">{{ ledgerTransferBusy === 'export-xlsx' ? '正在整理……' : '导出 Excel 账本' }}</button>
+              <button type="button" class="secondary" :disabled="!!ledgerTransferBusy" @click="downloadLedger('csv')">{{ ledgerTransferBusy === 'export-csv' ? '正在整理……' : '导出流水 CSV' }}</button>
+              <button type="button" class="secondary" :disabled="!!ledgerTransferBusy" @click="chooseLedgerImport">{{ ledgerTransferBusy === 'preview' ? '正在看旧账……' : '选旧账预览' }}</button>
+              <input ref="ledgerImportInput" class="ledger-file-input" type="file" accept=".xlsx,.csv" @change="previewLedgerFile">
+            </div>
+            <p class="ledger-transfer-tip">Excel 会带上完整流水、当前家底、每日汇总和一张“可再次导入”表。旧账真正写入前会自动备份。</p>
+            <p v-if="ledgerTransferNotice" class="inventory-notice" role="status">✓ {{ ledgerTransferNotice }}</p>
+            <section v-if="ledgerImportPreview" class="ledger-import-preview">
+              <header><div><h5>{{ ledgerImportPreview.filename }}</h5><p>这里还没有改动账本。</p></div><button type="button" @click="ledgerImportPreview = null; acceptLedgerConflicts = false">取消预览</button></header>
+              <div class="ledger-preview-counts">
+                <span class="new"><b>{{ ledgerImportPreview.counts.new }}</b>条可导入</span>
+                <span><b>{{ ledgerImportPreview.counts.duplicate }}</b>条重复会跳过</span>
+                <span :class="{ conflict: ledgerImportPreview.counts.conflict }"><b>{{ ledgerImportPreview.counts.conflict }}</b>条冲突</span>
+                <span v-if="ledgerImportPreview.counts.invalid || ledgerImportPreview.counts.ignored"><b>{{ ledgerImportPreview.counts.invalid + ledgerImportPreview.counts.ignored }}</b>条不写入</span>
+              </div>
+              <ul v-if="ledgerImportPreview.items.length" class="ledger-preview-list">
+                <li v-for="item in ledgerImportPreview.items.slice(0, 8)" :key="`${item.row}:${item.summary}`" :class="item.status"><span>第 {{ item.row }} 行 · {{ item.summary }}</span><em>{{ item.detail }}</em></li>
+              </ul>
+              <details v-if="ledgerImportPreview.issues.length"><summary>查看 {{ ledgerImportPreview.issues.length }} 条忽略/无法识别的内容</summary><ul><li v-for="issue in ledgerImportPreview.issues.slice(0, 20)" :key="`${issue.row}:${issue.reason}`">第 {{ issue.row }} 行：{{ issue.reason }}</li></ul></details>
+              <label v-if="ledgerImportPreview.counts.conflict" class="ledger-conflict-confirm"><input v-model="acceptLedgerConflicts" type="checkbox">我已检查冲突，仍要把这些行作为手动记录导入</label>
+              <button type="button" class="primary" :disabled="ledgerTransferBusy === 'apply' || (!ledgerImportPreview.counts.new && !acceptLedgerConflicts) || (!!ledgerImportPreview.counts.conflict && !acceptLedgerConflicts)" @click="importLedgerPreview">{{ ledgerTransferBusy === 'apply' ? '正在备份并导入……' : '备份后导入' }}</button>
+            </section>
+          </section>
           <div v-if="manualActionsOpen" class="manual-action-picker">
             <button type="button" @click="openProactiveReport()"><b>记一笔收支</b><small>记下自己获得或花掉的资源</small></button>
             <button type="button" @click="openManualSessionForm"><b>补记一段活动</b><small>记玩法、圈数和时间；与まあ丸分开计算</small></button>
@@ -1009,6 +1097,33 @@ onMounted(() => load())
 .resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.ledger-transfer { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
+.ledger-transfer > header, .ledger-import-preview > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ledger-transfer h4, .ledger-transfer h5, .ledger-transfer p { margin: 0; }
+.ledger-transfer header p { margin-top: 3px; color: var(--ink-dim); font-size: 12px; }
+.ledger-export-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ledger-file-input { display: none; }
+.ledger-transfer-tip { color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
+.ledger-import-preview { display: grid; gap: 10px; padding: 12px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.ledger-import-preview > header button { flex: 0 0 auto; padding: 4px 8px; color: var(--ink-dim); background: transparent; border: 0; cursor: pointer; }
+.ledger-preview-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ledger-preview-counts span { display: grid; gap: 1px; padding: 8px 9px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; font-size: 11px; }
+.ledger-preview-counts b { color: var(--ink); font-size: 18px; line-height: 1.1; }
+.ledger-preview-counts .new { border-color: #9bb68f; }
+.ledger-preview-counts .new b { color: #47734f; }
+.ledger-preview-counts .conflict { border-color: #c99082; }
+.ledger-preview-counts .conflict b { color: var(--danger); }
+.ledger-preview-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.ledger-preview-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, .8fr); gap: 10px; padding: 7px 9px; background: var(--paper-card); border-left: 3px solid #9bb68f; border-radius: 7px; font-size: 11px; }
+.ledger-preview-list li span { min-width: 0; overflow-wrap: anywhere; }
+.ledger-preview-list li em { color: var(--ink-dim); font-style: normal; overflow-wrap: anywhere; }
+.ledger-preview-list li.duplicate { opacity: .7; border-left-color: var(--paper-line); }
+.ledger-preview-list li.conflict { border-left-color: var(--danger); }
+.ledger-import-preview details { color: var(--ink-dim); font-size: 11px; }
+.ledger-import-preview details summary { color: var(--fox-gold-deep); cursor: pointer; }
+.ledger-import-preview details ul { margin: 7px 0 0; padding-left: 20px; }
+.ledger-conflict-confirm { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; color: var(--danger); background: color-mix(in srgb, var(--paper-card) 78%, #f1d4cc); border-radius: 8px; font-size: 12px; line-height: 1.5; }
+.ledger-conflict-confirm input { flex: 0 0 auto; margin-top: 2px; }
 .manual-action-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; padding: 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
 .manual-action-picker button { display: grid; gap: 3px; padding: 10px 12px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; text-align: left; cursor: pointer; }
 .manual-action-picker button:hover { border-color: var(--fox-gold); }
@@ -1077,6 +1192,10 @@ onMounted(() => load())
 .report-form .multi-resource-entry > small { grid-column: 1 / -1; color: var(--ink-dim); }
 .report-form-actions { display: flex; gap: 8px; }
 @media (max-width: 520px) {
+  .ledger-export-actions { display: grid; }
+  .ledger-export-actions button { width: 100%; }
+  .ledger-preview-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ledger-preview-list li { grid-template-columns: 1fr; gap: 3px; }
   .manual-inventory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manual-action-picker { grid-template-columns: 1fr; }
   .manual-session-fields { grid-template-columns: 1fr; }

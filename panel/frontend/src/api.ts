@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, LedgerImportPreview, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -28,6 +28,23 @@ export const api = {
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
   resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
+  ledgerExport: async (format: 'xlsx' | 'csv') => {
+    const response = await fetch(`/api/data/ledger-export?format=${format}`)
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.detail || body.error || body.reason || `导出失败（${response.status}）`)
+    }
+    const disposition = response.headers.get('Content-Disposition') || ''
+    const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+    return { blob: await response.blob(), filename: matched ? decodeURIComponent(matched[1]) : `maamaru-ledger.${format}` }
+  },
+  previewLedgerImport: (file: File) => request<LedgerImportPreview>(`/api/data/ledger-import/preview?filename=${encodeURIComponent(file.name)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
+  }),
+  applyLedgerImport: (previewId: string, acceptConflicts: boolean) => request<{ ok: boolean; imported: number; duplicates: number; conflicts: number; backup: string | null }>('/api/data/ledger-import/apply', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preview_id: previewId, accept_conflicts: acceptConflicts }),
+  }),
   manualInventory: (limit = 200) => request<{ schema_version: number; items: ManualInventory[] }>(`/api/data/manual-inventory?limit=${limit}`),
   addManualInventory: (resources: Record<string, number>, observedAt?: number) => request<{ ok: boolean; snapshot: ManualInventory }>('/api/data/manual-inventory', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, observed_at: observedAt }),

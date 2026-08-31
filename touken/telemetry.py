@@ -34,6 +34,7 @@ LEDGER_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石", "小判", "甲州
 _LEDGER_PEEK_RESOURCES = frozenset(("木炭", "玉钢", "冷却材", "砥石", "甲州金"))
 _LEDGER_OBS_TYPES = ("inventory.captured", "inventory.peek", "osaka.koban_session")
 _LEDGER_MERGE_SECONDS = 5.0  # 同一时刻多来源同值观察的去重窗口
+_MANUAL_INVENTORY_SOURCES = frozenset(("manual_entry", "manual_import"))
 
 try:
     from zoneinfo import ZoneInfo
@@ -275,7 +276,7 @@ class TelemetryStore:
         items = []
         for row in rows:
             payload = _loads(row["payload"], {})
-            if payload.get("source") != "manual_entry":
+            if payload.get("source") not in _MANUAL_INVENTORY_SOURCES:
                 continue
             items.append({"id": row["id"], "ts": row["ts"], **payload})
         return items
@@ -291,7 +292,7 @@ class TelemetryStore:
         old_payload = _loads(row["payload"], {}) if row else {}
         if (not row or row["run_id"] is not None or row["script"] != "manual"
                 or row["event_type"] != "inventory.captured"
-                or old_payload.get("source") != "manual_entry"):
+                or old_payload.get("source") not in _MANUAL_INVENTORY_SOURCES):
             raise ValueError("找不到这条手动家底记录")
         conn.execute(
             "UPDATE events SET ts = ?, payload = ? WHERE id = ?",
@@ -309,7 +310,7 @@ class TelemetryStore:
         payload = _loads(row["payload"], {}) if row else {}
         if (not row or row["run_id"] is not None or row["script"] != "manual"
                 or row["event_type"] != "inventory.captured"
-                or payload.get("source") != "manual_entry"):
+                or payload.get("source") not in _MANUAL_INVENTORY_SOURCES):
             return False
         cursor = conn.execute("DELETE FROM events WHERE id = ?", (int(event_id),))
         conn.commit()

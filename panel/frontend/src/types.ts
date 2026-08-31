@@ -116,8 +116,27 @@ export interface ManualInventory {
   id: number
   ts: number
   captured_at: string
-  source: 'manual_entry'
+  source: 'manual_entry' | 'manual_import'
   resources: Record<string, number>
+}
+
+export interface LedgerImportItem {
+  kind: 'transaction' | 'inventory' | 'session'
+  row: number
+  status: 'new' | 'duplicate' | 'conflict'
+  detail: string
+  summary: string
+}
+
+export interface LedgerImportPreview {
+  ok: boolean
+  schema_version: number
+  preview_id: string
+  filename: string
+  source_sha256: string
+  counts: { new: number; duplicate: number; conflict: number; invalid: number; ignored: number }
+  items: LedgerImportItem[]
+  issues: Array<{ row: number; ignored: boolean; reason: string }>
 }
 
 export interface ActivityPace {
