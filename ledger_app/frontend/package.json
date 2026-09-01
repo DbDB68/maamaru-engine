@@ -1,0 +1,25 @@
+{
+  "name": "maamaru-ledger-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "まあ丸账房独立前端（FastAPI + Vue）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b tsconfig.app.json && vite build",
+    "typecheck": "vue-tsc -b tsconfig.app.json",
+    "check": "pnpm run typecheck"
+  },
+  "dependencies": {
+    "@primeuix/themes": "1.2.5",
+    "echarts": "^6.1.0",
+    "primevue": "4.5.5",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "latest",
+    "typescript": "^5.9.3",
+    "vite": "latest",
+    "vue-tsc": "latest"
+  }
+}
