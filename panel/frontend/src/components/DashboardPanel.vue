@@ -21,6 +21,11 @@ const resourceIcons: Record<string, string> = {
   小判: 'koban.png', 甲州金: 'koushu-gold.png', 委托符: 'request-token.png', 加速符: 'speed-token.png',
 }
 
+function resourceValue(name: string) {
+  const value = resources.value?.[name]
+  return value == null ? '未读到' : Number(value).toLocaleString()
+}
+
 function duration(seconds: number) {
   const value = Math.max(0, Math.floor(seconds))
   const hours = Math.floor(value / 3600)
@@ -71,6 +76,16 @@ function endedRecently(run: any) {
   return Number(run?.ended_at || 0) >= Date.now() / 1000 - 86400
 }
 
+function reportBelongsToRun(report: any, run: any) {
+  if (!report?.finished || run?.script !== 'daily') return false
+  if (report.run_id) return report.run_id === run.run_id
+  // 兼容升级前没有 run_id 的成绩单：只认落在本轮起止时间内的那一份。
+  const finishedAt = Date.parse(String(report.finished_at || '').replace(' ', 'T') + '+08:00') / 1000
+  return Number.isFinite(finishedAt)
+    && finishedAt >= Number(run.started_at || 0) - 5
+    && finishedAt <= Number(run.ended_at || 0) + 5
+}
+
 const caretakerBrief = computed(() => {
   const running = data.value?.running
   if (running?.active) return {
@@ -88,6 +103,18 @@ const caretakerBrief = computed(() => {
     detail: `${runTitle(latest)}没有继续操作游戏，本丸现在是安全的。`,
   }
 
+  const dailyReport = reportBelongsToRun(data.value?.latest_report, latest)
+    ? data.value.latest_report : null
+  if (dailyReport && !dailyReport.all_green) {
+    const failed = (dailyReport.steps || [])
+      .filter((step: any) => !String(step.status || '').trimStart().startsWith('✓'))
+      .map((step: any) => step.name)
+    return {
+      tone: 'alert', title: '刚才日课有翻车项',
+      detail: failed.length ? `需要看一眼：${failed.join('、')}。` : '成绩单没有全绿，具体记录可以去本丸账查看。',
+    }
+  }
+
   if (latest) {
     let detail = `${runTitle(latest)}已经完成。`
     if (latest.script === 'edocastle') {
@@ -95,8 +122,8 @@ const caretakerBrief = computed(() => {
         && item.event_type === 'edocastle.run_completed')
         .reduce((sum, item) => sum + Number(item.payload?.keys || 0), 0)
       if (keys) detail = `${runTitle(latest)}，带回 ${keys.toLocaleString()} 把钥匙。`
-    } else if (latest.script === 'daily' && data.value?.latest_report?.all_green) {
-      detail = `一键日课已经全部跑完，${data.value.latest_report.steps?.length || 0} 项全绿。`
+    } else if (dailyReport?.all_green) {
+      detail = `一键日课已经全部跑完，${dailyReport.steps?.length || 0} 项全绿。`
     }
     return { tone: 'calm', title: '本丸无事，刚刚顺利收工', detail }
   }
@@ -131,10 +158,10 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <div class="resource-grid">
             <div v-for="name in primaryResources" :key="name" class="resource">
               <img class="resource-icon" :src="`/static/img/ui/${resourceIcons[name]}`" alt="">
-              <strong>{{ Number(resources[name] ?? 0).toLocaleString() }}</strong><span>{{ name }}</span>
+              <strong>{{ resourceValue(name) }}</strong><span>{{ name }}</span>
             </div>
           </div>
-          <p class="resource-line"><span v-for="name in basicResources" :key="name">{{ name }} {{ Number(resources[name] ?? 0).toLocaleString() }}</span></p>
+          <p class="resource-line"><span v-for="name in basicResources" :key="name">{{ name }} {{ resourceValue(name) }}</span></p>
           <p v-if="data.inventory.doko">刀位 {{ data.inventory.doko }}</p>
           <div class="chips furnaces"><span v-for="furnace in data.inventory.furnaces || []" :key="furnace.slot" :class="{ busy: furnaceBusy(furnace), done: !furnaceBusy(furnace) }">{{ furnaceLabel(furnace) }}</span></div>
         </template>

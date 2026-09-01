@@ -131,6 +131,7 @@ class SnapshotMixin:
 
         # ---- 所持道具界面读真小判（顶栏那个是甲州金，真小判只在这看）----
         koban = self._read_koban()
+        self._last_full_snapshot_complete = koban is not None
         if koban is not None:
             resources["小判"] = koban
         else:
@@ -155,6 +156,7 @@ class SnapshotMixin:
 
     def _read_koban(self):
         """目录→所持道具→右上 OCR 所持小判。失败返回 None，绝不抛异常。"""
+        opened_items = False
         try:
             # 打开目录
             if not self._open_menu():
@@ -164,26 +166,37 @@ class SnapshotMixin:
             pt = self.maa.template_match("menu/目录_所持道具.png")
             if not pt:
                 return None
+            opened_items = True
             self.maa.click(pt)
             time.sleep(2.5)
             self.maa.screenshot(force=True)
-            if not self.maa.exists("ui所持.png"):
-                return None
             # 右上「所持小判 672,416 枚」：取最长数字串
+            # 页面模板偶尔会因活动背景变化漏掉；小判栏本身的限定 OCR 才是
+            # 真正的数据门闩。无论最终读没读到，finally 都负责退出该页面。
             tokens = self.maa.ocr_all(roi_4to4(940, 20, 1210, 80))
             best = None
             for t, _ in tokens:
                 v = _to_int(t)
                 if v is not None and (best is None or v > best):
                     best = v
-            # 点 X 关掉所持道具，别给后面的步骤留弹窗
-            from ..maa_adapter import Point
-            self.maa.click(Point(1248, 35))
-            time.sleep(0.8)
             return best
         except Exception as e:  # noqa: BLE001 - 快照兜底，任何错都不许炸日课
             print(f"[快照] 小判读取异常: {e}")
             return None
+        finally:
+            if opened_items:
+                # 进过所持道具就必须退出来。旧逻辑在 ui所持.png 漏识别时直接
+                # return，把整张所持页面留给后续刀解/合成/出阵，造成连环翻车。
+                try:
+                    from ..maa_adapter import Point
+                    self.maa.click(Point(1248, 35))
+                    time.sleep(0.8)
+                except Exception as cleanup_error:  # noqa: BLE001
+                    print(f"[快照] 退出所持道具异常: {cleanup_error}")
+                finally:
+                    # _open_menu() 会把位置记成通用入口；进入并退出所持后该状态
+                    # 已经过期，清掉后下一步会重新确认并打开目录。
+                    self.current_location = None
 
     # ---------- 顺路顶栏快照（零导航） ----------
 

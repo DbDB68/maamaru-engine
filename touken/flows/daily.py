@@ -25,6 +25,7 @@
   特别登录礼物的"今日不再弹出"和模板长得不一样，但 X 就是 通用_关闭.png。
 """
 
+import os
 import re
 import time
 
@@ -100,6 +101,14 @@ def _shop_report_status(msg: str, current=None):
         return "✗ 未识别到领取按钮，未点击"
     if "未检测到0价格弹窗" in msg:
         return "✗ 未确认0价，已取消"
+    return current
+
+
+def _snapshot_report_status(msg: str, current=None):
+    if "盘点不完整" in msg:
+        return "⚠ 小判未读到"
+    if "没能确认本轮盘点" in msg:
+        return "✗ 未完成本轮盘点"
     return current
 
 
@@ -247,6 +256,8 @@ class DailyMixin:
                         detail_status = _shop_report_status(msg, detail_status)
                     if name == "演练":
                         detail_status = _practice_report_status(msg, detail_status)
+                    if name == "库存快照":
+                        detail_status = _snapshot_report_status(msg, detail_status)
             except Exception as exc:
                 ok = False
                 yield f"[日课] {name}翻车: {exc}"
@@ -335,6 +346,7 @@ class DailyMixin:
             status_dir.mkdir(exist_ok=True)
             fails = [n for n, s in report if not _is_success_status(s)]
             payload = {
+                "run_id": os.environ.get("MAAMARU_RUN_ID") or None,
                 "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "finished": finished,
                 "all_green": finished and not fails,
@@ -507,10 +519,18 @@ class DailyMixin:
         """日课收尾的家底盘点：锻刀步骤收工时已经顺手拍过完整快照（含小判），
         跑了锻刀就跳过；锻刀被跳过的话才专程导航拍一次。"""
         if forge_ran:
-            yield "[日课] 锻刀收工时已顺手盘点过家底（含小判），收工快照不再专程跑腿"
+            complete = getattr(self, "_last_full_snapshot_complete", None)
+            if complete is True:
+                yield "[日课] 锻刀收工时已顺手盘点过家底（含小判），收工快照不再专程跑腿"
+            elif complete is False:
+                yield "[日课] 锻刀收工盘点不完整：小判没读到，其他家底已保存"
+            else:
+                yield "[日课] 没能确认本轮盘点是否完成"
             return
         for msg in self.status_snapshot_stream(phase="after"):
             yield msg
+        if getattr(self, "_last_full_snapshot_complete", None) is False:
+            yield "[日课] 收工盘点不完整：小判没读到，其他家底已保存"
 
     # ========== 冷启动：优先按包名直启，可信图标只作回退 ==========
 
