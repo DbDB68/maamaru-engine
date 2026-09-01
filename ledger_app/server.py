@@ -2,7 +2,7 @@
 """
 まあ丸 账房 —— 独立 FastAPI 服务
 
-只暴露账房相关接口：资源总账、手账、导入导出、规划建议、活动日历。
+只暴露账房相关接口：资源总账、运行历史只读查询、手账、导入导出、规划建议、活动日历。
 不接触任何自动化设施（脚本运行、调度、模拟器、机器人）。
 """
 
@@ -265,6 +265,95 @@ def create_app() -> FastAPI:
         except (OSError, TypeError, ValueError) as exc:
             return JSONResponse({"ok": False, "reason": str(exc)}, status_code=409)
         return {"ok": True, **result}
+
+    # ── API：结构化运行数据（只读历史，与面板同一 telemetry 库）──
+
+    @app.get("/api/data/summary")
+    async def api_data_summary(days: int = 30):
+        """稳定机器数据总览；契约与面板一致，由 schema_version 标识。"""
+        from touken.telemetry import get_telemetry_store
+        data = get_telemetry_store().summary(days=days)
+
+        def _state(name: str):
+            path = STATE_DIR / name
+            try:
+                return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+            except (OSError, ValueError):
+                return None
+
+        data["current_state"] = {
+            "inventory": _state("inventory.json"),
+            "daily_report": _state("latest_report.json"),
+            "expeditions": _state("expeditions.json") or {},
+            "naihanka": _state("naihanka.json"),
+        }
+        return data
+
+    @app.get("/api/data/events")
+    async def api_data_events(limit: int = 100, event_type: str = "",
+                              script: str = "", before_id: int | None = None,
+                              from_ts: float | None = None,
+                              to_ts: float | None = None):
+        """结构化玩法事件；payload 只含机器字段，不依赖中文日志文案。"""
+        from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+        page_limit = max(1, min(int(limit), 1000))
+        items = get_telemetry_store().recent_events(
+            limit=page_limit + 1, event_type=event_type or None, script=script or None,
+            before_id=before_id, from_ts=from_ts, to_ts=to_ts)
+        has_more = len(items) > page_limit
+        items = items[:page_limit]
+        return {
+            "schema_version": TELEMETRY_SCHEMA_VERSION,
+            "items": items,
+            "has_more": has_more,
+            "next_cursor": items[-1]["id"] if items else None,
+        }
+
+    @app.get("/api/data/runs")
+    async def api_data_runs(limit: int = 20, script: str = "",
+                            before_started_at: float | None = None,
+                            from_ts: float | None = None,
+                            to_ts: float | None = None):
+        """每轮任务的结构化结算；圈速按相邻完成事件计算，不含盘点时间。"""
+        from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+        page_limit = max(1, min(int(limit), 100))
+        items = get_telemetry_store().recent_run_summaries(
+            limit=page_limit + 1, script=script or None,
+            before_started_at=before_started_at, from_ts=from_ts, to_ts=to_ts)
+        has_more = len(items) > page_limit
+        items = items[:page_limit]
+        return {
+            "schema_version": TELEMETRY_SCHEMA_VERSION,
+            "items": items,
+            "has_more": has_more,
+            "next_cursor": items[-1]["started_at"] if items else None,
+        }
+
+    @app.post("/api/data/runs/{run_id}/attach-inventory")
+    async def api_attach_run_inventory(run_id: str):
+        """把用户刚手动盘点的库存补为指定任务的收工快照。"""
+        inventory_path = STATE_DIR / "inventory.json"
+        try:
+            snapshot = json.loads(inventory_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return JSONResponse(
+                {"ok": False, "reason": "还没有库存快照，请先运行“库存快照”"}, status_code=400)
+        except (OSError, ValueError):
+            return JSONResponse(
+                {"ok": False, "reason": "最近的库存快照无法读取，请重新盘点"}, status_code=400)
+        captured_ts = inventory_path.stat().st_mtime
+        captured_at = str(snapshot.get("captured_at") or "")
+        try:
+            captured_ts = time.mktime(time.strptime(captured_at, "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            pass
+        from touken.telemetry import get_telemetry_store
+        try:
+            summary = get_telemetry_store().attach_inventory_snapshot(
+                run_id, snapshot, captured_ts=captured_ts)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+        return {"ok": True, "run": summary}
 
     # ── API：手动家底 ──
 

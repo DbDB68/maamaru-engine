@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
+import CountUp from './CountUp.vue'
+import { foxReads } from '../foxMood'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
@@ -62,6 +64,10 @@ const ledgerOnboarding = ref<LedgerOnboarding | null>(null)
 const ledgerOnboardingBusy = ref('')
 const planningPanelRef = ref<{ openCustomForm: () => Promise<void> } | null>(null)
 const swordWishlist = ref<string[]>([])
+
+// 账房狐之助的舞台反馈：翻账时读卷轴，记账落笔后再读一段。
+watch(loading, busy => { if (busy) foxReads(4200) })
+watch(inventoryNotice, notice => { if (notice) foxReads() })
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -1230,7 +1236,7 @@ onMounted(() => load())
           </form>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
-              <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
+              <small>{{ row.name }}</small><strong><CountUp :value="row.delta" signed /></strong><span v-if="row.current != null">当前 <CountUp :value="row.current" /></span><span v-else>尚未观察到</span>
               <span v-if="row.rate != null" class="resource-rate" :title="`按最近 ${planning?.rate_window_days || 14} 天里 ${row.rateDays} 个有完整记录的平常日计算`">{{ rateWindowLabel }} {{ signed(Math.round(row.rate)) }}/日</span>
               <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
             </article>

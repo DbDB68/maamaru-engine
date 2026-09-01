@@ -4,6 +4,8 @@ import { api } from './api'
 import ReportPanel from './components/ReportPanel.vue'
 import PlanningPanel from './components/report/PlanningPanel.vue'
 import SegmentedControl from './components/SegmentedControl.vue'
+import FoxClerk from './components/FoxClerk.vue'
+import { foxMood } from './foxMood'
 
 const loading = ref(true)
 const message = ref('')
@@ -47,7 +49,8 @@ onMounted(load)
   <div class="shell ledger-mode">
     <section class="honmaru-stage" aria-label="账房舞台">
       <div class="stage-brand"><strong>まあ丸</strong><small>纯净本丸账房</small></div>
-      <div class="stage-fox" aria-hidden="true"></div>
+      <span class="stage-seal" aria-hidden="true">账</span>
+      <FoxClerk class="stage-fox" :action="foxMood" />
       <div class="stage-status">
         <small>本丸账房</small>
         <strong>今天只算账</strong>
@@ -77,8 +80,10 @@ onMounted(load)
     </header>
     <main v-if="!loading" class="single-layout report-page">
       <p v-if="message" class="report-error">{{ message }}</p>
-      <ReportPanel v-if="tab === 'report'" />
-      <PlanningPanel v-else />
+      <Transition name="tab-swap" mode="out-in">
+        <ReportPanel v-if="tab === 'report'" />
+        <PlanningPanel v-else />
+      </Transition>
     </main>
     <div v-else class="single-layout report-page loading">正在整理账房……</div>
   </div>
@@ -92,5 +97,24 @@ onMounted(load)
   display: grid;
   place-items: center;
   color: var(--ink-dim);
+  font-family: var(--pixel-font);
+}
+.tab-swap-enter-active,
+.tab-swap-leave-active {
+  transition: opacity .18s ease, transform .18s ease;
+}
+.tab-swap-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.tab-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-swap-enter-active,
+  .tab-swap-leave-active {
+    transition: none;
+  }
 }
 </style>
