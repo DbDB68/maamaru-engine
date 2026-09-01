@@ -96,10 +96,15 @@ h1, h2, h3, h4, h5 { font-family: var(--pixel-font); letter-spacing: .02em; }
   animation: ledger-stamp-in .45s cubic-bezier(.3, 1.4, .4, 1) .35s both;
 }
 
+/*
+ * sprite 单帧底部有透明留白（idle 269/880、read 201/724），
+ * 用负 bottom 把留白沉到舞台外，狐狸爪子才踩在地板上。
+ */
 .stage-fox {
-  position: absolute; z-index: 1; right: 21%; bottom: 0;
+  position: absolute; z-index: 1; right: 21%; bottom: calc(var(--fox-h) * -0.306);
   animation: ledger-rise-in .6s ease-out .15s both;
 }
+.stage-fox.fox-read { bottom: calc(var(--fox-h) * -0.278); }
 
 .stage-status {
   position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; padding: 7px 12px;
