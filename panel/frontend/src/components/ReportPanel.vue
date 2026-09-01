@@ -61,6 +61,7 @@ const ledgerTransferNotice = ref('')
 const ledgerOnboarding = ref<LedgerOnboarding | null>(null)
 const ledgerOnboardingBusy = ref('')
 const planningPanelRef = ref<{ openCustomForm: () => Promise<void> } | null>(null)
+const swordWishlist = ref<string[]>([])
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -278,9 +279,38 @@ const anomalyInsight = computed<ReportInsight | null>(() => {
   }
 })
 
+const swordObtainedEvents = computed(() => events.value.filter(event => (
+  ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
+  && event.payload?.name
+)))
+// 刀剑明细仍归入“全部记录”；心愿命中只额外点名，不重新铺完整刀名列表。
+const swordDropTotal = computed(() => swordObtainedEvents.value.length)
+const wishlistHits = computed(() => {
+  const wanted = new Set(swordWishlist.value)
+  const hits = new Map<string, number>()
+  for (const event of swordObtainedEvents.value) {
+    const name = String(event.payload?.name || '').trim()
+    if (wanted.has(name)) hits.set(name, (hits.get(name) || 0) + 1)
+  }
+  return [...hits].map(([name, count]) => ({ name, count }))
+})
+const wishlistHitTotal = computed(() => wishlistHits.value.reduce((total, item) => total + item.count, 0))
+function wishlistNames(limit = 3) {
+  const names = wishlistHits.value.map(item => item.name)
+  return names.length > limit ? `${names.slice(0, limit).join('、')}等 ${names.length} 把` : names.join('、')
+}
+const wishlistFooter = computed(() => wishlistHits.value
+  .map(item => `${item.name}${item.count > 1 ? ` ×${item.count}` : ''}`).join('、'))
+
 const reportInsights = computed<ReportInsight[]>(() => {
   if (loading.value) return [{ key: 'loading', tone: 'plain', score: 1, title: '狐之助正在看账', detail: '稍等一下，马上挑出最值得说的事情。' }]
   const items: ReportInsight[] = []
+  if (wishlistHitTotal.value) items.push({
+    key: `wishlist:${wishlistHits.value.map(item => `${item.name}:${item.count}`).join('|')}`,
+    tone: 'gain', score: 120, target: 'records',
+    title: `🎉 心愿刀到账：${wishlistNames()}`,
+    detail: `这段时间命中 ${wishlistHitTotal.value} 振，完整入手记录已经替你收好。`,
+  })
   const completed = Number(summary.value?.runs?.by_status?.completed || 0)
   const failed = Number(summary.value?.runs?.by_status?.failed || 0)
   if (failed) items.push({ key: 'failed-runs', tone: 'alert', score: 98,
@@ -333,11 +363,6 @@ async function followInsight(insight: ReportInsight) {
     document.querySelector('.resource-trend')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
-// 刀剑明细已经归入“全部记录”，成绩单只保留这个时间段的总数。
-const swordDropTotal = computed(() => events.value.filter(event => (
-  ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
-  && event.payload?.name
-)).length)
 const manualLoops = computed(() => {
   const cutoff = Date.now() / 1000 - days.value * 86400
   return manualSessions.value.filter(item => item.started_at >= cutoff)
@@ -1017,7 +1042,7 @@ async function importLedgerPreview() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null)])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding, nextLists] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null), api.configLists().catch((): Record<string, string[]> => ({}))])
     summary.value = nextSummary
     ledger.value = nextLedger
     planning.value = nextPlanning
@@ -1032,6 +1057,7 @@ async function load(nextDays = days.value) {
     manualSessions.value = nextManualSessions.items
     manualInventories.value = nextManualInventory.items
     ledgerOnboarding.value = nextOnboarding
+    swordWishlist.value = nextLists.sword_wishlist || []
     if (!recordDate.value) recordDate.value = latestRecordDate()
     error.value = ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成绩单读取失败' }
@@ -1112,6 +1138,7 @@ onMounted(() => load())
           </ol>
           <footer v-if="swordDropTotal || manualLoops">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
+            <span v-if="wishlistHitTotal" class="wishlist">🎯 心愿命中 {{ wishlistFooter }}</span>
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
           </footer>
         </section>
@@ -1310,6 +1337,7 @@ onMounted(() => load())
 .report-glance > footer { display: flex; gap: 8px; flex-wrap: wrap; }
 .report-glance > footer span { padding: 3px 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 12px; }
 .report-glance > footer .obtain { color: var(--fox-gold-deep); }
+.report-glance > footer .wishlist { color: #7a4b16; background: color-mix(in srgb, var(--fox-gold-pale) 78%, var(--paper)); border-color: var(--fox-gold); font-weight: 700; }
 .report-glance > footer .manual { color: #536f8a; }
 .trend-callout { margin: 0 0 8px; padding: 8px 10px; color: var(--ink); background: var(--fox-gold-pale); border-left: 3px solid var(--fox-gold); font-size: 12px; line-height: 1.5; }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }

@@ -332,6 +332,9 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
         <SideNavItem :active="selected === '$dismantle-list'" @click="selected = '$dismantle-list'">
           <span><img class="task-menu-icon" :src="'/static/img/ui/dismantle.png'" alt="">刀解白名单</span>
         </SideNavItem>
+        <SideNavItem :active="selected === '$wishlist'" @click="selected = '$wishlist'">
+          <span><img class="task-menu-icon" :src="'/static/img/ui/menuList.png'" alt="">心愿刀名单</span>
+        </SideNavItem>
       </nav>
       <section ref="contentEl" class="content">
         <TaskForm
@@ -367,6 +370,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
         <SchedulePanel v-else-if="selected === '$schedule'" embedded />
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
+        <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>

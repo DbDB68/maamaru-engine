@@ -1132,7 +1132,7 @@ async def api_swords():
     }
 
 
-# ── API：全局名单配置（手入黑名单 / 刀解白名单）──
+# ── API：全局名单配置（手入黑名单 / 刀解白名单 / 心愿刀）──
 
 @app.get("/api/config-lists")
 async def api_get_config_lists():
@@ -1141,6 +1141,7 @@ async def api_get_config_lists():
     return {
         "repair_blacklist": cfg.get("repair", {}).get("blacklist", []),
         "dismantle_whitelist": cfg.get("dismantle", {}).get("whitelist", _DISMANTLE_WHITELIST),
+        "sword_wishlist": cfg.get("sword_wishlist", []),
     }
 
 
@@ -1156,6 +1157,10 @@ async def api_save_config_lists(request: Request):
     if "dismantle_whitelist" in body:
         cfg.setdefault("dismantle", {})["whitelist"] = [
             str(x).strip() for x in body["dismantle_whitelist"] if str(x).strip()
+        ]
+    if "sword_wishlist" in body:
+        cfg["sword_wishlist"] = [
+            str(x).strip() for x in body["sword_wishlist"] if str(x).strip()
         ]
     _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True}

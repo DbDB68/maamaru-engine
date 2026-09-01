@@ -4,21 +4,24 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PixelControl from './PixelControl.vue'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; initial?: 'repair_blacklist' | 'dismantle_whitelist' }>(), {
+type ListKey = 'repair_blacklist' | 'dismantle_whitelist' | 'sword_wishlist'
+
+const props = withDefaults(defineProps<{ embedded?: boolean; initial?: ListKey }>(), {
   embedded: false,
   initial: 'repair_blacklist',
 })
 
-const lists = ref<Record<string, string[]>>({ repair_blacklist: [], dismantle_whitelist: [] })
+const lists = ref<Record<ListKey, string[]>>({ repair_blacklist: [], dismantle_whitelist: [], sword_wishlist: [] })
 const swords = ref<Array<{ name: string; name_zh: string; type: string }>>([])
-const selected = ref<'repair_blacklist' | 'dismantle_whitelist'>(props.initial)
+const selected = ref<ListKey>(props.initial)
 const search = ref('')
 const message = ref('')
 const typeOrder = ['短刀', '脇差', '打刀', '太刀', '大太刀', '槍', '薙刀', '剣']
-const labels = { repair_blacklist: '手入黑名单', dismantle_whitelist: '刀解白名单' }
-const description = {
+const labels: Record<ListKey, string> = { repair_blacklist: '手入黑名单', dismantle_whitelist: '刀解白名单', sword_wishlist: '心愿刀名单' }
+const description: Record<ListKey, string> = {
   repair_blacklist: '手入时看到这些刀会跳过。',
   dismantle_whitelist: '刀解只会从这份名单中选择。',
+  sword_wishlist: '成绩单认出这些刀时，会额外把好消息放到本丸小结最前面。',
 }
 const candidates = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -52,6 +55,7 @@ async function save() {
   await api.saveConfigLists({
     repair_blacklist: lists.value.repair_blacklist,
     dismantle_whitelist: lists.value.dismantle_whitelist,
+    sword_wishlist: lists.value.sword_wishlist,
   })
   message.value = '名单已保存'
 }
