@@ -113,9 +113,11 @@ class LoginMixin:
         yield "[断网] 模拟器回来了，启动游戏..."
         time.sleep(5.0)
 
-        # 冷启动点图标（带 OCR 广告担保）→ 登录
-        for msg in self._ensure_game_started():
-            yield msg
+        # 冷启动优先按包名直启；只有直启失败才走带 OCR 担保的图标回退。
+        started = yield from self._ensure_game_started()
+        if not started:
+            yield "[断网] ⚠️ 没有确认游戏成功启动，停止恢复"
+            return None
         self.login()
         time.sleep(3.0)
 

@@ -277,6 +277,7 @@ class DailyLoginGateTests(unittest.TestCase):
         def _ensure_game_started(self):
             if False:
                 yield None
+            return True
 
         def login(self):
             if self.login_error:

@@ -62,6 +62,80 @@ class DailyUpdateFlow(DailyMixin, LoginMixin):
         return True
 
 
+class GameLaunchMaa:
+    def __init__(self, adb_ok=True, safe_icon=False):
+        self.adb_ok = adb_ok
+        self.safe_icon = safe_icon
+        self.stage = "desktop"
+        self.adb_calls = []
+        self.clicks = []
+
+    def screenshot(self, force=False):
+        return object()
+
+    def exists(self, template, roi=None, threshold=0.7):
+        if template == "目录.png":
+            return self.stage == "home"
+        if template == "登录.png":
+            return self.stage == "login"
+        return False
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if template == "刀剑乱舞.png" and self.safe_icon:
+            return Point(220, 220)
+        return None
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if expected == "刀剑乱舞" and self.safe_icon:
+            return Point(220, 270)
+        return None
+
+    def click(self, point):
+        self.clicks.append(point)
+        self.stage = "login"
+
+    def _adb_run(self, args, timeout=15.0, binary=False):
+        self.adb_calls.append(args)
+        if not self.adb_ok:
+            return None
+        if "resolve-activity" in args:
+            return b"com.youzu.djlw/org.cocos2dx.lua.AppActivity\n"
+        if "start" in args:
+            self.stage = "login"
+            return b"Status: ok\n"
+        return b""
+
+
+class GameLaunchFlow(DailyMixin):
+    def __init__(self, maa):
+        self.maa = maa
+        self.config = {"daily": {"logout": {"package": "com.youzu.djlw"}}}
+
+
+class DailyLaunchFailureFlow(DailyMixin):
+    def __init__(self):
+        self.config = {"daily": {}}
+        self.login_called = False
+        self.reports = []
+
+    def _daily_update_gate(self):
+        if False:
+            yield None
+        return False
+
+    def _ensure_game_started(self):
+        if False:
+            yield None
+        return False
+
+    def login(self):
+        self.login_called = True
+
+    def _flush_report(self, report, finished):
+        self.reports.append((list(report), finished))
+        return {}
+
+
 def generator_result(generator):
     while True:
         try:
@@ -101,6 +175,54 @@ class GameUpdateRecoveryTests(unittest.TestCase):
             self.assertTrue(generator_result(flow._daily_update_gate()))
         self.assertEqual(flow.sweeps, 1)
         self.assertEqual(flow.current_location, "本丸")
+
+    def test_game_launch_prefers_adb_and_never_clicks_desktop(self):
+        maa = GameLaunchMaa(adb_ok=True, safe_icon=True)
+        flow = GameLaunchFlow(maa)
+        with patch("touken.flows.daily.time.sleep"):
+            messages = []
+            generator = flow._ensure_game_started()
+            while True:
+                try:
+                    messages.append(next(generator))
+                except StopIteration as stop:
+                    result = stop.value
+                    break
+        self.assertTrue(result)
+        self.assertFalse(maa.clicks)
+        self.assertTrue(any("resolve-activity" in call for call in maa.adb_calls))
+        self.assertTrue(any("start" in call for call in maa.adb_calls))
+        self.assertTrue(any("绕过 MuMu 桌面遮挡" in msg for msg in messages))
+
+    def test_game_launch_accepts_existing_login_page_without_adb(self):
+        maa = GameLaunchMaa(adb_ok=True, safe_icon=False)
+        maa.stage = "login"
+        flow = GameLaunchFlow(maa)
+        self.assertTrue(generator_result(flow._ensure_game_started()))
+        self.assertFalse(maa.adb_calls)
+        self.assertFalse(maa.clicks)
+
+    def test_game_launch_falls_back_only_to_verified_icon(self):
+        maa = GameLaunchMaa(adb_ok=False, safe_icon=True)
+        flow = GameLaunchFlow(maa)
+        with patch("touken.flows.daily.time.sleep"):
+            result = generator_result(flow._ensure_game_started())
+        self.assertTrue(result)
+        self.assertEqual(maa.clicks, [Point(220, 220)])
+
+    def test_game_launch_stops_safely_when_ad_covers_icon(self):
+        maa = GameLaunchMaa(adb_ok=False, safe_icon=False)
+        flow = GameLaunchFlow(maa)
+        messages = list(flow._ensure_game_started())
+        self.assertFalse(maa.clicks)
+        self.assertTrue(any("没有在当前画面盲点" in msg for msg in messages))
+
+    def test_daily_stops_before_login_when_game_did_not_start(self):
+        flow = DailyLaunchFailureFlow()
+        messages = list(flow.daily_stream(only=["登录"], after="none"))
+        self.assertFalse(flow.login_called)
+        self.assertIn("[日课] 没有确认游戏成功启动，本次日课停止", messages)
+        self.assertEqual(flow.reports[-1], ([('登录', '✗ 游戏没有启动')], True))
 
 
 if __name__ == "__main__":

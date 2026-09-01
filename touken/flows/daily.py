@@ -155,8 +155,12 @@ class DailyMixin:
         if _w("登录"):
             yield "========== ① 登录 =========="
             try:
-                for msg in self._ensure_game_started():
-                    yield msg
+                started = yield from self._ensure_game_started()
+                if not started:
+                    report.append(("登录", "✗ 游戏没有启动"))
+                    yield "[日课] 没有确认游戏成功启动，本次日课停止"
+                    self._flush_report(report, finished=True)
+                    return
                 self.login()
                 if self._popup_sweep():
                     report.append(("登录", "✓"))
@@ -508,21 +512,75 @@ class DailyMixin:
         for msg in self.status_snapshot_stream(phase="after"):
             yield msg
 
-    # ========== 冷启动：游戏没开就先点图标 ==========
+    # ========== 冷启动：优先按包名直启，可信图标只作回退 ==========
+
+    def _launch_game_via_adb(self) -> bool:
+        """通过已配置的包名解析入口并启动游戏；不依赖可能被广告遮住的桌面。"""
+        package = (self.config.get("daily", {}).get("logout", {})
+                   .get("package", "com.youzu.djlw"))
+        resolve = self.maa._adb_run([
+            "shell", "cmd", "package", "resolve-activity", "--brief",
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.LAUNCHER", package,
+        ], timeout=20.0)
+        if resolve is None:
+            return False
+
+        component = None
+        for raw_line in reversed(resolve.decode("utf-8", "ignore").splitlines()):
+            candidate = raw_line.strip()
+            if candidate.startswith(package + "/") and " " not in candidate:
+                component = candidate
+                break
+        if not component:
+            return False
+
+        started = self.maa._adb_run(
+            ["shell", "am", "start", "-W", "-n", component], timeout=30.0)
+        return started is not None
+
+    def _wait_for_game_entry(self):
+        """等待登录页或本丸出现，返回是否确认游戏已进入可接管状态。"""
+        for i in range(75):  # 最多等 150s
+            time.sleep(2.0)
+            self.maa.screenshot(force=True)
+            if self.maa.exists("目录.png", threshold=0.7):
+                yield f"[日课] 游戏已进入本丸（{i * 2 + 2}s）"
+                return True
+            if self.maa.exists("登录.png", threshold=0.7):
+                yield f"[日课] 登录按钮出现（{i * 2 + 2}s）"
+                return True
+            # 版本更新框会挡在登录前（「检测到更新」→ 选线路），偶尔查一次
+            if i % 6 == 3:
+                upd = self.maa.ocr("线路一", roi_4to4(200, 300, 900, 600))
+                if upd:
+                    yield "[日课] 检测到游戏更新，选线路一更新..."
+                    self.maa.click(upd)
+        yield "[日课] 等待游戏登录页超时；没有继续盲点"
+        return False
 
     def _ensure_game_started(self):
         """
-        检查游戏开没开：在本丸就跳过；在模拟器桌面就点刀剑乱舞图标等登录按钮
-        （定时任务跑的时候游戏可能关着）
+        检查游戏开没开：在本丸就跳过；否则优先让 ADB 按包名直接启动。
+        只有 ADB 明确失败，才点击经图标模板 + 文字 OCR 双重确认的桌面入口。
         """
         self.maa.screenshot(force=True)
         if self.maa.exists("目录.png", threshold=0.7):
             yield "[日课] 游戏已在本丸，直接开跑"
-            return
+            return True
+        if self.maa.exists("登录.png", threshold=0.7):
+            yield "[日课] 游戏已在登录页，直接接管"
+            return True
+
+        if self._launch_game_via_adb():
+            yield "[日课] 已绕过 MuMu 桌面遮挡，直接启动刀剑乱舞"
+            return (yield from self._wait_for_game_entry())
+
+        yield "[日课] ADB 直启失败，尝试寻找经过文字确认的桌面图标"
         pt = self.maa.template_match("刀剑乱舞.png", threshold=0.8)
         if not pt:
-            yield "[日课] 既不在本丸也找不到游戏图标（在奇怪的界面？），硬试登录"
-            return
+            yield "[日课] 没找到可安全点击的刀剑乱舞入口；没有在当前画面盲点"
+            return False
 
         # ⚠️ 广告担保层（7-29 实测翻车：模拟器广告里的像素跟图标模板撞脸，
         # 点下去直接触发下载了个别的游戏）。模板只是 55x55 图标图，没有文字，
@@ -533,23 +591,11 @@ class DailyMixin:
         )
         if not self.maa.ocr("刀剑乱舞", guard):
             yield "[日课] ⚠️ 找到疑似图标但底下没写「刀剑乱舞」——怕是广告，没敢点"
-            return
+            return False
 
         yield "[日课] 游戏没开，点图标启动（OCR 验明正身 ✓）..."
         self.maa.click(pt)
-        for i in range(75):  # 最多等 150s
-            time.sleep(2.0)
-            self.maa.screenshot(force=True)
-            if self.maa.exists("登录.png", threshold=0.7):
-                yield f"[日课] 登录按钮出现（{i * 2 + 2}s）"
-                return
-            # 版本更新框会挡在登录前（「检测到更新」→ 选线路），偶尔查一次
-            if i % 6 == 3:
-                upd = self.maa.ocr("线路一", roi_4to4(200, 300, 900, 600))
-                if upd:
-                    yield "[日课] 检测到游戏更新，选线路一更新..."
-                    self.maa.click(upd)
-        yield "[日课] 等登录按钮超时，硬试登录"
+        return (yield from self._wait_for_game_entry())
 
     # ========== 登录后弹窗扫地 ==========
 
