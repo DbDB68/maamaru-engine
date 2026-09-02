@@ -5,10 +5,13 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import type { HumanReport, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import ManualLedger from './ManualLedger.vue'
+import SwordNotebook from './SwordNotebook.vue'
 import { eventTime, resourceNames, signed } from './report/reportModel'
 
-type LabView = 'overview' | 'ledger' | 'records' | 'goals' | 'wishlist'
+type LabView = 'overview' | 'ledger' | 'records' | 'goals' | 'wishlist' | 'swords'
 interface SwordEntry { id: string; name: string; name_zh: string; type: string }
+
+const props = withDefaults(defineProps<{ mobileMode?: boolean }>(), { mobileMode: false })
 
 const ledger = ref<ResourceLedger | null>(null)
 const planning = ref<PlanningReport | null>(null)
@@ -233,21 +236,18 @@ onMounted(loadData)
               <small>近 7 天动静最大</small>
               <strong v-if="biggestChange">{{ biggestChange.name }} {{ signed(biggestChange.delta || 0) }}</strong>
               <strong v-else>家底没有明显变化</strong>
-              <span>先说结论，不用翻完八张卡</span>
             </article>
             <article class="lab-brief run">
               <small>最近一笔手账</small>
               <strong v-if="latestManual">{{ latestManual.title }}</strong>
               <strong v-else>还没有手账</strong>
               <span v-if="latestManual">{{ latestManual.detail }} · {{ eventTime(latestManual.at) }}</span>
-              <span v-else>不连まあ丸也能从这里开始记</span>
             </article>
             <article class="lab-brief goal">
               <small>现在盯着的目标</small>
               <strong v-if="leadGoal">{{ leadGoal.resource }}</strong>
               <strong v-else>还没有立目标</strong>
               <span v-if="leadGoal">{{ goalLine(leadGoal) }}</span>
-              <span v-else>需要时再立，不催你填表</span>
             </article>
           </div>
 
@@ -261,7 +261,6 @@ onMounted(loadData)
           <header class="lab-view-head">
             <p>近 7 天账本</p>
             <h2>家底摆在这</h2>
-            <span>基础资材看整体，票券和货币单独放。</span>
           </header>
 
           <button class="lab-inline-entry" type="button" @click="show('records')">＋ 记下收支、家底或活动</button>
@@ -285,12 +284,12 @@ onMounted(loadData)
         </section>
 
         <section v-else-if="activeView === 'records'" key="records" class="lab-view">
-          <header class="lab-view-head"><p>{{ manualEntryCount }} 条手账</p><h2>今天记点啥</h2><span>收支、家底和自己打的活动，都归到一本账。</span></header>
+          <header class="lab-view-head"><p>{{ manualEntryCount }} 条手账</p><h2>今天记点啥</h2></header>
           <ManualLedger :reports="humanReports" :inventories="manualInventories" :sessions="manualSessions" @changed="loadData" />
         </section>
 
         <section v-else-if="activeView === 'goals'" key="goals" class="lab-view">
-          <header class="lab-view-head goal-head"><div><p>活动与家底</p><h2>盯着的目标</h2><span>选“攒到多少”，或让账房算一算某天大概能有多少。</span></div><button v-if="!goalFormOpen" type="button" @click="openGoalForm">＋ 立个目标</button></header>
+          <header class="lab-view-head goal-head"><div><p>活动与家底</p><h2>盯着的目标</h2><span>攒到多少，或看到哪天。</span></div><button v-if="!goalFormOpen" type="button" @click="openGoalForm">＋ 立个目标</button></header>
           <p v-if="goalNotice" class="lab-goal-notice" role="status">✓ {{ goalNotice }}</p>
           <p v-if="goalError" class="lab-goal-error" role="alert">{{ goalError }}</p>
           <form v-if="goalFormOpen" class="lab-goal-form" @submit.prevent="saveGoal">
@@ -313,10 +312,10 @@ onMounted(loadData)
               <button type="button" title="删掉这个目标" @click="removeGoal(goal)">×</button>
             </article>
           </div>
-          <div v-else-if="!goalFormOpen" class="lab-no-goal"><strong>眼下没有要追的目标</strong><span>这也是一种好消息，但想立也能立。</span><button type="button" @click="openGoalForm">＋ 立第一个目标</button></div>
+          <div v-else-if="!goalFormOpen" class="lab-no-goal"><strong>眼下没有目标</strong><button type="button" @click="openGoalForm">＋ 立第一个目标</button></div>
         </section>
 
-        <section v-else key="wishlist" class="lab-view">
+        <section v-else-if="activeView === 'wishlist'" key="wishlist" class="lab-view">
           <header class="lab-view-head wishlist-head"><div><p>刀帐上的小纸条</p><h2>想等谁来</h2><span>把惦记的名字点亮，单纯当作自己的心愿名单。</span></div><button type="button" :disabled="wishlistSaving" @click="saveWishlist">{{ wishlistSaving ? '收好中…' : '保存名单' }}</button></header>
           <p v-if="wishlistNotice" class="lab-goal-notice" role="status">{{ wishlistNotice }}</p>
           <section class="lab-wishlist-current">
@@ -331,14 +330,17 @@ onMounted(loadData)
             <p v-if="!wishlistCandidates.length">没翻到这个名字，换个写法试试。</p>
           </div>
         </section>
+
+        <section v-else key="swords" class="lab-view"><SwordNotebook /></section>
       </Transition>
 
-      <nav class="lab-nav" aria-label="试验田导航">
+      <nav class="lab-nav" :aria-label="props.mobileMode ? '账房导航' : '试验田导航'">
         <button type="button" :class="{ active: activeView === 'overview' }" :aria-current="activeView === 'overview' ? 'page' : undefined" @click="show('overview')">🏠<span>总览</span></button>
         <button type="button" :class="{ active: activeView === 'ledger' }" :aria-current="activeView === 'ledger' ? 'page' : undefined" @click="show('ledger')">📒<span>账本</span></button>
         <button type="button" :class="{ active: activeView === 'records' }" :aria-current="activeView === 'records' ? 'page' : undefined" @click="show('records')">✎<span>手账</span></button>
         <button type="button" :class="{ active: activeView === 'goals' }" :aria-current="activeView === 'goals' ? 'page' : undefined" @click="show('goals')">🎯<span>目标</span></button>
-        <button type="button" :class="{ active: activeView === 'wishlist' }" :aria-current="activeView === 'wishlist' ? 'page' : undefined" @click="show('wishlist')">♡<span>心愿</span></button>
+        <button v-if="props.mobileMode" type="button" :class="{ active: activeView === 'swords' }" :aria-current="activeView === 'swords' ? 'page' : undefined" @click="show('swords')">⚔<span>刀帐</span></button>
+        <button v-else type="button" :class="{ active: activeView === 'wishlist' }" :aria-current="activeView === 'wishlist' ? 'page' : undefined" @click="show('wishlist')">♡<span>心愿</span></button>
       </nav>
     </template>
   </div>

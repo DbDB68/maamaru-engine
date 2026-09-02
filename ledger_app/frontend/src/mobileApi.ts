@@ -29,6 +29,7 @@ interface MobileState {
   sessions: ManualSession[]
   goals: MobileGoal[]
   sword_wishlist: string[]
+  sword_records: Record<string, { level: number; ranbu: number; note?: string; updated_at: number }>
 }
 
 function seedState(): MobileState {
@@ -61,13 +62,18 @@ function seedState(): MobileState {
     }],
     goals: [],
     sword_wishlist: [],
+    sword_records: {},
   }
 }
 
 function readState(): MobileState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as MobileState
+    if (raw) {
+      const state = JSON.parse(raw) as MobileState
+      state.sword_records ||= {}
+      return state
+    }
   } catch { /* A fresh demo is better than a dead screen if storage is damaged. */ }
   const state = seedState()
   writeState(state)
@@ -245,5 +251,15 @@ export const mobileApi = {
   swords: async () => ({ swords: swordEntries }),
   saveConfigLists: async (value: Record<string, string[]>) => {
     const state = readState(); state.sword_wishlist = [...(value.sword_wishlist || [])]; writeState(state); return { ok: true }
+  },
+  swordRecords: async () => ({ ...readState().sword_records }),
+  saveSwordRecord: async (name: string, value: { level: number; ranbu: number; note?: string }) => {
+    const state = readState()
+    state.sword_records[name] = { level: Number(value.level), ranbu: Number(value.ranbu), note: value.note || '', updated_at: Date.now() / 1000 }
+    writeState(state)
+    return { ok: true, item: state.sword_records[name] }
+  },
+  deleteSwordRecord: async (name: string) => {
+    const state = readState(); delete state.sword_records[name]; writeState(state); return { ok: true }
   },
 }

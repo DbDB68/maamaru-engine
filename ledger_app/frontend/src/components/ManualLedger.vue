@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { api } from '../api'
 import type { HumanReport, ManualInventory, ManualSession } from '../types'
 import { resourceNames, scriptNames, signed } from './report/reportModel'
@@ -21,6 +21,7 @@ const notice = ref('')
 const error = ref('')
 const busy = ref(false)
 const deletingKey = ref('')
+const undoEntry = shallowRef<LedgerEntry | null>(null)
 const editingReport = ref<{ groupId?: string; reportId?: number } | null>(null)
 const editingInventoryId = ref<number | null>(null)
 const editingSessionId = ref<number | null>(null)
@@ -213,7 +214,6 @@ async function saveSession() {
 }
 
 async function deleteEntry(entry: LedgerEntry) {
-  if (!window.confirm(`撤销这条${entry.kind === 'resource' ? '收支' : entry.kind === 'inventory' ? '家底' : '活动'}记录吗？`)) return
   deletingKey.value = entry.key
   error.value = ''
   try {
@@ -222,10 +222,39 @@ async function deleteEntry(entry: LedgerEntry) {
       else await api.deleteHumanReport(entry.group.head.id)
     } else if (entry.kind === 'inventory') await api.deleteManualInventory(entry.item.id)
     else await api.deleteManualSession(entry.item.id)
+    undoEntry.value = entry
     notice.value = '这条手账已撤销。'
     emit('changed')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销失败' }
   finally { deletingKey.value = '' }
+}
+
+async function undoDelete() {
+  const entry = undoEntry.value
+  if (!entry) return
+  busy.value = true
+  error.value = ''
+  try {
+    if (entry.kind === 'resource') {
+      await api.addHumanReportBatch({
+        occurred_at: entry.group.head.occurred_at,
+        activities: entry.group.head.activities || [],
+        note: entry.group.head.note || '',
+        entries: Object.fromEntries(entry.group.entries.map(item => [String(item.resource), Number(item.claimed_delta)])),
+      })
+    } else if (entry.kind === 'inventory') {
+      await api.addManualInventory(entry.item.resources, entry.item.ts)
+    } else {
+      await api.addManualSession({
+        script: entry.item.script, started_at: entry.item.started_at, ended_at: entry.item.ended_at,
+        loops: entry.item.loops, note: entry.item.note || '',
+      })
+    }
+    undoEntry.value = null
+    notice.value = '放回来了。'
+    emit('changed')
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '没能放回来' }
+  finally { busy.value = false }
 }
 </script>
 
@@ -237,7 +266,7 @@ async function deleteEntry(entry: LedgerEntry) {
       <button type="button" @click="openEditor('session')"><span>◷</span><b>补活动</b><small>玩法、圈数与时间</small></button>
     </div>
 
-    <p v-if="notice" class="manual-notice" role="status">✓ {{ notice }}</p>
+    <p v-if="notice" class="manual-notice" role="status"><span>✓ {{ notice }}</span><button v-if="undoEntry" type="button" :disabled="busy" @click="undoDelete">后悔，放回来</button></p>
     <p v-if="error" class="manual-error" role="alert">{{ error }}</p>
 
     <form v-if="editor === 'resource'" class="manual-editor" @submit.prevent="saveResource">
@@ -269,7 +298,7 @@ async function deleteEntry(entry: LedgerEntry) {
     </form>
 
     <div class="manual-list">
-      <header><div><small>你自己记下的</small><h3>我的手账</h3></div><span>{{ entries.length }} 条</span></header>
+      <header><h3>我的手账</h3><span>{{ entries.length }} 条</span></header>
       <ul v-if="entries.length">
         <li v-for="entry in entries" :key="entry.key">
           <time>{{ entryTime(entry) }}</time>
@@ -293,7 +322,8 @@ async function deleteEntry(entry: LedgerEntry) {
 .manual-actions b { font-size: 14px; }
 .manual-actions small { overflow: hidden; font-size: 10.5px; opacity: .65; text-overflow: ellipsis; white-space: nowrap; }
 .manual-notice, .manual-error { margin: 0; padding: 10px 13px; border-radius: 12px; font-size: 12px; font-weight: 750; }
-.manual-notice { background: #e4f5d8; }
+.manual-notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #e4f5d8; }
+.manual-notice button { padding: 5px 9px; border: 1px solid #1d1a12; border-radius: 999px; background: #fff; color: #1d1a12; font-size: 10px; font-weight: 850; white-space: nowrap; }
 .manual-error { background: #ffe0dc; color: #842d27; }
 .manual-editor, .manual-list { padding: 18px; border: 2px solid #1d1a12; border-radius: 22px; background: #fff; box-shadow: 0 6px 0 rgba(29, 26, 18, .14); }
 .manual-editor { display: grid; gap: 14px; }

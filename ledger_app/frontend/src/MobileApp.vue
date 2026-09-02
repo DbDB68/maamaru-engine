@@ -4,7 +4,7 @@ import StyleLab from './components/StyleLab.vue'
 
 <template>
   <main class="mobile-ledger">
-    <StyleLab />
+    <StyleLab mobile-mode />
   </main>
 </template>
 
