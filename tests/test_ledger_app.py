@@ -9,12 +9,11 @@ import pytest
 
 # 先设置数据目录覆盖，避免 server 模块导入时写到真实 LOCALAPPDATA
 _tmp_root = Path(tempfile.mkdtemp(prefix="ledger_app_test_"))
-os.environ["MAAMARU_DATA_DIR"] = str(_tmp_root)
+with patch.dict(os.environ, {"MAAMARU_DATA_DIR": str(_tmp_root)}):
+    from fastapi.testclient import TestClient
 
-from fastapi.testclient import TestClient
-
-from ledger_app.server import create_app
-from touken import telemetry
+    from ledger_app.server import create_app
+    from touken import telemetry
 
 
 @pytest.fixture
