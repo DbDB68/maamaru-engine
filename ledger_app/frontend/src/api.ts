@@ -1,4 +1,5 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import { mobileApi } from './mobileApi'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -7,7 +8,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
-export const api = {
+export const serverApi = {
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
   settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; hero_resource?: string }>('/api/saved-settings'),
@@ -128,3 +129,10 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
 }
+
+// The Android demo is deliberately self-contained: its ledger lives on the
+// phone and never tries to reach the desktop panel.  Keeping the same API
+// shape lets the StyleLab UI stay shared with the desktop experiment.
+export const api: typeof serverApi = import.meta.env.VITE_APP_TARGET === 'android'
+  ? { ...serverApi, ...mobileApi } as typeof serverApi
+  : serverApi

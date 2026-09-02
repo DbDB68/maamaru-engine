@@ -6,6 +6,9 @@ __pycache__/
 dist/
 node_modules/
 panel/static/vue/
+ledger_app/frontend/dist-android/
+ledger_app/frontend/android/.gradle/
+ledger_app/frontend/android/app/build/
 *.tsbuildinfo
 *.egg-info/
 

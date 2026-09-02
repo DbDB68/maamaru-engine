@@ -7,16 +7,22 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b tsconfig.app.json && vite build",
+    "build:android": "vue-tsc -b tsconfig.app.json && vite build --mode android",
+    "android:sync": "npm run build:android && cap sync android",
+    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "typecheck": "vue-tsc -b tsconfig.app.json",
     "check": "pnpm run typecheck"
   },
   "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
     "@primeuix/themes": "1.2.5",
     "echarts": "^6.1.0",
     "primevue": "4.5.5",
     "vue": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
     "@vitejs/plugin-vue": "latest",
     "typescript": "^5.9.3",
     "vite": "latest",

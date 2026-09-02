@@ -1,0 +1,50 @@
+name: Build Ledger Android Demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ledger_app/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ledger_app/frontend/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and sync the offline app
+        run: npm run android:sync
+
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Give the APK a friendly name
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/maamaru-ledger-demo.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maamaru-ledger-demo-apk
+          path: ledger_app/frontend/android/app/build/outputs/apk/debug/maamaru-ledger-demo.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">まあ丸账房</string>
+    <string name="title_activity_main">まあ丸账房</string>
+    <string name="package_name">com.maamaru.ledger</string>
+    <string name="custom_url_scheme">com.maamaru.ledger</string>
+</resources>

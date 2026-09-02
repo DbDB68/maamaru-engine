@@ -7,7 +7,8 @@ import type { HumanReport, ManualInventory, ManualSession, PlanningGoalAdvice, P
 import ManualLedger from './ManualLedger.vue'
 import { eventTime, resourceNames, signed } from './report/reportModel'
 
-type LabView = 'overview' | 'ledger' | 'records' | 'goals'
+type LabView = 'overview' | 'ledger' | 'records' | 'goals' | 'wishlist'
+interface SwordEntry { id: string; name: string; name_zh: string; type: string }
 
 const ledger = ref<ResourceLedger | null>(null)
 const planning = ref<PlanningReport | null>(null)
@@ -23,6 +24,11 @@ const goalSaving = ref(false)
 const goalNotice = ref('')
 const goalError = ref('')
 const goalForm = ref({ goal_mode: 'amount_target' as 'amount_target' | 'deadline_target', resource: '小判', target: 100000, deadline: '', note: '' })
+const wishlist = ref<string[]>([])
+const swords = ref<SwordEntry[]>([])
+const wishlistSearch = ref('')
+const wishlistSaving = ref(false)
+const wishlistNotice = ref('')
 
 const resourceColors: Record<string, string> = {
   木炭: '#ff9f6e', 玉钢: '#a8d8ff', 冷却材: '#ffb3d1', 砥石: '#b8e6a0',
@@ -87,6 +93,24 @@ const leadGoal = computed(() => goals.value[0] || null)
 const biggestChange = computed(() => [...cards.value]
   .filter(card => card.delta != null && card.delta !== 0)
   .sort((a, b) => Math.abs(b.delta || 0) - Math.abs(a.delta || 0))[0] || null)
+const wishlistCandidates = computed(() => {
+  const query = wishlistSearch.value.trim().toLowerCase()
+  return swords.value.filter(sword => !query || `${sword.name}${sword.name_zh}${sword.type}`.toLowerCase().includes(query))
+})
+
+function swordName(sword: SwordEntry) { return sword.name_zh || sword.name }
+function toggleWishlist(name: string) {
+  wishlistNotice.value = ''
+  wishlist.value = wishlist.value.includes(name) ? wishlist.value.filter(item => item !== name) : [...wishlist.value, name]
+}
+async function saveWishlist() {
+  wishlistSaving.value = true
+  try {
+    await api.saveConfigLists({ sword_wishlist: wishlist.value })
+    wishlistNotice.value = wishlist.value.length ? `名单收好了，正在等 ${wishlist.value.length} 把刀。` : '心愿名单已清空。'
+  } catch (cause) { wishlistNotice.value = cause instanceof Error ? cause.message : '名单没能保存' }
+  finally { wishlistSaving.value = false }
+}
 
 function goalLine(goal: PlanningGoalAdvice): string {
   if (goal.current == null) return `先抄一次${goal.resource}家底`
@@ -156,13 +180,15 @@ async function removeGoal(goal: PlanningGoalAdvice) {
 
 async function loadData() {
   try {
-    const [ledgerData, planningData, reportsData, inventoriesData, sessionsData, settingsData] = await Promise.all([
+    const [ledgerData, planningData, reportsData, inventoriesData, sessionsData, settingsData, listsData, swordsData] = await Promise.all([
       api.resourceLedger(7),
       api.planning().catch(() => null),
       api.humanReports().catch(() => ({ schema_version: 1, items: [], inventory_gaps: [] })),
       api.manualInventory(200).catch(() => ({ schema_version: 1, items: [] })),
       api.manualSessions(200).catch(() => ({ schema_version: 1, items: [] })),
       api.settings().catch(() => ({ hero_resource: undefined })),
+      api.configLists().catch(() => ({ sword_wishlist: [] })),
+      api.swords().catch(() => ({ swords: [] })),
     ])
     ledger.value = ledgerData
     planning.value = planningData
@@ -170,6 +196,8 @@ async function loadData() {
     manualInventories.value = inventoriesData.items || []
     manualSessions.value = sessionsData.items || []
     if (resourceNames.includes(String(settingsData.hero_resource || ''))) heroResource.value = String(settingsData.hero_resource)
+    wishlist.value = listsData.sword_wishlist || []
+    swords.value = swordsData.swords || []
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '账房数据没搬动'
   } finally {
@@ -261,7 +289,7 @@ onMounted(loadData)
           <ManualLedger :reports="humanReports" :inventories="manualInventories" :sessions="manualSessions" @changed="loadData" />
         </section>
 
-        <section v-else key="goals" class="lab-view">
+        <section v-else-if="activeView === 'goals'" key="goals" class="lab-view">
           <header class="lab-view-head goal-head"><div><p>活动与家底</p><h2>盯着的目标</h2><span>选“攒到多少”，或让账房算一算某天大概能有多少。</span></div><button v-if="!goalFormOpen" type="button" @click="openGoalForm">＋ 立个目标</button></header>
           <p v-if="goalNotice" class="lab-goal-notice" role="status">✓ {{ goalNotice }}</p>
           <p v-if="goalError" class="lab-goal-error" role="alert">{{ goalError }}</p>
@@ -287,6 +315,22 @@ onMounted(loadData)
           </div>
           <div v-else-if="!goalFormOpen" class="lab-no-goal"><strong>眼下没有要追的目标</strong><span>这也是一种好消息，但想立也能立。</span><button type="button" @click="openGoalForm">＋ 立第一个目标</button></div>
         </section>
+
+        <section v-else key="wishlist" class="lab-view">
+          <header class="lab-view-head wishlist-head"><div><p>刀帐上的小纸条</p><h2>想等谁来</h2><span>把惦记的名字点亮，单纯当作自己的心愿名单。</span></div><button type="button" :disabled="wishlistSaving" @click="saveWishlist">{{ wishlistSaving ? '收好中…' : '保存名单' }}</button></header>
+          <p v-if="wishlistNotice" class="lab-goal-notice" role="status">{{ wishlistNotice }}</p>
+          <section class="lab-wishlist-current">
+            <small>心愿单</small><strong>{{ wishlist.length ? `${wishlist.length} 把刀正在路上` : '还没有写名字' }}</strong>
+            <div><button v-for="name in wishlist" :key="name" type="button" @click="toggleWishlist(name)">{{ name }} <i>×</i></button><span v-if="!wishlist.length">从下面的刀帐里点一个试试。</span></div>
+          </section>
+          <label class="lab-wishlist-search">翻刀帐<input v-model="wishlistSearch" type="search" placeholder="输入名字或刀种"></label>
+          <div class="lab-wishlist-list">
+            <button v-for="sword in wishlistCandidates" :key="sword.id" type="button" :class="{ active: wishlist.includes(swordName(sword)) }" :aria-pressed="wishlist.includes(swordName(sword))" @click="toggleWishlist(swordName(sword))">
+              <small>{{ sword.type }}</small><span>{{ swordName(sword) }}</span><i>{{ wishlist.includes(swordName(sword)) ? '✓' : '＋' }}</i>
+            </button>
+            <p v-if="!wishlistCandidates.length">没翻到这个名字，换个写法试试。</p>
+          </div>
+        </section>
       </Transition>
 
       <nav class="lab-nav" aria-label="试验田导航">
@@ -294,6 +338,7 @@ onMounted(loadData)
         <button type="button" :class="{ active: activeView === 'ledger' }" :aria-current="activeView === 'ledger' ? 'page' : undefined" @click="show('ledger')">📒<span>账本</span></button>
         <button type="button" :class="{ active: activeView === 'records' }" :aria-current="activeView === 'records' ? 'page' : undefined" @click="show('records')">✎<span>手账</span></button>
         <button type="button" :class="{ active: activeView === 'goals' }" :aria-current="activeView === 'goals' ? 'page' : undefined" @click="show('goals')">🎯<span>目标</span></button>
+        <button type="button" :class="{ active: activeView === 'wishlist' }" :aria-current="activeView === 'wishlist' ? 'page' : undefined" @click="show('wishlist')">♡<span>心愿</span></button>
       </nav>
     </template>
   </div>
@@ -390,6 +435,25 @@ onMounted(loadData)
 .lab-no-goal span { font-size: 13px; opacity: .65; }
 .lab-no-goal button { justify-self: center; margin-top: 8px; }
 
+.wishlist-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.wishlist-head > button { flex: none; padding: 9px 13px; border: 2px solid var(--lab-ink); border-radius: 999px; background: #fff; color: var(--lab-ink); font-size: 11px; font-weight: 850; }
+.lab-wishlist-current { display: grid; gap: 4px; margin-top: 24px; padding: 18px; border: 2px solid var(--lab-ink); border-radius: 22px; background: #ffb3d1; box-shadow: 0 6px 0 rgba(29, 26, 18, .14); transform: rotate(-.35deg); }
+.lab-wishlist-current > small { font-weight: 800; opacity: .6; }
+.lab-wishlist-current > strong { font-size: 21px; font-weight: 900; }
+.lab-wishlist-current > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.lab-wishlist-current button { padding: 6px 9px; border: 1.5px solid var(--lab-ink); border-radius: 999px; background: #fff; color: var(--lab-ink); font-size: 12px; font-weight: 750; }
+.lab-wishlist-current i { color: #a73956; font-style: normal; }
+.lab-wishlist-current span { font-size: 12px; opacity: .65; }
+.lab-wishlist-search { display: grid; gap: 5px; margin-top: 24px; font-size: 11px; font-weight: 850; }
+.lab-wishlist-search input { width: 100%; padding: 11px 13px; border: 2px solid var(--lab-ink); border-radius: 14px; background: #fff; }
+.lab-wishlist-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+.lab-wishlist-list > button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; padding: 11px 12px; border: 2px solid transparent; border-radius: 15px; background: rgba(255,255,255,.78); color: var(--lab-ink); text-align: left; }
+.lab-wishlist-list > button small { grid-column: 1; font-size: 9px; font-weight: 800; opacity: .52; }
+.lab-wishlist-list > button span { grid-column: 1; overflow: hidden; font-size: 13px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.lab-wishlist-list > button i { grid-row: 1 / 3; grid-column: 2; align-self: center; font-size: 17px; font-style: normal; }
+.lab-wishlist-list > button.active { border-color: var(--lab-ink); background: #b8e6a0; box-shadow: 0 3px 0 rgba(29, 26, 18, .16); }
+.lab-wishlist-list > p { grid-column: 1 / -1; text-align: center; font-weight: 750; opacity: .65; }
+
 .lab-nav { position: sticky; z-index: 10; bottom: 14px; display: flex; justify-content: space-around; gap: 4px; margin-top: 30px; padding: 9px 12px; border-radius: 999px; background: var(--lab-ink); box-shadow: 0 10px 24px rgba(29, 26, 18, .35); }
 .lab-nav button { display: grid; justify-items: center; gap: 2px; min-width: 58px; padding: 5px 10px; border: 0; border-radius: 999px; background: none; color: #fff4bb; font-size: 17px; cursor: pointer; transition: color .15s ease, background .15s ease, transform .15s ease; }
 .lab-nav button:hover, .lab-nav button.active { background: #ffd94d; color: var(--lab-ink); transform: translateY(-1px); }
@@ -406,10 +470,12 @@ onMounted(loadData)
   .lab-resource-card .lab-chip { padding: 3px 7px; font-size: 10px; }
   .lab-forward-row { grid-template-columns: 1fr; }
   .goal-head { display: grid; }
+  .wishlist-head { display: grid; }
+  .wishlist-head > button { justify-self: start; }
   .goal-head > button { justify-self: start; }
   .lab-goal-fields { grid-template-columns: 1fr; }
   .lab-nav { margin-inline: 2px; }
-  .lab-nav button { min-width: 48px; padding-inline: 7px; }
+  .lab-nav button { min-width: 42px; padding-inline: 5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

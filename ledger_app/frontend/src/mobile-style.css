@@ -1,0 +1,27 @@
+:root {
+  --paper: #f1e9d7;
+  --paper-card: #fbf6ea;
+  --paper-panel: #e8ddc6;
+  --paper-line: #d9cdb2;
+  --ink: #3a3129;
+  --ink-dim: #8a7d6b;
+  --shu: #c1432f;
+  --danger: #a53b32;
+  --fox-gold: #d4a017;
+  --fox-gold-pale: #f6e7b8;
+  --body-font: "Hiragino Sans", "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --pixel-font: var(--body-font);
+  font-family: var(--body-font);
+  color: var(--ink);
+  background: #ffd94d;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { min-width: 320px; min-height: 100%; margin: 0; }
+body { font-size: 14px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .6; }
+input, select, textarea { color: var(--ink); }
+:focus-visible { outline: 2px solid #1d1a12; outline-offset: 2px; }
