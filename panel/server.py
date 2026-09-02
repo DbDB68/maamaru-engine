@@ -114,6 +114,13 @@ def _on_script_message(payload: dict):
     except Exception:
         pass
 
+    # 异常与通知中心：值得追踪的异常立案归档（只记录，不开口）
+    try:
+        from . import incident_feed
+        incident_feed.feed(payload)
+    except Exception:
+        pass
+
 
 # ── 注册脚本 ──
 
@@ -1003,6 +1010,34 @@ async def get_logs(limit: int = 100, after_id: int = 0):
     logs = store.get_recent(limit=limit, after_id=after_id)
     last_id = store.get_last_id()
     return {"logs": logs, "last_id": last_id}
+
+
+# ── API：异常与通知中心 ──
+
+@app.get("/api/incidents")
+async def get_incidents():
+    from touken.incidents import list_incidents
+    items = list_incidents()
+    unread = sum(1 for item in items if item.get("status") == "active")
+    return {"items": items, "unread": unread}
+
+
+@app.post("/api/incidents/{code}/ack")
+async def ack_incident(code: str):
+    from touken.incidents import set_status
+    item = set_status(code, "acknowledged")
+    if item is None:
+        return JSONResponse({"ok": False, "reason": "没有这张事故单"}, status_code=404)
+    return {"ok": True, "item": item}
+
+
+@app.post("/api/incidents/{code}/resolve")
+async def resolve_incident(code: str):
+    from touken.incidents import set_status
+    item = set_status(code, "resolved")
+    if item is None:
+        return JSONResponse({"ok": False, "reason": "没有这张事故单"}, status_code=404)
+    return {"ok": True, "item": item}
 
 
 @app.get("/api/diagnostics/export")

@@ -307,3 +307,19 @@ export interface EventTimelineReport {
   later: EventTimelineEntry[]
   unverified: EventTimelineCandidate[]
 }
+
+// ---- 异常与通知中心 /api/incidents ----
+
+export interface Incident {
+  code: string
+  severity: 'info' | 'warning' | 'urgent'
+  title: string
+  cause: string
+  action: string
+  needs_human: boolean
+  entry: { tab?: string; script?: string }
+  status: 'active' | 'acknowledged' | 'resolved'
+  first_seen: number
+  last_seen: number
+  count: number
+}

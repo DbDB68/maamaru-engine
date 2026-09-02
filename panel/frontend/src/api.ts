@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -124,4 +124,7 @@ export const api = {
   saveBotConfig: (value: any) => request<any>('/api/bot-config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
+  incidents: () => request<{ items: Incident[]; unread: number }>('/api/incidents'),
+  ackIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/ack`, { method: 'POST' }),
+  resolveIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/resolve`, { method: 'POST' }),
 }

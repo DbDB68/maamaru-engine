@@ -14,6 +14,7 @@ import AdvancedSettingLink from './components/AdvancedSettingLink.vue'
 import SwordListDrawer from './components/SwordListDrawer.vue'
 import MaamaruFrame from './components/MaamaruFrame.vue'
 import SideNavItem from './components/SideNavItem.vue'
+import NotificationCenter from './components/NotificationCenter.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import type { ScriptInfo, ScriptParams } from './types'
 
@@ -237,6 +238,13 @@ function onReportScroll(event: Event) {
 }
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
+// 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
+function openIncidentEntry(entry: { tab?: string; script?: string }) {
+  const target = String(entry.tab || 'report')
+  if (['home', 'tasks', 'report', 'chat', 'system'].includes(target)) tab.value = target as typeof tab.value
+  if (entry.script && scripts.value[entry.script]) selected.value = entry.script
+}
+
 async function save() {
   try {
     await Promise.all([
@@ -309,6 +317,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       </nav>
       <div class="top-status">
         <i :class="{ running: stageActive }"></i><span>{{ ledgerMode ? '纯净模式' : stageActive ? '执务中' : '待命中' }}</span>
+        <NotificationCenter v-if="!ledgerMode" @open-entry="openIncidentEntry" />
         <button v-if="launcherAvailable" class="launcher-return" type="button" title="返回启动器，不会停止正在运行的任务" :disabled="returningToLauncher" @click="returnToLauncher">{{ returningToLauncher ? '正在返回…' : '返回启动器' }}</button>
         <button class="theme-button" :title="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" :aria-label="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" @click="toggleTheme"></button>
         <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
