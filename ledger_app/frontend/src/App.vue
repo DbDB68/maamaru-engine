@@ -4,6 +4,7 @@ import { api } from './api'
 import ReportPanel from './components/ReportPanel.vue'
 import PlanningPanel from './components/report/PlanningPanel.vue'
 import StyleLab from './components/StyleLab.vue'
+import WishlistPanel from './components/WishlistPanel.vue'
 import SegmentedControl from './components/SegmentedControl.vue'
 import FoxClerk from './components/FoxClerk.vue'
 import { foxMood } from './foxMood'
@@ -11,11 +12,12 @@ import { foxMood } from './foxMood'
 const loading = ref(true)
 const message = ref('')
 const theme = ref<'washi' | 'pixel'>('washi')
-const tab = ref<'report' | 'planning' | 'lab'>('report')
+const tab = ref<'report' | 'planning' | 'wishlist' | 'lab'>('report')
 
 const tabItems = [
   { value: 'report', label: '成绩单' },
   { value: 'planning', label: '规划' },
+  { value: 'wishlist', label: '心愿刀' },
   { value: 'lab', label: '试验田' },
 ]
 
@@ -67,7 +69,7 @@ onMounted(load)
           :items="tabItems"
           label="账房主标签"
           variant="wide"
-          @update:model-value="tab = $event as 'report' | 'planning' | 'lab'"
+          @update:model-value="tab = $event as 'report' | 'planning' | 'wishlist' | 'lab'"
         />
       </nav>
       <div class="top-status">
@@ -83,9 +85,10 @@ onMounted(load)
     <main v-if="!loading" class="single-layout report-page">
       <p v-if="message" class="report-error">{{ message }}</p>
       <Transition name="tab-swap" mode="out-in">
-        <ReportPanel v-if="tab === 'report'" />
-        <StyleLab v-else-if="tab === 'lab'" />
-        <PlanningPanel v-else />
+        <ReportPanel v-if="tab === 'report'" @open-wishlist="tab = 'wishlist'" />
+        <PlanningPanel v-else-if="tab === 'planning'" />
+        <WishlistPanel v-else-if="tab === 'wishlist'" />
+        <StyleLab v-else />
       </Transition>
     </main>
     <div v-else class="single-layout report-page loading">正在整理账房……</div>

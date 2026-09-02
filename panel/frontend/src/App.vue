@@ -68,6 +68,10 @@ async function chooseAdjacentHome(direction: -1 | 1) {
   homeFunctionsNav.value?.querySelector<HTMLElement>(`[data-script="${selected.value}"]`)
     ?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
 }
+function openWishlist() {
+  selected.value = '$wishlist'
+  tab.value = 'tasks'
+}
 const scriptGroups = computed(() => {
   const entries = Object.entries(scripts.value)
   const take = (...keys: string[]) => entries.filter(([key]) => keys.includes(key))
@@ -419,7 +423,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel @open-wishlist="openWishlist" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>

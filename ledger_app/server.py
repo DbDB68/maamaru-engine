@@ -169,7 +169,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/config-lists")
     async def api_get_config_lists():
-        """读取当前游戏配置里的名单（只读，供账房前端选择器使用）。"""
+        """读取当前配置里的名单。"""
         try:
             cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         except Exception:
@@ -178,6 +178,43 @@ def create_app() -> FastAPI:
             "repair_blacklist": cfg.get("repair", {}).get("blacklist", []),
             "dismantle_whitelist": cfg.get("dismantle", {}).get("whitelist", _DISMANTLE_WHITELIST),
             "sword_wishlist": cfg.get("sword_wishlist", []),
+        }
+
+    @app.post("/api/config-lists")
+    async def api_save_config_lists(request: Request):
+        """纯净账房只允许修改心愿刀，不碰自动化使用的其他名单。"""
+        body = await request.json()
+        raw = body.get("sword_wishlist")
+        if not isinstance(raw, list):
+            return JSONResponse({"detail": "心愿刀名单格式不正确"}, status_code=400)
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+        clean = []
+        for value in raw:
+            name = str(value).strip()
+            if name and name not in clean:
+                clean.append(name)
+        cfg["sword_wishlist"] = clean
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "sword_wishlist": clean}
+
+    @app.get("/api/swords")
+    async def api_swords():
+        """返回心愿刀选择器使用的刀剑名册。"""
+        from touken import sword_db
+        return {
+            "swords": [
+                {
+                    "id": sword_id,
+                    "name": info["name"],
+                    "name_zh": info.get("name_zh", ""),
+                    "type": info.get("type", "其他"),
+                }
+                for sword_id, info in sword_db.all_swords().items()
+            ]
         }
 
     # ── API：资源总账 ──

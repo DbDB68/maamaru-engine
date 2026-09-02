@@ -13,6 +13,8 @@ import PlanningPanel from './report/PlanningPanel.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
+const emit = defineEmits<{ 'open-wishlist': [] }>()
+
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>('report')
 const view = ref<'chart' | 'records'>('chart')
@@ -1145,9 +1147,10 @@ onMounted(() => load())
               <button v-if="insight.target" type="button" @click="followInsight(insight)">{{ insight.target === 'planning' ? '看规划' : insight.target === 'records' ? '看记录' : '看证据' }} →</button>
             </li>
           </ol>
-          <footer v-if="swordDropTotal || manualLoops">
+          <footer v-if="swordDropTotal || manualLoops || swordWishlist.length">
             <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
             <span v-if="wishlistHitTotal" class="wishlist">🎯 心愿命中 {{ wishlistFooter }}</span>
+            <button v-if="swordDropTotal || swordWishlist.length" type="button" class="wishlist-manage" @click="emit('open-wishlist')">{{ swordWishlist.length ? `心愿名单 ${swordWishlist.length} 把` : '＋ 设置心愿刀' }} →</button>
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
           </footer>
         </section>
@@ -1347,6 +1350,8 @@ onMounted(() => load())
 .report-glance > footer span { padding: 3px 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 12px; }
 .report-glance > footer .obtain { color: var(--fox-gold-deep); }
 .report-glance > footer .wishlist { color: #7a4b16; background: color-mix(in srgb, var(--fox-gold-pale) 78%, var(--paper)); border-color: var(--fox-gold); font-weight: 700; }
+.report-glance > footer .wishlist-manage { padding: 3px 10px; color: var(--fox-gold-deep); background: transparent; border: 1px dashed var(--fox-gold); border-radius: 999px; font-size: 12px; }
+.report-glance > footer .wishlist-manage:hover { color: var(--ink); background: var(--fox-gold-pale); }
 .report-glance > footer .manual { color: #536f8a; }
 .trend-callout { margin: 0 0 8px; padding: 8px 10px; color: var(--ink); background: var(--fox-gold-pale); border-left: 3px solid var(--fox-gold); font-size: 12px; line-height: 1.5; }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }

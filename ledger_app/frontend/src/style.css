@@ -199,16 +199,18 @@ h1, h2, h3, h4, h5 { font-family: var(--pixel-font); letter-spacing: .02em; }
   display: grid; place-items: center; min-width: 21px; height: 18px; padding: 0 5px;
   color: var(--ink-dim); background: var(--paper-panel); border-radius: 4px; font-size: 10px; font-style: normal;
 }
-.segmented-wide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.segmented-wide { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .segmented-wide button { min-height: 40px; }
-/* 两个主标签各配一枚像素小图标：卷轴记账，小判规划。 */
+/* 主标签各配一枚像素小图标。 */
 .ledger-tab-switch button::before {
   content: ''; width: 16px; height: 16px; background: currentColor;
   -webkit-mask: var(--tab-icon) center / contain no-repeat; mask: var(--tab-icon) center / contain no-repeat;
   image-rendering: pixelated;
 }
 .ledger-tab-switch button:first-child { --tab-icon: url('/static/img/ui/scrollVertical.png'); }
-.ledger-tab-switch button:last-child { --tab-icon: url('/static/img/ui/koban.png'); }
+.ledger-tab-switch button:nth-child(2) { --tab-icon: url('/static/img/ui/koban.png'); }
+.ledger-tab-switch button:nth-child(3) { --tab-icon: url('/static/img/ui/menuList.png'); }
+.ledger-tab-switch button:nth-child(4) { --tab-icon: url('/static/img/ui/gear.png'); }
 .report-toolbar-actions .segmented-control { background: var(--paper); }
 
 /* ---- 按钮与输入 ---- */

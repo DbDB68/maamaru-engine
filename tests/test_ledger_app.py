@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -85,12 +86,42 @@ def test_static_fallback_when_no_build(client, tmp_path, monkeypatch):
     assert "前端构建产物还没放进来" in resp.text
 
 
-def test_config_lists_read_only_with_missing_config(client):
+def test_config_lists_with_missing_config(client):
     resp = client.get("/api/config-lists")
     assert resp.status_code == 200
     data = resp.json()
     assert "sword_wishlist" in data
     assert data["sword_wishlist"] == []
+
+
+def test_wishlist_roundtrip_preserves_other_config(client):
+    from ledger_app import server
+
+    server.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    server.CONFIG_PATH.write_text(json.dumps({
+        "repair": {"blacklist": ["岩融"]},
+        "daily": {"enabled": True},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    resp = client.post("/api/config-lists", json={
+        "sword_wishlist": [" 姬鹤一文字 ", "", "道誉一文字", "姬鹤一文字"],
+        "repair_blacklist": ["不该被纯净账房改动"],
+    })
+    assert resp.status_code == 200
+    assert resp.json()["sword_wishlist"] == ["姬鹤一文字", "道誉一文字"]
+
+    saved = json.loads(server.CONFIG_PATH.read_text(encoding="utf-8"))
+    assert saved["sword_wishlist"] == ["姬鹤一文字", "道誉一文字"]
+    assert saved["repair"]["blacklist"] == ["岩融"]
+    assert saved["daily"] == {"enabled": True}
+
+
+def test_swords_endpoint_supplies_wishlist_candidates(client):
+    resp = client.get("/api/swords")
+    assert resp.status_code == 200
+    swords = resp.json()["swords"]
+    assert len(swords) > 100
+    assert any(item["name_zh"] == "姬鹤一文字" and item["type"] == "太刀" for item in swords)
 
 
 def test_saved_settings_roundtrip(client):
