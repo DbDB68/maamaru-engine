@@ -1,16 +1,19 @@
 <script setup lang="ts">
 // 风格试验田：保留明黄拼贴气质，但用真实页面层级验证“随身账房”。
-// 只读数据，不写任何东西；数据口径与成绩单一致。
+// 数据口径与成绩单一致；“手账”页承接绿玩也能独立使用的手动记账。
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
-import { eventTime, runStatusLabel, runTitle, signed } from './report/reportModel'
+import type { HumanReport, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
+import ManualLedger from './ManualLedger.vue'
+import { eventTime, resourceNames, signed } from './report/reportModel'
 
 type LabView = 'overview' | 'ledger' | 'records' | 'goals'
 
 const ledger = ref<ResourceLedger | null>(null)
 const planning = ref<PlanningReport | null>(null)
-const runs = ref<any[]>([])
+const humanReports = ref<HumanReport[]>([])
+const manualInventories = ref<ManualInventory[]>([])
+const manualSessions = ref<ManualSession[]>([])
 const loading = ref(true)
 const error = ref('')
 const activeView = ref<LabView>('overview')
@@ -45,7 +48,30 @@ const specialCards = computed(() => ['小判', '甲州金', '委托符', '加速
   .filter((card): card is LabCard => Boolean(card)))
 
 const hero = computed(() => cards.value.find(card => card.name === '小判') || null)
-const latestRun = computed(() => runs.value[0] || null)
+const manualGroups = computed(() => {
+  const groups = new Map<string, HumanReport[]>()
+  for (const report of humanReports.value) {
+    if (report.source !== 'proactive' || !resourceNames.includes(String(report.resource || ''))
+      || report.claimed_delta == null || !Number(report.claimed_delta)) continue
+    const key = report.group_id || `single:${report.id}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(report)
+  }
+  return [...groups.values()]
+})
+const manualEntryCount = computed(() => manualGroups.value.length + manualInventories.value.length + manualSessions.value.length)
+const latestManual = computed(() => {
+  const entries = [
+    ...manualGroups.value.map(group => ({
+      at: Number(group[0].occurred_at),
+      title: group[0].activities?.[0] || '资源收支',
+      detail: group.map(report => `${report.resource} ${signed(Number(report.claimed_delta))}`).join(' · '),
+    })),
+    ...manualInventories.value.map(item => ({ at: Number(item.ts), title: '家底盘点', detail: `${Object.keys(item.resources || {}).length} 项资源` })),
+    ...manualSessions.value.map(item => ({ at: Number(item.started_at), title: `${item.activity} · ${item.loops} 圈`, detail: `用时 ${Math.max(1, Math.round(item.duration_seconds / 60))} 分钟` })),
+  ]
+  return entries.sort((a, b) => b.at - a.at)[0] || null
+})
 const goals = computed<PlanningGoalAdvice[]>(() =>
   [...(planning.value?.goals || [])]
     .filter(goal => goal.status === 'active' || goal.status === 'behind' || goal.status === 'on_track')
@@ -71,22 +97,28 @@ function show(view: LabView) {
   document.querySelector('.style-lab')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-onMounted(async () => {
+async function loadData() {
   try {
-    const [ledgerData, planningData, runsData] = await Promise.all([
+    const [ledgerData, planningData, reportsData, inventoriesData, sessionsData] = await Promise.all([
       api.resourceLedger(7),
       api.planning().catch(() => null),
-      api.dataRuns(6).catch(() => ({ schema_version: 1, items: [], has_more: false, next_cursor: null })),
+      api.humanReports().catch(() => ({ schema_version: 1, items: [], inventory_gaps: [] })),
+      api.manualInventory(200).catch(() => ({ schema_version: 1, items: [] })),
+      api.manualSessions(200).catch(() => ({ schema_version: 1, items: [] })),
     ])
     ledger.value = ledgerData
     planning.value = planningData
-    runs.value = runsData.items || []
+    humanReports.value = reportsData.items || []
+    manualInventories.value = inventoriesData.items || []
+    manualSessions.value = sessionsData.items || []
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '账房数据没搬动'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadData)
 </script>
 
 <template>
@@ -114,11 +146,11 @@ onMounted(async () => {
               <span>先说结论，不用翻完八张卡</span>
             </article>
             <article class="lab-brief run">
-              <small>最近一次忙活</small>
-              <strong v-if="latestRun">{{ runTitle(latestRun) }}</strong>
-              <strong v-else>还没有任务记录</strong>
-              <span v-if="latestRun">{{ runStatusLabel(latestRun) }} · {{ eventTime(latestRun.started_at) }}</span>
-              <span v-else>跑过一次以后，这里会告诉你结果</span>
+              <small>最近一笔手账</small>
+              <strong v-if="latestManual">{{ latestManual.title }}</strong>
+              <strong v-else>还没有手账</strong>
+              <span v-if="latestManual">{{ latestManual.detail }} · {{ eventTime(latestManual.at) }}</span>
+              <span v-else>不连まあ丸也能从这里开始记</span>
             </article>
             <article class="lab-brief goal">
               <small>现在盯着的目标</small>
@@ -129,7 +161,10 @@ onMounted(async () => {
             </article>
           </div>
 
-          <button class="lab-forward" type="button" @click="show('ledger')">看完整家底 <span>→</span></button>
+          <div class="lab-forward-row">
+            <button class="lab-forward primary" type="button" @click="show('records')">＋ 记一笔</button>
+            <button class="lab-forward" type="button" @click="show('ledger')">看完整家底 <span>→</span></button>
+          </div>
         </section>
 
         <section v-else-if="activeView === 'ledger'" key="ledger" class="lab-view">
@@ -138,6 +173,8 @@ onMounted(async () => {
             <h2>家底摆在这</h2>
             <span>基础资材看整体，票券和货币单独放。</span>
           </header>
+
+          <button class="lab-inline-entry" type="button" @click="show('records')">＋ 记下收支、家底或活动</button>
 
           <div class="lab-resource-grid" aria-label="四项基础资材">
             <article v-for="card in basicCards" :key="card.name" class="lab-resource-card" :style="{ background: card.color }">
@@ -158,17 +195,8 @@ onMounted(async () => {
         </section>
 
         <section v-else-if="activeView === 'records'" key="records" class="lab-view">
-          <header class="lab-view-head"><p>任务记录</p><h2>最近忙活</h2><span>先看结果，需要细账再回成绩单。</span></header>
-          <div class="lab-records">
-            <div class="lab-records-head"><span>{{ runs.length ? `${runs.length} 条` : '还没记录' }}</span></div>
-            <ul v-if="runs.length">
-              <li v-for="run in runs" :key="run.run_id || run.started_at">
-                <span class="lab-record-title">{{ runTitle(run) }}</span>
-                <span class="lab-record-meta">{{ run.started_at ? eventTime(run.started_at) : '' }} · {{ runStatusLabel(run) }}</span>
-              </li>
-            </ul>
-            <p v-else class="lab-empty">账本还空着，等它跑几圈就有了</p>
-          </div>
+          <header class="lab-view-head"><p>{{ manualEntryCount }} 条手账</p><h2>今天记点啥</h2><span>收支、家底和自己打的活动，都归到一本账。</span></header>
+          <ManualLedger :reports="humanReports" :inventories="manualInventories" :sessions="manualSessions" @changed="loadData" />
         </section>
 
         <section v-else key="goals" class="lab-view">
@@ -188,7 +216,7 @@ onMounted(async () => {
       <nav class="lab-nav" aria-label="试验田导航">
         <button type="button" :class="{ active: activeView === 'overview' }" :aria-current="activeView === 'overview' ? 'page' : undefined" @click="show('overview')">🏠<span>总览</span></button>
         <button type="button" :class="{ active: activeView === 'ledger' }" :aria-current="activeView === 'ledger' ? 'page' : undefined" @click="show('ledger')">📒<span>账本</span></button>
-        <button type="button" :class="{ active: activeView === 'records' }" :aria-current="activeView === 'records' ? 'page' : undefined" @click="show('records')">🧾<span>记录</span></button>
+        <button type="button" :class="{ active: activeView === 'records' }" :aria-current="activeView === 'records' ? 'page' : undefined" @click="show('records')">✎<span>手账</span></button>
         <button type="button" :class="{ active: activeView === 'goals' }" :aria-current="activeView === 'goals' ? 'page' : undefined" @click="show('goals')">🎯<span>目标</span></button>
       </nav>
     </template>
@@ -233,8 +261,11 @@ onMounted(async () => {
 .lab-brief small { font-size: 11px; font-weight: 800; opacity: .65; }
 .lab-brief strong { font-size: 19px; font-weight: 900; }
 .lab-brief span { font-size: 12.5px; font-weight: 650; opacity: .72; }
-.lab-forward { width: 100%; margin-top: 22px; padding: 14px 18px; border: 0; border-radius: 18px; background: #fff; color: var(--lab-ink); font-weight: 900; text-align: left; cursor: pointer; }
+.lab-forward-row { display: grid; grid-template-columns: .7fr 1.3fr; gap: 9px; margin-top: 22px; }
+.lab-forward { width: 100%; padding: 14px 18px; border: 0; border-radius: 18px; background: #fff; color: var(--lab-ink); font-weight: 900; text-align: left; cursor: pointer; }
+.lab-forward.primary { background: var(--lab-ink); color: #fff4bb; }
 .lab-forward span { float: right; font-size: 18px; }
+.lab-inline-entry { width: 100%; margin-top: 18px; padding: 12px 16px; border: 2px solid var(--lab-ink); border-radius: 16px; background: #fff; color: var(--lab-ink); font-weight: 850; text-align: left; cursor: pointer; }
 
 .lab-resource-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 28px; }
 .lab-resource-card { min-width: 0; padding: 16px; border: 2px solid var(--lab-ink); border-radius: 22px; box-shadow: 0 5px 0 rgba(29, 26, 18, .14); }
@@ -250,15 +281,6 @@ onMounted(async () => {
 .lab-special-grid span { font-size: 12px; font-weight: 800; opacity: .65; }
 .lab-special-grid strong { font-size: 21px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .lab-special-grid em { font-size: 10.5px; font-weight: 700; font-style: normal; opacity: .62; }
-
-.lab-records { margin-top: 26px; padding: 18px; background: #fff; border-radius: 22px; box-shadow: 0 6px 0 rgba(29, 26, 18, .14); }
-.lab-records-head { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-.lab-records-head span { font-size: 12px; font-weight: 800; opacity: .58; }
-.lab-records ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.lab-records li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 13px; border-radius: 14px; background: #f3f0e8; }
-.lab-record-title { font-size: 14px; font-weight: 850; }
-.lab-record-meta { font-size: 11px; opacity: .62; white-space: nowrap; }
-.lab-empty { margin: 6px 0 2px; font-size: 13px; font-weight: 650; opacity: .65; }
 
 .lab-goals { display: grid; gap: 12px; margin-top: 28px; }
 .lab-goal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 18px 20px; border-radius: 22px; background: var(--lab-ink); color: #ffd94d; }
@@ -284,9 +306,7 @@ onMounted(async () => {
   .lab-resource-card { padding: 14px 12px; }
   .lab-resource-card header { align-items: flex-start; }
   .lab-resource-card .lab-chip { padding: 3px 7px; font-size: 10px; }
-  .lab-records { padding: 14px; }
-  .lab-records li { align-items: flex-start; flex-direction: column; gap: 3px; }
-  .lab-record-meta { white-space: normal; }
+  .lab-forward-row { grid-template-columns: 1fr; }
   .lab-nav { margin-inline: 2px; }
   .lab-nav button { min-width: 48px; padding-inline: 7px; }
 }

@@ -103,6 +103,66 @@ def test_saved_settings_roundtrip(client):
     assert resp.json()["theme"] == "pixel"
 
 
+def test_manual_resource_group_roundtrip(client):
+    created = client.post("/api/data/human-reports/batch", json={
+        "occurred_at": 1_700_000_000,
+        "activities": ["领邮箱"],
+        "note": "绿玩手账",
+        "entries": {"小判": 1200, "木炭": -50},
+    })
+    assert created.status_code == 200
+    group_id = created.json()["group_id"]
+
+    updated = client.put(f"/api/data/human-reports/group/{group_id}", json={
+        "occurred_at": 1_700_000_100,
+        "activities": ["手动领奖"],
+        "note": "改好了",
+        "entries": {"小判": 1300},
+    })
+    assert updated.status_code == 200
+    listing = client.get("/api/data/human-reports").json()["items"]
+    assert [(item["resource"], item["claimed_delta"]) for item in listing] == [("小判", 1300)]
+
+    assert client.delete(f"/api/data/human-reports/group/{group_id}").status_code == 200
+    assert client.get("/api/data/human-reports").json()["items"] == []
+
+
+def test_manual_inventory_roundtrip(client):
+    created = client.post("/api/data/manual-inventory", json={
+        "observed_at": 1_700_000_000,
+        "resources": {"小判": 50_000, "木炭": 12_000},
+    })
+    assert created.status_code == 200
+    event_id = created.json()["snapshot"]["id"]
+
+    updated = client.put(f"/api/data/manual-inventory/{event_id}", json={
+        "observed_at": 1_700_000_100,
+        "resources": {"小判": 51_000},
+    })
+    assert updated.status_code == 200
+    assert updated.json()["snapshot"]["resources"] == {"小判": 51_000}
+    assert client.delete(f"/api/data/manual-inventory/{event_id}").status_code == 200
+    assert client.get("/api/data/manual-inventory").json()["items"] == []
+
+
+def test_manual_session_roundtrip(client):
+    created = client.post("/api/data/manual-sessions", json={
+        "script": "edocastle", "started_at": 1_700_000_000,
+        "ended_at": 1_700_003_600, "loops": 6, "note": "自己打的",
+    })
+    assert created.status_code == 200
+    session_id = created.json()["item"]["id"]
+
+    updated = client.put(f"/api/data/manual-sessions/{session_id}", json={
+        "script": "edocastle", "started_at": 1_700_000_000,
+        "ended_at": 1_700_004_200, "loops": 7, "note": "多打一圈",
+    })
+    assert updated.status_code == 200
+    assert updated.json()["item"]["loops"] == 7
+    assert client.delete(f"/api/data/manual-sessions/{session_id}").status_code == 200
+    assert client.get("/api/data/manual-sessions").json()["items"] == []
+
+
 def teardown_module():
     # 清理模块级临时目录
     shutil.rmtree(_tmp_root, ignore_errors=True)
