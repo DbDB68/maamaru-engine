@@ -10,7 +10,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
-  settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string }>('/api/saved-settings'),
+  settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; hero_resource?: string }>('/api/saved-settings'),
   saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -18,6 +18,9 @@ export const api = {
   }),
   saveTheme: (theme: string) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme }),
+  }),
+  saveLedgerHeroResource: (heroResource: string) => request<{ ok: boolean }>('/api/saved-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hero_resource: heroResource }),
   }),
   run: (script: string, params: ScriptParams) => request<{ ok: boolean }>('/api/scripts/run', {
     method: 'POST',

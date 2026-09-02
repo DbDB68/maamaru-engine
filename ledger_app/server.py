@@ -161,6 +161,9 @@ def create_app() -> FastAPI:
             existing["params"] = clean
         if body.get("theme") in ("washi", "pixel"):
             existing["theme"] = body["theme"]
+        if body.get("hero_resource") in (
+                "小判", "木炭", "玉钢", "冷却材", "砥石", "委托符", "加速符", "甲州金"):
+            existing["hero_resource"] = body["hero_resource"]
         _save_panel_settings(existing)
         return {"ok": True}
 

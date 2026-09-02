@@ -94,13 +94,31 @@ def test_config_lists_read_only_with_missing_config(client):
 
 
 def test_saved_settings_roundtrip(client):
-    resp = client.post("/api/saved-settings", json={"theme": "pixel"})
+    resp = client.post("/api/saved-settings", json={"theme": "pixel", "hero_resource": "玉钢"})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
     resp = client.get("/api/saved-settings")
     assert resp.status_code == 200
     assert resp.json()["theme"] == "pixel"
+    assert resp.json()["hero_resource"] == "玉钢"
+
+
+def test_custom_goal_roundtrip(client):
+    created = client.post("/api/planning/goals", json={
+        "goal_mode": "amount_target", "resource": "玉钢",
+        "target": 100_000, "note": "下一轮锻刀",
+    })
+    assert created.status_code == 200
+    goal_id = created.json()["goal"]["id"]
+
+    planning = client.get("/api/planning")
+    assert planning.status_code == 200
+    goal = next(item for item in planning.json()["goals"] if item["id"] == goal_id)
+    assert goal["resource"] == "玉钢"
+    assert goal["target"] == 100_000
+    assert client.delete(f"/api/planning/goals/{goal_id}").status_code == 200
+    assert client.get("/api/planning").json()["goals"] == []
 
 
 def test_manual_resource_group_roundtrip(client):
