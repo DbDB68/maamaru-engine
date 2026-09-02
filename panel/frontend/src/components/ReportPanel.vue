@@ -688,12 +688,15 @@ const dayDetail = computed(() => {
     unexplained,
     attributions: (ledger.value?.attributions || []).filter(item => item.resource === resource && start <= item.ts && item.ts < end),
     runs: runs.value.filter(run => start <= Number(run.started_at) && Number(run.started_at) < end),
+    manualReports: recentManualReports.value.filter(report => report.resource === resource
+      && start <= Number(report.occurred_at) && Number(report.occurred_at) < end),
+    manualSessions: manualSessions.value.filter(item => Number(item.started_at) < end && Number(item.ended_at) >= start),
     gaps: unreportedGaps.value.filter(gap => gap.started_at < end && gap.ended_at >= start
       && Number(gap.resource_delta?.[resource] || 0) !== 0),
   }
 })
 
-// ---- 审神者报备 ----
+// ---- 手动补账 ----
 
 const reportMode = ref('')
 const reportGap = ref<InventoryGap | null>(null)
@@ -828,7 +831,7 @@ async function saveHumanReport(skip = false) {
         : `已记下 ${reportForm.value.resource} ${signed(Number(reportForm.value.claimed_delta))}。`
     }
     reportMode.value = ''; reportGap.value = null; editingManualReport.value = null
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '审神者报备保存失败' }
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '手动补账保存失败' }
   finally { reportSaving.value = false }
 }
 
@@ -1251,14 +1254,14 @@ onMounted(() => load())
         </form>
 
         <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
-          <header class="report-form-heading"><div><h4>{{ reportGap ? '说明这段差值' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '认领这笔变化' : '记一笔收支' }}</h4><p>{{ reportGap ? '说说这期间做过什么，不用硬猜具体数额。' : reportForm.claim_limit != null ? '确认其中有多少是你自己操作造成的。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
-          <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>认领这笔：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
+          <header class="report-form-heading"><div><h4>{{ reportGap ? '补上这段账' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '补上这笔账' : '记一笔收支' }}</h4><p>{{ reportGap ? '只记你能确定的；具体数额不用硬猜。' : reportForm.claim_limit != null ? '账房已经列出当天线索；想不起来也可以如实记下。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
+          <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>待补：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
             <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
           </template>
-          <label v-if="reportForm.resource && reportForm.claim_limit != null">认领数额<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多认领当前灰色部分 {{ signed(reportForm.claim_limit) }}</small></label>
+          <label v-if="reportForm.resource && reportForm.claim_limit != null">其中有多少是这次操作<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多补到当前没对上的 {{ signed(reportForm.claim_limit) }}</small></label>
           <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
-          <fieldset><legend>{{ reportGap ? '这个时间段你做过什么？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', '没有其他操作']" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
+          <fieldset><legend>{{ reportGap || reportForm.claim_limit != null ? '你记得它来自哪里？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', ...(reportGap ? ['没有其他操作'] : [])]" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
           <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '保存中……' : editingManualReport ? '保存修改' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null; editingManualReport = null">取消</button></div>
         </form>

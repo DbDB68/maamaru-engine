@@ -14,7 +14,7 @@ export const sourceCategories: SourceCategory[] = [
   { key: 'task_rewards', label: '任务报酬', color: '#9a7bb0' },
   { key: 'yosari', label: '异去', color: '#4fa3a5' },
   { key: 'other', label: '其他来源', color: '#c7b299' },
-  { key: 'human', label: '审神者已说明', color: '#a89c8d' },
+  { key: 'human', label: '你补记的', color: '#a89c8d' },
   { key: 'unknown', label: '还不知道', color: '#ddd6cb' },
 ]
 
