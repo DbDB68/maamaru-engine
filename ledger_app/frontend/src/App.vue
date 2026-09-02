@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { api } from './api'
 import ReportPanel from './components/ReportPanel.vue'
 import PlanningPanel from './components/report/PlanningPanel.vue'
+import StyleLab from './components/StyleLab.vue'
 import SegmentedControl from './components/SegmentedControl.vue'
 import FoxClerk from './components/FoxClerk.vue'
 import { foxMood } from './foxMood'
@@ -10,11 +11,12 @@ import { foxMood } from './foxMood'
 const loading = ref(true)
 const message = ref('')
 const theme = ref<'washi' | 'pixel'>('washi')
-const tab = ref<'report' | 'planning'>('report')
+const tab = ref<'report' | 'planning' | 'lab'>('report')
 
 const tabItems = [
   { value: 'report', label: '成绩单' },
   { value: 'planning', label: '规划' },
+  { value: 'lab', label: '试验田' },
 ]
 
 function applyTheme() { document.body.dataset.theme = theme.value }
@@ -65,7 +67,7 @@ onMounted(load)
           :items="tabItems"
           label="账房主标签"
           variant="wide"
-          @update:model-value="tab = $event as 'report' | 'planning'"
+          @update:model-value="tab = $event as 'report' | 'planning' | 'lab'"
         />
       </nav>
       <div class="top-status">
@@ -82,6 +84,7 @@ onMounted(load)
       <p v-if="message" class="report-error">{{ message }}</p>
       <Transition name="tab-swap" mode="out-in">
         <ReportPanel v-if="tab === 'report'" />
+        <StyleLab v-else-if="tab === 'lab'" />
         <PlanningPanel v-else />
       </Transition>
     </main>
