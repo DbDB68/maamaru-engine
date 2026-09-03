@@ -141,7 +141,7 @@ maamaru-engine/
 
 まあ丸使用 [MaaFramework](https://github.com/MaaXYZ/MaaFramework) 提供的视觉识别能力，并由 [FastAPI](https://github.com/tiangolo/fastapi)、[Vue](https://github.com/vuejs/core)、[Vite](https://github.com/vitejs/vite)、[pywebview](https://github.com/r0x0r/pywebview)、[Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) 与 [Kenney Game Icons](https://kenney.nl/assets/game-icons) 等开源项目共同支撑。完整许可证信息见 [NOTICE](NOTICE)。
 
-まあ丸本身也由人类与 AI 协作开发：人类提出真实场景、定义玩法规则和安全边界、判断方案并实机验收；Kimi Code、Codex、WorkBuddy 等工具协作实现与检查。
+まあ丸本身也由人类与 AI 共同开发：人类提出真实场景、定义玩法规则和安全边界、判断方案并实机验收；Kimi Code K3、Codex 与 WorkBuddy 作为协作者参与实现、排障、测试和发布。
 
 本项目以 [AGPL-3.0-or-later](LICENSE) 开源。
 
