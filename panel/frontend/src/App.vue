@@ -15,6 +15,7 @@ import SwordListDrawer from './components/SwordListDrawer.vue'
 import MaamaruFrame from './components/MaamaruFrame.vue'
 import SideNavItem from './components/SideNavItem.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
+import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import type { ScriptInfo, ScriptParams } from './types'
 
@@ -301,7 +302,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
   <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed, 'ledger-mode': ledgerMode }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
-      <div class="stage-fox" aria-hidden="true"></div>
+      <StageActors :active="stageActive" />
       <div class="stage-status">
         <small>{{ stagePlace }}</small>
         <strong>{{ stageFlavor }}</strong>
