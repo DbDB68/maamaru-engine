@@ -387,10 +387,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .system-panel .system-form input, .system-panel .system-form select, .system-panel .system-form textarea { padding: 9px 10px; font-size: 14px; font-weight: 400; }
 .system-panel .system-form textarea { min-height: 150px; }
 .system-panel .system-nav button { font-size: 14px; }
-.chat-page, .system-page, .report-page { padding: 0; }
+.chat-page, .system-page, .report-page, .workflow-page { padding: 0; }
 .chat-page > .maamaru-surface > .chat-panel,
-.system-page > .maamaru-surface > .system-panel { border: 0; border-radius: 0; box-shadow: none; }
-.chat-page .page-toolbar, .system-page .page-toolbar { flex: 0 0 64px; }
+.system-page > .maamaru-surface > .system-panel,
+.workflow-page > .maamaru-surface > .workflow-panel { border: 0; border-radius: 0; box-shadow: none; }
+.chat-page .page-toolbar, .system-page .page-toolbar, .workflow-page .page-toolbar { flex: 0 0 64px; }
 .chat-page .messages { padding-inline: clamp(22px, 4vw, 58px); }
 .chat-page .message p { max-width: min(72%, 820px); }
 .system-page .system-layout { grid-template-columns: 210px minmax(0, 1fr); }
@@ -889,7 +890,7 @@ body[data-theme='pixel'] .single-frame > .maamaru-surface {
   padding: 12px;
   overflow: auto;
 }
-body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar {
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page, .workflow-page) .page-toolbar {
   min-height: 52px;
   flex: 0 0 52px;
   padding: 7px 4px;
@@ -897,9 +898,9 @@ body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolb
   border: 0;
   border-bottom: 1px solid #c8bea5;
 }
-body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar h2 { font-size: 14px; }
-body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar p { font-size: 12px; }
-body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page) .page-toolbar h2::before { background: #c9a227; }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page, .workflow-page) .page-toolbar h2 { font-size: 14px; }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page, .workflow-page) .page-toolbar p { font-size: 12px; }
+body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page, .workflow-page) .page-toolbar h2::before { background: #c9a227; }
 
 /* 近侍：米色工作台承载标题，只有消息记录本身是一张白纸，不套整页白卡。 */
 body[data-theme='pixel'] .chat-page > .maamaru-surface { overflow: hidden; }
@@ -2003,17 +2004,16 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
 }
 
 /* 个人首页与执务共用庭院；导航增加入口后仍保持一条可滚动的目录。 */
-/* The sticky save bar meets the scrollport edge, without a gap showing steps beneath it. */
-.workflow-page.single-layout { padding: 28px 28px 0; background: var(--paper); }
-body[data-theme='pixel'] .workflow-page > .maamaru-surface { padding: 28px 28px 0; background: var(--paper); }
+/* 工作流页已并入通用页家族（padding 0 + page-toolbar 顶栏），内容边距由
+   WorkflowPanel 的 .wf-layout 自理；底部留出空间防止 sticky 保存条贴边。 */
 .workflow-live-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 20px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; }
 .workflow-live-bar strong { flex: 1; font-size: 15px; }
 .workflow-live-bar button { padding: 9px 13px; border: 1px solid var(--paper-line); border-radius: 5px; color: var(--ink); background: var(--paper); cursor: pointer; }
 .workflow-live-bar button:last-child { color: #a04b3a; }
 @media (max-width: 720px) {
-  .workflow-page.single-layout { height: auto; overflow: visible; padding: 20px 14px; }
+  .workflow-page.single-layout { height: auto; overflow: visible; padding: 0; }
   body[data-theme='pixel'] .workflow-page { height: auto; overflow: visible; padding: 3px; }
-  body[data-theme='pixel'] .workflow-page > .maamaru-surface { height: auto; overflow: visible; padding: 20px 12px; }
+  body[data-theme='pixel'] .workflow-page > .maamaru-surface { height: auto; overflow: visible; }
 }
 .topnav { min-width: 0; overflow-x: auto; flex-shrink: 1; }
 .topnav button { flex-shrink: 0; }

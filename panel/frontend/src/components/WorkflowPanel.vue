@@ -288,7 +288,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 
 <template>
   <section class="workflow-panel wf-panel">
-    <PanelHeader :variant="embedded ? 'embedded' : 'section'" title="工作流" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
+    <PanelHeader :variant="embedded ? 'embedded' : 'page'" title="工作流" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
     <p v-if="loading" class="wf-loading">正在取出你的流程…</p>
     <p v-else-if="loadError" class="wf-loading" role="alert">{{ loadError }} <button class="wf-button" @click="load">重新加载</button></p>
     <div v-else class="wf-layout">
@@ -374,13 +374,12 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 
 <style scoped>
 .wf-panel { color: var(--ink); }
-/* This heading scrolls with the page; the shared sticky, blurred header would cover the editor. */
-.wf-panel :deep(.section-head) { position: static; padding: 0 0 14px; border: 0; background: none; backdrop-filter: none; box-shadow: none; }
-.wf-panel :deep(.section-head h2) { font-size: 24px; }
+/* 页面改用通用 page-toolbar 顶部（与本丸/近侍一致）；页面 padding 为 0，
+   内容区自己留边距。 */
 .wf-panel button, .wf-dialog button { cursor: pointer; font: inherit; }
 .wf-panel button:disabled, .wf-dialog button:disabled { cursor: default; opacity: .42; }
 .wf-panel button:focus-visible, .wf-dialog button:focus-visible, .wf-dialog input:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
-.wf-layout { display: grid; grid-template-columns: 205px minmax(0, 1fr); gap: 28px; align-items: start; }
+.wf-layout { display: grid; grid-template-columns: 205px minmax(0, 1fr); gap: 28px; align-items: start; padding: 22px clamp(22px, 4vw, 58px); }
 .wf-library { padding-top: 8px; min-width: 0; }
 .wf-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
 .wf-library h3 { margin: 0; font-size: 13px; }
@@ -462,7 +461,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-running { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 26px; border-top: 1px solid var(--paper-line); font-size: 12px; }
 .wf-message { margin: 0; padding: 12px 26px; font-size: 12px; }
 .wf-danger { color: #a04b3a !important; }
-.wf-loading { padding: 30px 0; color: var(--ink-dim); font-size: 13px; }
+.wf-loading { padding: 30px clamp(22px, 4vw, 58px); color: var(--ink-dim); font-size: 13px; }
 .wf-dialog { padding: 0; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); width: min(700px, calc(100% - 32px)); max-height: calc(100dvh - 48px); box-shadow: 0 22px 80px #251a1140; }
 .wf-dialog::backdrop { background: #30291f80; }
 .wf-picker[open] { display: flex; flex-direction: column; }
@@ -500,8 +499,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
   .wf-step-detail { padding-left: 18px; }
 }
 @media (max-width: 720px) {
-  .wf-panel :deep(.section-head) { padding-bottom: 16px; }
-  .wf-layout { grid-template-columns: 1fr; gap: 18px; }
+  .wf-layout { grid-template-columns: 1fr; gap: 18px; padding: 16px 14px; }
   .wf-library { padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
   .wf-library > header { flex: 1; margin: 0; }
   .wf-new { width: auto; }
