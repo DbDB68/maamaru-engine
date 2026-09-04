@@ -319,6 +319,7 @@ async function load() {
     eventHidden.value = scriptData.event_hidden || []
     theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
     applyTheme()
+    applyBackdrop(saved.backdrop)
     params.value = Object.fromEntries(Object.entries(scriptData.scripts).map(([key, info]) => [
       key,
       { ...defaults(info), ...migrateParams(key, saved.params?.[key] || {}) },
@@ -340,6 +341,10 @@ async function load() {
 }
 
 function applyTheme() { document.body.dataset.theme = theme.value }
+function applyBackdrop(color?: string) {
+  if (color && /^#[0-9a-fA-F]{6}$/.test(color)) document.body.style.setProperty('--space-backdrop', color)
+  else document.body.style.removeProperty('--space-backdrop')
+}
 async function toggleTheme() { theme.value = theme.value === 'washi' ? 'pixel' : 'washi'; applyTheme(); await api.saveTheme(theme.value) }
 type LauncherWindow = Window & { pywebview?: { api?: { return_to_launcher?: () => Promise<{ ok: boolean; message?: string }> } } }
 function detectLauncherBridge() {
