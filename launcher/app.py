@@ -53,8 +53,13 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .checks-count{display:block;margin-top:9px;color:var(--muted);font-size:11px}
 .loading{padding:30px 0;color:var(--muted);text-align:center;font-size:13px}
 .tools{padding:14px 16px;display:flex;flex-direction:column;gap:7px;background:#fdf6e7}
-.tools button{min-height:34px;padding:6px 12px;text-align:left;color:#554b40;background:var(--card);border:1px solid #d3c5af;border-radius:8px;font-size:13px}
+.tools button{display:flex;align-items:center;gap:10px;min-height:36px;padding:4px 10px;text-align:left;color:#554b40;background:var(--card);border:1px solid #d3c5af;border-radius:8px;font-size:13px}
 .tools button:hover{background:#fff;border-color:#b99e72}.tools button:disabled{cursor:not-allowed;opacity:.55}
+.tool-symbol{display:grid;place-items:center;width:26px;height:26px;flex:0 0 26px;border-radius:6px;color:var(--gold-deep);background:#f3ead6}
+.tools button:hover .tool-symbol{background:#f5e5bc}.tools button:focus-visible{outline:2px solid var(--gold-deep);outline-offset:2px}
+.launcher-icon{display:block;width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.check-row .mark .launcher-icon{width:12px;height:12px;stroke-width:2}.status .mark .launcher-icon{width:17px;height:17px;stroke-width:2}
+.check-row.info .mark{color:#856523;background:#eee2c6}
 .runbar{margin-top:12px;padding:10px 18px 14px;background:var(--card);border:1px solid var(--line);border-radius:14px}
 .run-track{position:relative;height:40px;border-bottom:2px dashed var(--gold);margin-bottom:8px}
 .run-fox{position:absolute;bottom:0;display:none;width:48px;height:48px;background:url("__FOX1_URI__") no-repeat center/contain;image-rendering:pixelated;animation:fox-run 18s linear infinite,fox-frames 1.2s steps(1,end) infinite,fox-bob .6s ease-in-out infinite}
@@ -82,7 +87,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 <div class="garden"><img src="__GARDEN_URI__" alt="雨中的本丸庭院，狐之助坐在缘侧"></div>
 <section class="panel">
 <div class="checks"><h3>检查</h3><div id="checks"><div class="loading">狐之助正在巡查……</div></div><span id="checksCount" class="checks-count"></span></div>
-<div class="tools"><h3>功能</h3><button onclick="refresh()">↻ 重新检查</button><button onclick="repair()">🔧 修复环境</button><button onclick="openData()">📁 数据目录</button><button id="migrateDataButton" onclick="migrateData(this)">🗂️ 迁移数据</button><button id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">🧹 清理旧副本</button><button onclick="chooseEmulator(this)">🖥️ 选择模拟器</button><button id="feedbackButton" onclick="exportFeedback(this)">📦 反馈错误</button><button id="issueButton" style="display:none" onclick="openIssue()">↗ 去 Issue</button><button onclick="update()">⬆ 检查更新</button><p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p></div>
+<div class="tools"><h3>功能</h3><button data-icon="refresh" onclick="refresh()">重新检查</button><button data-icon="repair" onclick="repair()">修复环境</button><button data-icon="folder" onclick="openData()">数据目录</button><button data-icon="move" id="migrateDataButton" onclick="migrateData(this)">迁移数据</button><button data-icon="sweep" id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">清理旧副本</button><button data-icon="monitor" onclick="chooseEmulator(this)">选择模拟器</button><button data-icon="report" id="feedbackButton" onclick="exportFeedback(this)">反馈错误</button><button data-icon="external" id="issueButton" style="display:none" onclick="openIssue()">去 Issue</button><button data-icon="update" onclick="update()">检查更新</button><p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p></div>
 </section>
 </div>
 <div id="runbar" class="runbar">
@@ -93,19 +98,41 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 </main>
 <script>
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const stateIcon={error:'×',warn:'!',info:'i',ok:'✓'};
+// Small, code-native icons share the panel's rounded 16px line style.
+const iconPaths={
+ refresh:'M13.5 6A5.5 5.5 0 1 0 13 11M13.5 2v4H9.5',
+ repair:'M9.5 2a4 4 0 0 0-4.7 4.7L1.5 10a2.1 2.1 0 0 0 3 3l3.3-3.3A4 4 0 0 0 12.5 5L10 7 8 5z',
+ folder:'M1.5 12.5v-9h4l2 2h7v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1ZM1.5 6.5h13',
+ move:'M6 13.5H2.5a1 1 0 0 1-1-1v-9h4l2 2h6v2M7 11h7m-3-3 3 3-3 3',
+ sweep:'m10.5 1.5-4 6M4 7l5 3-3 4H1.5L2 10zM4 10l-1 3.5M10 13.5h4M12 10.5h2',
+ monitor:'M1.5 2.5h13v9h-13zM8 11.5v3M5 14.5h6M4 5.5h3M4 8h5',
+ report:'M9.5 1.5h-7v13h11v-9zM9.5 1.5v4h4M8 7.5v3M8 12.5h.01',
+ external:'M9 2h5v5M14 2 7 9M6 3H2v11h11v-4',
+ update:'M8 11V2m-3 3 3-3 3 3M2 10v4h12v-4',
+ check:'m3 8 3.5 3.5L13 4.5',
+ close:'m4 4 8 8M12 4l-8 8',
+ warn:'M8 3v6M8 12h.01',
+ info:'M8 7v5M8 4h.01',
+ wait:'M3 8h.01M8 8h.01M13 8h.01',
+};
+function icon(name){return `<svg class="launcher-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="${iconPaths[name]||iconPaths.info}"/></svg>`}
+function setToolLabel(button,label){button.innerHTML=`<span class="tool-symbol" aria-hidden="true">${icon(button.dataset.icon)}</span><span>${esc(label)}</span>`}
+document.querySelectorAll('.tools button[data-icon]').forEach(button=>setToolLabel(button,button.textContent));
+const stateIcon={error:'close',warn:'warn',info:'info',ok:'check'};
+const stateMarkIcon={'×':'close','!':'warn','i':'info','✓':'check','…':'wait'};
+document.querySelector('#stateMark').innerHTML=icon('wait');
 const issueUrl='https://github.com/DbDB68/maamaru-engine/issues/new';let feedbackFailures=0;let feedbackResetTimer=0;const feedbackLines={1:'导出失败？问问上天',2:'还失败？去issue骂作者',4:'干嘛不去？',5:'你是不是想骂连错误处理系统都做不好？',6:'噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',7:'面包店里卖面包，蛋糕店里卖蛋糕。',8:'你还点',9:'？',10:'我没有日志，你也不去issue，你到底想让我怎样'};
-function setState(kind,title,copy,mark){const status=document.querySelector('#status');status.className='status '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').textContent=mark;document.querySelector('#runbar').classList.toggle('busy',kind==='')}
+function setState(kind,title,copy,mark){const status=document.querySelector('#status');status.className='status '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').innerHTML=icon(stateMarkIcon[mark]||'info');document.querySelector('#runbar').classList.toggle('busy',kind==='')}
 function setProgress(ratio){document.querySelector('#barFill').style.width=(Math.max(0,Math.min(1,ratio))*100).toFixed(1)+'%'}
 function renderChecks(items){
  const issues=items.filter(x=>x.state==='error'||x.state==='warn');
- document.querySelector('#checks').innerHTML=`<div class="check-list">${items.map(x=>`<div class="check-row ${x.state}"><span class="mark">${stateIcon[x.state]||'i'}</span><div title="${esc(x.label)}：${esc(x.detail)}"><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div></div>`).join('')}</div>`;
+ document.querySelector('#checks').innerHTML=`<div class="check-list">${items.map(x=>`<div class="check-row ${x.state}"><span class="mark">${icon(stateIcon[x.state]||'info')}</span><div title="${esc(x.label)}：${esc(x.detail)}"><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div></div>`).join('')}</div>`;
  document.querySelector('#checksCount').textContent=`${items.length} 项 · ${issues.length?issues.length+' 项提醒':'全部通过'}`;
  return issues;
 }
 async function refresh(){
  setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');setProgress(0);const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
- const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'inline-block':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';const ledger=document.querySelector('#ledgerStart');ledger.disabled=false;
+ const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'flex':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';const ledger=document.querySelector('#ledgerStart');ledger.disabled=false;
  const issues=renderChecks(data.items);const warnings=issues.filter(x=>x.state==='warn').length;
  if(data.blocked){setState('blocked','还差一步','先处理上方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
  else if(warnings){setState('ready','准备就绪',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
@@ -135,11 +162,11 @@ async function update(){
  }else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
  await refresh();
 }
-async function exportFeedback(button){if(button.disabled)return;button.disabled=true;button.textContent='正在整理…';let r;try{r=await pywebview.api.export_diagnostics()}catch(_){r={ok:false}}if(r.ok){alert(r.message);feedbackFailures=0;document.querySelector('#issueButton').style.display='none';button.disabled=false;button.textContent='📦 反馈错误';return}feedbackFailures+=1;if(feedbackFailures===3){document.querySelector('#issueButton').style.display='inline-block'}else if(feedbackFailures>=11){button.textContent='狐之助已下班';clearTimeout(feedbackResetTimer);feedbackResetTimer=setTimeout(()=>{feedbackFailures=0;button.disabled=false;button.textContent='📦 反馈错误';document.querySelector('#issueButton').style.display='none'},3000);return}else{alert(feedbackLines[feedbackFailures]||'导出失败')}button.disabled=false;button.textContent='📦 反馈错误'}
+async function exportFeedback(button){if(button.disabled)return;button.disabled=true;setToolLabel(button,'正在整理…');let r;try{r=await pywebview.api.export_diagnostics()}catch(_){r={ok:false}}if(r.ok){alert(r.message);feedbackFailures=0;document.querySelector('#issueButton').style.display='none';button.disabled=false;setToolLabel(button,'反馈错误');return}feedbackFailures+=1;if(feedbackFailures===3){document.querySelector('#issueButton').style.display='flex'}else if(feedbackFailures>=11){setToolLabel(button,'狐之助已下班');clearTimeout(feedbackResetTimer);feedbackResetTimer=setTimeout(()=>{feedbackFailures=0;button.disabled=false;setToolLabel(button,'反馈错误');document.querySelector('#issueButton').style.display='none'},3000);return}else{alert(feedbackLines[feedbackFailures]||'导出失败')}button.disabled=false;setToolLabel(button,'反馈错误')}
 async function openIssue(){await pywebview.api.open_url(issueUrl)}
 async function openData(){await pywebview.api.open_data()}
 async function chooseEmulator(button){button.disabled=true;const r=await pywebview.api.choose_emulator();if(r.message)alert(r.message);button.disabled=false;if(r.ok)await refresh()}
-async function migrateData(button){button.disabled=true;let chosen;try{chosen=await pywebview.api.choose_data_location()}catch(_){chosen={ok:false,message:'没能打开目录选择器'}}if(!chosen.ok){button.disabled=false;if(chosen.message)alert(chosen.message);return}if(!confirm(`まあ丸会先完整复制并校验用户数据，再让下次启动改用：\n\n${chosen.target}\n\n原目录暂时保留，确认新目录可用后可在启动器清理。现在开始吗？`)){button.disabled=false;return}button.textContent='正在迁移…';setState('','正在迁移数据','狐之助正在搬运家当，搬完会点一遍数。','…');const r=await pywebview.api.migrate_data(chosen.selected);alert(r.message);button.disabled=false;button.textContent='🗂️ 迁移数据';await refresh();if(r.ok){alert('请关闭并重新打开まあ丸。新目录通过启动检查后，会出现“清理旧副本”按钮。')}}
+async function migrateData(button){button.disabled=true;let chosen;try{chosen=await pywebview.api.choose_data_location()}catch(_){chosen={ok:false,message:'没能打开目录选择器'}}if(!chosen.ok){button.disabled=false;if(chosen.message)alert(chosen.message);return}if(!confirm(`まあ丸会先完整复制并校验用户数据，再让下次启动改用：\n\n${chosen.target}\n\n原目录暂时保留，确认新目录可用后可在启动器清理。现在开始吗？`)){button.disabled=false;return}setToolLabel(button,'正在迁移…');setState('','正在迁移数据','狐之助正在搬运家当，搬完会点一遍数。','…');const r=await pywebview.api.migrate_data(chosen.selected);alert(r.message);button.disabled=false;setToolLabel(button,'迁移数据');await refresh();if(r.ok){alert('请关闭并重新打开まあ丸。新目录通过启动检查后，会出现“清理旧副本”按钮。')}}
 async function cleanupOldData(button){const source=button.dataset.source;if(!confirm(`新目录已经通过校验。确定永久删除旧数据副本吗？\n\n${source}\n\n此操作无法撤销。`))return;button.disabled=true;const r=await pywebview.api.cleanup_old_data(button.dataset.token);alert(r.message);if(r.ok){button.style.display='none'}else{button.disabled=false}}
 window.addEventListener('pywebviewready',refresh);
 </script></body></html>
