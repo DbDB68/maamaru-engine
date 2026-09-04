@@ -58,6 +58,8 @@ export interface WorkflowPreset {
   id: string
   name: string
   nodes: WorkflowNode[]
+  after?: 'none' | 'logout' | 'shutdown' | 'sleep'
+  daily_mode?: boolean
 }
 
 export type WorkflowNodeCategory = 'cold' | 'chore' | 'battle' | 'finish'
@@ -68,6 +70,8 @@ export interface WorkflowNodeDef {
   desc: string
   category: WorkflowNodeCategory
   params: ParamField[]
+  saved_params?: ScriptParams
+  template_only?: boolean
 }
 
 export type ScriptParams = Record<string, unknown>

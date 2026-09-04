@@ -27,6 +27,11 @@ const selected = ref('daily')
 const running = ref(false)
 const current = ref<string | null>(null)
 const workflowDraft = ref<WorkflowPreset | null>(null)
+const workflowPanel = ref<{ dirty: boolean } | null>(null)
+const dailyEntry = ref(0)
+function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
+const runningDailyWorkflow = ref(false)
+function viewRunningWorkflow() { if (runningDailyWorkflow.value) openDailyWorkflow(); else tab.value = 'workflow' }
 const loading = ref(true)
 const message = ref('')
 const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
@@ -267,6 +272,22 @@ async function save() {
 }
 
 async function run() {
+  if (selected.value === 'daily') {
+    if (workflowDraft.value?.id === 'builtin-daily' && workflowPanel.value?.dirty) {
+      openDailyWorkflow()
+      message.value = '日课有未保存的修改，请保存并运行'
+      return
+    }
+    try {
+      const result = await api.run('workflow', { workflow_id: 'builtin-daily' })
+      if (!result.ok) throw new Error('日课没有启动，请重试')
+      running.value = true
+      current.value = 'workflow'
+      runningDailyWorkflow.value = true
+      message.value = '日课安排已开始'
+    } catch (error) { message.value = error instanceof Error ? error.message : '日课启动失败' }
+    return
+  }
   await api.run(selected.value, params.value[selected.value] || {})
   running.value = true
   current.value = selected.value
@@ -325,7 +346,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-office" :class="{ active: tab === 'office' }" @click="tab = 'office'">执务</button>
-          <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
+          <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); tab = 'tasks'">配置</button>
           <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
           <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
@@ -344,7 +365,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
       <nav class="sidebar">
         <template v-for="group in scriptGroups" :key="group.label">
           <h3>{{ group.label }}</h3>
-          <SideNavItem v-for="([key, info]) in group.entries" :key="key" :active="selected === key" :running="running && current === key" @click="selected = key">
+          <SideNavItem v-for="([key, info]) in group.entries" :key="key" :active="selected === key" :running="running && current === key" @click="key === 'daily' ? openDailyWorkflow() : selected = key">
             <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
           </SideNavItem>
           <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
@@ -367,7 +388,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
       </nav>
       <section ref="contentEl" class="content">
         <TaskForm
-          v-if="selectedInfo"
+          v-if="selectedInfo && selected !== 'daily'"
           :script-key="selected"
           :info="selectedInfo"
           :model-value="params[selected] || {}"
@@ -396,6 +417,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
             />
           </template>
         </TaskForm>
+        <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课已放进工作流</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
         <SchedulePanel v-else-if="selected === '$schedule'" embedded />
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
@@ -425,9 +447,10 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
-        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" @click="tab = 'workflow'">查看流程</button><button type="button" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
+        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" @click="viewRunningWorkflow">查看流程</button><button type="button" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
+        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" @click="openDailyWorkflow">调整日课安排</button><button type="button" :disabled="running" @click="run">运行日课</button></div>
         <OverviewTaskCard
-          v-if="selectedInfo && !(running && current === 'workflow')"
+          v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
           :info="selectedInfo"
           :icon-src="taskIcon(selected)"
           :params="params[selected] || {}"
@@ -447,7 +470,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
-    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel v-model:draft="workflowDraft" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
+    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"

@@ -203,7 +203,8 @@ class DailyMixin:
         if after in ("logout", "shutdown", "sleep"):
             yield "========== ⑬ 下线 =========="
             try:
-                for msg in self.logout_stream():
+                for msg in self.logout_stream(
+                        kill_game=True, close_emulator=False, sleep_pc=False):
                     yield msg
             except Exception as exc:
                 yield f"[日课] 下线翻车: {exc}"

@@ -332,7 +332,7 @@ def _wrap_inventory(tag: str, runner, inventory=False):
     return _fn
 
 
-def _build_daily(agent, config_path, params):
+def _daily_plan_inputs(params):
     # 面板传 steps，Agent 网关传 only，都认
     steps = params.get("steps") or params.get("only") or None   # 空列表=全跑
     after = params.get("after") or "none"
@@ -419,6 +419,11 @@ def _build_daily(agent, config_path, params):
             "map_slot": found.get("slot") if found else None,
             "map_name": found.get("name") if found else None,
         })
+    return steps, after, sortie_plan, practice_plan, expedition_plan
+
+
+def _build_daily(agent, config_path, params):
+    steps, after, sortie_plan, practice_plan, expedition_plan = _daily_plan_inputs(params)
     yield from agent.daily_stream(
         only=steps, after=after, sortie_override=sortie_plan,
         practice_override=practice_plan or None,
@@ -954,7 +959,7 @@ def _wf_node(script, builder, category, merge_saved=False, detail=None):
         yield from builder(agent, config_path, merged)
 
     node = {"type": script, "label": info["label"], "desc": info["desc"],
-            "category": category, "params": info["params"], "run": _run}
+            "category": category, "params": info["params"], "run": _run, "merge_saved": merge_saved}
     if detail:
         node["detail"] = list(detail)
     _workflow.register_node(node)
@@ -974,6 +979,12 @@ _wf_node("repair", _build_repair, "chore")
 _wf_node("expedition", _build_expedition_manager, "chore")
 
 
+from .daily_workflow import install_daily_template  # noqa: E402
+install_daily_template(
+    _workflow, _SCRIPTS, _load_settings=lambda: _load_panel_settings(),
+    config=_CFG_DATA, daily_steps=_DAILY_STEPS, plan_inputs=_daily_plan_inputs)
+
+
 def _build_workflow(config_path, params):
     """自定义工作流入口：按 id 读预设，再交给 workflow 引擎编排。"""
     preset_id = str(params.get("workflow_id") or "")
@@ -986,7 +997,9 @@ def _build_workflow(config_path, params):
     except _workflow.WorkflowError as exc:
         yield f"[工作流] 预设校验翻车: {exc}"
         return
-    yield from _workflow.run_workflow(config_path, plan, make_agent=_make_agent)
+    yield from _workflow.run_workflow(config_path, plan, make_agent=_make_agent,
+                                      after=preset.get("after", "none"),
+                                      daily_mode=preset.get("daily_mode", False))
 
 
 register_script("workflow", "自定义工作流",
@@ -1243,13 +1256,20 @@ async def api_stop_script():
 
 @app.get("/api/workflows")
 async def api_list_workflows():
-    return {"presets": _workflow.load_presets()}
+    return {"presets": _workflow.list_presets()}
 
 
 @app.get("/api/workflows/nodes")
 async def api_workflow_nodes():
     """节点目录：type/label/desc/category/params schema，前端渲染积木选择器用"""
-    return {"nodes": _workflow.node_catalog()}
+    nodes = _workflow.node_catalog()
+    saved = _load_panel_settings().get("params", {})
+    for node in nodes:
+        if _workflow.NODE_REGISTRY[node["type"]].get("merge_saved"):
+            node["saved_params"] = saved.get(node["type"], {})
+            if node["type"] == "practice" and not node["saved_params"]:
+                node["saved_params"] = _CFG_DATA.get("daily", {}).get("practice", {})
+    return {"nodes": nodes}
 
 
 @app.post("/api/workflows")
@@ -1277,7 +1297,11 @@ async def api_update_workflow(preset_id: str, request: Request):
 
 @app.delete("/api/workflows/{preset_id}")
 async def api_delete_workflow(preset_id: str):
-    if not _workflow.delete_preset(preset_id):
+    try:
+        deleted = _workflow.delete_preset(preset_id)
+    except _workflow.WorkflowError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    if not deleted:
         return JSONResponse({"ok": False, "reason": "没有这个预设"},
                             status_code=404)
     return {"ok": True}

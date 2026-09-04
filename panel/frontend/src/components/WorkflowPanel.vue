@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
@@ -8,12 +8,12 @@ import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset } from '../types'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean }>(), { embedded: false, running: false, current: null, stopping: false })
+const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; dailyEntry?: number; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, dailyEntry: 0, active: true })
 const emit = defineEmits<{ started: []; stop: []; office: [] }>()
 // Keep the draft in the parent so switching pages does not discard edits.
 const draft = defineModel<WorkflowPreset | null>('draft', { default: null })
 const maxNodes = 30 // panel/workflow.py: MAX_NODES
-const categoryOrder: WorkflowNodeCategory[] = ['cold', 'chore', 'battle', 'finish']
+const categoryOrder: WorkflowNodeCategory[] = ['cold', 'chore', 'battle']
 const categoryLabels: Record<WorkflowNodeCategory, string> = { cold: '准备', chore: '后勤', battle: '出阵', finish: '收尾' }
 const presets = ref<WorkflowPreset[]>([])
 const defs = ref<WorkflowNodeDef[]>([])
@@ -35,6 +35,7 @@ const category = ref<WorkflowNodeCategory | 'all'>('all')
 const insertAt = ref(0)
 const lastAdded = ref('')
 const removed = ref<{ node: WorkflowNode; index: number } | null>(null)
+let handledDailyEntry = 0
 let pendingSwitch: (() => void) | null = null
 const nodeIds = new WeakMap<WorkflowNode, number>()
 let nextId = 0
@@ -42,12 +43,12 @@ const locked = computed(() => saving.value || starting.value)
 const dirty = computed(() => {
   if (!draft.value) return false
   const saved = presets.value.find(preset => preset.id === draft.value?.id)
-  return !saved || saved.name !== draft.value.name || canonical(saved.nodes) !== canonical(draft.value.nodes)
+  return !saved || saved.name !== draft.value.name || canonical(saved.nodes) !== canonical(draft.value.nodes) || (saved.after || 'none') !== (draft.value.after || 'none') || !!saved.daily_mode !== !!draft.value.daily_mode
 })
 const valid = computed(() => !!draft.value?.name.trim() && !!draft.value?.nodes.length)
 const groups = computed(() => categoryOrder
   .filter(item => category.value === 'all' || category.value === item)
-  .map(item => ({ category: item, nodes: defs.value.filter(def => def.category === item && `${def.label} ${def.desc}`.toLowerCase().includes(search.value.trim().toLowerCase())) }))
+  .map(item => ({ category: item, nodes: defs.value.filter(def => def.type !== 'logout' && !def.template_only && def.category === item && `${def.label} ${def.desc}`.toLowerCase().includes(search.value.trim().toLowerCase())) }))
   .filter(group => group.nodes.length))
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 function canonical(value: unknown): string {
@@ -62,7 +63,19 @@ function keyFor(node: WorkflowNode) {
   return nodeIds.get(node)!
 }
 function defOf(type: string) { return defs.value.find(def => def.type === type) }
+function valueFor(node: WorkflowNode, key: string) {
+  const def = defOf(node.type)
+  return node.params[key] ?? def?.saved_params?.[key] ?? def?.params.find(field => field.key === key)?.default ?? ''
+}
 function description(type: string) {
+  if (draft.value?.daily_mode) {
+    const dailyDescriptions: Record<string, string> = {
+      expedition: '收取归来奖励，按常用安排派遣；仍在远征中的部队会跳过。',
+      dismantle: '按白名单刀解一把；今天已经刀解过时自动跳过。',
+      snapshot: '收工时盘点家底；本轮锻刀已顺手盘点时不再重复。',
+    }
+    if (dailyDescriptions[type]) return dailyDescriptions[type]
+  }
   const descriptions: Record<string, string> = {
     boot_emulator: '打开模拟器，等待开机。模拟器已打开时会跳过。',
     login: '打开并登录游戏，处理登录弹窗，回到本丸。',
@@ -73,7 +86,7 @@ function description(type: string) {
 function isVisible(field: Field, node: WorkflowNode) {
   const rule = field.visibleWhen
   if (!rule) return true
-  const current = String(node.params[rule.key] ?? '')
+  const current = String(valueFor(node, rule.key))
   if (rule.is !== undefined) return current === String(rule.is)
   if (rule.not !== undefined) return current !== String(rule.not)
   return true
@@ -81,7 +94,7 @@ function isVisible(field: Field, node: WorkflowNode) {
 function summary(node: WorkflowNode) {
   const fields = (defOf(node.type)?.params || []).filter(field => field.type !== 'note' && isVisible(field, node))
   return fields.slice(0, 3).map(field => {
-    const value = node.params[field.key] ?? field.default
+    const value = valueFor(node, field.key)
     const option = field.options?.find(option => String(Array.isArray(option) ? option[0] : option) === String(value))
     const label = Array.isArray(option) ? option[1] : option
     const display = label ?? (Array.isArray(value) ? value.join('、') : typeof value === 'boolean' ? (value ? '开启' : '关闭') : value)
@@ -109,6 +122,7 @@ function setDraft(value: WorkflowPreset) {
   message.value = ''
 }
 async function load() {
+  const keepEdits = dirty.value
   loading.value = true
   loadError.value = ''
   try {
@@ -116,6 +130,11 @@ async function load() {
     presets.value = workflowData.presets || []
     defs.value = nodeData.nodes || []
     if (!draft.value) setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
+    else if (!keepEdits) {
+      const current = presets.value.find(preset => preset.id === draft.value?.id)
+      if (current && canonical(current) !== canonical(draft.value)) setDraft(current)
+    }
+    if (props.dailyEntry > handledDailyEntry) { openDaily(); handledDailyEntry = props.dailyEntry }
   } catch (error) {
     loadError.value = error instanceof Error ? `加载失败：${error.message}` : '加载失败，请重试'
   } finally { loading.value = false }
@@ -139,6 +158,13 @@ function select(preset: WorkflowPreset) {
   if (draft.value?.id === preset.id) return
   switchTo(() => setDraft(preset))
 }
+function openDaily() {
+  const daily = presets.value.find(preset => preset.id === 'builtin-daily')
+  if (daily) select(daily)
+}
+watch(() => props.dailyEntry, () => { if (!loading.value) { openDaily(); handledDailyEntry = props.dailyEntry } })
+watch(() => props.active, active => { if (active) load() })
+defineExpose({ dirty })
 function duplicate(preset: WorkflowPreset) {
   closeMenu()
   const copy = clone(draft.value?.id === preset.id ? draft.value : preset)
@@ -209,7 +235,7 @@ async function save(): Promise<boolean> {
       const result = await api.updateWorkflow(snapshot)
       if (!result.ok) throw new Error('没有保存成功，请重试')
     } else {
-      const result = await api.createWorkflow({ name: snapshot.name, nodes: snapshot.nodes })
+      const result = await api.createWorkflow({ name: snapshot.name, nodes: snapshot.nodes, after: snapshot.after || 'none', daily_mode: !!snapshot.daily_mode })
       if (!result.ok || !result.id) throw new Error('没有保存成功，请重试')
       snapshot.id = result.id
     }
@@ -261,7 +287,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
         <div class="wf-presets">
           <div v-for="preset in presets" :key="preset.id" class="wf-preset" :class="{ selected: draft?.id === preset.id }">
             <button type="button" class="wf-preset-select" :aria-pressed="draft?.id === preset.id" :disabled="locked" @click="select(preset)">
-              <strong>{{ preset.name }}</strong><small>{{ preset.nodes.length }} 个步骤<span v-if="draft?.id === preset.id && dirty"> · 编辑中</span></small>
+              <strong>{{ preset.name }}</strong><small>{{ preset.id === 'builtin-daily' ? '默认日课 · ' : '' }}{{ preset.nodes.length }} 个步骤<span v-if="draft?.id === preset.id && dirty"> · 编辑中</span></small>
             </button>
             <button type="button" class="wf-more-button" :aria-label="`${preset.name}的更多操作`" :disabled="locked" aria-haspopup="true" @click="openMenu(preset, $event)"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="13" cy="8" r="1.3" fill="currentColor"/></svg></button>
           </div>
@@ -273,6 +299,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
           <header class="wf-editor-head">
             <label class="wf-name">{{ draft.id ? '流程名称' : '新的安排' }}<PixelControl v-model="draft.name" maxlength="30" placeholder="给流程起个名字，比如：晚间日课" /></label>
           </header>
+          <p v-if="draft.id === 'builtin-daily'" class="wf-tutorial">这是你的默认日课安排。可以直接运行，也可以从左侧菜单复制一份，试着添加步骤或调整顺序。</p>
           <div class="wf-list-heading"><h3>执行顺序 <span>{{ draft.nodes.length }} / {{ maxNodes }}</span></h3><small>从上往下依次执行</small></div>
           <div v-if="!draft.nodes.length" class="wf-empty">
             <h3>今天想让まあ丸做些什么？</h3><p>先选一个任务，再按你的习惯往下安排。</p>
@@ -292,14 +319,21 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                 </div>
                 <div v-if="expanded === node" class="wf-step-detail">
                   <p>{{ description(node.type) }}</p>
-                  <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="node.params[field.key]" @update:model-value="node.params[field.key] = $event" /></div>
-                  <div class="wf-error-policy"><span>这一步没完成时</span><SegmentedControl v-model="node.on_error" label="失败后的安排" :items="[{ value: 'stop', label: '停下等我', caption: '暂停后面的安排' }, { value: 'continue', label: '继续下一步', caption: '记录失败，接着执行' }]" /></div>
+                  <p v-if="defOf(node.type)?.saved_params && !Object.keys(node.params).length" class="wf-inherited">沿用该玩法已保存的配置；在这里修改后，会作为这一步的专用设置。</p>
+                  <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="valueFor(node, field.key)" @update:model-value="node.params[field.key] = $event" /></div>
+                  <p v-if="draft.daily_mode && node.type === 'login'" class="wf-inherited">登录未成功时，会停止后面的日课安排。</p>
+                  <div v-else class="wf-error-policy"><span>这一步没完成时</span><SegmentedControl v-model="node.on_error" label="失败后的安排" :items="[{ value: 'stop', label: '停下等我', caption: '暂停后面的安排' }, { value: 'continue', label: '继续下一步', caption: '记录失败，接着执行' }]" /></div>
                 </div>
               </article>
             </template>
             <button type="button" class="wf-button wf-add" :disabled="draft.nodes.length >= maxNodes" @click="openPicker(draft.nodes.length)">{{ draft.nodes.length >= maxNodes ? '已达到 30 步上限' : '＋ 添加下一步' }}</button>
           </div>
           <div v-if="removed" class="wf-undo" role="status">已移除「{{ defOf(removed.node.type)?.label || removed.node.type }}」<button type="button" :disabled="draft.nodes.length >= maxNodes" @click="undoRemove">撤销</button></div>
+          <div class="wf-finish">
+            <label>结束后做什么<PixelControl as="select" :model-value="draft.after || 'none'" :disabled="draft.nodes.some(node => node.type === 'logout')" @update:model-value="draft.after = $event as WorkflowPreset['after']"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></PixelControl></label>
+            <p v-if="draft.nodes.some(node => node.type === 'logout')">这份旧流程仍有下班步骤。移除它后，就可以在这里统一安排收尾。</p>
+            <p v-else>走完最后一步才会执行；中途停止时不会退出游戏或休眠。</p>
+          </div>
         </fieldset>
         <footer class="wf-toolbar">
           <span class="wf-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
@@ -312,7 +346,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
     <div ref="moreMenu" popover="auto" class="wf-preset-menu" :style="menuPosition" :aria-label="`${menuPreset?.name || '流程'}的操作`">
       <template v-if="menuPreset">
         <button type="button" :disabled="locked" @click="duplicate(menuPreset)">复制流程</button>
-        <button type="button" class="wf-danger" :disabled="running || locked" @click="remove(menuPreset)">删除流程</button>
+        <button v-if="menuPreset.id !== 'builtin-daily'" type="button" class="wf-danger" :disabled="running || locked" @click="remove(menuPreset)">删除流程</button>
       </template>
     </div>
     <dialog ref="picker" class="wf-dialog wf-picker" aria-labelledby="wf-picker-title" @cancel.prevent="closePicker">
@@ -357,6 +391,12 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-editor { padding: 0 !important; min-width: 0; border: 1px solid var(--paper-line); border-radius: 10px; background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
 .wf-edit-fields { border: 0; margin: 0; padding: 25px 26px 22px; min-width: 0; }
 .wf-editor-head { display: flex; gap: 16px; align-items: center; padding-bottom: 24px; }
+.wf-tutorial { margin: -8px 0 20px; padding: 12px 14px; background: var(--paper-panel); border-radius: 5px; color: var(--ink-dim); font-size: 12px; line-height: 1.8; }
+.wf-inherited { color: var(--ink-dim); font-size: 11px; }
+.wf-finish { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--paper-line); }
+.wf-finish label { display: grid; gap: 10px; font-size: 13px; max-width: 370px; }
+.wf-finish :deep(select) { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper); color: var(--ink); font: inherit; }
+.wf-finish > p { font-size: 11px; color: var(--ink-dim); line-height: 1.7; margin: 10px 0 0; }
 .wf-name { display: grid; gap: 9px; flex: 1; min-width: 0; color: var(--ink-dim); font-size: 11px; }
 .wf-name :deep(input) { width: 100%; min-width: 0; height: auto; border: 0; border-bottom: 1px solid var(--paper-line); border-radius: 0; padding: 8px 0; background: transparent; box-shadow: none; color: var(--ink); font: inherit; font-size: 20px; font-weight: 650; }
 .wf-name :deep(input::placeholder) { color: var(--ink-dim); font-size: 16px; font-weight: normal; opacity: .75; }

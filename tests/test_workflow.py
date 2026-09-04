@@ -211,7 +211,7 @@ class WorkflowApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         preset = r.json()["preset"]
         r = self.client.get("/api/workflows")
-        self.assertEqual([p["id"] for p in r.json()["presets"]], [preset["id"]])
+        self.assertEqual([p["id"] for p in r.json()["presets"]], [workflow.DAILY_PRESET_ID, preset["id"]])
 
         r = self.client.put(f"/api/workflows/{preset['id']}", json={
             "name": "改名", "nodes": [_node("signin")]})
@@ -223,7 +223,7 @@ class WorkflowApiTests(unittest.TestCase):
 
         r = self.client.delete(f"/api/workflows/{preset['id']}")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.client.get("/api/workflows").json()["presets"], [])
+        self.assertEqual([p["id"] for p in self.client.get("/api/workflows").json()["presets"]], [workflow.DAILY_PRESET_ID])
 
     def test_invalid_payload_is_400_and_not_persisted(self):
         r = self.client.post("/api/workflows", json={
@@ -237,7 +237,7 @@ class WorkflowApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         r = self.client.delete("/api/workflows/no-such")
         self.assertEqual(r.status_code, 404)
-        self.assertEqual(self.client.get("/api/workflows").json()["presets"], [])
+        self.assertEqual([p["id"] for p in self.client.get("/api/workflows").json()["presets"]], [workflow.DAILY_PRESET_ID])
 
 
 class WorkflowRunnerTests(unittest.TestCase):

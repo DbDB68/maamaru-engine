@@ -16,7 +16,9 @@
 """
 
 import json
+import copy
 import os
+import shutil
 import queue
 import threading
 import time
@@ -38,6 +40,9 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 MAX_NODES = 30
 VALID_ON_ERROR = ("stop", "continue")
+VALID_AFTER = ("none", "logout", "shutdown", "sleep")
+DAILY_PRESET_ID = "builtin-daily"
+daily_template_provider = None
 
 # ⏭ = 前块翻车即停、这块没轮到跑——不是翻车，播报/推送都不许算成失败
 _SKIPPED_PREFIX = "⏭"
@@ -79,6 +84,7 @@ def node_catalog() -> list[dict]:
     nodes = [{
         "type": d["type"], "label": d["label"], "desc": d.get("desc", ""),
         "category": d["category"], "params": d.get("params") or [],
+        "template_only": d.get("template_only", False),
     } for d in NODE_REGISTRY.values()]
     nodes.sort(key=lambda n: (order.get(n["category"], 9), n["type"]))
     return nodes
@@ -180,6 +186,8 @@ _stream_node("snapshot", "库存快照", "拍一次完整家底刷新看板", "c
 
 def _run_logout(agent, params, config_path):
     mode = str((params or {}).get("mode") or "logout")
+    if mode not in VALID_AFTER[1:]:
+        raise WorkflowError("不支持的下班方式")
     yield from agent.logout_stream(
         kill_game=True,
         close_emulator=mode in ("shutdown", "sleep"),
@@ -227,6 +235,39 @@ def _presets_path() -> Path:
     return STATUS_DIR / "workflows.json"
 
 
+def normalize_after(value):
+    if value not in VALID_AFTER:
+        raise WorkflowError("结束后的安排只能是留在本丸、退出游戏、关模拟器或休眠")
+    return value
+
+
+def validate_ending(preset):
+    if preset.get("after", "none") != "none" and any(n["type"] == "logout" for n in preset["nodes"]):
+        raise WorkflowError("已有下班步骤，请先移除再设置结束后的安排")
+
+
+def present_preset(preset):
+    """兼容旧流程，仅将唯一且位于末尾的下班步骤投影为结束安排；读取不改文件。"""
+    result = copy.deepcopy(preset)
+    nodes = result.get("nodes") or []
+    if "after" not in result and len(nodes) > 1 and sum(n.get("type") == "logout" for n in nodes) == 1 and nodes[-1].get("type") == "logout":
+        mode = (nodes[-1].get("params") or {}).get("mode") or "logout"
+        if mode in VALID_AFTER[1:]:
+            result["after"] = mode
+            result["nodes"] = nodes[:-1]
+    result.setdefault("after", "none")
+    result.setdefault("daily_mode", False)
+    return result
+
+
+def list_presets():
+    presets = load_presets()
+    daily = next((p for p in presets if p.get("id") == DAILY_PRESET_ID), None)
+    if daily is None and daily_template_provider is not None:
+        daily = daily_template_provider()
+    return ([daily] if daily else []) + [p for p in presets if p.get("id") != DAILY_PRESET_ID]
+
+
 def load_presets() -> list[dict]:
     """读预设；坏文件备份后重置为空，绝不让面板崩。"""
     path = _presets_path()
@@ -244,18 +285,22 @@ def load_presets() -> list[dict]:
         return []
     if not isinstance(data, dict) or not isinstance(data.get("presets"), list):
         return []
-    return [p for p in data["presets"] if isinstance(p, dict)]
+    return [present_preset(p) for p in data["presets"] if isinstance(p, dict)]
 
 
 def save_presets(presets: list[dict]):
     path = _presets_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"presets": presets}, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
+    # 保存前保留旧结构，替换失败时原文件仍在；旧版迁移不会丢失原始顺序。
+    if path.exists():
+        shutil.copy2(path, path.with_suffix(".json.bak"))
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps({"presets": presets}, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temp, path)
 
 
 def find_preset(preset_id) -> dict | None:
-    for preset in load_presets():
+    for preset in list_presets():
         if preset.get("id") == preset_id:
             return preset
     return None
@@ -273,7 +318,10 @@ def create_preset(body: dict) -> dict:
         "id": uuid.uuid4().hex[:8],
         "name": name,
         "nodes": normalize_nodes(body.get("nodes")),
+        "after": normalize_after(body.get("after", "none")),
+        "daily_mode": body.get("daily_mode") is True,
     }
+    validate_ending(preset)
     presets = load_presets()
     presets.append(preset)
     save_presets(presets)
@@ -285,6 +333,8 @@ def update_preset(preset_id: str, body: dict) -> dict | None:
     if not isinstance(body, dict):
         raise WorkflowError("预设必须是对象")
     presets = load_presets()
+    if preset_id == DAILY_PRESET_ID and not any(p.get("id") == preset_id for p in presets) and daily_template_provider is not None:
+        presets.append(daily_template_provider())
     for i, existing in enumerate(presets):
         if existing.get("id") != preset_id:
             continue
@@ -299,13 +349,18 @@ def update_preset(preset_id: str, body: dict) -> dict | None:
             "nodes": normalize_nodes(
                 body.get("nodes") if body.get("nodes") is not None
                 else existing.get("nodes")),
+            "after": normalize_after(body.get("after", existing.get("after", "none"))),
+            "daily_mode": body.get("daily_mode", existing.get("daily_mode", False)) is True,
         }
+        validate_ending(presets[i])
         save_presets(presets)
         return presets[i]
     return None
 
 
 def delete_preset(preset_id: str) -> bool:
+    if preset_id == DAILY_PRESET_ID:
+        raise WorkflowError("默认日课请保留；可以复制后自由调整")
     presets = load_presets()
     remaining = [p for p in presets if p.get("id") != preset_id]
     if len(remaining) == len(presets):
@@ -387,7 +442,7 @@ def _finale(report, payload):
         yield f"[工作流] 手机推送翻车（不影响跑）: {exc}"
 
 
-def run_workflow(config_path, nodes, make_agent):
+def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False):
     """
     流式跑一条工作流。
 
@@ -400,6 +455,9 @@ def run_workflow(config_path, nodes, make_agent):
         str: 执行状态消息
     """
     plan = normalize_nodes(nodes)
+    after = normalize_after(after)
+    if after != "none" and any(n["type"] == "logout" for n in plan):
+        raise WorkflowError("已有下班步骤，请先移除再设置结束后的安排")
     config_path = str(config_path)
     report: list[tuple] = []
     game_closed = False  # 下班积木跑过后游戏/模拟器已关，收尾不能再导航
@@ -422,10 +480,21 @@ def run_workflow(config_path, nodes, make_agent):
 
     yield "【工作流】正在连接游戏（创建 Agent）..."
     agent = make_agent(config_path)
+    agent._workflow_forge_ran = False
+    completed = True
 
     for i in range(start, len(plan)):
         node = plan[i]
         defn = NODE_REGISTRY[node["type"]]
+        if daily_mode:
+            if (yield from agent._daily_update_gate()) is None:
+                yield "【工作流】✗ 游戏更新未完成，后续日课停止"
+                report.append((defn["label"], "✗ 游戏更新未完成"))
+                report.extend(_skipped_entries(plan[i + 1:]))
+                completed = False
+                break
+            if defn.get("daily_run"):
+                defn = {**defn, "run": defn["daily_run"]}
         suffix = "（翻车跳过继续）" if node["on_error"] == "continue" else ""
         yield f"【工作流】▶ 第 {i + 1} 块：{defn['label']}{suffix}"
         try:
@@ -434,6 +503,8 @@ def run_workflow(config_path, nodes, make_agent):
         except Exception:
             pass
         ok, detail = yield from _run_node(defn, agent, node["params"], config_path)
+        if node["type"] == "forge":
+            agent._workflow_forge_ran = True
         report.append((defn["label"], detail or ("✓" if ok else "✗")))
         if ok and node["type"] == "logout":
             # 下班积木会杀游戏（甚至关模拟器/休眠），收尾导航只会撞死在
@@ -441,12 +512,22 @@ def run_workflow(config_path, nodes, make_agent):
             game_closed = True
         # 每跑完一块就落盘一次，防中途被杀丢数据
         _flush_report(report, finished=False)
-        if not ok and node["on_error"] == "stop":
+        if not ok and (node["on_error"] == "stop" or (daily_mode and node["type"] == "login")):
+            completed = False
             yield (f"【工作流】这块翻车了，按设定「翻车即停」，"
                    f"剩余 {len(plan) - i - 1} 块不跑")
             report.extend(_skipped_entries(plan[i + 1:]))
             _flush_report(report, finished=False)
             break
+
+    if after != "none" and completed:
+        # This action is outside the movable steps. A stopped/aborted run never
+        # reaches it. Defer PC sleep until after the final report/notification.
+        yield "【工作流】结束后的安排：下班"
+        mode = "shutdown" if after == "sleep" else after
+        ok, detail = yield from _run_node(NODE_REGISTRY["logout"], agent, {"mode": mode}, config_path)
+        report.append(("下班", detail or ("✓" if ok else "✗")))
+        game_closed = ok
 
     # 收尾（整个 run 只此一次）：回本丸 + 强制顶栏 peek。
     # 中间节点不套 run 级盘点/收尾，避免每块都磨叽一遍（日课同款约定）。
@@ -477,3 +558,10 @@ def run_workflow(config_path, nodes, make_agent):
 
     payload = _flush_report(report, finished=True)
     yield from _finale(report, payload)
+    if after == "sleep" and completed and game_closed:
+        def sleep_only(agent, params, config_path):
+            yield from agent.logout_stream(kill_game=False, close_emulator=False, sleep_pc=True)
+        yield "【工作流】成绩单已记录，准备休眠电脑"
+        ok, detail = yield from _run_node({"run": sleep_only}, agent, {}, config_path)
+        report.append(("电脑休眠", detail or ("✓" if ok else "✗")))
+        _flush_report(report, finished=True)
