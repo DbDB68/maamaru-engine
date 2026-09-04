@@ -40,7 +40,7 @@ function remaining(item: any) {
   if (item.remain_sec == null) return '时间不明'
   const loadedAt = data.value?._loadedAt || now.value
   const left = Math.max(0, Number(item.remain_sec) - (now.value - loadedAt) / 1000)
-  return left ? `剩 ${duration(left)}` : '🎉 该回来了'
+  return left ? `剩 ${duration(left)}` : '🎉 已经回来啦，等你接它'
 }
 
 function furnaceLabel(furnace: any) {

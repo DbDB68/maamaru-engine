@@ -37,6 +37,23 @@ def _to_int(text: str):
     return int(digits) if digits else None
 
 
+def _parse_furnace_remain(text: str):
+    """从炉行 OCR 文本里抠倒计时（"HH:MM:SS"）。
+
+    OCR 读小字容易把冒号吃掉（9-04 冤案：三炉同时点火，只读出一只的时间），
+    先认带冒号的，再退到连续 5~6 位数字。分/秒超 59 的匹配是杂物，扔掉。
+    """
+    m = re.search(r"(\d{1,2})\s*[:：]\s*(\d{2})\s*[:：]\s*(\d{2})", text or "")
+    if not m:
+        m = re.search(r"(?<!\d)(\d{1,2})\s?(\d{2})\s?(\d{2})(?!\d)", text or "")
+    if not m:
+        return None
+    hours, minutes, seconds = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if minutes > 59 or seconds > 59:
+        return None
+    return f"{hours}:{m.group(2)}:{m.group(3)}"
+
+
 class SnapshotMixin:
     """库存快照。依赖宿主类的 navigate_to_stream、maa。"""
 
@@ -125,9 +142,8 @@ class SnapshotMixin:
             elif "空闲" in text:
                 furnaces.append({"slot": i, "state": "空闲中", "remain": None})
             else:
-                m2 = re.search(r"(\d{1,2})\s*[:：]\s*(\d{2})\s*[:：]\s*(\d{2})", text)
-                remain = f"{m2.group(1)}:{m2.group(2)}:{m2.group(3)}" if m2 else None
-                furnaces.append({"slot": i, "state": "锻造中", "remain": remain})
+                furnaces.append({"slot": i, "state": "锻造中",
+                                 "remain": _parse_furnace_remain(text)})
 
         # ---- 所持道具界面读真小判（顶栏那个是甲州金，真小判只在这看）----
         koban = self._read_koban()

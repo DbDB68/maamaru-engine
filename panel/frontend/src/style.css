@@ -480,6 +480,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .schedule-panel { --section-icon: url('/static/img/ui/expedition.png'); }
 .system-panel { --section-icon: url('/static/img/ui/wrench.png'); }
 .chat-panel { --section-icon: url('/static/img/ui/singleplayer.png'); }
+.dashboard-panel { --section-icon: url('/static/img/ui/home.png'); }
 .section-head > button, .primary, .secondary, .danger, .pause-row button { min-height: 38px; border-radius: 6px; transition: transform .12s ease, filter .12s ease, box-shadow .12s ease; }
 .section-head > button:hover, .primary:hover:not(:disabled), .secondary:hover:not(:disabled), .pause-row button:hover { filter: brightness(1.04); transform: translateY(-1px); }
 .section-head > button:active, .primary:active:not(:disabled), .secondary:active:not(:disabled), .pause-row button:active { transform: translateY(1px); }

@@ -9,7 +9,7 @@ from touken.flows.daily import (
     _is_success_status,
     _snapshot_report_status,
 )
-from touken.flows.snapshot import SnapshotMixin
+from touken.flows.snapshot import SnapshotMixin, _parse_furnace_remain
 from touken.maa_adapter import Point
 
 
@@ -77,6 +77,17 @@ class SnapshotCleanupTests(unittest.TestCase):
 
         self.assertEqual(maa.clicks[-1], Point(1248, 35))
         self.assertIsNone(flow.current_location)
+
+    def test_parse_furnace_remain(self):
+        self.assertEqual(_parse_furnace_remain("1:29:57"), "1:29:57")
+        self.assertEqual(_parse_furnace_remain("01：29：57"), "1:29:57")
+        # OCR 吃掉冒号 → 连续数字按 H MM SS 切
+        self.assertEqual(_parse_furnace_remain("012957"), "1:29:57")
+        self.assertEqual(_parse_furnace_remain("12957"), "1:29:57")
+        # 分秒超界视为脏识别
+        self.assertIsNone(_parse_furnace_remain("19:99:00"))
+        self.assertIsNone(_parse_furnace_remain("abc"))
+        self.assertIsNone(_parse_furnace_remain(""))
 
     def test_incomplete_forge_snapshot_is_a_snapshot_warning(self):
         flow = DailyMixin()
