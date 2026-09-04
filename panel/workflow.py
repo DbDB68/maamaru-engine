@@ -402,6 +402,7 @@ def run_workflow(config_path, nodes, make_agent):
     plan = normalize_nodes(nodes)
     config_path = str(config_path)
     report: list[tuple] = []
+    game_closed = False  # 下班积木跑过后游戏/模拟器已关，收尾不能再导航
 
     start = 0
     if plan[0]["type"] == "boot_emulator":
@@ -434,6 +435,10 @@ def run_workflow(config_path, nodes, make_agent):
             pass
         ok, detail = yield from _run_node(defn, agent, node["params"], config_path)
         report.append((defn["label"], detail or ("✓" if ok else "✗")))
+        if ok and node["type"] == "logout":
+            # 下班积木会杀游戏（甚至关模拟器/休眠），收尾导航只会撞死在
+            # 离线设备上（日课 9-04 凌晨翻车冤案同款），标记跳过收尾。
+            game_closed = True
         # 每跑完一块就落盘一次，防中途被杀丢数据
         _flush_report(report, finished=False)
         if not ok and node["on_error"] == "stop":
@@ -445,18 +450,21 @@ def run_workflow(config_path, nodes, make_agent):
 
     # 收尾（整个 run 只此一次）：回本丸 + 强制顶栏 peek。
     # 中间节点不套 run 级盘点/收尾，避免每块都磨叽一遍（日课同款约定）。
-    try:
-        yield "【工作流】收尾：导航回本丸"
-        for nav_msg in agent.navigate_to_stream("本丸"):
-            yield nav_msg
-        if getattr(agent, "current_location", None) == "本丸":
-            yield "【工作流】收尾：已回本丸，强制拍一次顶栏"
-            if hasattr(agent, "quick_peek"):
-                agent.quick_peek(tag="工作流·收尾", force=True)
-        else:
-            yield "【工作流】⚠️ 收尾没能回到本丸，可能卡在某个界面了，去看看"
-    except Exception as exc:
-        yield f"【工作流】⚠️ 收尾导航/Peek 失败（不影响成绩单）: {exc}"
+    if game_closed:
+        yield "【工作流】已执行下班积木，游戏已关，跳过收尾回本丸"
+    else:
+        try:
+            yield "【工作流】收尾：导航回本丸"
+            for nav_msg in agent.navigate_to_stream("本丸"):
+                yield nav_msg
+            if getattr(agent, "current_location", None) == "本丸":
+                yield "【工作流】收尾：已回本丸，强制拍一次顶栏"
+                if hasattr(agent, "quick_peek"):
+                    agent.quick_peek(tag="工作流·收尾", force=True)
+            else:
+                yield "【工作流】⚠️ 收尾没能回到本丸，可能卡在某个界面了，去看看"
+        except Exception as exc:
+            yield f"【工作流】⚠️ 收尾导航/Peek 失败（不影响成绩单）: {exc}"
 
     payload = _flush_report(report, finished=True)
     yield from _finale(report, payload)

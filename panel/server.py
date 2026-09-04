@@ -413,25 +413,32 @@ def _build_daily_standalone(config_path, params):
 
     但统一收尾约定（回本丸 + 强制 peek）仍然要在整个日课 run 结束时执行
     一次，与 inventory 开关无关；收尾失败不拖垮任务结果。
+    例外：after 安排了退出游戏/关模拟器/休眠时跳过收尾——游戏都关了
+    还导航回本丸只会撞死在离线设备上（9-04 凌晨翻车冤案：日课全绿，
+    收尾对着已关的模拟器抢救 25 分钟，MAA 自裁，整轮被记成 failed）。
     """
     agent = _make_agent(config_path)
+    after = params.get("after") or "none"
     try:
         yield from _build_daily(agent, config_path, params)
     finally:
-        # --- 统一收尾：回本丸 + 强制顶栏 peek ---
-        try:
-            yield "[日课] 收尾：导航回本丸"
-            for nav_msg in agent.navigate_to_stream("本丸"):
-                yield nav_msg
-            if getattr(agent, "current_location", None) == "本丸":
-                yield "[日课] 收尾：已回本丸，强制拍一次顶栏"
-                if hasattr(agent, "quick_peek"):
-                    agent.quick_peek(tag="日课·收尾", force=True)
-            else:
-                yield ("[日课] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
-                       "去看看")
-        except Exception as exc:
-            yield f"[日课] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
+        if after != "none":
+            yield f"[日课] 已安排「{after}」下班，跳过收尾回本丸"
+        else:
+            # --- 统一收尾：回本丸 + 强制顶栏 peek ---
+            try:
+                yield "[日课] 收尾：导航回本丸"
+                for nav_msg in agent.navigate_to_stream("本丸"):
+                    yield nav_msg
+                if getattr(agent, "current_location", None) == "本丸":
+                    yield "[日课] 收尾：已回本丸，强制拍一次顶栏"
+                    if hasattr(agent, "quick_peek"):
+                        agent.quick_peek(tag="日课·收尾", force=True)
+                else:
+                    yield ("[日课] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
+                           "去看看")
+            except Exception as exc:
+                yield f"[日课] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
 
 
 def _build_raid(agent, config_path, params):

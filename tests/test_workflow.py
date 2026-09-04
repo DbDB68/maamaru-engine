@@ -191,8 +191,11 @@ class WorkflowApiTests(unittest.TestCase):
     def setUp(self):
         from fastapi.testclient import TestClient
         self._tmp = tempfile.TemporaryDirectory(prefix="workflow_api_test_")
-        self._patch = patch.object(panel.server, "STATUS_DIR", Path(self._tmp.name))
-        # server._workflow 与 panel.workflow 是同一模块对象，patch 一处即可
+        # 路由里真正读的是 workflow 模块的 STATUS_DIR（load_presets 等直接用），
+        # 必须 patch 这一处；只 patch server.STATUS_DIR 会写进真实用户数据目录
+        # （全量跑时 runtime_paths 早已被别的测试 import，模块头的环境变量
+        # 补丁不再生效，9-04 实测把测试预设写进了老大的 workflows.json）。
+        self._patch = patch.object(workflow, "STATUS_DIR", Path(self._tmp.name))
         self._patch.start()
         self.client = TestClient(panel.server.app)
 
@@ -416,6 +419,24 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertTrue(report["steps"][0]["status"].startswith("✗"))
         self.assertEqual(report["steps"][1]["status"], "⏭ 跳过（翻车即停）")
         self.assertFalse(any(c[0] == "signin_stream" for c in agent.calls))
+
+    def test_logout_node_skips_closing_navigation(self):
+        """下班积木跑过后游戏已关，收尾导航只会撞死在离线设备上——
+        日课 9-04 凌晨翻车冤案同款，必须跳过。"""
+        agent = _FakeAgent()
+        messages, agent, _ = self._run(
+            [_node("signin"), _node("logout")], agent)
+        self.assertTrue(any(c[0] == "logout_stream" for c in agent.calls))
+        self.assertTrue(any("跳过收尾回本丸" in m for m in messages))
+        self.assertFalse(any(c[0] == "quick_peek" for c in agent.calls))
+        self.assertTrue(any("全绿" in m for m in messages))
+
+    def test_closing_navigation_runs_without_logout_node(self):
+        """对照组：没有下班积木时，收尾照常回本丸 + 强制 peek。"""
+        agent = _FakeAgent()
+        messages, agent, _ = self._run([_node("signin")], agent)
+        self.assertTrue(any("收尾：导航回本丸" in m for m in messages))
+        self.assertTrue(any(c[0] == "quick_peek" for c in agent.calls))
 
 
 class WorkflowScriptEntryTests(unittest.TestCase):

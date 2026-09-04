@@ -113,6 +113,28 @@ class TaskCleanupTests(unittest.TestCase):
         )
         self.assertEqual(agent.peek_calls, [])
 
+    def test_daily_cleanup_skipped_when_after_logout(self):
+        """安排了下班（退出游戏/关模拟器/休眠）时跳过收尾导航——
+        游戏都关了还回本丸只会撞死在离线设备上（9-04 凌晨翻车冤案）。"""
+        for after in ("logout", "shutdown", "sleep"):
+            with self.subTest(after=after):
+                agent = FakeAgent()
+                with patch("panel.server._make_agent", return_value=agent), \
+                        patch("panel.server._load_panel_settings",
+                              return_value={}), \
+                        patch("panel.scheduler.load_config",
+                              return_value={"common_plan": []}):
+                    msgs = list(_build_daily_standalone(
+                        "config.json", {"after": after}))
+
+                self.assertIn("[日课] 跑完了", msgs)
+                self.assertTrue(
+                    any("跳过收尾回本丸" in m for m in msgs),
+                    f"未找到跳过收尾的消息，消息为：{msgs}",
+                )
+                self.assertNotIn("[日课] 收尾：导航回本丸", msgs)
+                self.assertEqual(agent.peek_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()
