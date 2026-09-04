@@ -2028,3 +2028,30 @@ body[data-theme='pixel'] .personal-home-page > .maamaru-surface { padding: 28px;
   body[data-theme='pixel'] .personal-home-page { height: auto; overflow: visible; padding: 3px; }
   body[data-theme='pixel'] .personal-home-page > .maamaru-surface { height: auto; overflow: visible; padding: 20px 14px; }
 }
+
+/* 常用功能自定义：标题栏「自定义」按钮与编辑模式。 */
+.home-functions-head { display: flex; align-items: center; justify-content: space-between; }
+.home-functions .home-customize { flex: 0 0 auto; width: auto; min-height: 0; margin: 0 8px 9px; padding: 3px 10px; font-size: 11px; color: var(--ink-dim); background: transparent; border: 1px dashed var(--paper-line); border-radius: 999px; cursor: pointer; }
+.home-functions .home-customize:hover { color: var(--fox-gold-deep); border-color: var(--fox-gold); }
+/* 编辑模式下轮播箭头退场（模板里同时置了 disabled，双保险）。 */
+.home-functions.editing .home-functions-arrow { display: none; }
+.home-functions.editing nav { display: grid; gap: 6px; overflow: visible; scroll-snap-type: none; }
+.home-entry-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: center; }
+.home-entry-row > button { min-width: 0; margin-bottom: 0; }
+.home-entry-tools { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+.home-entry-tools button { width: auto; min-width: 0; min-height: 0; margin-bottom: 0; padding: 4px 6px; font-size: 11px; }
+.home-edit-panel { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--paper-line); }
+.home-edit-panel h3 { margin: 10px 8px 6px; font-size: 12px; color: var(--ink-dim); }
+.home-edit-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 5px; padding: 5px 8px; font-size: 12px; color: #51453b; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 9px; }
+.home-edit-row > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.home-edit-row small { color: var(--ink-dim); }
+.home-edit-row button { flex: 0 0 auto; width: auto; min-height: 0; margin-bottom: 0; padding: 4px 10px; font-size: 11px; color: var(--fox-gold-deep); background: transparent; border: 1px solid var(--paper-line); border-radius: 999px; cursor: pointer; }
+.home-edit-empty { margin: 0 8px 6px; font-size: 11px; color: var(--ink-dim); }
+body[data-theme='pixel'] .home-edit-row { color: #dce8e1; }
+body[data-theme='pixel'] .home-edit-row button { color: #f2d26f; }
+
+@media (max-width: 720px) {
+  /* 窄屏编辑时退回纵向列表，工具按钮自动换行，不挤爆轮播轨道。 */
+  .home-functions.editing .home-functions-carousel { display: block; }
+  .home-entry-tools { max-width: 96px; }
+}

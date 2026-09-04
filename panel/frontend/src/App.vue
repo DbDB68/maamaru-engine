@@ -19,7 +19,7 @@ import NotificationCenter from './components/NotificationCenter.vue'
 import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
-import type { ScriptInfo, ScriptParams, WorkflowPreset } from './types'
+import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset } from './types'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
@@ -60,23 +60,120 @@ const taskIcons: Record<string, string> = {
 }
 
 const selectedInfo = computed(() => scripts.value[selected.value])
-const homeScriptOrder = ['daily', 'sortie', 'yosari', 'osaka', 'edocastle', 'expedition', 'smith', 'pumpkin', 'raid', 'sugar', 'sakura', 'practice', 'snapshot']
+// 常用功能默认清单：后端布局接口不可用时兜底用，顺序与旧版硬编码一致。
+const fallbackHomeOrder = ['daily', 'sortie', 'yosari', 'osaka', 'edocastle', 'expedition', 'smith', 'pumpkin', 'raid', 'sugar', 'sakura', 'practice', 'snapshot']
+const homeLayoutEntries = ref<HomeLayoutEntry[]>([])
+const homeLayoutLoaded = ref(false)
+const homeHiddenList = ref<string[]>([])
+const homeWorkflows = ref<WorkflowPreset[]>([])
 // 活动没开放的脚本从常用功能收起来（后端 /api/scripts 下发，配置页不受影响）
 const eventHidden = ref<string[]>([])
-const homeScripts = computed(() => homeScriptOrder
-  .filter(key => scripts.value[key] && !eventHidden.value.includes(key))
-  .map(key => [key, scripts.value[key]] as const))
+const homeEntries = computed<HomeLayoutEntry[]>(() => (homeLayoutLoaded.value ? homeLayoutEntries.value : fallbackHomeOrder
+  .filter(key => scripts.value[key])
+  .map(key => ({ kind: 'script' as const, key, label: scripts.value[key].label })))
+  .filter(entry => entry.kind !== 'script' || (scripts.value[entry.key] && !eventHidden.value.includes(entry.key))))
 const eventHiddenLabels = computed(() => eventHidden.value
   .filter(key => scripts.value[key])
   .map(key => scripts.value[key].label))
-const homeScriptIndex = computed(() => homeScripts.value.findIndex(([key]) => key === selected.value))
+const homeScriptIndex = computed(() => homeEntries.value.findIndex(entry => entry.key === selected.value))
 async function chooseAdjacentHome(direction: -1 | 1) {
   const next = homeScriptIndex.value + direction
-  if (next < 0 || next >= homeScripts.value.length) return
-  selected.value = homeScripts.value[next][0]
+  if (next < 0 || next >= homeEntries.value.length) return
+  selected.value = homeEntries.value[next].key
   await nextTick()
   homeFunctionsNav.value?.querySelector<HTMLElement>(`[data-script="${selected.value}"]`)
     ?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+}
+// ---- 常用功能自定义（编辑模式：排序、收起、把工作流钉进来）----
+const editingHome = ref(false)
+const editOrder = ref<string[]>([])
+const editHidden = ref<string[]>([])
+const savingHomeLayout = ref(false)
+const hiddenHomeEntries = computed<HomeLayoutEntry[]>(() => editHidden.value.map(key => {
+  if (key.startsWith('wf:')) {
+    const preset = homeWorkflows.value.find(item => `wf:${item.id}` === key)
+    return preset ? { kind: 'workflow' as const, key, label: preset.name } : null
+  }
+  const info = scripts.value[key]
+  return info ? { kind: 'script' as const, key, label: info.label } : null
+}).filter((entry): entry is HomeLayoutEntry => entry !== null))
+const pinnableWorkflows = computed(() => homeWorkflows.value.filter(preset => !editOrder.value.includes(`wf:${preset.id}`)))
+const selectedWorkflow = computed(() => selected.value.startsWith('wf:')
+  ? homeWorkflows.value.find(preset => `wf:${preset.id}` === selected.value) || null
+  : null)
+async function startHomeEdit() {
+  editingHome.value = true
+  editOrder.value = (homeLayoutLoaded.value ? homeLayoutEntries.value : homeEntries.value).map(entry => entry.key)
+  editHidden.value = [...homeHiddenList.value]
+  try {
+    homeWorkflows.value = (await api.workflows()).presets || []
+  } catch (error) {
+    message.value = error instanceof Error ? `工作流列表没加载出来：${error.message}` : '工作流列表没加载出来，只能调整现有功能'
+  }
+}
+function finishHomeEdit() { editingHome.value = false }
+async function applyHomeEdit(mutate: () => void) {
+  if (savingHomeLayout.value) return
+  const prevOrder = [...editOrder.value]
+  const prevHidden = [...editHidden.value]
+  mutate()
+  savingHomeLayout.value = true
+  try {
+    const result = await api.saveHomeLayout(editOrder.value, editHidden.value)
+    homeLayoutEntries.value = result.entries || []
+    homeLayoutLoaded.value = true
+    editOrder.value = homeLayoutEntries.value.map(entry => entry.key)
+  } catch (error) {
+    editOrder.value = prevOrder
+    editHidden.value = prevHidden
+    message.value = error instanceof Error ? `这次调整没能保存：${error.message}` : '这次调整没能保存，请重试'
+  } finally { savingHomeLayout.value = false }
+}
+function moveHomeEntry(index: number, delta: -1 | 1) {
+  const target = index + delta
+  if (target < 0 || target >= editOrder.value.length) return
+  void applyHomeEdit(() => {
+    const next = [...editOrder.value]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    editOrder.value = next
+  })
+}
+function hideHomeEntry(key: string) {
+  void applyHomeEdit(() => {
+    editOrder.value = editOrder.value.filter(item => item !== key)
+    // 工作流拿掉就算取消钉住；脚本要记进 hidden，免得下版本自动冒回来。
+    if (!key.startsWith('wf:') && !editHidden.value.includes(key)) editHidden.value = [...editHidden.value, key]
+  })
+}
+function restoreHomeEntry(key: string) {
+  void applyHomeEdit(() => {
+    editHidden.value = editHidden.value.filter(item => item !== key)
+    if (!editOrder.value.includes(key)) editOrder.value = [...editOrder.value, key]
+  })
+}
+function pinHomeWorkflow(id: string) {
+  void applyHomeEdit(() => {
+    const key = `wf:${id}`
+    editHidden.value = editHidden.value.filter(item => item !== key)
+    if (!editOrder.value.includes(key)) editOrder.value = [...editOrder.value, key]
+  })
+}
+// 常用功能里钉住的工作流：右侧直接给一条能跑的流程条。
+const presetJump = ref<{ id: string; tick: number } | null>(null)
+function openWorkflowPreset(id: string) {
+  presetJump.value = { id, tick: (presetJump.value?.tick || 0) + 1 }
+  tab.value = 'workflow'
+}
+async function runSelectedWorkflow() {
+  const preset = selectedWorkflow.value
+  if (!preset) return
+  try {
+    const result = await api.run('workflow', { workflow_id: preset.id })
+    if (!result.ok) throw new Error('这条流程没有启动，请重试')
+    running.value = true
+    current.value = 'workflow'
+    message.value = `「${preset.name}」已开始`
+  } catch (error) { message.value = error instanceof Error ? error.message : '启动失败，请重试' }
 }
 function openWishlist() {
   selected.value = '$wishlist'
@@ -188,7 +285,15 @@ async function load() {
       key,
       { ...defaults(info), ...migrateParams(key, saved.params?.[key] || {}) },
     ]))
-    if (!scripts.value[selected.value]) selected.value = Object.keys(scripts.value)[0] || ''
+    if (!scripts.value[selected.value] && !selected.value.startsWith('wf:')) selected.value = Object.keys(scripts.value)[0] || ''
+    // 常用功能布局与工作流预设：布局接口不可用时回落默认清单，不影响其余加载。
+    try {
+      const [layout, workflowData] = await Promise.all([api.homeLayout(), api.workflows()])
+      homeLayoutEntries.value = layout.entries || []
+      homeHiddenList.value = layout.hidden || []
+      homeLayoutLoaded.value = true
+      homeWorkflows.value = workflowData.presets || []
+    } catch (_) { /* 兜底走 fallbackHomeOrder */ }
   } catch (error) {
     message.value = error instanceof Error ? error.message : '面板加载失败'
   } finally {
@@ -427,27 +532,65 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @planning="reportEntry = 'planning'; tab = 'report'" @wishlist="openWishlist" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout">
-      <aside class="home-functions">
-        <div class="home-functions-head"><h2>常用功能</h2><span v-if="homeScriptIndex >= 0">{{ homeScriptIndex + 1 }} / {{ homeScripts.length }}</span></div>
+      <aside class="home-functions" :class="{ editing: editingHome }">
+        <div class="home-functions-head">
+          <h2>常用功能</h2>
+          <span v-if="homeScriptIndex >= 0 && !editingHome">{{ homeScriptIndex + 1 }} / {{ homeEntries.length }}</span>
+          <button type="button" class="home-customize" @click="editingHome ? finishHomeEdit() : startHomeEdit()">{{ editingHome ? '完成' : '自定义' }}</button>
+        </div>
         <div class="home-functions-carousel">
-          <button type="button" class="home-functions-arrow previous" aria-label="上一个常用功能" :disabled="homeScriptIndex <= 0" @click="chooseAdjacentHome(-1)">‹</button>
+          <button type="button" class="home-functions-arrow previous" aria-label="上一个常用功能" :disabled="editingHome || homeScriptIndex <= 0" @click="chooseAdjacentHome(-1)">‹</button>
         <nav ref="homeFunctionsNav">
-          <button
-            v-for="([key, info]) in homeScripts"
-            :key="key"
-            :data-script="key"
-            :class="{ active: selected === key, running: running && current === key }"
-            @click="selected = String(key)"
-          >
-            <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
-          </button>
+          <template v-if="editingHome">
+            <div v-for="(entry, index) in homeEntries" :key="entry.key" class="home-entry-row">
+              <button
+                :data-script="entry.key"
+                :class="{ active: selected === entry.key }"
+                @click="selected = entry.key"
+              >
+                <span><img class="task-menu-icon" :src="taskIcon(entry.kind === 'workflow' ? 'workflow' : entry.key)" alt="">{{ entry.label }}</span>
+              </button>
+              <span class="home-entry-tools">
+                <button type="button" title="往上挪" :disabled="index === 0 || savingHomeLayout" @click="moveHomeEntry(index, -1)">↑</button>
+                <button type="button" title="往下挪" :disabled="index === homeEntries.length - 1 || savingHomeLayout" @click="moveHomeEntry(index, 1)">↓</button>
+                <button type="button" :disabled="savingHomeLayout" @click="hideHomeEntry(entry.key)">收起</button>
+              </span>
+            </div>
+          </template>
+          <template v-else>
+            <button
+              v-for="entry in homeEntries"
+              :key="entry.key"
+              :data-script="entry.key"
+              :class="{ active: selected === entry.key, running: running && current === entry.key }"
+              @click="selected = entry.key"
+            >
+              <span><img class="task-menu-icon" :src="taskIcon(entry.kind === 'workflow' ? 'workflow' : entry.key)" alt="">{{ entry.label }}</span><small v-if="running && current === entry.key">运行中</small>
+            </button>
+          </template>
         </nav>
-          <button type="button" class="home-functions-arrow next" aria-label="下一个常用功能" :disabled="homeScriptIndex < 0 || homeScriptIndex >= homeScripts.length - 1" @click="chooseAdjacentHome(1)">›</button>
+          <button type="button" class="home-functions-arrow next" aria-label="下一个常用功能" :disabled="editingHome || homeScriptIndex < 0 || homeScriptIndex >= homeEntries.length - 1" @click="chooseAdjacentHome(1)">›</button>
+        </div>
+        <div v-if="editingHome" class="home-edit-panel">
+          <h3>收起来的功能</h3>
+          <p v-if="!hiddenHomeEntries.length" class="home-edit-empty">还没有收起来的功能</p>
+          <div v-for="entry in hiddenHomeEntries" :key="entry.key" class="home-edit-row">
+            <span><img class="task-menu-icon" :src="taskIcon(entry.kind === 'workflow' ? 'workflow' : entry.key)" alt="">{{ entry.label }}</span>
+            <button type="button" :disabled="savingHomeLayout" @click="restoreHomeEntry(entry.key)">加回</button>
+          </div>
+          <h3>我的工作流</h3>
+          <p v-if="!pinnableWorkflows.length" class="home-edit-empty">工作流都钉上啦</p>
+          <div v-for="preset in pinnableWorkflows" :key="preset.id" class="home-edit-row">
+            <span><img class="task-menu-icon" :src="taskIcon('workflow')" alt="">{{ preset.name }}<small>{{ preset.nodes.length }} 块积木</small></span>
+            <button type="button" :disabled="savingHomeLayout" @click="pinHomeWorkflow(preset.id)">钉上</button>
+          </div>
         </div>
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
         <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" @click="viewRunningWorkflow">查看流程</button><button type="button" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
+        <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" :disabled="running" @click="runSelectedWorkflow">跑这条</button></div>
+        <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
         <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" @click="openDailyWorkflow">调整日课安排</button><button type="button" :disabled="running" @click="run">运行日课</button></div>
         <OverviewTaskCard
           v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
@@ -470,7 +613,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
-    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
+    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"

@@ -8,7 +8,7 @@ import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset } from '../types'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; dailyEntry?: number; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, dailyEntry: 0, active: true })
+const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; dailyEntry?: number; presetJump?: { id: string; tick: number } | null; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, dailyEntry: 0, presetJump: null, active: true })
 const emit = defineEmits<{ started: []; stop: []; office: [] }>()
 // Keep the draft in the parent so switching pages does not discard edits.
 const draft = defineModel<WorkflowPreset | null>('draft', { default: null })
@@ -36,6 +36,7 @@ const insertAt = ref(0)
 const lastAdded = ref('')
 const removed = ref<{ node: WorkflowNode; index: number } | null>(null)
 let handledDailyEntry = 0
+let handledPresetJump = 0
 let pendingSwitch: (() => void) | null = null
 const nodeIds = new WeakMap<WorkflowNode, number>()
 let nextId = 0
@@ -135,6 +136,7 @@ async function load() {
       if (current && canonical(current) !== canonical(draft.value)) setDraft(current)
     }
     if (props.dailyEntry > handledDailyEntry) { openDaily(); handledDailyEntry = props.dailyEntry }
+    if (props.presetJump && props.presetJump.tick > handledPresetJump) { openPresetById(props.presetJump.id); handledPresetJump = props.presetJump.tick }
   } catch (error) {
     loadError.value = error instanceof Error ? `加载失败：${error.message}` : '加载失败，请重试'
   } finally { loading.value = false }
@@ -162,7 +164,16 @@ function openDaily() {
   const daily = presets.value.find(preset => preset.id === 'builtin-daily')
   if (daily) select(daily)
 }
+// 执务页常用功能里钉住的工作流点「调整」时，按 id 选中对应预设。
+function openPresetById(id: string) {
+  const preset = presets.value.find(item => item.id === id)
+  if (preset) select(preset)
+}
 watch(() => props.dailyEntry, () => { if (!loading.value) { openDaily(); handledDailyEntry = props.dailyEntry } })
+watch(() => props.presetJump, request => {
+  if (!request || request.tick <= handledPresetJump) return
+  if (!loading.value) { openPresetById(request.id); handledPresetJump = request.tick }
+})
 watch(() => props.active, active => { if (active) load() })
 defineExpose({ dirty })
 function duplicate(preset: WorkflowPreset) {

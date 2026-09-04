@@ -46,6 +46,20 @@ export interface ScriptsResponse {
   event_hidden?: string[]
 }
 
+// ---- 执务页常用功能自定义 /api/home-layout ----
+
+export interface HomeLayoutEntry {
+  kind: 'script' | 'workflow'
+  key: string
+  label: string
+}
+
+export interface HomeLayout {
+  order: string[]
+  hidden: string[]
+  entries: HomeLayoutEntry[]
+}
+
 // ---- 自定义工作流 /api/workflows ----
 
 export interface WorkflowNode {

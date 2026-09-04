@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, WorkflowNodeDef, WorkflowPreset } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote } from './types'
 
@@ -35,6 +35,10 @@ export const api = {
   }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
+  homeLayout: () => request<HomeLayout>('/api/home-layout'),
+  saveHomeLayout: (order: string[], hidden: string[]) => request<{ ok: boolean; entries: HomeLayoutEntry[] }>('/api/home-layout', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order, hidden }),
+  }),
   workflowNodes: () => request<{ nodes: WorkflowNodeDef[] }>('/api/workflows/nodes'),
   createWorkflow: (preset: Omit<WorkflowPreset, 'id'>) => request<{ ok: boolean; id?: string }>('/api/workflows', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset),

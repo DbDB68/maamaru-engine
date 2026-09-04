@@ -945,6 +945,7 @@ from touken.flows.report_judge import (  # noqa: E402
     _practice_report_status,
 )
 from . import workflow as _workflow  # noqa: E402
+from . import home_layout as _home_layout  # noqa: E402
 
 
 def _wf_node(script, builder, category, merge_saved=False, detail=None):
@@ -1305,6 +1306,30 @@ async def api_delete_workflow(preset_id: str):
         return JSONResponse({"ok": False, "reason": "没有这个预设"},
                             status_code=404)
     return {"ok": True}
+
+
+# ── API：执务页常用功能布局（自定义/排序/隐藏）──
+
+@app.get("/api/home-layout")
+async def api_get_home_layout():
+    layout = _home_layout.load_layout()
+    return {"order": layout["order"], "hidden": layout["hidden"],
+            "entries": _home_layout.resolve_layout()}
+
+
+@app.put("/api/home-layout")
+async def api_put_home_layout(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "reason": "请求体不是合法 JSON"},
+                            status_code=400)
+    try:
+        layout = _home_layout.normalize_layout(body)
+    except _home_layout.HomeLayoutError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    _home_layout.save_layout(layout)
+    return {"ok": True, "entries": _home_layout.resolve_layout()}
 
 
 # ── API：刀剑名册（供前端名单选择器）──
