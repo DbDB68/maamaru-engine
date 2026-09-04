@@ -58,7 +58,7 @@ const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
   daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
-  sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'daily.png',
+  sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'workflow.svg',
 }
 
 const selectedInfo = computed(() => scripts.value[selected.value])

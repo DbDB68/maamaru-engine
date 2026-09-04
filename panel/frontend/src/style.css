@@ -77,12 +77,12 @@ button { cursor: pointer; }
 .topnav button { height: 37px; min-width: 96px; padding: 7px 12px; color: inherit; background: var(--paper-card); border: 1px solid var(--paper-line); border-bottom: 0; border-radius: 9px 9px 0 0; font-size: 13px; }
 .topnav button::before, .theme-button::before { content: ''; display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; background: currentColor; -webkit-mask: var(--nav-icon) center / contain no-repeat; mask: var(--nav-icon) center / contain no-repeat; image-rendering: pixelated; }
 .topnav .nav-home { --nav-icon: url('/static/img/ui/home.png'); }
-.topnav .nav-office { --nav-icon: url('/static/img/ui/daily.png'); }
+.topnav .nav-office { --nav-icon: url('/static/img/ui/office.svg'); }
 .topnav .nav-tasks { --nav-icon: url('/static/img/ui/gear.png'); }
 .topnav .nav-report { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-lists { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-schedule { --nav-icon: url('/static/img/ui/expedition.png'); }
-.topnav .nav-workflow { --nav-icon: url('/static/img/ui/daily.png'); }
+.topnav .nav-workflow { --nav-icon: url('/static/img/ui/workflow.svg'); }
 .topnav .nav-chat { --nav-icon: url('/static/img/ui/singleplayer.png'); }
 .topnav .nav-system { --nav-icon: url('/static/img/ui/wrench.png'); }
 .topnav button:hover { color: var(--ink); background: var(--fox-gold-pale); }
@@ -511,7 +511,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .pause-row button { padding: 7px 11px; background: var(--paper-card); border: 1px solid #b9a68b; }
 
 /* 工作流：积木流水线编辑器。左边是已保存的流水线，右边一块块积木往上垒。 */
-.workflow-panel { --section-icon: url('/static/img/ui/daily.png'); }
+.workflow-panel { --section-icon: url('/static/img/ui/workflow.svg'); }
 .workflow-body { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; padding: 20px; align-items: start; }
 .preset-list-card h3 { margin-top: 0; }
 .preset-item { display: grid; gap: 8px; margin-top: 10px; padding: 11px 12px; background: #fffaf0; border: 1px solid var(--paper-line); border-radius: 8px; }
