@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 近侍舞台的演员层：狐之助 + 小狐丸（占位立绘）。
+// 近侍舞台的演员层：狐之助 + 小狐丸（透明像素立绘）。
 // 待命期间两位会随机串门打招呼；任务跑完时追加一次收工寒暄。
 // 互动只改 CSS class，动画本体全部在 style.css，主题换皮不影响状态机。
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'

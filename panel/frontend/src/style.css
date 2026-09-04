@@ -47,12 +47,12 @@ button { cursor: pointer; }
 .stage-fox { --fox-size: 92px; position: absolute; z-index: 1; right: 13%; bottom: 4px; width: 92px; height: 116px; background: url('/static/img/fox_frames/v2/idle/transparent/frame_01.png') center -70px / var(--fox-size) auto no-repeat; filter: drop-shadow(1px 0 #fff) drop-shadow(-1px 0 #fff) drop-shadow(0 1px #fff) drop-shadow(0 -1px #fff) drop-shadow(1px 2px rgba(52,35,28,.3)); image-rendering: pixelated; animation: vue-fox-idle 3.6s steps(1,end) infinite; }
 @keyframes vue-fox-idle { 0%,15%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_01.png')} 16%,31%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_02.png')} 32%,47%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_03.png')} 48%,63%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_04.png')} 64%,79%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_05.png')} 80%,100%{background-image:url('/static/img/fox_frames/v2/idle/transparent/frame_06.png')} }
 
-/* 舞台演员层：狐之助 + 小狐丸（占位立绘，正式素材待按狐狸绿幕管线生成）。
+/* 舞台演员层：狐之助 + 小狐丸（透明像素立绘）。
    互动状态机见 components/StageActors.vue，这里只负责各相位的外观。 */
 .stage-actors { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .stage-fox { transition: transform .2s steps(2, end); }
-.stage-kogi { --kogi-size: 92px; position: absolute; z-index: 1; left: 14%; bottom: 4px; width: 92px; height: 116px; background: url('/static/img/kogitsune_frames/v1/idle/frame_01.png') center -70px / var(--kogi-size) auto no-repeat; filter: drop-shadow(1px 0 #fff) drop-shadow(-1px 0 #fff) drop-shadow(0 1px #fff) drop-shadow(0 -1px #fff) drop-shadow(1px 2px rgba(52,35,28,.3)); image-rendering: pixelated; animation: vue-kogi-idle 3.6s steps(1,end) infinite; transition: left 1.35s steps(12, end); }
-@keyframes vue-kogi-idle { 0%,15%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_01.png')} 16%,31%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_02.png')} 32%,47%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_03.png')} 48%,63%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_04.png')} 64%,79%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_05.png')} 80%,100%{background-image:url('/static/img/kogitsune_frames/v1/idle/frame_06.png')} }
+.stage-kogi { position: absolute; z-index: 1; left: 14%; bottom: 4px; width: 92px; height: 116px; background: url('/static/img/kogitsune_frames/v2/idle.png') center bottom / contain no-repeat; filter: drop-shadow(1px 0 #fff) drop-shadow(-1px 0 #fff) drop-shadow(0 1px #fff) drop-shadow(0 -1px #fff) drop-shadow(1px 2px rgba(52,35,28,.3)); image-rendering: pixelated; animation: vue-kogi-idle 3.6s steps(2,end) infinite; transition: left 1.35s steps(12, end); }
+@keyframes vue-kogi-idle { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
 .stage-actors.phase-approach .stage-kogi,
 .stage-actors.phase-chat .stage-kogi { left: 44%; }
 .stage-actors.phase-approach .stage-fox,
@@ -401,7 +401,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-height: 800px) and (min-width: 721px) {
   .honmaru-stage { flex-basis: 170px; height: 170px; }
   .stage-fox { --fox-size: 74px; width: 76px; height: 94px; background-position-y: -57px; }
-  .stage-kogi { --kogi-size: 74px; width: 76px; height: 94px; background-position-y: -57px; }
+  .stage-kogi { width: 76px; height: 94px; background-position: center bottom; }
   .stage-bubble { bottom: 102px; }
 }
 
@@ -415,7 +415,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .stage-status strong { font-size: 12px; }
   .stage-status span { display: block; }
   .stage-fox { --fox-size: 58px; right: 9%; bottom: 2px; width: 60px; height: 73px; background-position-y: -45px; }
-  .stage-kogi { --kogi-size: 58px; left: 8%; bottom: 2px; width: 60px; height: 73px; background-position-y: -45px; }
+  .stage-kogi { left: 8%; bottom: 2px; width: 60px; height: 73px; background-position: center bottom; }
   .stage-bubble { display: none; }
   .layout { grid-template-columns: 1fr; }
   .sidebar { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid #c7bba8; }
@@ -829,12 +829,11 @@ body[data-theme='pixel'] .stage-fox {
   background-position: center -54px;
 }
 body[data-theme='pixel'] .stage-kogi {
-  --kogi-size: 70px;
   left: 14%;
   bottom: 3px;
   width: 72px;
   height: 90px;
-  background-position: center -54px;
+  background-position: center bottom;
 }
 body[data-theme='pixel'] .stage-bubble { bottom: 98px; }
 body[data-theme='pixel'] .topbar {
@@ -1968,12 +1967,11 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
     background-position: center -54px;
   }
   .stage-kogi {
-    --kogi-size: 70px;
     left: 14%;
     bottom: 3px;
     width: 72px;
     height: 90px;
-    background-position: center -54px;
+    background-position: center bottom;
   }
   .stage-bubble { bottom: 98px; }
 }
@@ -1988,12 +1986,11 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
     background-position: center -45px;
   }
   .stage-kogi {
-    --kogi-size: 58px;
     left: 8%;
     bottom: 2px;
     width: 60px;
     height: 73px;
-    background-position: center -45px;
+    background-position: center bottom;
   }
 }
 
