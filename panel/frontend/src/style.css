@@ -847,9 +847,9 @@ body[data-theme='pixel'] .topbar {
 }
 body[data-theme='pixel'] .topnav { align-items: center; gap: 2px; }
 body[data-theme='pixel'] .topnav button {
-  height: auto;
+  height: 100%;
   min-width: 112px;
-  padding: 8px 22px;
+  padding: 6px 22px;
   border: 1px solid #c8bea5;
 }
 body[data-theme='pixel'] .top-status { padding-bottom: 0; }
@@ -2007,7 +2007,7 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
   body[data-theme='pixel'] .workflow-page { height: auto; overflow: visible; padding: 3px; }
   body[data-theme='pixel'] .workflow-page > .maamaru-surface { height: auto; overflow: visible; }
 }
-.topnav { min-width: 0; overflow-x: auto; flex-shrink: 1; }
+.topnav { min-width: 0; overflow-x: auto; overflow-y: hidden; flex-shrink: 1; }
 .topnav button { flex-shrink: 0; }
 .top-status { flex-shrink: 0; }
 .personal-home-page.single-layout { padding: 30px; background: var(--paper); }
