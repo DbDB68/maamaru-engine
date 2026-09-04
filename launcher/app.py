@@ -45,7 +45,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .checks{padding:14px 16px;border-right:1px dashed #e2d7c5;min-width:0}
 .checks h3,.tools h3{margin:0 0 9px;font-size:16px}
 .check-list{display:grid;gap:7px}
-.check-row{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:center;min-height:34px;padding:6px 9px;border-radius:8px;background:#f7f2e8}
+.check-row{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:center;padding:6px 9px;border-radius:8px;background:#f7f2e8}
 .check-row .mark{display:grid;width:18px;height:18px;place-items:center;color:white;background:var(--green);border-radius:50%;font-size:11px;font-weight:800}
 .check-row.warn{background:#fff8e7;border:1px solid #ecd4a8}.check-row.warn .mark{background:var(--orange)}
 .check-row.error{background:#fff0ee;border:1px solid #e5b6b2}.check-row.error .mark{background:var(--red)}
@@ -53,7 +53,10 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .checks-count{display:block;margin-top:9px;color:var(--muted);font-size:11px}
 .loading{padding:30px 0;color:var(--muted);text-align:center;font-size:13px}
 .tools{padding:14px 16px;display:flex;flex-direction:column;gap:7px;background:#fdf6e7}
-.tools button{display:flex;align-items:center;gap:10px;min-height:36px;padding:4px 10px;text-align:left;color:#554b40;background:var(--card);border:1px solid #d3c5af;border-radius:8px;font-size:13px}
+/* The tools column adds a 7px flex gap below its heading: 2 + 7 matches the checks' 9px. */
+.tools h3{margin-bottom:2px}
+.check-row,.tools button{min-height:36px}
+.tools button{display:flex;align-items:center;gap:10px;padding:4px 10px;text-align:left;color:#554b40;background:var(--card);border:1px solid #d3c5af;border-radius:8px;font-size:13px}
 .tools button:hover{background:#fff;border-color:#b99e72}.tools button:disabled{cursor:not-allowed;opacity:.55}
 .tool-symbol{display:grid;place-items:center;width:26px;height:26px;flex:0 0 26px;border-radius:6px;color:var(--gold-deep);background:#f3ead6}
 .tools button:hover .tool-symbol{background:#f5e5bc}.tools button:focus-visible{outline:2px solid var(--gold-deep);outline-offset:2px}
