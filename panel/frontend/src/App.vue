@@ -20,7 +20,7 @@ import NotificationCenter from './components/NotificationCenter.vue'
 import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
-import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset } from './types'
+import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
@@ -28,11 +28,29 @@ const selected = ref('daily')
 const running = ref(false)
 const current = ref<string | null>(null)
 const workflowDraft = ref<WorkflowPreset | null>(null)
-const workflowPanel = ref<{ dirty: boolean } | null>(null)
+const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
 function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
-const runningDailyWorkflow = ref(false)
-function viewRunningWorkflow() { if (runningDailyWorkflow.value) openDailyWorkflow(); else tab.value = 'workflow' }
+const runningWorkflow = ref<WorkflowIdentity | null>(null)
+const startingWorkflow = ref(false)
+let statusRevision = 0
+const workflowRunningLabel = computed(() => runningWorkflow.value ? `「${runningWorkflow.value.name}」正在执行` : '工作流正在执行')
+function viewRunningWorkflow() {
+  if (runningWorkflow.value) openWorkflowPreset(runningWorkflow.value.id)
+  else tab.value = 'workflow'
+}
+function workflowStarted(identity: WorkflowIdentity) {
+  statusRevision++
+  running.value = true
+  current.value = 'workflow'
+  runningWorkflow.value = identity
+}
+function workflowSaved(preset: WorkflowPreset) {
+  const index = homeWorkflows.value.findIndex(item => item.id === preset.id)
+  if (index < 0) homeWorkflows.value.push(preset)
+  else homeWorkflows.value[index] = preset
+  homeLayoutEntries.value = homeLayoutEntries.value.map(entry => entry.key === `wf:${preset.id}` ? { ...entry, label: preset.name } : entry)
+}
 const loading = ref(true)
 const message = ref('')
 const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
@@ -53,6 +71,10 @@ const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
 const clock = ref(Date.now())
+const logRunning = computed(() => running.value || !!dashboardRun.value?.active)
+const logTaskLabel = computed(() => running.value
+  ? (current.value === 'workflow' ? runningWorkflow.value?.name || '工作流' : scripts.value[current.value || '']?.label || '任务')
+  : dashboardRun.value?.active ? dashboardRun.value.label || '任务' : '')
 
 const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
@@ -171,13 +193,24 @@ function openWorkflowPreset(id: string) {
 async function runSelectedWorkflow() {
   const preset = selectedWorkflow.value
   if (!preset) return
+  await startWorkflow(preset)
+}
+async function startWorkflow(preset: WorkflowIdentity) {
+  if (running.value || stopping.value || startingWorkflow.value) return
+  if (workflowDraft.value?.id === preset.id && (workflowPanel.value?.dirty || workflowPanel.value?.locked)) {
+    openWorkflowPreset(preset.id)
+    message.value = '这条流程有未保存的修改或正在保存，请在编辑页确认后运行'
+    return
+  }
+  startingWorkflow.value = true
+  statusRevision++
   try {
     const result = await api.run('workflow', { workflow_id: preset.id })
     if (!result.ok) throw new Error('这条流程没有启动，请重试')
-    running.value = true
-    current.value = 'workflow'
-    message.value = `「${preset.name}」已开始`
+    workflowStarted(result.workflow || preset)
+    message.value = `「${runningWorkflow.value!.name}」已开始`
   } catch (error) { message.value = error instanceof Error ? error.message : '启动失败，请重试' }
+  finally { startingWorkflow.value = false }
 }
 function openWishlist() {
   selected.value = '$wishlist'
@@ -282,6 +315,7 @@ async function load() {
     scripts.value = scriptData.scripts
     running.value = scriptData.running
     current.value = scriptData.current
+    runningWorkflow.value = scriptData.workflow || null
     eventHidden.value = scriptData.event_hidden || []
     theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
     applyTheme()
@@ -331,8 +365,10 @@ async function returnToLauncher() {
   }
 }
 async function pollStatus() {
+  const revision = statusRevision
   try {
     const [state, dashboard] = await Promise.all([api.scripts(), api.dashboard()])
+    if (revision !== statusRevision || startingWorkflow.value || workflowPanel.value?.locked) return
     dashboardRun.value = dashboard.running || null
     clock.value = Date.now()
     const wasRunning = running.value
@@ -341,6 +377,8 @@ async function pollStatus() {
     if (stopping.value && !state.running) stopping.value = false
     running.value = state.running
     current.value = state.running ? state.current : null
+    if (!state.running || state.current !== 'workflow') runningWorkflow.value = null
+    else if ('workflow' in state) runningWorkflow.value = state.workflow || null
     if (state.event_hidden) eventHidden.value = state.event_hidden
     if (wasRunning && !state.running) message.value = '任务已结束'
   } catch (_) {}
@@ -384,19 +422,7 @@ async function save() {
 
 async function run() {
   if (selected.value === 'daily') {
-    if (workflowDraft.value?.id === 'builtin-daily' && workflowPanel.value?.dirty) {
-      openDailyWorkflow()
-      message.value = '日课有未保存的修改，请保存并运行'
-      return
-    }
-    try {
-      const result = await api.run('workflow', { workflow_id: 'builtin-daily' })
-      if (!result.ok) throw new Error('日课没有启动，请重试')
-      running.value = true
-      current.value = 'workflow'
-      runningDailyWorkflow.value = true
-      message.value = '日课安排已开始'
-    } catch (error) { message.value = error instanceof Error ? error.message : '日课启动失败' }
+    await startWorkflow(homeWorkflows.value.find(preset => preset.id === 'builtin-daily') || { id: 'builtin-daily', name: '一键日课' })
     return
   }
   await api.run(selected.value, params.value[selected.value] || {})
@@ -406,12 +432,12 @@ async function run() {
 }
 
 async function stop() {
+  statusRevision++
   stopping.value = true
   try {
     const result = await api.stop()
     if (!result.ok) throw new Error('停止请求未成功，请重试')
-    running.value = false
-    current.value = null
+    // 保持当前任务，直到下一次状态轮询确认停止，避免提前显示“空闲”。
     message.value = '已发送停止请求'
   } catch (error) {
     message.value = error instanceof Error ? error.message : '停止失败，请重试'
@@ -597,10 +623,10 @@ watch(tab, value => {
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
-        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
-        <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running" @click="runSelectedWorkflow">跑这条</button></div>
+        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>{{ stopping ? "正在停止…" : workflowRunningLabel }}</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
+        <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="runSelectedWorkflow">跑这条</button></div>
         <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
-        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running" @click="run">运行日课</button></div>
+        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="run">运行日课</button></div>
         <OverviewTaskCard
           v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
           :info="selectedInfo"
@@ -612,7 +638,7 @@ watch(tab, value => {
           @stop="stop"
           @configure="tab = 'tasks'"
         />
-        <LogPanel />
+        <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
@@ -622,7 +648,7 @@ watch(tab, value => {
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
-    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
+    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" :busy="startingWorkflow" :running-workflow="runningWorkflow" @started="workflowStarted" @saved="workflowSaved" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"

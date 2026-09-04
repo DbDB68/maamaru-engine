@@ -1215,6 +1215,7 @@ async def api_scripts():
             "scripts": {},
             "running": False,
             "current": None,
+            "workflow": None,
             "event_hidden": [],
         }
     runner = get_runner()
@@ -1222,6 +1223,7 @@ async def api_scripts():
         "scripts": list_scripts(),
         "running": runner.is_running,
         "current": runner.current_script,
+        "workflow": runner.current_workflow,
         # 概览页「常用功能」联动：绑活动的脚本没开放就先收起来（配置页不受影响）
         "event_hidden": _event_hidden_scripts(),
     }
@@ -1241,7 +1243,7 @@ async def api_run_script(request: Request):
     run_id = runner.start(script_name, str(_CONFIG_PATH), params=params)
     if run_id is None:
         return JSONResponse({"ok": False, "reason": "不支持或正在运行"}, status_code=400)
-    return {"ok": True, "run_id": run_id}
+    return {"ok": True, "run_id": run_id, "workflow": runner.current_workflow}
 
 
 @app.post("/api/scripts/stop")

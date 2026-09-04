@@ -1,6 +1,6 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, WorkflowNodeDef, WorkflowPreset } from './types'
 
-import type { HonmaruHomeData, HonmaruProfile, HonmaruNote } from './types'
+import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -28,7 +28,7 @@ export const api = {
   saveTheme: (theme: string) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme }),
   }),
-  run: (script: string, params: ScriptParams) => request<{ ok: boolean }>('/api/scripts/run', {
+  run: (script: string, params: ScriptParams) => request<{ ok: boolean; workflow?: WorkflowIdentity | null }>('/api/scripts/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, params }),

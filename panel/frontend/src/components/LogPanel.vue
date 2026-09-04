@@ -4,6 +4,9 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import UiIcon from './UiIcon.vue'
 
+const props = withDefaults(defineProps<{ running?: boolean; stopping?: boolean; taskLabel?: string }>(), { running: false, stopping: false, taskLabel: '' })
+const runStatus = computed(() => props.stopping ? '正在停止…' : props.running ? `${props.taskLabel || '任务'}正在执行` : '空闲')
+
 const entries = ref<any[]>([])
 const raw = ref(false)
 const autoScroll = ref(true)
@@ -119,6 +122,6 @@ onBeforeUnmount(() => { source?.close(); window.clearTimeout(feedbackResetTimer)
         <time>{{ time(entry.ts) }}</time><b>{{ scriptName(entry.script) }}</b><span>{{ clean(entry.message) }}</span>
       </div>
     </div>
-    <footer class="log-status-bar"><span>{{ visibleEntries.length }} 条进度</span><span>● 空闲</span></footer>
+    <footer class="log-status-bar"><span>{{ visibleEntries.length }} 条进度</span><span role="status" :title="runStatus">● {{ runStatus }}</span></footer>
   </section>
 </template>

@@ -42,9 +42,12 @@ export interface ScriptInfo {
 export interface ScriptsResponse {
   running: boolean
   current: string | null
+  workflow?: WorkflowIdentity | null
   scripts: Record<string, ScriptInfo>
   event_hidden?: string[]
 }
+
+export interface WorkflowIdentity { id: string; name: string }
 
 // ---- 执务页常用功能自定义 /api/home-layout ----
 

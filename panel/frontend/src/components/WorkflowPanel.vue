@@ -6,10 +6,10 @@ import PaperCard from './PaperCard.vue'
 import PixelControl from './PixelControl.vue'
 import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
-import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset } from '../types'
+import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset, WorkflowIdentity } from '../types'
 
-const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; dailyEntry?: number; presetJump?: { id: string; tick: number } | null; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, dailyEntry: 0, presetJump: null, active: true })
-const emit = defineEmits<{ started: []; stop: []; office: [] }>()
+const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; busy?: boolean; runningWorkflow?: WorkflowIdentity | null; dailyEntry?: number; presetJump?: { id: string; tick: number } | null; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, busy: false, runningWorkflow: null, dailyEntry: 0, presetJump: null, active: true })
+const emit = defineEmits<{ started: [identity: WorkflowIdentity]; saved: [preset: WorkflowPreset]; stop: []; office: [] }>()
 // Keep the draft in the parent so switching pages does not discard edits.
 const draft = defineModel<WorkflowPreset | null>('draft', { default: null })
 const maxNodes = 30 // panel/workflow.py: MAX_NODES
@@ -40,7 +40,7 @@ let handledPresetJump = 0
 let pendingSwitch: (() => void) | null = null
 const nodeIds = new WeakMap<WorkflowNode, number>()
 let nextId = 0
-const locked = computed(() => saving.value || starting.value)
+const locked = computed(() => saving.value || starting.value || props.busy)
 const dirty = computed(() => {
   if (!draft.value) return false
   const saved = presets.value.find(preset => preset.id === draft.value?.id)
@@ -175,7 +175,7 @@ watch(() => props.presetJump, request => {
   if (!loading.value) { openPresetById(request.id); handledPresetJump = request.tick }
 })
 watch(() => props.active, active => { if (active) load() })
-defineExpose({ dirty })
+defineExpose({ dirty, locked })
 function duplicate(preset: WorkflowPreset) {
   closeMenu()
   const copy = clone(draft.value?.id === preset.id ? draft.value : preset)
@@ -257,6 +257,7 @@ async function save(): Promise<boolean> {
     else presets.value.push(clone(snapshot))
     draft.value.id = snapshot.id
     draft.value.name = snapshot.name
+    emit('saved', clone(snapshot))
     tell('流程已保存')
     return true
   } catch (error) {
@@ -271,7 +272,7 @@ async function run() {
     if (dirty.value && !await save()) return
     const result = await api.run('workflow', { workflow_id: draft.value!.id })
     if (!result.ok) throw new Error('没有启动成功，请稍后重试')
-    emit('started')
+    emit('started', result.workflow || { id: draft.value!.id, name: draft.value!.name })
     tell(`「${draft.value!.name}」已开始`)
   } catch (error) { tell(error instanceof Error ? `启动失败：${error.message}` : '启动失败，请重试', true) }
   finally { starting.value = false }
@@ -350,7 +351,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
           <span class="wf-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
           <div class="wf-actions"><button type="button" class="wf-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="wf-button wf-primary" :disabled="running || locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
         </footer>
-        <div v-if="running" class="wf-running"><span>{{ current === 'workflow' ? '工作流正在执行' : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务看实况 →</button></div>
+        <div v-if="running" class="wf-running"><span>{{ stopping ? '正在停止…' : current === 'workflow' ? (runningWorkflow ? `「${runningWorkflow.name}」正在执行` : '工作流正在执行') : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务看实况 →</button></div>
         <p v-if="message" class="wf-message" :class="{ 'wf-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
     </div>

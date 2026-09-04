@@ -63,6 +63,7 @@ class ScriptRunner:
         self._lock = threading.Lock()
         self._current_run_id: str | None = None
         self._current_script: str | None = None
+        self._current_workflow: dict | None = None
         self._current_started: float | None = None  # 启动时间戳，仪表盘算已跑多久
         self._on_message = None  # callback(message_dict)
         self._last_output: float = 0.0   # 最后一次收到子进程输出的时间
@@ -85,6 +86,11 @@ class ScriptRunner:
         """本轮启动时间戳（没在跑就是 None）"""
         return self._current_started if self.is_running else None
 
+    @property
+    def current_workflow(self) -> dict | None:
+        """本轮启动时的流程身份；不暴露参数，也不跟随后续重命名改变。"""
+        return dict(self._current_workflow) if self.is_running and self._current_workflow else None
+
     def start(self, script_name: str, config_path: str, params: dict | None = None) -> str | None:
         """启动脚本。返回 run_id 或 None（不支持/已在跑/子进程没起来）"""
         with self._lock:
@@ -99,8 +105,14 @@ class ScriptRunner:
             self._current_started = time.time()
             self._last_output = time.time()
             self._stop_reason = ""
+            self._current_workflow = None
 
             try:
+                if script_name == "workflow":
+                    from .workflow import find_preset
+                    preset = find_preset(str((params or {}).get("workflow_id") or ""))
+                    if preset:
+                        self._current_workflow = {"id": preset["id"], "name": preset["name"]}
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
                 from touken.telemetry import get_telemetry_store
                 get_telemetry_store().start_run(run_id, script_name, self._current_started)
