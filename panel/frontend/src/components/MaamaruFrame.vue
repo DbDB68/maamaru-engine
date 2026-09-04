@@ -16,7 +16,8 @@ const emit = defineEmits<{
     否则滚动内容会被浮在线上的描边切穿。
   -->
   <main class="maamaru-frame" :class="[`${variant}-frame`, pageClass]" @scroll="emit('scroll', $event)">
-    <div class="maamaru-surface">
+    <!-- scroll 不冒泡：像素主题由内层滚动，也要通知页面使用同一套滚动行为。 -->
+    <div class="maamaru-surface" @scroll="emit('scroll', $event)">
       <slot />
     </div>
   </main>
