@@ -10,6 +10,16 @@
 
 **[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v0.5.2 更新内容](docs/releases/v0.5.2.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
 
+## 欢迎回到我的本丸
+
+![我的本丸首页：庭院里的小狐丸与狐之助、审神者档案、日常小记和心愿刀名单](docs/assets/honmaru-home-preview.png)
+
+*开发版首页预览，尚未发版。*
+
+给审神者留一处自己的空间：头像、近侍刀、随手写的小记，执务留下的记录，还有惦记着的刀剑和目标。庭院里，小狐丸和狐之助偶尔串门聊两句；今天的本丸，也慢慢攒成了自己的日常。
+
+开工之前，先回来坐一会儿。
+
 ## 打开以后，选一条路
 
 | 今天想做什么 | 从哪里进去 | 最后得到什么 |
