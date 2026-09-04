@@ -307,7 +307,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
 
 <style scoped>
 .wf-panel { color: var(--ink); }
-.wf-panel :deep(.section-head) { padding: 0 0 14px; border: 0; background: none; box-shadow: none; }
+/* This heading scrolls with the page; the shared sticky, blurred header would cover the editor. */
+.wf-panel :deep(.section-head) { position: static; padding: 0 0 14px; border: 0; background: none; backdrop-filter: none; box-shadow: none; }
 .wf-panel :deep(.section-head h2) { font-size: 24px; }
 .wf-panel button, .wf-dialog button { cursor: pointer; font: inherit; }
 .wf-panel button:disabled, .wf-dialog button:disabled { cursor: default; opacity: .42; }
@@ -379,6 +380,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
 .wf-undo { display: flex; gap: 12px; align-items: center; font-size: 12px; margin-top: 14px; color: var(--ink-dim); }
 .wf-undo button, .wf-text-button { background: none; border: 0; color: var(--fox-gold); font-size: 12px !important; padding: 6px 0; }
 .wf-toolbar { display: flex; position: sticky; bottom: 0; z-index: 3; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 15px 26px; background: var(--paper-card); border-top: 1px solid var(--paper-line); border-radius: 0 0 10px 10px; box-shadow: 0 -6px 14px #49382104; }
+.wf-editor:has(.wf-steps) .wf-toolbar { border-radius: 0; }
 .wf-save-state { font-size: 11px; color: var(--ink-dim); }
 .wf-save-state.unsaved { color: var(--fox-gold); }
 .wf-actions { display: flex; gap: 9px; }
