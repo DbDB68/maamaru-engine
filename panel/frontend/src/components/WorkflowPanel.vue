@@ -27,7 +27,9 @@ const failed = ref(false)
 const picker = ref<HTMLDialogElement | null>(null)
 const switchDialog = ref<HTMLDialogElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
-const moreMenu = ref<HTMLDetailsElement | null>(null)
+const moreMenu = ref<HTMLElement | null>(null)
+const menuPreset = ref<WorkflowPreset | null>(null)
+const menuPosition = ref({ left: '0px', top: '0px' })
 const search = ref('')
 const category = ref<WorkflowNodeCategory | 'all'>('all')
 const insertAt = ref(0)
@@ -87,9 +89,21 @@ function summary(node: WorkflowNode) {
   }).join(' · ') || description(node.type) || '点击查看设置'
 }
 function tell(text: string, error = false) { message.value = text; failed.value = error }
+function closeMenu() { moreMenu.value?.hidePopover() }
+async function openMenu(preset: WorkflowPreset, event: MouseEvent) {
+  const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  menuPreset.value = preset
+  await nextTick()
+  moreMenu.value?.showPopover()
+  const height = moreMenu.value?.offsetHeight || 80
+  menuPosition.value = {
+    left: `${Math.max(8, Math.min(anchor.right - 136, window.innerWidth - 144))}px`,
+    top: `${anchor.bottom + height + 8 <= window.innerHeight ? anchor.bottom + 4 : Math.max(8, anchor.top - height - 4)}px`,
+  }
+}
 function setDraft(value: WorkflowPreset) {
   draft.value = clone(value)
-  if (moreMenu.value) moreMenu.value.open = false
+  closeMenu()
   expanded.value = null
   removed.value = null
   message.value = ''
@@ -125,21 +139,21 @@ function select(preset: WorkflowPreset) {
   if (draft.value?.id === preset.id) return
   switchTo(() => setDraft(preset))
 }
-function duplicate() {
-  if (!draft.value) return
-  const copy = clone(draft.value)
+function duplicate(preset: WorkflowPreset) {
+  closeMenu()
+  const copy = clone(draft.value?.id === preset.id ? draft.value : preset)
   switchTo(() => setDraft({ ...copy, id: '', name: `${copy.name.slice(0, 27)} 副本` }))
 }
-async function remove() {
-  if (!draft.value?.id || locked.value || props.running) return
-  const preset = draft.value
+async function remove(preset: WorkflowPreset) {
+  if (locked.value || props.running) return
+  closeMenu()
   if (!window.confirm(`删除「${preset.name}」？这条已保存的流程将无法恢复。`)) return
   saving.value = true
   try {
     const result = await api.deleteWorkflow(preset.id)
     if (!result.ok) throw new Error('没有删除成功，请重试')
     presets.value = presets.value.filter(item => item.id !== preset.id)
-    setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
+    if (draft.value?.id === preset.id) setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
     tell(`已删除「${preset.name}」`)
   } catch (error) { tell(error instanceof Error ? error.message : '删除失败，请重试', true) }
   finally { saving.value = false }
@@ -231,8 +245,8 @@ function protectDraft(event: BeforeUnloadEvent) {
     event.returnValue = ''
   }
 }
-onMounted(() => { load(); window.addEventListener('beforeunload', protectDraft) })
-onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
+onMounted(() => { load(); window.addEventListener('beforeunload', protectDraft); window.addEventListener('scroll', closeMenu, true) })
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft); window.removeEventListener('scroll', closeMenu, true) })
 </script>
 
 <template>
@@ -245,9 +259,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
         <header><h3>我的流程</h3><span>{{ presets.length }}</span></header>
         <button type="button" class="wf-button wf-new" :class="{ selected: !draft?.id }" :disabled="locked" @click="newPreset">＋ 新建流程</button>
         <div class="wf-presets">
-          <button v-for="preset in presets" :key="preset.id" type="button" class="wf-preset" :class="{ selected: draft?.id === preset.id }" :aria-pressed="draft?.id === preset.id" :disabled="locked" @click="select(preset)">
-            <strong>{{ preset.name }}</strong><small>{{ preset.nodes.length }} 个步骤<span v-if="draft?.id === preset.id && dirty"> · 编辑中</span></small>
-          </button>
+          <div v-for="preset in presets" :key="preset.id" class="wf-preset" :class="{ selected: draft?.id === preset.id }">
+            <button type="button" class="wf-preset-select" :aria-pressed="draft?.id === preset.id" :disabled="locked" @click="select(preset)">
+              <strong>{{ preset.name }}</strong><small>{{ preset.nodes.length }} 个步骤<span v-if="draft?.id === preset.id && dirty"> · 编辑中</span></small>
+            </button>
+            <button type="button" class="wf-more-button" :aria-label="`${preset.name}的更多操作`" :disabled="locked" aria-haspopup="true" @click="openMenu(preset, $event)"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="13" cy="8" r="1.3" fill="currentColor"/></svg></button>
+          </div>
         </div>
         <p class="wf-library-note">选一条慢慢调整，<br>也可以从空白开始安排。</p>
       </aside>
@@ -255,7 +272,6 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
         <fieldset :disabled="locked" class="wf-edit-fields">
           <header class="wf-editor-head">
             <label class="wf-name">{{ draft.id ? '流程名称' : '新的安排' }}<PixelControl v-model="draft.name" maxlength="30" placeholder="给流程起个名字，比如：晚间日课" /></label>
-            <details ref="moreMenu" class="wf-more"><summary aria-label="更多流程操作">•••</summary><div><button type="button" :disabled="!draft.nodes.length" @click="duplicate">复制这份安排</button><button v-if="draft.id" type="button" class="wf-danger" :disabled="running" @click="remove">删除流程</button></div></details>
           </header>
           <div class="wf-list-heading"><h3>执行顺序 <span>{{ draft.nodes.length }} / {{ maxNodes }}</span></h3><small>从上往下依次执行</small></div>
           <div v-if="!draft.nodes.length" class="wf-empty">
@@ -293,6 +309,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
         <p v-if="message" class="wf-message" :class="{ 'wf-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
     </div>
+    <div ref="moreMenu" popover="auto" class="wf-preset-menu" :style="menuPosition" :aria-label="`${menuPreset?.name || '流程'}的操作`">
+      <template v-if="menuPreset">
+        <button type="button" :disabled="locked" @click="duplicate(menuPreset)">复制流程</button>
+        <button type="button" class="wf-danger" :disabled="running || locked" @click="remove(menuPreset)">删除流程</button>
+      </template>
+    </div>
     <dialog ref="picker" class="wf-dialog wf-picker" aria-labelledby="wf-picker-title" @cancel.prevent="closePicker">
       <header class="wf-dialog-head"><div><h2 id="wf-picker-title">添加步骤</h2><p>可以连续选择，按点击顺序加入流程。</p></div><button type="button" class="wf-close" aria-label="关闭步骤选择" @click="closePicker">×</button></header>
       <div class="wf-search-area"><label class="wf-search"><span aria-hidden="true">⌕</span><input ref="searchInput" v-model="search" type="search" aria-label="搜索步骤" placeholder="搜索任务，比如：江户城、远征" /></label><div class="wf-categories" role="group" aria-label="任务分类"><button type="button" :aria-pressed="category === 'all'" @click="category = 'all'">全部</button><button v-for="item in categoryOrder" :key="item" type="button" :aria-pressed="category === item" @click="category = item">{{ categoryLabels[item] }}</button></div></div>
@@ -325,7 +347,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
 .wf-new { width: 100%; text-align: left; background: transparent; border-style: dashed; }
 .wf-new.selected { border-color: var(--fox-gold); color: var(--fox-gold); }
 .wf-presets { display: grid; gap: 6px; margin-top: 14px; }
-.wf-preset { text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); padding: 12px; min-width: 0; }
+.wf-preset { position: relative; text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); min-width: 0; }
+.wf-preset-select { display: block; width: 100%; padding: 12px 38px 12px 12px; text-align: left; border: 0; border-radius: inherit; background: transparent; color: inherit; }
 .wf-preset strong { display: block; font-size: 13px; overflow-wrap: anywhere; line-height: 1.6; }
 .wf-preset small { display: block; font-size: 11px; color: var(--ink-dim); margin-top: 5px; }
 .wf-preset:hover { background: var(--paper-panel); }
@@ -337,11 +360,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
 .wf-name { display: grid; gap: 9px; flex: 1; min-width: 0; color: var(--ink-dim); font-size: 11px; }
 .wf-name :deep(input) { width: 100%; min-width: 0; height: auto; border: 0; border-bottom: 1px solid var(--paper-line); border-radius: 0; padding: 8px 0; background: transparent; box-shadow: none; color: var(--ink); font: inherit; font-size: 20px; font-weight: 650; }
 .wf-name :deep(input::placeholder) { color: var(--ink-dim); font-size: 16px; font-weight: normal; opacity: .75; }
-.wf-more { position: relative; align-self: flex-start; margin-top: 20px; }
-.wf-more summary { list-style: none; cursor: pointer; color: var(--ink-dim); padding: 6px; letter-spacing: 2px; }
-.wf-more summary::-webkit-details-marker { display: none; }
-.wf-more > div { position: absolute; right: 0; top: 35px; z-index: 4; width: 155px; padding: 6px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 6px; box-shadow: 0 6px 20px #0002; }
-.wf-more button { display: block; width: 100%; background: none; color: var(--ink); border: 0; padding: 10px; text-align: left; font-size: 12px; }
+.wf-more-button { display: grid; place-items: center; position: absolute; right: 6px; top: 8px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink-dim); font-size: 18px !important; line-height: 1; }
+.wf-more-button:hover { background: var(--paper-panel); color: var(--ink); }
+/* The top layer keeps the compact menu clear of the narrow-screen card scroller. */
+.wf-preset-menu { position: fixed; inset: auto; margin: 0; width: 136px; padding: 4px; background: var(--paper-card); color: var(--ink); border: 1px solid var(--paper-line); border-radius: 6px; box-shadow: 0 4px 14px #0002; }
+.wf-preset-menu button { display: block; width: 100%; background: none; color: var(--ink); border: 0; border-radius: 3px; padding: 8px 10px; text-align: left; font-size: 12px; }
+.wf-preset-menu button:hover:not(:disabled) { background: var(--paper-panel); }
 .wf-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .wf-list-heading h3 { margin: 0; font-size: 13px; }
 .wf-list-heading h3 span { margin-left: 8px; color: var(--ink-dim); font-size: 11px; font-weight: normal; }
@@ -431,7 +455,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
   .wf-library > header { flex: 1; margin: 0; }
   .wf-new { width: auto; }
   .wf-presets { display: flex; width: 100%; overflow-x: auto; gap: 8px; margin: 0; padding-bottom: 3px; }
-  .wf-preset { flex: 0 0 auto; max-width: 210px; padding: 9px 13px; border-color: var(--paper-line); }
+  .wf-preset { flex: 0 0 auto; max-width: 210px; border-color: var(--paper-line); }
+  .wf-preset-select { padding: 9px 38px 9px 13px; }
   .wf-library-note { display: none; }
   .wf-editor-head { padding-bottom: 20px; gap: 8px; }
   .wf-name :deep(input) { font-size: 18px; }
