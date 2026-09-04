@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
+import UiIcon from './UiIcon.vue'
 
 const entries = ref<any[]>([])
 const raw = ref(false)
@@ -104,12 +105,12 @@ onBeforeUnmount(() => { source?.close(); window.clearTimeout(feedbackResetTimer)
     <PanelHeader title="日志" :subtitle="`${visibleEntries.length} 条`">
       <template #actions>
       <div class="head-actions">
-        <button class="secondary" :class="{ active: !raw }" @click="raw = false">可视化</button>
-        <button class="secondary" :class="{ active: raw }" @click="raw = true">源码日志</button>
-        <button class="secondary" @click="entries = []">清屏</button>
-        <button class="secondary" :class="{ active: autoScroll }" @click="autoScroll = !autoScroll">自动滚动</button>
-        <button class="secondary" :disabled="feedbackDisabled" title="整理错误信息并下载可附在 Issue 中的 ZIP" @click="exportFeedback">{{ feedbackLabel }}</button>
-        <button v-if="showIssueButton" class="secondary issue-button" @click="openIssue">去 Issue</button>
+        <button class="secondary" :class="{ active: !raw }" :aria-pressed="!raw" @click="raw = false"><UiIcon name="cards" />可视化</button>
+        <button class="secondary" :class="{ active: raw }" :aria-pressed="raw" @click="raw = true"><UiIcon name="code" />源码日志</button>
+        <button class="secondary" @click="entries = []"><UiIcon name="eraser" />清屏</button>
+        <button class="secondary" :class="{ active: autoScroll }" :aria-pressed="autoScroll" @click="autoScroll = !autoScroll"><UiIcon name="follow" />自动滚动</button>
+        <button class="secondary" :disabled="feedbackDisabled" title="整理错误信息并下载可附在 Issue 中的 ZIP" @click="exportFeedback"><UiIcon name="download" />{{ feedbackLabel }}</button>
+        <button v-if="showIssueButton" class="secondary issue-button" @click="openIssue"><UiIcon name="external" />去 Issue</button>
       </div>
       </template>
     </PanelHeader>

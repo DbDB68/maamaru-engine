@@ -196,7 +196,7 @@ button { cursor: pointer; }
 .exp-row span { min-width: 0; }
 .exp-row em { grid-column: 1 / -1; color: #7a4f2b; font-style: normal; }
 .empty { color: #8b7f72; }
-.log-panel { display: flex; min-height: 0; flex-direction: column; }
+.log-panel { --section-icon: url('/static/img/ui/log.svg'); display: flex; min-height: 0; flex-direction: column; }
 .log-status-bar { display: none; }
 .head-actions { display: flex; gap: 5px; }
 .head-actions .active { color: #fff; background: #576b5c; }
@@ -1025,7 +1025,7 @@ body[data-theme='pixel'] .home-center .log-panel {
 }
 body[data-theme='pixel'] .log-panel .section-head {
   position: static;
-  height: 25.2px;
+  height: auto;
   min-height: 25.2px;
   padding: 0;
   background: transparent;
@@ -1034,7 +1034,7 @@ body[data-theme='pixel'] .log-panel .section-head {
 body[data-theme='pixel'] .log-panel .section-head h2 { margin: 0; font-size: 13px; }
 body[data-theme='pixel'] .log-panel .section-head h2::before { width: 16px; height: 16px; flex-basis: 16px; }
 body[data-theme='pixel'] .log-panel .section-head p { display: none; }
-body[data-theme='pixel'] .log-panel .head-actions { height: 25.2px; gap: 5px; }
+body[data-theme='pixel'] .log-panel .head-actions { height: auto; gap: 5px; }
 body[data-theme='pixel'] .log-panel .head-actions button {
   min-height: 25.2px;
   padding: 3px 8px;
@@ -1064,13 +1064,6 @@ body[data-theme='pixel'] .log-panel.visual-mode .log-row span { grid-area: messa
 body[data-theme='pixel'] .log-panel.visual-mode .log-row + .log-row { margin-top: 1px; }
 body[data-theme='pixel'] .log-panel .head-actions button { border-radius: 6px; }
 body[data-theme='pixel'] .log-panel .head-actions button.active { color: #6a560b; background: #f1dea3; border-color: #c9a227 !important; }
-body[data-theme='pixel'] .log-panel .head-actions button::before { display: inline-block; margin-right: 6px; font-size: 10px; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(1)::before { content: '▣'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(2)::before { content: '☷'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(3)::before { content: '■'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(4)::before { content: '●'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(5)::before { content: '⇩'; }
-body[data-theme='pixel'] .log-panel .head-actions button:nth-child(6)::before { content: '↗'; }
 body[data-theme='pixel'] .log-status-bar {
   display: flex;
   height: 18px;
@@ -1266,8 +1259,11 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 }
 .log-panel .section-head {
   position: static;
-  height: 25.2px;
+  height: auto;
   min-height: 25.2px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -1275,7 +1271,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .log-panel .section-head h2 { margin: 0; font-size: 13px; white-space: nowrap; }
 .log-panel .section-head h2::before { width: 16px; height: 16px; flex-basis: 16px; }
 .log-panel .section-head p { display: none; }
-.log-panel .head-actions { height: 25.2px; flex-wrap: nowrap; gap: 5px; }
+.log-panel .head-actions { height: auto; flex-wrap: wrap; gap: 5px; min-width: 0; }
 .log-panel .head-actions button {
   flex: 0 0 auto;
   min-height: 25.2px;
@@ -1306,13 +1302,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 }
 .log-panel.visual-mode .log-row span { grid-area: message; }
 .log-panel.visual-mode .log-row + .log-row { margin-top: 1px; }
-.log-panel .head-actions button::before { display: inline-block; margin-right: 6px; font-size: 10px; }
-.log-panel .head-actions button:nth-child(1)::before { content: '▣'; }
-.log-panel .head-actions button:nth-child(2)::before { content: '☷'; }
-.log-panel .head-actions button:nth-child(3)::before { content: '■'; }
-.log-panel .head-actions button:nth-child(4)::before { content: '●'; }
-.log-panel .head-actions button:nth-child(5)::before { content: '⇩'; }
-.log-panel .head-actions button:nth-child(6)::before { content: '↗'; }
+.log-panel .head-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .log-status-bar {
   display: flex;
   height: 18px;
