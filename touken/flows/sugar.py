@@ -46,10 +46,12 @@ class SugarMixin:
         Yields:
             str: 执行状态消息
         """
+        total_fed = 0
         for cycle in range(1, 11):  # 外层安全上限 10 圈
             yield f"[炼糖] ===== 第 {cycle} 圈 ====="
             inbox = yield from self._inbox_claim_stream(dry_run)
             fed = yield from self._shugo_loop_stream(dry_run)
+            total_fed += fed
             yield f"[炼糖] 第 {cycle} 圈结算：收件={inbox} 喂了={fed} 轮"
             if dry_run:
                 yield "[炼糖] 演习模式只跑一圈，收工"
@@ -67,7 +69,8 @@ class SugarMixin:
             if inbox == "failed" and fed == 0:
                 yield "[炼糖] 收件失败也喂不动，收工"
                 return
-        yield "[炼糖] 到安全上限 10 圈，强制收工"
+        yield (f"[炼糖] 到安全上限 10 圈收工：邮箱还压着邮件，刀位一直满员是瓶颈，"
+               f"这次只消化了 {total_fed} 轮；先去刀解腾位置，或者有空多跑几趟")
 
     # ==================== 收件箱 ====================
 

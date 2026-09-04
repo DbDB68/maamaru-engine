@@ -83,3 +83,18 @@ def _snapshot_report_status(msg: str, current=None):
     if "没能确认本轮盘点" in msg:
         return "✗ 未完成本轮盘点"
     return current
+
+
+def _sugar_report_status(msg: str, current=None):
+    """炼糖专项判分：邮箱真清空了才算绿；撞上限/刀位满收工必须如实标出
+    （9-05 冤案：邮箱 999+ 封、刀位钉死满员，一趟只消化几把，
+    收尾话术一个词不沾翻车词表，成绩单装绿）。"""
+    if "邮件里没刀了，收工" in msg:
+        return "✓ 邮箱已清空"
+    if "领到的刀都没重刀可喂，收工" in msg:
+        return "✓ 没有可喂的重刀"
+    if "到安全上限" in msg:
+        return "⚠ 邮箱没清完：刀位太满，先刀解腾位置再多跑几趟"
+    if "所持满了领不动、也没重刀可喂" in msg:
+        return "⚠ 刀位满了领不动，先去刀解腾位"
+    return current

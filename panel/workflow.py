@@ -31,6 +31,7 @@ from touken.flows.report_judge import (
     _practice_report_status,
     _shop_report_status,
     _snapshot_report_status,
+    _sugar_report_status,
 )
 from touken.runtime_paths import STATUS_DIR
 
@@ -172,7 +173,7 @@ _stream_node("dismantle", "刀解", "按刀解白名单解一把；今天解过�
 _stream_node("synthesize", "合成", "按合成白名单喂一把", "chore",
              "synthesize_stream")
 _stream_node("sugar", "炼糖", "收件箱清狗粮 + 习合循环", "chore",
-             "sugar_stream")
+             "sugar_stream", detail=[_sugar_report_status])
 _stream_node("inbox_supplies", "收杂物箱",
              "收件箱只收资源/货币/便利道具，刀剑邮件原样躺着", "chore",
              "inbox_supplies_stream")
