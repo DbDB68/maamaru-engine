@@ -83,6 +83,35 @@ class HomeLayoutStoreTests(unittest.TestCase):
         self.assertEqual(home_layout.load_layout(),
                          {"order": ["daily", "wf:abc123"], "hidden": ["pumpkin"]})
 
+    def test_daily_aliases_merge_without_writing_and_backup_can_restore(self):
+        self._save(["sortie", "wf:builtin-daily", "daily", "wf:abc123"], ["pumpkin"])
+        path = self.dir / "home_layout.json"
+        original = path.read_bytes()
+        projected = home_layout.load_layout()
+        self.assertEqual(projected, {"order": ["sortie", "daily", "wf:abc123"], "hidden": ["pumpkin"]})
+        keys = [entry["key"] for entry in home_layout.resolve_layout()]
+        self.assertEqual(keys[:2], ["sortie", "daily"])
+        self.assertEqual(keys.count("daily"), 1)
+        self.assertNotIn("wf:builtin-daily", keys)
+        self.assertEqual(path.read_bytes(), original)
+        home_layout.save_layout(projected)
+        self.assertEqual(path.with_suffix(".json.bak").read_bytes(), original)
+        path.write_bytes(original)
+        self.assertEqual(home_layout.load_layout(), projected)
+
+    def test_pinned_daily_stays_visible_when_old_shortcut_was_hidden(self):
+        self._save(["sortie", "wf:builtin-daily"], ["daily", "pumpkin"])
+        self.assertEqual(home_layout.load_layout(), {"order": ["sortie", "daily"], "hidden": ["pumpkin"]})
+
+    def test_hidden_daily_alias_stays_hidden(self):
+        self._save(["sortie"], ["wf:builtin-daily"])
+        self.assertEqual(home_layout.load_layout()["hidden"], ["daily"])
+        self.assertNotIn("daily", [entry["key"] for entry in home_layout.resolve_layout()])
+
+    def test_normalize_daily_aliases_before_saving(self):
+        self.assertEqual(home_layout.normalize_layout({"order": ["daily", "wf:builtin-daily"], "hidden": []}),
+                         {"order": ["daily"], "hidden": []})
+
     def test_bad_json_backed_up_and_falls_back(self):
         path = self.dir / "home_layout.json"
         path.write_text("{broken", encoding="utf-8")

@@ -49,6 +49,20 @@ def _is_str_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(x, str) for x in value)
 
 
+def _unify_daily(order, hidden):
+    """默认日课的两种入口共用 daily；只投影，读取不改原文件。"""
+    alias = f"wf:{workflow.DAILY_PRESET_ID}"
+    if alias not in order and alias not in hidden:
+        return {"order": order, "hidden": hidden}
+    # 曾收起旧入口、再钉上默认流程的用户，仍然保留可见的日课。
+    visible = any(key in order and key not in hidden for key in ("daily", alias))
+    mapped_order = list(dict.fromkeys("daily" if key == alias else key for key in order))
+    mapped_hidden = list(dict.fromkeys("daily" if key == alias else key for key in hidden))
+    if visible:
+        mapped_hidden = [key for key in mapped_hidden if key != "daily"]
+    return {"order": mapped_order, "hidden": mapped_hidden}
+
+
 # ── 存取（STATUS_DIR/home_layout.json）──
 
 def load_layout() -> dict:
@@ -73,8 +87,7 @@ def load_layout() -> dict:
     if not _is_str_list(order) or not _is_str_list(hidden):
         return _default_layout()
     # 去重；手改文件造成的 order∩hidden 交集以 hidden 为准（resolve 时过滤）
-    return {"order": list(dict.fromkeys(order)),
-            "hidden": list(dict.fromkeys(hidden))}
+    return _unify_daily(list(dict.fromkeys(order)), list(dict.fromkeys(hidden)))
 
 
 def save_layout(layout: dict):
@@ -111,7 +124,7 @@ def normalize_layout(body) -> dict:
     if overlap:
         raise HomeLayoutError(
             "同一项不能既在常用又在收起来: " + "、".join(sorted(overlap)))
-    return {"order": order, "hidden": hidden}
+    return _unify_daily(order, hidden)
 
 
 # ── 解析 ──

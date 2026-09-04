@@ -99,7 +99,8 @@ const hiddenHomeEntries = computed<HomeLayoutEntry[]>(() => editHidden.value.map
   const info = scripts.value[key]
   return info ? { kind: 'script' as const, key, label: info.label } : null
 }).filter((entry): entry is HomeLayoutEntry => entry !== null))
-const pinnableWorkflows = computed(() => homeWorkflows.value.filter(preset => !editOrder.value.includes(`wf:${preset.id}`)))
+// 默认日课已经由 daily 入口管理；收起后也只从「收起来的功能」加回。
+const pinnableWorkflows = computed(() => homeWorkflows.value.filter(preset => preset.id !== 'builtin-daily' && !editOrder.value.includes(`wf:${preset.id}`)))
 const selectedWorkflow = computed(() => selected.value.startsWith('wf:')
   ? homeWorkflows.value.find(preset => `wf:${preset.id}` === selected.value) || null
   : null)
@@ -124,6 +125,7 @@ async function applyHomeEdit(mutate: () => void) {
     const result = await api.saveHomeLayout(editOrder.value, editHidden.value)
     homeLayoutEntries.value = result.entries || []
     homeLayoutLoaded.value = true
+    homeHiddenList.value = [...editHidden.value]
     editOrder.value = homeLayoutEntries.value.map(entry => entry.key)
   } catch (error) {
     editOrder.value = prevOrder
