@@ -678,6 +678,16 @@ body[data-theme='pixel'] {
   --paper: #eee8d8; --paper-card: #fffaf0; --paper-panel: #e8dfca; --ink: #1a3055; --ink-dim: #687080;
   --fox-gold: #c9a227; --fox-gold-deep: #75600f; --fox-gold-pale: #f1dea3; --paper-line: #1a3055;
 }
+/* 个人空间的外层壁纸；纸面与卡片继续使用各自的实色背景。 */
+body { --space-backdrop: #cbc4b6; --space-thread: rgba(79,65,45,.055); }
+body[data-theme='pixel'] { --space-backdrop: #c3c5b5; --space-thread: rgba(62,72,48,.06); }
+body, body[data-theme='pixel'] {
+  background-color: var(--space-backdrop);
+  background-image:
+    radial-gradient(ellipse at 50% 0, rgba(255,250,230,.24), transparent 75%),
+    repeating-linear-gradient(0deg, var(--space-thread) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(255,253,237,.19) 0 1px, transparent 1px 4px);
+}
 body[data-theme='pixel'] :is(button, h1, h2, h3, h4, strong, b, .stage-brand, .stage-status, .status, .top-status) {
   font-family: MaamaruPixel, "Microsoft YaHei UI", sans-serif;
 }
