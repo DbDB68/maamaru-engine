@@ -271,7 +271,7 @@ button { cursor: pointer; }
 .system-nav button.active { background: #fffaf0; border-color: #bd8b47; }
 .system-form { padding: 24px; }
 .system-form h3 { margin-top: 0; }
-.system-form label:not(.check-label) { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; font-weight: 700; }
+.system-form label:not(.check-label):not(.swatch-custom) { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; font-weight: 700; }
 .system-form input, .system-form select, .system-form textarea { padding: 10px; border: 1px solid #aa9b87; }
 .system-form textarea { min-height: 180px; resize: vertical; }
 .check-label { display: block; margin-bottom: 16px; }

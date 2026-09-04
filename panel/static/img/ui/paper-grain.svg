@@ -3,5 +3,5 @@
     <feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" seed="17" stitchTiles="stitch"/>
     <feColorMatrix type="saturate" values="0"/>
   </filter>
-  <path d="M0 0h192v192H0z" filter="url(#paper)" opacity=".14"/>
+  <path d="M0 0h192v192H0z" filter="url(#paper)" opacity=".24"/>
 </svg>
