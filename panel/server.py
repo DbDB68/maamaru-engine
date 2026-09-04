@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from .log_store import get_store
+from .honmaru_home import create_home_router
 from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
 from touken.diagnostics import build_diagnostic_bundle
 from touken.runtime_paths import (
@@ -52,6 +53,7 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 # ── App ──
 app = FastAPI(title="まあ丸 近侍面板")
+app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json"))
 _server_mode = threading.local()
 
 

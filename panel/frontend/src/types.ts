@@ -1,5 +1,17 @@
 export type Option = string | [string, string]
 
+export interface HonmaruProfile {
+  honmaru_name: string
+  saniwa_name: string
+  province: string
+  attendant: string
+  motto: string
+  joined_on: string
+  avatar: string
+}
+export interface HonmaruNote { id: string; body: string; created_at: number; updated_at?: number }
+export interface HonmaruHomeData { schema_version: number; profile: Partial<HonmaruProfile>; notes: HonmaruNote[] }
+
 export interface VisibilityRule {
   key: string
   is?: string

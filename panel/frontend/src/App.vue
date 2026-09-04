@@ -18,6 +18,7 @@ import SideNavItem from './components/SideNavItem.vue'
 import NotificationCenter from './components/NotificationCenter.vue'
 import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
+import HonmaruHome from './components/HonmaruHome.vue'
 import type { ScriptInfo, ScriptParams } from './types'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
@@ -27,8 +28,9 @@ const running = ref(false)
 const current = ref<string | null>(null)
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
+const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
 const ledgerMode = ref(false)
+const reportEntry = ref<'report' | 'planning'>('report')
 const launcherAvailable = ref(false)
 const returningToLauncher = ref(false)
 const theme = ref<'washi' | 'pixel'>('washi')
@@ -296,7 +298,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
-watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false })
+watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' } })
 </script>
 
 <template>
@@ -314,7 +316,8 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       <nav class="topnav">
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else>
-          <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
+          <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
+          <button class="nav-office" :class="{ active: tab === 'office' }" @click="tab = 'office'">执务</button>
           <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
           <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
@@ -393,7 +396,8 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="overview" page-class="overview-layout">
+    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @planning="reportEntry = 'planning'; tab = 'report'" @wishlist="openWishlist" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout">
       <aside class="home-functions">
         <div class="home-functions-head"><h2>常用功能</h2><span v-if="homeScriptIndex >= 0">{{ homeScriptIndex + 1 }} / {{ homeScripts.length }}</span></div>
         <div class="home-functions-carousel">
@@ -430,7 +434,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel :running="running" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel @open-wishlist="openWishlist" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else class="loading">正在整理本丸配置……</div>

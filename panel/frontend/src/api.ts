@@ -1,5 +1,7 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, WorkflowNodeDef, WorkflowPreset } from './types'
 
+import type { HonmaruHomeData, HonmaruProfile, HonmaruNote } from './types'
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
   const body = await response.json()
@@ -8,6 +10,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  honmaruHome: () => request<HonmaruHomeData>('/api/honmaru-home'),
+  saveHonmaruProfile: (profile: HonmaruProfile) => request<{ profile: HonmaruProfile }>('/api/honmaru-home/profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile),
+  }),
+  saveHonmaruNote: (body: string, id?: string) => request<{ note: HonmaruNote }>(`/api/honmaru-home/notes${id ? `/${encodeURIComponent(id)}` : ''}`, {
+    method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
+  }),
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
   settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string }>('/api/saved-settings'),

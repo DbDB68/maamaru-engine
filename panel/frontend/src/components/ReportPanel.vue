@@ -12,9 +12,10 @@ import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourc
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{ 'open-wishlist': [] }>()
+const props = defineProps<{ initialSection?: 'report' | 'planning' }>()
 
 const days = ref(7)
-const honmaruTab = ref<'report' | 'planning'>('report')
+const honmaruTab = ref<'report' | 'planning'>(props.initialSection || 'report')
 const view = ref<'chart' | 'records'>('chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
