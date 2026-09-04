@@ -892,6 +892,8 @@ body[data-theme='pixel'] .single-frame > .maamaru-surface {
   padding: 12px;
   overflow: auto;
 }
+/* sticky 保存栏贴齐滚动区底边，避免底部 padding 留出透出后续步骤的缝。 */
+body[data-theme='pixel'] .single-frame.workflow-page > .maamaru-surface { padding-bottom: 0; }
 body[data-theme='pixel'] :is(.chat-page, .system-page, .report-page, .workflow-page) .page-toolbar {
   min-height: 52px;
   flex: 0 0 52px;
