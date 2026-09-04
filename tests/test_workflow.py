@@ -64,7 +64,8 @@ class _FakeAgent:
         self.calls.append(("login", (), {}))
         return True
 
-    def _popup_sweep(self):
+    def _popup_sweep(self, max_rounds=30):
+        self.calls.append(("_popup_sweep", (), {"max_rounds": max_rounds}))
         return True
 
     def _daily_update_gate(self):
@@ -350,6 +351,14 @@ class WorkflowRunnerTests(unittest.TestCase):
         self._run([_node("signin")], agent)
         self.assertEqual(self._latest_report()["steps"][0]["status"], "✓")
 
+    def test_edocastle_operational_wording_stays_green(self):
+        """9-04 假红冤案：江户城「入场先遇敌，停止跳过并处理阵形」是正常
+        操作播报，撞上词表里的「停止」被误判 ✗——6 圈 119 钥匙白跑。
+        出阵类长循环的话术必须能被白名单捞回。"""
+        self.assertFalse(report_judge._is_fail("[江户城] 入场先遇敌，停止跳过并处理阵形"))
+        # 真翻车话术仍然判红，白名单不许误捞
+        self.assertTrue(report_judge._is_fail("[江户城] 没找到活动入口，停"))
+
     def test_detail_status_from_shop_special_judge(self):
         agent = _FakeAgent({
             "claim_free_gift_stream": ["[SHOP] 今日暖心礼包已售罄，跳过"],
@@ -437,6 +446,20 @@ class WorkflowRunnerTests(unittest.TestCase):
         messages, agent, _ = self._run([_node("signin")], agent)
         self.assertTrue(any("收尾：导航回本丸" in m for m in messages))
         self.assertTrue(any(c[0] == "quick_peek" for c in agent.calls))
+
+    def test_closing_sweeps_return_screens_before_peek(self):
+        """收尾回本丸后先点穿归来结算屏再拍照（9-04 冤案二号：
+        远征归来结算屏亮着没人收，看着像卡死，peek 也拍歪）。"""
+        agent = _FakeAgent()
+        messages, agent, _ = self._run([_node("signin")], agent)
+        self.assertTrue(any("扫一遍归来结算屏" in m for m in messages))
+        sweep = [c for c in agent.calls if c[0] == "_popup_sweep"]
+        peek = [c for c in agent.calls if c[0] == "quick_peek"]
+        self.assertTrue(sweep and peek)
+        # 扫地必须在拍照之前
+        order = [c[0] for c in agent.calls]
+        self.assertLess(max(i for i, n in enumerate(order) if n == "_popup_sweep"),
+                        min(i for i, n in enumerate(order) if n == "quick_peek"))
 
 
 class WorkflowScriptEntryTests(unittest.TestCase):

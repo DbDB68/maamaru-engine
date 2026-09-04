@@ -458,6 +458,15 @@ def run_workflow(config_path, nodes, make_agent):
             for nav_msg in agent.navigate_to_stream("本丸"):
                 yield nav_msg
             if getattr(agent, "current_location", None) == "本丸":
+                # 回本丸后点穿归来结算屏（远征/内番/修行），别让它们挡着
+                # 收尾拍照——9-04 冤案二号：屏亮着没人收，看着像卡死。
+                sweep = getattr(agent, "_popup_sweep", None)
+                if sweep is not None:
+                    try:
+                        yield "【工作流】收尾：扫一遍归来结算屏"
+                        sweep(max_rounds=6)
+                    except Exception as exc:
+                        yield f"【工作流】⚠️ 收尾扫地失败（不影响成绩单）: {exc}"
                 yield "【工作流】收尾：已回本丸，强制拍一次顶栏"
                 if hasattr(agent, "quick_peek"):
                     agent.quick_peek(tag="工作流·收尾", force=True)

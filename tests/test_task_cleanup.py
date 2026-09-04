@@ -14,6 +14,7 @@ class FakeAgent:
         self.peek_ok = peek_ok
         self.raise_on_nav = raise_on_nav
         self.peek_calls = []
+        self.sweep_calls = []
         self.daily_args = None
 
     def navigate_to_stream(self, target):
@@ -22,6 +23,10 @@ class FakeAgent:
         yield f"[NAV] 正在去 {target}"
         if self.nav_ok:
             self.current_location = target
+
+    def _popup_sweep(self, max_rounds=30):
+        self.sweep_calls.append(max_rounds)
+        return True
 
     def quick_peek(self, tag="", force=False):
         self.peek_calls.append({"tag": tag, "force": force})
@@ -134,6 +139,26 @@ class TaskCleanupTests(unittest.TestCase):
                 )
                 self.assertNotIn("[日课] 收尾：导航回本丸", msgs)
                 self.assertEqual(agent.peek_calls, [])
+
+    def test_cleanup_sweeps_return_screens_before_peek(self):
+        """收尾回本丸后先点穿归来结算屏再拍照（9-04 冤案二号：远征归来
+        结算屏亮着没人收，看着像卡死，顶栏 peek 也拍歪）。"""
+        for label, build in (
+                ("单任务", lambda: _wrap_inventory("TEST", _simple_runner("done"))),
+                ("日课", lambda: _build_daily_standalone)):
+            with self.subTest(kind=label):
+                agent = FakeAgent()
+                with patch("panel.server._make_agent", return_value=agent), \
+                        patch("panel.server._load_panel_settings",
+                              return_value={}), \
+                        patch("panel.scheduler.load_config",
+                              return_value={"common_plan": []}):
+                    msgs = list(build()("config.json", {}))
+                self.assertTrue(
+                    any("扫一遍归来结算屏" in m for m in msgs),
+                    f"{label} 未找到扫地消息，消息为：{msgs}")
+                self.assertEqual(agent.sweep_calls, [6])  # 限定轮数防磨蹭
+                self.assertEqual(len(agent.peek_calls), 1)
 
 
 if __name__ == "__main__":

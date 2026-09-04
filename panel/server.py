@@ -260,6 +260,24 @@ def _sword_names(raw) -> list[str]:
 # 玩法脚本统一由 _wrap_inventory 包一层：开工前/收工后各拍一次库存（run 级
 # 整体归因）。builder 本体签名统一：(agent, config_path, params) -> generator。
 
+def _sweep_return_screens(agent, tag):
+    """回本丸后点穿归来结算屏（远征/内番/修行），别让它们挡着收尾拍照。
+
+    9-04 冤案二号：远征队中途归来，结算屏要等回本丸才弹；收尾只导航不点屏，
+    屏就亮在那儿没人收——看着像卡死，顶栏 peek 也拍歪。扫地复用日课登录
+    同款的 _popup_sweep（结算屏/弹窗是同一类东西），限定轮数防磨蹭，
+    扫不动也不拖垮收尾。
+    """
+    sweep = getattr(agent, "_popup_sweep", None)
+    if sweep is None:
+        return
+    try:
+        yield f"[{tag}] 收尾：扫一遍归来结算屏"
+        sweep(max_rounds=6)
+    except Exception as exc:
+        yield f"[{tag}] ⚠️ 收尾扫地失败（不影响任务结果）：{exc}"
+
+
 def _wrap_inventory(tag: str, runner, inventory=False):
     """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 必做的回本丸 + 强制 peek。
 
@@ -302,6 +320,7 @@ def _wrap_inventory(tag: str, runner, inventory=False):
                 for nav_msg in agent.navigate_to_stream("本丸"):
                     yield nav_msg
                 if getattr(agent, "current_location", None) == "本丸":
+                    yield from _sweep_return_screens(agent, tag)
                     yield f"[{tag}] 收尾：已回本丸，强制拍一次顶栏"
                     if hasattr(agent, "quick_peek"):
                         agent.quick_peek(tag=f"{tag}·收尾", force=True)
@@ -433,6 +452,7 @@ def _build_daily_standalone(config_path, params):
                 for nav_msg in agent.navigate_to_stream("本丸"):
                     yield nav_msg
                 if getattr(agent, "current_location", None) == "本丸":
+                    yield from _sweep_return_screens(agent, "日课")
                     yield "[日课] 收尾：已回本丸，强制拍一次顶栏"
                     if hasattr(agent, "quick_peek"):
                         agent.quick_peek(tag="日课·收尾", force=True)
