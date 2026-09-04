@@ -8,6 +8,7 @@ import LogPanel from './components/LogPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
+import WorkflowPanel from './components/WorkflowPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
 import OverviewTaskCard from './components/OverviewTaskCard.vue'
 import AdvancedSettingLink from './components/AdvancedSettingLink.vue'
@@ -26,7 +27,7 @@ const running = ref(false)
 const current = ref<string | null>(null)
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'tasks' | 'report' | 'chat' | 'system'>('home')
+const tab = ref<'home' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
 const ledgerMode = ref(false)
 const launcherAvailable = ref(false)
 const returningToLauncher = ref(false)
@@ -47,7 +48,7 @@ const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
   daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
-  sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png',
+  sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'daily.png',
 }
 
 const selectedInfo = computed(() => scripts.value[selected.value])
@@ -246,7 +247,7 @@ async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarni
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
 function openIncidentEntry(entry: { tab?: string; script?: string }) {
   const target = String(entry.tab || 'report')
-  if (['home', 'tasks', 'report', 'chat', 'system'].includes(target)) tab.value = target as typeof tab.value
+  if (['home', 'tasks', 'workflow', 'report', 'chat', 'system'].includes(target)) tab.value = target as typeof tab.value
   if (entry.script && scripts.value[entry.script]) selected.value = entry.script
 }
 
@@ -315,6 +316,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">概览</button>
           <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="tab = 'tasks'">配置</button>
+          <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
           <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
@@ -337,6 +339,9 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
           </SideNavItem>
           <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
             <span><img class="task-menu-icon" :src="'/static/img/ui/expedition.png'" alt="">自动排班</span>
+          </SideNavItem>
+          <SideNavItem v-if="group.label === '后勤配置'" :active="false" @click="tab = 'workflow'">
+            <span><img class="task-menu-icon" :src="taskIcon('workflow')" alt="">工作流</span>
           </SideNavItem>
         </template>
         <h3>名单设置</h3>
@@ -424,6 +429,7 @@ watch(tab, value => { if (value !== 'report') reportStageCollapsed.value = false
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel :running="running" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel @open-wishlist="openWishlist" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>

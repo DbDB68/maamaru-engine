@@ -34,6 +34,30 @@ export interface ScriptsResponse {
   event_hidden?: string[]
 }
 
+// ---- 自定义工作流 /api/workflows ----
+
+export interface WorkflowNode {
+  type: string
+  params: ScriptParams
+  on_error: 'stop' | 'continue'
+}
+
+export interface WorkflowPreset {
+  id: string
+  name: string
+  nodes: WorkflowNode[]
+}
+
+export type WorkflowNodeCategory = 'cold' | 'chore' | 'battle' | 'finish'
+
+export interface WorkflowNodeDef {
+  type: string
+  label: string
+  desc: string
+  category: WorkflowNodeCategory
+  params: ParamField[]
+}
+
 export type ScriptParams = Record<string, unknown>
 
 // ---- 本丸成绩单 /api/data/resource-ledger ----

@@ -52,13 +52,13 @@ _CRASH = [
 ]
 
 _DAILY_OK = [
-    "日课全绿收工！🌸 本丸今天也是模范员工，主君快夸我！",
-    "日课一条龙全部 ✓！哼，有狐之助盯着，想翻车都难。",
+    "{label}全绿收工！🌸 本丸今天也是模范员工，主君快夸我！",
+    "{label}一条龙全部 ✓！哼，有狐之助盯着，想翻车都难。",
 ]
 
 _DAILY_FAIL = [
-    "日课跑完了，但有 {n} 项翻车🍂：{fails}。详细成绩单在面板里，主君过目。",
-    "呜…日课有 {n} 项没跑好（{fails}）。不是狐之助的错……大概。",
+    "{label}跑完了，但有 {n} 项翻车🍂：{fails}。详细成绩单在面板里，主君过目。",
+    "呜…{label}有 {n} 项没跑好（{fails}）。不是狐之助的错……大概。",
 ]
 
 _SCHED = [
@@ -163,8 +163,8 @@ class Broadcaster:
 
     def _label(self, script: str) -> str:
         try:
-            from .script_runner import list_scripts
-            return list_scripts().get(script, {}).get("label", script or "脚本")
+            from .script_runner import _SCRIPTS
+            return _SCRIPTS.get(script, {}).get("label") or script or "脚本"
         except Exception:
             return script or "脚本"
 
@@ -174,8 +174,9 @@ class Broadcaster:
     def _on_finish(self, script: str, run_id: str):
         with self._lock:
             self._runs.pop(run_id, None)
-        if script == "daily":
-            self._on_daily_report()
+        if script in ("daily", "workflow"):
+            # workflow（自定义工作流）落的是同 schema 的成绩单，一并发
+            self._on_daily_report(label=self._label(script))
         else:
             self._send_qq(_pick(_FINISH).format(label=self._label(script)))
 
@@ -194,26 +195,27 @@ class Broadcaster:
         self._send_ntfy(f"{label} 脚本崩溃：{detail}",
                         title="Maamaru Crash", tags="warning", priority="high")
 
-    def _on_daily_report(self):
-        """日课收工：读落盘的成绩单（比解析日志流靠谱），QQ 播报。
-        ntfy 版由 touken.flows.daily 自己发，这里不重复。"""
+    def _on_daily_report(self, label: str = "一键日课"):
+        """日课/工作流收工：读落盘的成绩单（比解析日志流靠谱），QQ 播报。
+        ntfy 版由 touken.flows.daily / panel.workflow 自己发，这里不重复。"""
         try:
             fp = _STATUS_DIR / "latest_report.json"
             rep = json.loads(fp.read_text(encoding="utf-8"))
         except Exception:
-            self._send_qq(_pick(_FINISH).format(label="一键日课"))
+            self._send_qq(_pick(_FINISH).format(label=label))
             return
         fails = []
         for step in rep.get("steps", []):
             status = str(step.get("status", ""))
-            if status.startswith("✓"):
+            if status.startswith("✓") or status.startswith("⏭"):
                 continue
             detail = status.lstrip("✗⚠ ")
             fails.append(f"{step['name']}（{detail}）" if detail else step["name"])
         if fails:
-            self._send_qq(_pick(_DAILY_FAIL).format(n=len(fails), fails="、".join(fails)))
+            self._send_qq(_pick(_DAILY_FAIL).format(
+                label=label, n=len(fails), fails="、".join(fails)))
         else:
-            self._send_qq(_pick(_DAILY_OK))
+            self._send_qq(_pick(_DAILY_OK).format(label=label))
 
     def _on_schedule(self, msg: str):
         if msg.startswith("⏳"):

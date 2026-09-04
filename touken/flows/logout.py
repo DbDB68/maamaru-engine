@@ -20,16 +20,27 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 class LogoutMixin:
     """下线。依赖宿主类的 maa。"""
 
-    def logout_stream(self):
+    def logout_stream(self, kill_game: bool = None,
+                      close_emulator: bool = None, sleep_pc: bool = None):
         """
         流式下线
+
+        Args:
+            kill_game/close_emulator/sleep_pc: 显式覆盖配置 daily.logout 的三段
+                开关；None（缺省）回落到配置，行为与旧版完全一致。
 
         Yields:
             str: 执行状态消息
         """
         cfg = self.config.get("daily", {}).get("logout", {})
+        if kill_game is None:
+            kill_game = cfg.get("kill_game", True)
+        if close_emulator is None:
+            close_emulator = cfg.get("close_emulator")
+        if sleep_pc is None:
+            sleep_pc = cfg.get("sleep_pc")
 
-        if cfg.get("kill_game", True):
+        if kill_game:
             pkg = cfg.get("package", "com.youzu.djlw")
             try:
                 subprocess.run(
@@ -41,7 +52,7 @@ class LogoutMixin:
                 yield f"[下线] 杀游戏失败: {exc}"
             time.sleep(1.0)
 
-        if cfg.get("close_emulator"):
+        if close_emulator:
             for proc in cfg.get("emulator_processes", ["MuMuPlayer.exe"]):
                 try:
                     subprocess.run(["taskkill", "/F", "/IM", proc],
@@ -52,7 +63,7 @@ class LogoutMixin:
                     yield f"[下线] 关模拟器（{proc}）失败: {exc}"
             time.sleep(2.0)
 
-        if cfg.get("sleep_pc"):
+        if sleep_pc:
             yield "[下线] 3 秒后休眠电脑..."
             time.sleep(3.0)
             try:
@@ -62,6 +73,5 @@ class LogoutMixin:
             except Exception as exc:
                 yield f"[下线] 休眠失败: {exc}"
 
-        if not cfg.get("kill_game", True) and not cfg.get("close_emulator") \
-                and not cfg.get("sleep_pc"):
+        if not kill_game and not close_emulator and not sleep_pc:
             yield "[下线] 配置里三段全关，啥也没干"

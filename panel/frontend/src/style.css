@@ -81,6 +81,7 @@ button { cursor: pointer; }
 .topnav .nav-report { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-lists { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-schedule { --nav-icon: url('/static/img/ui/expedition.png'); }
+.topnav .nav-workflow { --nav-icon: url('/static/img/ui/daily.png'); }
 .topnav .nav-chat { --nav-icon: url('/static/img/ui/singleplayer.png'); }
 .topnav .nav-system { --nav-icon: url('/static/img/ui/wrench.png'); }
 .topnav button:hover { color: var(--ink); background: var(--fox-gold-pale); }
@@ -296,6 +297,8 @@ body[data-theme='pixel'] .overview-summary span { background: #303940; border-co
 body[data-theme='pixel'] .advanced-settings-label, body[data-theme='pixel'] .advanced-setting-link small { color: #aab8b1; }
 body[data-theme='pixel'] .advanced-setting-link, body[data-theme='pixel'] .settings-drawer, body[data-theme='pixel'] .drawer-candidates button { color: #dce8e1; background: #252d33; border-color: #526169; }
 body[data-theme='pixel'] .auto-step, body[data-theme='pixel'] .enable-row { color: #dce8e1; background: #303940; border-color: #526169; }
+body[data-theme='pixel'] .preset-item, body[data-theme='pixel'] .workflow-node, body[data-theme='pixel'] .node-picker, body[data-theme='pixel'] .picker-grid button { color: #dce8e1; background: #303940; border-color: #526169; }
+body[data-theme='pixel'] .preset-name strong, body[data-theme='pixel'] .workflow-node > header strong { color: #dce8e1; }
 body[data-theme='pixel'] .auto-card-head p, body[data-theme='pixel'] .stacked-field, body[data-theme='pixel'] .route-teams label, body[data-theme='pixel'] .capitalist-row small { color: #aab8b1; }
 body[data-theme='pixel'] .timeline-preview { border-color: #526169; }
 body[data-theme='pixel'] .timeline-lane span { background: #252d33; border-color: #526169; }
@@ -502,6 +505,53 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .pause-row { padding: 14px 16px; background: #eee4d4; border: 1px dashed #b9a68b; border-radius: 8px; }
 .pause-row > span { color: var(--ink-dim); }
 .pause-row button { padding: 7px 11px; background: var(--paper-card); border: 1px solid #b9a68b; }
+
+/* 工作流：积木流水线编辑器。左边是已保存的流水线，右边一块块积木往上垒。 */
+.workflow-panel { --section-icon: url('/static/img/ui/daily.png'); }
+.workflow-body { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; padding: 20px; align-items: start; }
+.preset-list-card h3 { margin-top: 0; }
+.preset-item { display: grid; gap: 8px; margin-top: 10px; padding: 11px 12px; background: #fffaf0; border: 1px solid var(--paper-line); border-radius: 8px; }
+.preset-item.active { border-color: var(--fox-gold); box-shadow: 0 0 0 3px rgba(212,160,23,.12); }
+.preset-name { display: grid; gap: 2px; padding: 0; text-align: left; background: transparent; border: 0; }
+.preset-name strong { font-size: 14px; }
+.preset-name small { color: var(--ink-dim); }
+.preset-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-tools button { min-height: 30px; padding: 4px 9px; border: 1px solid #9d8c77; font-size: 12px; }
+.editor-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 6px; }
+.editor-head .stacked-field { min-width: min(320px, 100%); margin-bottom: 0; }
+.dirty-flag { padding: 4px 10px; color: #735311; background: var(--fox-gold-pale); border: 1px solid #dfc36d; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.node-list { display: grid; gap: 10px; margin-top: 10px; }
+.workflow-node { background: #fffaf0; border: 1px solid var(--paper-line); border-radius: 8px; box-shadow: inset 3px 0 0 rgba(212,160,23,.35); }
+.workflow-node.open { border-color: var(--fox-gold); }
+.workflow-node > header { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; }
+.workflow-node > header strong { min-width: 0; flex: 1; }
+.workflow-node .step-number { flex: 0 0 auto; }
+.skip-tag { padding: 2px 8px; color: #8a5a13; background: #f6e6af; border: 1px solid #dfc36d; border-radius: 999px; font-size: 11px; }
+.node-tools { display: flex; gap: 5px; }
+.node-tools button { display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 1px solid #9d8c77; }
+.node-tools button:disabled { opacity: .4; cursor: default; }
+.node-detail { padding: 4px 14px 14px 49px; }
+.node-desc { margin: 0 0 4px; color: var(--ink-dim); font-size: 12px; }
+.node-detail .fields { padding: 8px 0 12px; }
+.on-error-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px dashed var(--paper-line); }
+.on-error-row > span { color: #75695d; font-size: 13px; }
+.add-block { margin-top: 14px; }
+.node-picker { display: grid; gap: 14px; margin-top: 12px; padding: 14px; background: #f4ecdd; border: 1px solid var(--paper-line); border-radius: 8px; }
+.node-picker h4 { margin: 0 0 8px; color: #604b35; font-size: 14px; }
+.picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.picker-grid button { display: grid; gap: 3px; padding: 9px 11px; text-align: left; background: var(--paper-card); border: 1px solid #d4c7b3; border-radius: 7px; }
+.picker-grid button:hover { border-color: var(--fox-gold); }
+.picker-grid small { color: var(--ink-dim); font-size: 11px; line-height: 1.4; }
+.editor-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--paper-line); }
+.editor-foot .primary:disabled { opacity: .5; cursor: default; }
+.empty-editor { display: grid; min-height: 220px; place-items: center; }
+
+@media (max-width: 720px) {
+  .workflow-body { grid-template-columns: 1fr; }
+  .editor-head { flex-direction: column; align-items: stretch; }
+  .node-detail { padding-left: 14px; }
+  .picker-grid { grid-template-columns: 1fr 1fr; }
+}
 
 .list-tabs { gap: 0; border-bottom: 1px solid var(--paper-line); }
 .list-tabs button { margin-bottom: -1px; border-radius: 7px 7px 0 0; }

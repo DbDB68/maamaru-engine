@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, WorkflowNodeDef, WorkflowPreset } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -25,6 +25,15 @@ export const api = {
     body: JSON.stringify({ script, params }),
   }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
+  workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
+  workflowNodes: () => request<{ nodes: WorkflowNodeDef[] }>('/api/workflows/nodes'),
+  createWorkflow: (preset: Omit<WorkflowPreset, 'id'>) => request<{ ok: boolean; id?: string }>('/api/workflows', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset),
+  }),
+  updateWorkflow: (preset: WorkflowPreset) => request<{ ok: boolean }>(`/api/workflows/${encodeURIComponent(preset.id)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset),
+  }),
+  deleteWorkflow: (id: string) => request<{ ok: boolean }>(`/api/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
   resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),

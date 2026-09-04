@@ -76,7 +76,7 @@ def notify_daily_report(payload: dict) -> bool:
     """
     all_green = payload.get("all_green", False)
     fails = [s["name"] for s in payload.get("steps", [])
-             if not str(s.get("status", "")).startswith("✓")]
+             if not str(s.get("status", "")).startswith(("✓", "⏭"))]
     lines = [f"跑完时间：{payload.get('finished_at', '?')}"]
     if all_green:
         lines.append("全部步骤 ✓，本丸今天也是模范员工。")

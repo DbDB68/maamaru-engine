@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from .log_store import get_store
-from .script_runner import get_runner, list_scripts, register_script, ScriptRunner
+from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
 from touken.diagnostics import build_diagnostic_bundle
 from touken.runtime_paths import (
     BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
@@ -902,6 +902,69 @@ register_script("snapshot", "库存快照",
                                 inventory=False))
 
 
+# ── 自定义工作流（乐高排班）──
+# 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
+# 各 _build_* builder（未覆盖的战斗参数沿用「单独配置页」已存参数，与 _build_daily
+# 一个思路）；由 server 注入 NODE_REGISTRY 而非 workflow import server，避免循环依赖。
+from touken.flows.report_judge import (  # noqa: E402
+    _equip_warning_status,
+    _practice_report_status,
+)
+from . import workflow as _workflow  # noqa: E402
+
+
+def _wf_node(script, builder, category, merge_saved=False, detail=None):
+    info = _SCRIPTS[script]
+
+    def _run(agent, params, config_path):
+        merged = dict(params or {})
+        if merge_saved:
+            saved = (_load_panel_settings().get("params", {}).get(script, {})
+                     or {})
+            merged = {**saved, **merged}
+        yield from builder(agent, config_path, merged)
+
+    node = {"type": script, "label": info["label"], "desc": info["desc"],
+            "category": category, "params": info["params"], "run": _run}
+    if detail:
+        node["detail"] = list(detail)
+    _workflow.register_node(node)
+
+
+for _wf_script, _wf_builder in (
+        ("practice", _build_practice), ("raid", _build_raid),
+        ("edocastle", _build_edocastle), ("sortie", _build_sortie),
+        ("yosari", _build_yosari), ("osaka", _build_osaka),
+        ("pumpkin", _build_pumpkin), ("sakura", _build_sakura)):
+    _wf_node(_wf_script, _wf_builder, "battle", merge_saved=True,
+             detail=[_equip_warning_status])
+# 演练专项判分（打了却一场没赢不算绿）照旧补上
+_workflow.NODE_REGISTRY["practice"]["detail"].append(_practice_report_status)
+_wf_node("forge", _build_forge, "chore")
+_wf_node("repair", _build_repair, "chore")
+_wf_node("expedition", _build_expedition_manager, "chore")
+
+
+def _build_workflow(config_path, params):
+    """自定义工作流入口：按 id 读预设，再交给 workflow 引擎编排。"""
+    preset_id = str(params.get("workflow_id") or "")
+    preset = _workflow.find_preset(preset_id)
+    if preset is None:
+        yield f"[工作流] 找不到预设 {preset_id!r}，可能已被删除"
+        return
+    try:
+        plan = _workflow.normalize_nodes(preset.get("nodes"))
+    except _workflow.WorkflowError as exc:
+        yield f"[工作流] 预设校验翻车: {exc}"
+        return
+    yield from _workflow.run_workflow(config_path, plan, make_agent=_make_agent)
+
+
+register_script("workflow", "自定义工作流",
+                "把任务积木自由排序拼成流水线，一键运行",
+                _build_workflow, hidden=True)
+
+
 # ── 服务端启动 ──
 
 @app.on_event("startup")
@@ -1147,6 +1210,50 @@ async def api_stop_script():
     return {"ok": True}
 
 
+# ── API：自定义工作流（乐高排班）──
+
+@app.get("/api/workflows")
+async def api_list_workflows():
+    return {"presets": _workflow.load_presets()}
+
+
+@app.get("/api/workflows/nodes")
+async def api_workflow_nodes():
+    """节点目录：type/label/desc/category/params schema，前端渲染积木选择器用"""
+    return {"nodes": _workflow.node_catalog()}
+
+
+@app.post("/api/workflows")
+async def api_create_workflow(request: Request):
+    body = await request.json()
+    try:
+        preset = _workflow.create_preset(body)
+    except _workflow.WorkflowError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "id": preset["id"], "preset": preset}
+
+
+@app.put("/api/workflows/{preset_id}")
+async def api_update_workflow(preset_id: str, request: Request):
+    body = await request.json()
+    try:
+        preset = _workflow.update_preset(preset_id, body)
+    except _workflow.WorkflowError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    if preset is None:
+        return JSONResponse({"ok": False, "reason": "没有这个预设"},
+                            status_code=404)
+    return {"ok": True, "preset": preset}
+
+
+@app.delete("/api/workflows/{preset_id}")
+async def api_delete_workflow(preset_id: str):
+    if not _workflow.delete_preset(preset_id):
+        return JSONResponse({"ok": False, "reason": "没有这个预设"},
+                            status_code=404)
+    return {"ok": True}
+
+
 # ── API：刀剑名册（供前端名单选择器）──
 
 @app.get("/api/swords")
@@ -1372,6 +1479,7 @@ _STEP_FLAVOR = {
 
 _SCRIPT_FLAVOR = {
     "daily": "正在爆肝日课📋",
+    "workflow": "正在跑自定义工作流🧩",
     "raid": "正在和时间溯行军搏斗中⚔️",
     "pumpkin": "正在南瓜田里刨剪影🎃",
     "edocastle": "正在江户城摸黑巡游🏯",
