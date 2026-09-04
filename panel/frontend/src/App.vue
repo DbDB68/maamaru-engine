@@ -595,10 +595,10 @@ watch(tab, value => {
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
-        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" @click="viewRunningWorkflow">查看流程</button><button type="button" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
-        <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" :disabled="running" @click="runSelectedWorkflow">跑这条</button></div>
+        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
+        <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running" @click="runSelectedWorkflow">跑这条</button></div>
         <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
-        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" @click="openDailyWorkflow">调整日课安排</button><button type="button" :disabled="running" @click="run">运行日课</button></div>
+        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running" @click="run">运行日课</button></div>
         <OverviewTaskCard
           v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
           :info="selectedInfo"

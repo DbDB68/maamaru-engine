@@ -2010,8 +2010,8 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
    WorkflowPanel 的 .wf-layout 自理；底部留出空间防止 sticky 保存条贴边。 */
 .workflow-live-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 20px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; }
 .workflow-live-bar strong { flex: 1; font-size: 15px; }
-.workflow-live-bar button { padding: 9px 13px; border: 1px solid var(--paper-line); border-radius: 5px; color: var(--ink); background: var(--paper); cursor: pointer; }
-.workflow-live-bar button:last-child { color: #a04b3a; }
+.workflow-live-bar button:not(.primary):not(.secondary):not(.danger) { padding: 9px 13px; border: 1px solid var(--paper-line); border-radius: 5px; color: var(--ink); background: var(--paper); cursor: pointer; }
+.workflow-live-bar button { padding: 9px 13px; }
 @media (max-width: 720px) {
   .workflow-page.single-layout { height: auto; overflow: visible; padding: 0; }
   body[data-theme='pixel'] .workflow-page { height: auto; overflow: visible; padding: 3px; }
