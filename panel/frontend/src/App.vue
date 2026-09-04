@@ -19,13 +19,14 @@ import NotificationCenter from './components/NotificationCenter.vue'
 import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
-import type { ScriptInfo, ScriptParams } from './types'
+import type { ScriptInfo, ScriptParams, WorkflowPreset } from './types'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
 const selected = ref('daily')
 const running = ref(false)
 const current = ref<string | null>(null)
+const workflowDraft = ref<WorkflowPreset | null>(null)
 const loading = ref(true)
 const message = ref('')
 const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
@@ -274,10 +275,16 @@ async function run() {
 
 async function stop() {
   stopping.value = true
-  await api.stop()
-  running.value = false
-  current.value = null
-  message.value = '已发送停止请求'
+  try {
+    const result = await api.stop()
+    if (!result.ok) throw new Error('停止请求未成功，请重试')
+    running.value = false
+    current.value = null
+    message.value = '已发送停止请求'
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '停止失败，请重试'
+    stopping.value = false
+  }
 }
 
 // 页面级提示统一短暂展示；重复提示会重新计时，点击仍可立即关闭。
@@ -418,8 +425,9 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
+        <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>工作流正在执行</strong><button type="button" @click="tab = 'workflow'">查看流程</button><button type="button" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
         <OverviewTaskCard
-          v-if="selectedInfo"
+          v-if="selectedInfo && !(running && current === 'workflow')"
           :info="selectedInfo"
           :icon-src="taskIcon(selected)"
           :params="params[selected] || {}"
@@ -430,14 +438,16 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
           @configure="tab = 'tasks'"
         />
         <LogPanel />
+        <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel :running="running" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
-    <div v-else class="loading">正在整理本丸配置……</div>
+    <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
+    <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
+    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel v-model:draft="workflowDraft" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"

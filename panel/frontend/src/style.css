@@ -2003,6 +2003,17 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
 }
 
 /* 个人首页与执务共用庭院；导航增加入口后仍保持一条可滚动的目录。 */
+.workflow-page.single-layout { padding: 28px; background: var(--paper); }
+body[data-theme='pixel'] .workflow-page > .maamaru-surface { padding: 28px; background: var(--paper); }
+.workflow-live-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 20px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; }
+.workflow-live-bar strong { flex: 1; font-size: 15px; }
+.workflow-live-bar button { padding: 9px 13px; border: 1px solid var(--paper-line); border-radius: 5px; color: var(--ink); background: var(--paper); cursor: pointer; }
+.workflow-live-bar button:last-child { color: #a04b3a; }
+@media (max-width: 720px) {
+  .workflow-page.single-layout { height: auto; overflow: visible; padding: 20px 14px; }
+  body[data-theme='pixel'] .workflow-page { height: auto; overflow: visible; padding: 3px; }
+  body[data-theme='pixel'] .workflow-page > .maamaru-surface { height: auto; overflow: visible; padding: 20px 12px; }
+}
 .topnav { min-width: 0; overflow-x: auto; flex-shrink: 1; }
 .topnav button { flex-shrink: 0; }
 .top-status { flex-shrink: 0; }

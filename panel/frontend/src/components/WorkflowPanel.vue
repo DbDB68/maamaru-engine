@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
@@ -8,47 +8,66 @@ import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset } from '../types'
 
-withDefaults(defineProps<{ embedded?: boolean; running?: boolean }>(), { embedded: false, running: false })
-
+const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean }>(), { embedded: false, running: false, current: null, stopping: false })
+const emit = defineEmits<{ started: []; stop: []; office: [] }>()
+// Keep the draft in the parent so switching pages does not discard edits.
+const draft = defineModel<WorkflowPreset | null>('draft', { default: null })
+const maxNodes = 30 // panel/workflow.py: MAX_NODES
 const categoryOrder: WorkflowNodeCategory[] = ['cold', 'chore', 'battle', 'finish']
-const categoryLabels: Record<WorkflowNodeCategory, string> = {
-  cold: '冷启动', chore: '后勤', battle: '出阵', finish: '收尾',
-}
-
+const categoryLabels: Record<WorkflowNodeCategory, string> = { cold: '准备', chore: '后勤', battle: '出阵', finish: '收尾' }
 const presets = ref<WorkflowPreset[]>([])
 const defs = ref<WorkflowNodeDef[]>([])
-const currentId = ref<string | null>(null)
-const draft = ref<WorkflowPreset | null>(null)
-const expanded = ref<number | null>(null)
-const pickerOpen = ref(false)
+const expanded = ref<WorkflowNode | null>(null)
+const loading = ref(true)
+const loadError = ref('')
 const saving = ref(false)
-const renamingId = ref<string | null>(null)
-const renameText = ref('')
+const starting = ref(false)
 const message = ref('')
-
-const groupedDefs = computed(() => categoryOrder
-  .map(category => ({ category, nodes: defs.value.filter(def => def.category === category) }))
-  .filter(group => group.nodes.length))
-
+const failed = ref(false)
+const picker = ref<HTMLDialogElement | null>(null)
+const switchDialog = ref<HTMLDialogElement | null>(null)
+const searchInput = ref<HTMLInputElement | null>(null)
+const moreMenu = ref<HTMLDetailsElement | null>(null)
+const search = ref('')
+const category = ref<WorkflowNodeCategory | 'all'>('all')
+const insertAt = ref(0)
+const lastAdded = ref('')
+const removed = ref<{ node: WorkflowNode; index: number } | null>(null)
+let pendingSwitch: (() => void) | null = null
+const nodeIds = new WeakMap<WorkflowNode, number>()
+let nextId = 0
+const locked = computed(() => saving.value || starting.value)
 const dirty = computed(() => {
   if (!draft.value) return false
-  if (!draft.value.id) return true
   const saved = presets.value.find(preset => preset.id === draft.value?.id)
-  return !saved || JSON.stringify(saved) !== JSON.stringify(draft.value)
+  return !saved || saved.name !== draft.value.name || canonical(saved.nodes) !== canonical(draft.value.nodes)
 })
-
-function cloneNodes(nodes: WorkflowNode[]): WorkflowNode[] {
-  return JSON.parse(JSON.stringify(nodes)) as WorkflowNode[]
+const valid = computed(() => !!draft.value?.name.trim() && !!draft.value?.nodes.length)
+const groups = computed(() => categoryOrder
+  .filter(item => category.value === 'all' || category.value === item)
+  .map(item => ({ category: item, nodes: defs.value.filter(def => def.category === item && `${def.label} ${def.desc}`.toLowerCase().includes(search.value.trim().toLowerCase())) }))
+  .filter(group => group.nodes.length))
+function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
 }
-
-function defaults(def: WorkflowNodeDef) {
-  return Object.fromEntries((def.params || []).map(field => [field.key, field.default ?? '']))
+function keyFor(node: WorkflowNode) {
+  if (!nodeIds.has(node)) nodeIds.set(node, ++nextId)
+  return nodeIds.get(node)!
 }
-
-function defOf(type: string) {
-  return defs.value.find(def => def.type === type)
+function defOf(type: string) { return defs.value.find(def => def.type === type) }
+function description(type: string) {
+  const descriptions: Record<string, string> = {
+    boot_emulator: '打开模拟器，等待开机。模拟器已打开时会跳过。',
+    login: '打开并登录游戏，处理登录弹窗，回到本丸。',
+    signin: '领取公告中的每日签到奖励。',
+  }
+  return descriptions[type] ?? defOf(type)?.desc ?? ''
 }
-
 function isVisible(field: Field, node: WorkflowNode) {
   const rule = field.visibleWhen
   if (!rule) return true
@@ -57,214 +76,389 @@ function isVisible(field: Field, node: WorkflowNode) {
   if (rule.not !== undefined) return current !== String(rule.not)
   return true
 }
-
+function summary(node: WorkflowNode) {
+  const fields = (defOf(node.type)?.params || []).filter(field => field.type !== 'note' && isVisible(field, node))
+  return fields.slice(0, 3).map(field => {
+    const value = node.params[field.key] ?? field.default
+    const option = field.options?.find(option => String(Array.isArray(option) ? option[0] : option) === String(value))
+    const label = Array.isArray(option) ? option[1] : option
+    const display = label ?? (Array.isArray(value) ? value.join('、') : typeof value === 'boolean' ? (value ? '开启' : '关闭') : value)
+    return `${field.label?.split(/[（(]/)[0]}：${display === '' || display == null ? '未设置' : display}`
+  }).join(' · ') || description(node.type) || '点击查看设置'
+}
+function tell(text: string, error = false) { message.value = text; failed.value = error }
+function setDraft(value: WorkflowPreset) {
+  draft.value = clone(value)
+  if (moreMenu.value) moreMenu.value.open = false
+  expanded.value = null
+  removed.value = null
+  message.value = ''
+}
 async function load() {
+  loading.value = true
+  loadError.value = ''
   try {
     const [workflowData, nodeData] = await Promise.all([api.workflows(), api.workflowNodes()])
     presets.value = workflowData.presets || []
     defs.value = nodeData.nodes || []
+    if (!draft.value) setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
   } catch (error) {
-    message.value = error instanceof Error ? `工作流加载失败：${error.message}` : '工作流加载失败，请刷新重试'
-  }
+    loadError.value = error instanceof Error ? `加载失败：${error.message}` : '加载失败，请重试'
+  } finally { loading.value = false }
 }
-
+function switchTo(action: () => void) {
+  if (locked.value) return
+  if (dirty.value && (draft.value?.name.trim() || draft.value?.nodes.length)) {
+    pendingSwitch = action
+    switchDialog.value?.showModal()
+  } else action()
+}
+async function confirmSwitch(saveFirst: boolean) {
+  if (saveFirst && !await save()) return
+  const action = pendingSwitch
+  pendingSwitch = null
+  switchDialog.value?.close()
+  action?.()
+}
+function newPreset() { switchTo(() => setDraft({ id: '', name: '', nodes: [] })) }
 function select(preset: WorkflowPreset) {
-  draft.value = { ...preset, nodes: cloneNodes(preset.nodes) }
-  currentId.value = preset.id
-  expanded.value = null
-  pickerOpen.value = false
+  if (draft.value?.id === preset.id) return
+  switchTo(() => setDraft(preset))
 }
-
-function newPreset() {
-  draft.value = { id: '', name: `新流水线 ${presets.value.length + 1}`, nodes: [] }
-  currentId.value = ''
-  expanded.value = null
-  pickerOpen.value = false
-}
-
-function duplicate(preset: WorkflowPreset) {
-  draft.value = { id: '', name: `${preset.name} 副本`, nodes: cloneNodes(preset.nodes) }
-  currentId.value = ''
-  expanded.value = null
-  message.value = '复制好了，点「保存成新流水线」落成正式预设'
-}
-
-async function remove(preset: WorkflowPreset) {
-  if (!window.confirm(`确定删掉「${preset.name}」吗？删了就找不回来了。`)) return
-  await api.deleteWorkflow(preset.id)
-  if (currentId.value === preset.id) { draft.value = null; currentId.value = null }
-  presets.value = presets.value.filter(item => item.id !== preset.id)
-  message.value = `已删除「${preset.name}」`
-}
-
-function startRename(preset: WorkflowPreset) {
-  renamingId.value = preset.id
-  renameText.value = preset.name
-}
-
-async function commitRename(preset: WorkflowPreset) {
-  if (renamingId.value !== preset.id) return
-  renamingId.value = null
-  const name = renameText.value.trim()
-  if (!name || name === preset.name) return
-  await api.updateWorkflow({ ...preset, name })
-  preset.name = name
-  if (draft.value?.id === preset.id) draft.value.name = name
-  message.value = '改名完成'
-}
-
-async function run(preset: WorkflowPreset) {
-  await api.run('workflow', { workflow_id: preset.id })
-  message.value = `「${preset.name}」已开始，去「概览」看实况`
-}
-
-function addNode(def: WorkflowNodeDef) {
+function duplicate() {
   if (!draft.value) return
-  draft.value.nodes.push({ type: def.type, params: defaults(def), on_error: 'stop' })
-  pickerOpen.value = false
-  expanded.value = draft.value.nodes.length - 1
+  const copy = clone(draft.value)
+  switchTo(() => setDraft({ ...copy, id: '', name: `${copy.name.slice(0, 27)} 副本` }))
 }
-
-function move(index: number, delta: number) {
-  if (!draft.value) return
-  const target = index + delta
-  if (target < 0 || target >= draft.value.nodes.length) return
-  const nodes = draft.value.nodes
-  ;[nodes[index], nodes[target]] = [nodes[target], nodes[index]]
-  expanded.value = target
-}
-
-function removeNode(index: number) {
-  if (!draft.value) return
-  draft.value.nodes.splice(index, 1)
-  if (expanded.value === index) expanded.value = null
-  else if (expanded.value != null && expanded.value > index) expanded.value -= 1
-}
-
-function toggle(index: number) {
-  expanded.value = expanded.value === index ? null : index
-}
-
-async function save() {
-  if (!draft.value || saving.value) return
+async function remove() {
+  if (!draft.value?.id || locked.value || props.running) return
+  const preset = draft.value
+  if (!window.confirm(`删除「${preset.name}」？这条已保存的流程将无法恢复。`)) return
   saving.value = true
   try {
-    if (draft.value.id) {
-      await api.updateWorkflow(draft.value)
-      message.value = '改动已保存'
+    const result = await api.deleteWorkflow(preset.id)
+    if (!result.ok) throw new Error('没有删除成功，请重试')
+    presets.value = presets.value.filter(item => item.id !== preset.id)
+    setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
+    tell(`已删除「${preset.name}」`)
+  } catch (error) { tell(error instanceof Error ? error.message : '删除失败，请重试', true) }
+  finally { saving.value = false }
+}
+function openPicker(index: number) {
+  insertAt.value = index
+  search.value = ''
+  category.value = 'all'
+  lastAdded.value = ''
+  picker.value?.showModal()
+  nextTick(() => searchInput.value?.focus())
+}
+function addNode(def: WorkflowNodeDef) {
+  if (!draft.value || draft.value.nodes.length >= maxNodes) return
+  const node: WorkflowNode = { type: def.type, params: clone(Object.fromEntries(def.params.filter(field => field.type !== 'note').map(field => [field.key, field.default ?? '']))), on_error: 'stop' }
+  draft.value.nodes.splice(insertAt.value++, 0, node)
+  expanded.value = draft.value.nodes[insertAt.value - 1]
+  lastAdded.value = `已添加「${def.label}」，可以继续选`
+}
+function closePicker() {
+  picker.value?.close()
+  nextTick(() => {
+    if (expanded.value) document.getElementById(`wf-step-${keyFor(expanded.value)}`)?.scrollIntoView({ block: 'nearest' })
+  })
+}
+function move(index: number, delta: number) {
+  if (!draft.value) return
+  const nodes = draft.value.nodes
+  const target = index + delta
+  if (target < 0 || target >= nodes.length) return
+  const [node] = nodes.splice(index, 1)
+  nodes.splice(target, 0, node)
+  tell(`「${defOf(node.type)?.label || node.type}」已移到第 ${target + 1} 步`)
+}
+function removeNode(index: number) {
+  if (!draft.value) return
+  const [node] = draft.value.nodes.splice(index, 1)
+  removed.value = { node, index }
+  if (expanded.value === node) expanded.value = null
+}
+function undoRemove() {
+  if (!draft.value || !removed.value || draft.value.nodes.length >= maxNodes) return
+  draft.value.nodes.splice(Math.min(removed.value.index, draft.value.nodes.length), 0, removed.value.node)
+  removed.value = null
+}
+async function save(): Promise<boolean> {
+  if (!draft.value || saving.value || !valid.value) return false
+  saving.value = true
+  const snapshot = clone(draft.value)
+  snapshot.name = snapshot.name.trim()
+  try {
+    if (snapshot.id) {
+      const result = await api.updateWorkflow(snapshot)
+      if (!result.ok) throw new Error('没有保存成功，请重试')
     } else {
-      const result = await api.createWorkflow({ name: draft.value.name, nodes: cloneNodes(draft.value.nodes) })
-      draft.value.id = result.id || ''
-      message.value = '新流水线已保存'
+      const result = await api.createWorkflow({ name: snapshot.name, nodes: snapshot.nodes })
+      if (!result.ok || !result.id) throw new Error('没有保存成功，请重试')
+      snapshot.id = result.id
     }
-    await load()
-    if (draft.value?.id) currentId.value = draft.value.id
+    // Keep the baseline locally after success: a failed follow-up GET must not
+    // make a successful create look failed and duplicate it on retry.
+    const index = presets.value.findIndex(item => item.id === snapshot.id)
+    if (index >= 0) presets.value[index] = clone(snapshot)
+    else presets.value.push(clone(snapshot))
+    draft.value.id = snapshot.id
+    draft.value.name = snapshot.name
+    tell('流程已保存')
+    return true
   } catch (error) {
-    message.value = error instanceof Error ? `保存失败：${error.message}` : '保存失败，请重试'
-  } finally {
-    saving.value = false
+    tell(error instanceof Error ? `保存失败：${error.message}` : '保存失败，请重试', true)
+    return false
+  } finally { saving.value = false }
+}
+async function run() {
+  if (props.running || locked.value || !valid.value) return
+  starting.value = true
+  try {
+    if (dirty.value && !await save()) return
+    const result = await api.run('workflow', { workflow_id: draft.value!.id })
+    if (!result.ok) throw new Error('没有启动成功，请稍后重试')
+    emit('started')
+    tell(`「${draft.value!.name}」已开始`)
+  } catch (error) { tell(error instanceof Error ? `启动失败：${error.message}` : '启动失败，请重试', true) }
+  finally { starting.value = false }
+}
+function protectDraft(event: BeforeUnloadEvent) {
+  if (dirty.value && (draft.value?.name.trim() || draft.value?.nodes.length)) {
+    event.preventDefault()
+    event.returnValue = ''
   }
 }
-
-onMounted(load)
+onMounted(() => { load(); window.addEventListener('beforeunload', protectDraft) })
+onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft))
 </script>
 
 <template>
-  <section class="workflow-panel">
-    <PanelHeader :variant="embedded ? 'embedded' : 'section'" title="工作流" subtitle="把任务积木排成一条流水线，一键从头跑到尾">
-      <template #actions><button type="button" class="primary" @click="newPreset">＋ 新建流水线</button></template>
-    </PanelHeader>
-    <div class="workflow-body">
-      <PaperCard variant="settings" class="preset-list-card">
-        <h3>已保存的流水线</h3>
-        <p v-if="!presets.length" class="empty">还没有流水线，点右上角「新建」搭一条吧。</p>
-        <div v-for="preset in presets" :key="preset.id" class="preset-item" :class="{ active: currentId === preset.id }">
-          <button type="button" class="preset-name" @click="select(preset)">
-            <PixelControl v-if="renamingId === preset.id" v-model="renameText" @keyup.enter="commitRename(preset)" @blur="commitRename(preset)" />
-            <strong v-else>{{ preset.name }}</strong>
-            <small>{{ preset.nodes.length }} 块积木</small>
+  <section class="workflow-panel wf-panel">
+    <PanelHeader :variant="embedded ? 'embedded' : 'section'" title="工作流" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
+    <p v-if="loading" class="wf-loading">正在取出你的流程…</p>
+    <p v-else-if="loadError" class="wf-loading" role="alert">{{ loadError }} <button class="wf-button" @click="load">重新加载</button></p>
+    <div v-else class="wf-layout">
+      <aside class="wf-library" aria-label="我的流程">
+        <header><h3>我的流程</h3><span>{{ presets.length }}</span></header>
+        <button type="button" class="wf-button wf-new" :class="{ selected: !draft?.id }" :disabled="locked" @click="newPreset">＋ 新建流程</button>
+        <div class="wf-presets">
+          <button v-for="preset in presets" :key="preset.id" type="button" class="wf-preset" :class="{ selected: draft?.id === preset.id }" :aria-pressed="draft?.id === preset.id" :disabled="locked" @click="select(preset)">
+            <strong>{{ preset.name }}</strong><small>{{ preset.nodes.length }} 个步骤<span v-if="draft?.id === preset.id && dirty"> · 编辑中</span></small>
           </button>
-          <span class="preset-tools">
-            <button type="button" class="primary" :disabled="running" :title="running ? '有任务在跑，先等它忙完' : '按这条流水线从头跑一遍'" @click="run(preset)">跑这条</button>
-            <button v-if="renamingId !== preset.id" type="button" @click="startRename(preset)">重命名</button>
-            <button type="button" @click="duplicate(preset)">复制</button>
-            <button type="button" class="danger" @click="remove(preset)">删除</button>
-          </span>
         </div>
-      </PaperCard>
-
-      <PaperCard v-if="draft" variant="settings" class="workflow-editor">
-        <div class="editor-head">
-          <label class="stacked-field">流水线名字
-            <PixelControl v-model="draft.name" placeholder="比如：早课快线" />
-          </label>
-          <span v-if="dirty" class="dirty-flag">有未保存的改动</span>
-        </div>
-
-        <div class="node-list">
-          <p v-if="!draft.nodes.length" class="empty">一块积木都还没搭。点下面的「＋ 加积木」，从冷启动开始一块块往上垒。</p>
-          <article v-for="(node, index) in draft.nodes" :key="index" class="workflow-node" :class="{ open: expanded === index }">
-            <header @click="toggle(index)">
-              <span class="step-number">{{ index + 1 }}</span>
-              <strong>{{ defOf(node.type)?.label || node.type }}</strong>
-              <small v-if="node.on_error === 'continue'" class="skip-tag">翻车跳过</small>
-              <span class="node-tools">
-                <button type="button" title="往上挪一格" :disabled="index === 0" @click.stop="move(index, -1)">↑</button>
-                <button type="button" title="往下挪一格" :disabled="index === draft.nodes.length - 1" @click.stop="move(index, 1)">↓</button>
-                <button type="button" class="danger" title="删掉这块积木" @click.stop="removeNode(index)">✕</button>
-              </span>
-            </header>
-            <div v-if="expanded === index" class="node-detail">
-              <p v-if="defOf(node.type)?.desc" class="node-desc">{{ defOf(node.type)?.desc }}</p>
-              <div class="fields">
-                <ParamField
-                  v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))"
-                  :key="field.key"
-                  :field="field"
-                  :model-value="node.params[field.key]"
-                  @update:model-value="node.params[field.key] = $event"
-                />
-              </div>
-              <div class="on-error-row">
-                <span>这块翻车了怎么办？</span>
-                <SegmentedControl
-                  v-model="node.on_error"
-                  label="翻车策略"
-                  :items="[
-                    { value: 'stop', label: '停下喊人', caption: '后面的积木先不跑' },
-                    { value: 'continue', label: '跳过继续', caption: '记一笔翻车，接着跑下一块' },
-                  ]"
-                />
-              </div>
-            </div>
-          </article>
-        </div>
-
-        <div class="add-block">
-          <button type="button" class="secondary" @click="pickerOpen = !pickerOpen">＋ 加积木</button>
-          <div v-if="pickerOpen" class="node-picker">
-            <section v-for="group in groupedDefs" :key="group.category">
-              <h4>{{ categoryLabels[group.category] }}</h4>
-              <div class="picker-grid">
-                <button v-for="def in group.nodes" :key="def.type" type="button" @click="addNode(def)">
-                  <b>{{ def.label }}</b>
-                  <small>{{ def.desc }}</small>
-                </button>
-              </div>
-            </section>
+        <p class="wf-library-note">选一条慢慢调整，<br>也可以从空白开始安排。</p>
+      </aside>
+      <PaperCard v-if="draft" variant="settings" class="wf-editor">
+        <fieldset :disabled="locked" class="wf-edit-fields">
+          <header class="wf-editor-head">
+            <label class="wf-name">{{ draft.id ? '流程名称' : '新的安排' }}<PixelControl v-model="draft.name" maxlength="30" placeholder="给流程起个名字，比如：晚间日课" /></label>
+            <details ref="moreMenu" class="wf-more"><summary aria-label="更多流程操作">•••</summary><div><button type="button" :disabled="!draft.nodes.length" @click="duplicate">复制这份安排</button><button v-if="draft.id" type="button" class="wf-danger" :disabled="running" @click="remove">删除流程</button></div></details>
+          </header>
+          <div class="wf-list-heading"><h3>执行顺序 <span>{{ draft.nodes.length }} / {{ maxNodes }}</span></h3><small>从上往下依次执行</small></div>
+          <div v-if="!draft.nodes.length" class="wf-empty">
+            <h3>今天想让まあ丸做些什么？</h3><p>先选一个任务，再按你的习惯往下安排。</p>
+            <button type="button" class="wf-button wf-primary" @click="openPicker(0)">添加第一个步骤</button>
           </div>
-        </div>
-
-        <footer class="editor-foot">
-          <button type="button" class="primary" :disabled="!dirty || saving || !draft.name.trim()" @click="save">
-            {{ saving ? '正在保存…' : draft.id ? '保存改动' : '保存成新流水线' }}
-          </button>
+          <div v-else class="wf-steps">
+            <template v-for="(node, index) in draft.nodes" :key="keyFor(node)">
+              <button type="button" class="wf-insert" :disabled="draft.nodes.length >= maxNodes" :aria-label="`在第 ${index + 1} 步前插入`" @click="openPicker(index)"><span>＋ 在这里插入</span></button>
+              <article :id="`wf-step-${keyFor(node)}`" class="wf-step" :class="{ 'is-open': expanded === node }">
+                <div class="wf-step-head">
+                  <button type="button" class="wf-step-toggle" :aria-expanded="expanded === node" @click="expanded = expanded === node ? null : node">
+                    <span class="wf-number">{{ String(index + 1).padStart(2, '0') }}</span>
+                    <span class="wf-step-label"><strong>{{ defOf(node.type)?.label || node.type }}<small v-if="node.on_error === 'continue'">失败后继续</small></strong><span>{{ summary(node) }}</span></span>
+                    <span class="wf-chevron" aria-hidden="true">{{ expanded === node ? '−' : '＋' }}</span>
+                  </button>
+                  <span class="wf-step-tools"><button type="button" :aria-label="`上移第 ${index + 1} 步`" title="上移" :disabled="index === 0" @click="move(index, -1)">↑</button><button type="button" :aria-label="`下移第 ${index + 1} 步`" title="下移" :disabled="index === draft.nodes.length - 1" @click="move(index, 1)">↓</button><button type="button" class="wf-danger" :aria-label="`移除第 ${index + 1} 步`" title="移除步骤" @click="removeNode(index)">×</button></span>
+                </div>
+                <div v-if="expanded === node" class="wf-step-detail">
+                  <p>{{ description(node.type) }}</p>
+                  <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="node.params[field.key]" @update:model-value="node.params[field.key] = $event" /></div>
+                  <div class="wf-error-policy"><span>这一步没完成时</span><SegmentedControl v-model="node.on_error" label="失败后的安排" :items="[{ value: 'stop', label: '停下等我', caption: '暂停后面的安排' }, { value: 'continue', label: '继续下一步', caption: '记录失败，接着执行' }]" /></div>
+                </div>
+              </article>
+            </template>
+            <button type="button" class="wf-button wf-add" :disabled="draft.nodes.length >= maxNodes" @click="openPicker(draft.nodes.length)">{{ draft.nodes.length >= maxNodes ? '已达到 30 步上限' : '＋ 添加下一步' }}</button>
+          </div>
+          <div v-if="removed" class="wf-undo" role="status">已移除「{{ defOf(removed.node.type)?.label || removed.node.type }}」<button type="button" :disabled="draft.nodes.length >= maxNodes" @click="undoRemove">撤销</button></div>
+        </fieldset>
+        <footer class="wf-toolbar">
+          <span class="wf-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
+          <div class="wf-actions"><button type="button" class="wf-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="wf-button wf-primary" :disabled="running || locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
         </footer>
+        <div v-if="running" class="wf-running"><span>{{ current === 'workflow' ? '工作流正在执行' : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务看实况 →</button></div>
+        <p v-if="message" class="wf-message" :class="{ 'wf-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
-      <PaperCard v-else variant="settings" class="workflow-editor empty-editor">
-        <p class="empty">从左边挑一条流水线开始编辑，或者点右上角「新建」搭一条新的。</p>
-      </PaperCard>
-      <p v-if="message" class="inline-message">{{ message }}</p>
     </div>
+    <dialog ref="picker" class="wf-dialog wf-picker" aria-labelledby="wf-picker-title" @cancel.prevent="closePicker">
+      <header class="wf-dialog-head"><div><h2 id="wf-picker-title">添加步骤</h2><p>可以连续选择，按点击顺序加入流程。</p></div><button type="button" class="wf-close" aria-label="关闭步骤选择" @click="closePicker">×</button></header>
+      <div class="wf-search-area"><label class="wf-search"><span aria-hidden="true">⌕</span><input ref="searchInput" v-model="search" type="search" aria-label="搜索步骤" placeholder="搜索任务，比如：江户城、远征" /></label><div class="wf-categories" role="group" aria-label="任务分类"><button type="button" :aria-pressed="category === 'all'" @click="category = 'all'">全部</button><button v-for="item in categoryOrder" :key="item" type="button" :aria-pressed="category === item" @click="category = item">{{ categoryLabels[item] }}</button></div></div>
+      <div class="wf-catalog"><section v-for="group in groups" :key="group.category"><h3>{{ categoryLabels[group.category] }}</h3><div class="wf-catalog-grid"><button v-for="def in group.nodes" :key="def.type" type="button" :disabled="(draft?.nodes.length || 0) >= maxNodes" @click="addNode(def)"><span><strong>{{ def.label }}</strong><small>{{ description(def.type) }}</small></span><span class="wf-catalog-plus" aria-hidden="true">＋</span></button></div></section><p v-if="!groups.length" class="wf-no-results">没有找到这个任务，换个关键词试试。</p></div>
+      <footer class="wf-picker-footer"><span role="status">{{ (draft?.nodes.length || 0) >= maxNodes ? '已达到 30 步上限' : lastAdded || `将加入第 ${insertAt + 1} 步` }}<small>当前共 {{ draft?.nodes.length || 0 }} 个步骤</small></span><button type="button" class="wf-button wf-primary" @click="closePicker">选好了</button></footer>
+    </dialog>
+    <dialog ref="switchDialog" class="wf-dialog wf-switch" aria-labelledby="wf-switch-title" @close="pendingSwitch = null">
+      <h2 id="wf-switch-title">先收好这份安排？</h2><p>「{{ draft?.name || '未命名流程' }}」还有没保存的修改。</p><p v-if="failed" class="wf-danger" role="alert">{{ message }}</p><div class="wf-switch-actions"><button type="button" class="wf-text-button" :disabled="locked" @click="switchDialog?.close()">继续编辑</button><button type="button" class="wf-button" :disabled="locked" @click="confirmSwitch(false)">放弃修改</button><button type="button" class="wf-button wf-primary" :disabled="!valid || locked" @click="confirmSwitch(true)">{{ saving ? '保存中…' : '保存并切换' }}</button></div>
+    </dialog>
   </section>
 </template>
+
+<style scoped>
+.wf-panel { color: var(--ink); }
+.wf-panel :deep(.section-head) { padding: 0 0 14px; border: 0; background: none; box-shadow: none; }
+.wf-panel :deep(.section-head h2) { font-size: 24px; }
+.wf-panel button, .wf-dialog button { cursor: pointer; font: inherit; }
+.wf-panel button:disabled, .wf-dialog button:disabled { cursor: default; opacity: .42; }
+.wf-panel button:focus-visible, .wf-dialog button:focus-visible, .wf-dialog input:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
+.wf-layout { display: grid; grid-template-columns: 205px minmax(0, 1fr); gap: 28px; align-items: start; }
+.wf-library { padding-top: 8px; min-width: 0; }
+.wf-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
+.wf-library h3 { margin: 0; font-size: 13px; }
+.wf-library > header > span { font-size: 11px; color: var(--ink-dim); }
+.wf-button { min-height: 39px; border: 1px solid var(--paper-line); border-radius: 6px; color: var(--ink); background: var(--paper-card); padding: 9px 15px; font-size: 13px !important; font-weight: 600 !important; }
+.wf-button:hover:not(:disabled) { border-color: var(--fox-gold); background: var(--paper-panel); }
+.wf-button.wf-primary { background: var(--fox-gold); color: #fffaf0; border-color: var(--fox-gold); }
+.wf-button.wf-primary:hover:not(:disabled) { filter: brightness(.95); background: var(--fox-gold); }
+.wf-new { width: 100%; text-align: left; background: transparent; border-style: dashed; }
+.wf-new.selected { border-color: var(--fox-gold); color: var(--fox-gold); }
+.wf-presets { display: grid; gap: 6px; margin-top: 14px; }
+.wf-preset { text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); padding: 12px; min-width: 0; }
+.wf-preset strong { display: block; font-size: 13px; overflow-wrap: anywhere; line-height: 1.6; }
+.wf-preset small { display: block; font-size: 11px; color: var(--ink-dim); margin-top: 5px; }
+.wf-preset:hover { background: var(--paper-panel); }
+.wf-preset.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }
+.wf-library-note { font-size: 11px; line-height: 1.9; color: var(--ink-dim); margin: 24px 12px; }
+.wf-editor { padding: 0 !important; min-width: 0; border: 1px solid var(--paper-line); border-radius: 10px; background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
+.wf-edit-fields { border: 0; margin: 0; padding: 25px 26px 22px; min-width: 0; }
+.wf-editor-head { display: flex; gap: 16px; align-items: center; padding-bottom: 24px; }
+.wf-name { display: grid; gap: 9px; flex: 1; min-width: 0; color: var(--ink-dim); font-size: 11px; }
+.wf-name :deep(input) { width: 100%; min-width: 0; height: auto; border: 0; border-bottom: 1px solid var(--paper-line); border-radius: 0; padding: 8px 0; background: transparent; box-shadow: none; color: var(--ink); font: inherit; font-size: 20px; font-weight: 650; }
+.wf-name :deep(input::placeholder) { color: var(--ink-dim); font-size: 16px; font-weight: normal; opacity: .75; }
+.wf-more { position: relative; align-self: flex-start; margin-top: 20px; }
+.wf-more summary { list-style: none; cursor: pointer; color: var(--ink-dim); padding: 6px; letter-spacing: 2px; }
+.wf-more summary::-webkit-details-marker { display: none; }
+.wf-more > div { position: absolute; right: 0; top: 35px; z-index: 4; width: 155px; padding: 6px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 6px; box-shadow: 0 6px 20px #0002; }
+.wf-more button { display: block; width: 100%; background: none; color: var(--ink); border: 0; padding: 10px; text-align: left; font-size: 12px; }
+.wf-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.wf-list-heading h3 { margin: 0; font-size: 13px; }
+.wf-list-heading h3 span { margin-left: 8px; color: var(--ink-dim); font-size: 11px; font-weight: normal; }
+.wf-list-heading > small { color: var(--ink-dim); font-size: 11px; }
+.wf-editor:has(.wf-empty) .wf-edit-fields { padding-block: 18px 10px; }
+.wf-editor:has(.wf-empty) .wf-editor-head { padding-bottom: 14px; }
+.wf-editor:has(.wf-empty) .wf-name :deep(input) { padding-block: 6px; }
+.wf-editor:has(.wf-empty) .wf-toolbar { position: static; }
+.wf-empty { text-align: center; padding: 16px 10px 18px; }
+.wf-empty h3 { font-size: 16px; margin: 0 0 8px; }
+.wf-empty p { color: var(--ink-dim); font-size: 12px; margin: 0 0 14px; line-height: 1.8; }
+.wf-insert { display: flex; width: 100%; height: 29px; padding: 0; border: 0; align-items: center; justify-content: center; gap: 8px; background: transparent; color: var(--ink-dim); font-size: 10px !important; }
+.wf-insert::before, .wf-insert::after { content: ''; height: 1px; background: var(--paper-line); flex: 1; opacity: .5; }
+.wf-insert span { opacity: .65; }
+.wf-insert:hover span, .wf-insert:focus-visible span { opacity: 1; color: var(--fox-gold); }
+.wf-step { border: 1px solid var(--paper-line); border-radius: 7px; background: var(--paper-card); scroll-margin: 12px; }
+.wf-step.is-open { border-color: var(--fox-gold); }
+.wf-step-head { display: flex; align-items: center; padding: 0 9px 0 0; }
+.wf-step-toggle { display: flex; align-items: center; gap: 13px; min-width: 0; flex: 1; border: 0; background: none; color: var(--ink); padding: 16px 12px; text-align: left; }
+.wf-number { align-self: flex-start; margin-top: 1px; width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center; color: var(--fox-gold); background: var(--paper-panel); border-radius: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.wf-step-label { min-width: 0; flex: 1; }
+.wf-step-label strong { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 14px; line-height: 1.7; }
+.wf-step-label strong small { font-weight: normal; color: var(--ink-dim); font-size: 10px; border: 1px solid var(--paper-line); padding: 0 5px; border-radius: 3px; }
+.wf-step-label > span { display: block; color: var(--ink-dim); font-size: 11px; line-height: 1.7; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-chevron { color: var(--ink-dim); font-size: 13px; }
+.wf-step-tools { display: flex; border-left: 1px solid var(--paper-line); padding-left: 7px; }
+.wf-step-tools button { border: 0; background: none; color: var(--ink-dim); width: 29px; height: 34px; border-radius: 4px; }
+.wf-step-tools button:hover:not(:disabled) { background: var(--paper-panel); color: var(--ink); }
+.wf-step-detail { padding: 0 18px 18px 53px; }
+.wf-step-detail > p { font-size: 12px; color: var(--ink-dim); line-height: 1.7; margin: 0 0 14px; }
+.wf-params { padding: 0 !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wf-error-policy { margin-top: 15px; padding-top: 14px; border-top: 1px dashed var(--paper-line); display: grid; gap: 10px; }
+.wf-error-policy > span { color: var(--ink-dim); font-size: 11px; }
+.wf-error-policy :deep(.segmented-control) { max-width: 390px; }
+.wf-add { display: block; width: 100%; margin-top: 18px; border-style: dashed; background: transparent; color: var(--fox-gold); }
+.wf-undo { display: flex; gap: 12px; align-items: center; font-size: 12px; margin-top: 14px; color: var(--ink-dim); }
+.wf-undo button, .wf-text-button { background: none; border: 0; color: var(--fox-gold); font-size: 12px !important; padding: 6px 0; }
+.wf-toolbar { display: flex; position: sticky; bottom: 0; z-index: 3; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 15px 26px; background: var(--paper-card); border-top: 1px solid var(--paper-line); border-radius: 0 0 10px 10px; box-shadow: 0 -6px 14px #49382104; }
+.wf-save-state { font-size: 11px; color: var(--ink-dim); }
+.wf-save-state.unsaved { color: var(--fox-gold); }
+.wf-actions { display: flex; gap: 9px; }
+.wf-running { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 26px; border-top: 1px solid var(--paper-line); font-size: 12px; }
+.wf-message { margin: 0; padding: 12px 26px; font-size: 12px; }
+.wf-danger { color: #a04b3a !important; }
+.wf-loading { padding: 30px 0; color: var(--ink-dim); font-size: 13px; }
+.wf-dialog { padding: 0; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); width: min(700px, calc(100% - 32px)); max-height: calc(100dvh - 48px); box-shadow: 0 22px 80px #251a1140; }
+.wf-dialog::backdrop { background: #30291f80; }
+.wf-picker[open] { display: flex; flex-direction: column; }
+.wf-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 25px 26px 18px; }
+.wf-dialog h2 { font-size: 20px; margin: 0; }
+.wf-dialog-head p { font-size: 12px; color: var(--ink-dim); margin: 9px 0 0; }
+.wf-close { color: var(--ink-dim); font-size: 25px !important; border: 0; background: none; padding: 0 4px; }
+.wf-search-area { padding: 0 26px 17px; border-bottom: 1px solid var(--paper-line); }
+.wf-search { display: flex; align-items: center; gap: 10px; padding: 0 12px; border: 1px solid var(--paper-line); background: var(--paper); border-radius: 6px; }
+.wf-search > span { color: var(--ink-dim); font-size: 25px; }
+.wf-search input { width: 100%; min-width: 0; background: none; border: 0; padding: 12px 0; color: var(--ink); font: inherit; font-size: 13px; }
+.wf-categories { display: flex; gap: 6px; margin-top: 14px; }
+.wf-categories button { background: transparent; color: var(--ink-dim); border: 1px solid transparent; padding: 6px 13px; font-size: 12px; border-radius: 5px; }
+.wf-categories button[aria-pressed='true'] { background: var(--paper-panel); border-color: var(--paper-line); color: var(--ink); }
+.wf-catalog { overflow-y: auto; min-height: 0; padding: 2px 26px 24px; overscroll-behavior: contain; }
+.wf-catalog h3 { margin: 21px 0 10px; font-size: 12px; color: var(--ink-dim); font-weight: 500; }
+.wf-catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.wf-catalog-grid > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; text-align: left; padding: 14px; color: var(--ink); border: 1px solid var(--paper-line); border-radius: 7px; background: var(--paper-card); min-width: 0; }
+.wf-catalog-grid > button:hover:not(:disabled) { border-color: var(--fox-gold); background: var(--paper-panel); }
+.wf-catalog-grid strong { display: block; font-size: 13px; font-weight: 600; }
+.wf-catalog-grid small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 7px; font-size: 11px; color: var(--ink-dim); line-height: 1.6; }
+.wf-catalog-plus { flex-shrink: 0; color: var(--fox-gold); font-size: 18px; }
+.wf-no-results { padding: 30px 0; text-align: center; font-size: 13px; color: var(--ink-dim); }
+.wf-picker-footer { flex-shrink: 0; border-top: 1px solid var(--paper-line); padding: 16px 26px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.wf-picker-footer > span { font-size: 12px; color: var(--ink); line-height: 1.6; }
+.wf-picker-footer small { display: block; color: var(--ink-dim); font-size: 11px; margin-top: 3px; }
+.wf-picker-footer button { flex-shrink: 0; }
+.wf-switch { width: min(480px, calc(100% - 32px)); padding: 26px; }
+.wf-switch > p { color: var(--ink-dim); font-size: 13px; line-height: 1.7; }
+.wf-switch-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+@media (max-width: 1000px) {
+  .wf-layout { grid-template-columns: 170px minmax(0, 1fr); gap: 18px; }
+  .wf-edit-fields { padding: 20px 18px; }
+  .wf-toolbar { padding: 14px 18px; }
+  .wf-step-detail { padding-left: 18px; }
+}
+@media (max-width: 720px) {
+  .wf-panel :deep(.section-head) { padding-bottom: 16px; }
+  .wf-layout { grid-template-columns: 1fr; gap: 18px; }
+  .wf-library { padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .wf-library > header { flex: 1; margin: 0; }
+  .wf-new { width: auto; }
+  .wf-presets { display: flex; width: 100%; overflow-x: auto; gap: 8px; margin: 0; padding-bottom: 3px; }
+  .wf-preset { flex: 0 0 auto; max-width: 210px; padding: 9px 13px; border-color: var(--paper-line); }
+  .wf-library-note { display: none; }
+  .wf-editor-head { padding-bottom: 20px; gap: 8px; }
+  .wf-name :deep(input) { font-size: 18px; }
+  .wf-name :deep(input::placeholder) { font-size: 13px; }
+  .wf-edit-fields { padding: 18px 12px; }
+  .wf-empty { padding: 26px 0; }
+  .wf-empty h3 { font-size: 15px; }
+  .wf-list-heading > small { font-size: 10px; }
+  .wf-step-head { flex-wrap: wrap; padding: 0; }
+  .wf-step-toggle { padding: 12px 10px; gap: 9px; width: 100%; flex-basis: 100%; }
+  .wf-number { width: 23px; height: 25px; }
+  .wf-step-tools { margin: 0 8px 6px auto; border: 0; gap: 4px; }
+  .wf-step-tools button { width: 36px; height: 32px; background: var(--paper-panel); }
+  .wf-step-detail { padding: 8px 12px 15px; }
+  .wf-params { grid-template-columns: 1fr; }
+  .wf-toolbar { padding: 12px; gap: 8px; }
+  .wf-save-state { width: 100%; }
+  .wf-actions { width: 100%; }
+  .wf-actions button { flex: 1; padding-inline: 8px; }
+  .wf-running, .wf-message { padding: 12px; }
+  .wf-dialog { max-height: calc(100dvh - 24px); width: calc(100% - 20px); border-radius: 9px; }
+  .wf-dialog-head { padding: 20px 16px 16px; }
+  .wf-search-area { padding: 0 16px 14px; }
+  .wf-categories { gap: 3px; justify-content: space-between; }
+  .wf-categories button { padding: 6px 10px; }
+  .wf-catalog { padding: 0 16px 18px; }
+  .wf-catalog-grid { grid-template-columns: 1fr; }
+  .wf-picker-footer { padding: 12px 16px; gap: 10px; }
+  .wf-picker-footer > span { font-size: 11px; }
+  .wf-switch { padding: 22px 18px; }
+}
+</style>
