@@ -192,8 +192,9 @@ button { cursor: pointer; }
 .chips, .step-list { display: flex; flex-wrap: wrap; gap: 7px; }
 .chips span, .step-list span { padding: 5px 8px; background: #e1e9df; border: 1px solid #b6c2b3; }
 .step-list span.bad { background: #f1d8d3; border-color: #cb958c; }
-.exp-row { display: grid; grid-template-columns: auto 1fr auto; gap: 9px; padding: 7px 0; border-bottom: 1px dotted #cbbfac; }
-.exp-row em { color: #7a4f2b; font-style: normal; }
+.exp-row { display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; padding: 7px 0; border-bottom: 1px dotted #cbbfac; }
+.exp-row span { min-width: 0; }
+.exp-row em { grid-column: 1 / -1; color: #7a4f2b; font-style: normal; }
 .empty { color: #8b7f72; }
 .log-panel { display: flex; min-height: 0; flex-direction: column; }
 .log-status-bar { display: none; }
