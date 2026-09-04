@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Ref } from 'vue'
 import { api } from './api'
 import TaskForm from './components/TaskForm.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
@@ -47,6 +48,7 @@ let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
 const reportStageCollapsed = ref(false)
+const workflowStageCollapsed = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
@@ -342,19 +344,21 @@ async function pollStatus() {
   } catch (_) {}
 }
 function onSchedulerWarning(event: Event) { schedulerWarning.value = String((event as CustomEvent).detail || '') }
-function onReportScroll(event: Event) {
+function onStageScroll(event: Event, state: Ref<boolean>) {
   const scroller = event.currentTarget as HTMLElement | null
   const scrollTop = scroller?.scrollTop || 0
-  if (reportStageCollapsed.value) {
-    if (scrollTop < 12) reportStageCollapsed.value = false
+  if (state.value) {
+    if (scrollTop < 12) state.value = false
   } else if (scrollTop > 56) {
-    // 短规划页收掉舞台后可能立刻失去滚动空间，scrollTop 被压回顶部，
+    // 短页面收掉舞台后可能立刻失去滚动空间，scrollTop 被压回顶部，
     // 继而触发“展开 → 又可滚 → 再收起”的抖动。只有收起后仍有余量才动舞台。
     const stageHeight = document.querySelector<HTMLElement>('.honmaru-stage')?.getBoundingClientRect().height || 0
     const scrollRange = scroller ? scroller.scrollHeight - scroller.clientHeight : 0
-    if (scrollRange > stageHeight + 56) reportStageCollapsed.value = true
+    if (scrollRange > stageHeight + 56) state.value = true
   }
 }
+function onReportScroll(event: Event) { onStageScroll(event, reportStageCollapsed) }
+function onWorkflowScroll(event: Event) { onStageScroll(event, workflowStageCollapsed) }
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
@@ -431,11 +435,14 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
-watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' } })
+watch(tab, value => {
+  if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
+  if (value !== 'workflow') workflowStageCollapsed.value = false
+})
 </script>
 
 <template>
-  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed, 'ledger-mode': ledgerMode }">
+  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
       <StageActors :active="stageActive" />
@@ -613,7 +620,7 @@ watch(tab, value => { if (value !== 'report') { reportStageCollapsed.value = fal
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
-    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
+    <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" @started="running = true; current = 'workflow'; runningDailyWorkflow = workflowDraft?.id === 'builtin-daily'" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"
