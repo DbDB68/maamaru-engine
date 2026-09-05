@@ -4,9 +4,9 @@ import { api } from '../../api'
 import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 import EventTimeline from './EventTimeline.vue'
-import GameplayPlanner from './GameplayPlanner.vue'
+import KobanGoalGuide from './KobanGoalGuide.vue'
 
-const emit = defineEmits<{ goalSaved: [] }>()
+const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const loading = ref(false)
@@ -312,7 +312,6 @@ onMounted(load)
 
 <template>
   <section class="planning-panel" :class="{ loading }">
-    <GameplayPlanner />
     <header class="planning-toolbar">
       <div><h3>当前目标</h3><span v-if="planning?.goals.length">{{ planning.goals.length }} 个</span></div>
       <button v-if="!formOpen && planning?.goals.length" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
@@ -367,6 +366,11 @@ onMounted(load)
             <progress v-if="goal.current != null && goal.target != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
             <p><span>当前 <b>{{ fmt(goal.current) }}</b><template v-if="goal.target != null"> / {{ fmt(goal.target) }}</template> {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
           </div>
+          <KobanGoalGuide
+            v-if="goal.resource === '小判' && goal.goal_mode === 'amount_target' && !['done', 'expired'].includes(goal.status)"
+            :goal="goal"
+            @open-expedition="emit('openExpedition')"
+          />
           <details>
             <summary>查看预测依据</summary>
             <p>{{ goal.message }}</p>

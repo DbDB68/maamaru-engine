@@ -11,7 +11,7 @@ import PlanningPanel from './report/PlanningPanel.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
-const emit = defineEmits<{ 'open-wishlist': [] }>()
+const emit = defineEmits<{ 'open-wishlist': []; 'open-expedition': [] }>()
 const props = defineProps<{ initialSection?: 'report' | 'planning' }>()
 
 const days = ref(7)
@@ -1298,7 +1298,7 @@ onMounted(() => load())
           <ol aria-label="首次设置进度"><li class="done"><span>1</span>抄家底</li><li class="done"><span>2</span>带旧账</li><li class="active"><span>3</span>立目标</li></ol>
           <div class="ledger-onboarding-copy"><div><b>让账房替你盯结果</b><p>可以选“攒到多少”或“到哪一天”；暂时没想法也可以直接完成。</p></div><div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">立一个目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div></div>
         </section>
-        <PlanningPanel ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" />
+        <PlanningPanel ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" @open-expedition="emit('open-expedition')" />
       </template>
     </div>
   </section>
