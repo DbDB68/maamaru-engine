@@ -355,6 +355,10 @@ const reportInsights = computed<ReportInsight[]>(() => {
 
 const insightHeading = computed(() => days.value === 7 ? '本周本丸小结' : `${rangeLabel.value}本丸小结`)
 
+function insightToneLabel(tone: ReportInsight['tone']) {
+  return { plain: '记', gain: '得', cost: '用', alert: '留意', goal: '目标' }[tone]
+}
+
 async function followInsight(insight: ReportInsight) {
   if (insight.target === 'planning') return openPlanning()
   if (insight.target === 'records') return switchView('records')
@@ -1133,12 +1137,12 @@ onMounted(() => load())
       <template v-if="view === 'chart'">
         <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
           <header>
-            <div><small>麻麻露已经替你看完账了</small><h2 id="report-insight-title">🦊 {{ insightHeading }}</h2></div>
-            <span>最多只说三件事</span>
+            <div><small>狐之助从账里圈出的三笔</small><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
+            <span>{{ rangeLabel }} · 回看</span>
           </header>
           <ol class="report-insight-list">
-            <li v-for="(insight, index) in reportInsights" :key="insight.key" :class="insight.tone">
-              <i>{{ index + 1 }}</i><div><strong>{{ insight.title }}</strong><p>{{ insight.detail }}</p></div>
+            <li v-for="(insight, index) in reportInsights" :key="insight.key" :class="[insight.tone, { lead: index === 0 }]">
+              <i>{{ insightToneLabel(insight.tone) }}</i><div><strong>{{ insight.title }}</strong><p>{{ insight.detail }}</p></div>
               <button v-if="insight.target" type="button" @click="followInsight(insight)">{{ insight.target === 'planning' ? '看规划' : insight.target === 'records' ? '看记录' : '看证据' }} →</button>
             </li>
           </ol>
@@ -1325,28 +1329,32 @@ onMounted(() => load())
 .ledger-onboarding-copy p { color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
 .ledger-onboarding-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .ledger-onboarding-goal { margin-bottom: 12px; }
-.report-glance { display: grid; gap: 14px; overflow: hidden; background: linear-gradient(135deg, var(--fox-gold-pale), var(--paper-card) 55%); border: 1px solid var(--fox-gold); border-radius: 14px; padding: 18px 20px; box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 8%, transparent); }
+.report-glance { position: relative; display: grid; gap: 14px; overflow: hidden; padding: 17px 19px 15px; background: var(--paper-card); border: 1px solid var(--paper-line); border-left: 5px solid color-mix(in srgb, var(--fox-gold-deep) 72%, var(--ink)); box-shadow: 4px 4px 0 color-mix(in srgb, var(--paper-line) 48%, transparent); }
 .report-glance > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
-.report-glance > header small { display: block; margin-bottom: 3px; color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; letter-spacing: .06em; }
-.report-glance > header h2 { margin: 0; font-size: clamp(20px, 2.5vw, 28px); line-height: 1.2; }
-.report-glance > header > span { color: var(--ink-dim); font-size: 11px; }
-.report-insight-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.report-insight-list li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 11px 12px; background: color-mix(in srgb, var(--paper-card) 88%, transparent); border-left: 4px solid var(--paper-line); }
-.report-insight-list li > i { display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink-dim); background: var(--paper-panel); border-radius: 50%; font-size: 11px; font-style: normal; font-weight: 700; }
+.report-glance > header small { display: block; margin-bottom: 3px; color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.report-glance > header h2 { margin: 0; font-size: clamp(19px, 2.3vw, 25px); line-height: 1.2; }
+.report-glance > header > span { padding-bottom: 2px; color: var(--ink-dim); border-bottom: 1px solid var(--paper-line); font-size: 10px; letter-spacing: .04em; }
+.report-insight-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; border-top: 1px solid var(--paper-line); border-bottom: 1px solid var(--paper-line); list-style: none; }
+.report-insight-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; min-width: 0; padding: 12px 10px; border-left: 3px solid transparent; }
+.report-insight-list li:not(.lead) { border-top: 1px solid var(--paper-line); }
+.report-insight-list li:not(.lead):last-child { border-left-color: var(--paper-line); }
+.report-insight-list li.lead { grid-column: 1 / -1; padding: 14px 10px 15px; }
+.report-insight-list li > i { min-width: 27px; padding: 3px 5px; color: var(--ink-dim); background: var(--paper-panel); border: 1px solid var(--paper-line); font-size: 9px; font-style: normal; font-weight: 700; text-align: center; }
 .report-insight-list li > div { display: grid; gap: 3px; min-width: 0; }
-.report-insight-list strong { font-size: 15px; line-height: 1.35; }
-.report-insight-list p { margin: 0; color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
-.report-insight-list button { align-self: stretch; padding: 4px 8px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; white-space: nowrap; cursor: pointer; }
-.report-insight-list li.gain { border-left-color: #6d9262; }
-.report-insight-list li.cost { border-left-color: #b97c67; }
-.report-insight-list li.alert { background: color-mix(in srgb, var(--paper-card) 80%, #f1d9d1); border-left-color: var(--danger); }
-.report-insight-list li.goal { border-left-color: var(--fox-gold); }
+.report-insight-list strong { font-size: 13px; line-height: 1.4; }
+.report-insight-list .lead strong { font-size: clamp(16px, 2vw, 19px); }
+.report-insight-list p { margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.55; }
+.report-insight-list button { align-self: center; padding: 4px 6px; color: var(--fox-gold-deep); background: transparent; border: 0; border-bottom: 1px solid var(--fox-gold); font-size: 10px; white-space: nowrap; cursor: pointer; }
+.report-insight-list li.gain > i { color: #47734f; border-color: #91ad8f; }
+.report-insight-list li.cost > i { color: #8d4c3e; border-color: #c79d91; }
+.report-insight-list li.alert > i { color: var(--danger); border-color: #c99589; }
+.report-insight-list li.goal > i { color: #806115; border-color: var(--fox-gold); }
 .report-glance > footer { display: flex; gap: 8px; flex-wrap: wrap; }
-.report-glance > footer span { padding: 3px 10px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 12px; }
+.report-glance > footer span { padding: 2px 0; color: var(--ink-dim); border-bottom: 1px dotted var(--paper-line); font-size: 11px; }
 .report-glance > footer .obtain { color: var(--fox-gold-deep); }
-.report-glance > footer .wishlist { color: #7a4b16; background: color-mix(in srgb, var(--fox-gold-pale) 78%, var(--paper)); border-color: var(--fox-gold); font-weight: 700; }
-.report-glance > footer .wishlist-manage { padding: 3px 10px; color: var(--fox-gold-deep); background: transparent; border: 1px dashed var(--fox-gold); border-radius: 999px; font-size: 12px; }
-.report-glance > footer .wishlist-manage:hover { color: var(--ink); background: var(--fox-gold-pale); }
+.report-glance > footer .wishlist { color: #7a4b16; border-color: var(--fox-gold); font-weight: 700; }
+.report-glance > footer .wishlist-manage { padding: 2px 3px; color: var(--fox-gold-deep); background: transparent; border: 0; border-bottom: 1px dashed var(--fox-gold); font-size: 11px; }
+.report-glance > footer .wishlist-manage:hover { color: var(--ink); }
 .report-glance > footer .manual { color: #536f8a; }
 .trend-callout { margin: 0 0 8px; padding: 8px 10px; color: var(--ink); background: var(--fox-gold-pale); border-left: 3px solid var(--fox-gold); font-size: 12px; line-height: 1.5; }
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
@@ -1358,8 +1366,10 @@ onMounted(() => load())
 @media (max-width: 520px) {
   .report-glance { padding: 15px 13px; }
   .report-glance > header { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .report-insight-list li { grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
-  .report-insight-list li > i { width: 21px; height: 21px; }
+  .report-insight-list { grid-template-columns: 1fr; }
+  .report-insight-list li { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+  .report-insight-list li.lead { grid-column: auto; }
+  .report-insight-list li:not(.lead):last-child { border-left-color: transparent; }
   .report-insight-list li > button { grid-column: 2; justify-self: start; min-height: 28px; padding: 0; }
 }
 .compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
