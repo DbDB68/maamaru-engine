@@ -20,6 +20,7 @@ except Exception:  # pragma: no cover - 老 Python 兜底
     _TZ = timezone(timedelta(hours=8))
 
 from .telemetry import LEDGER_RESOURCES
+from . import acquisition
 
 PLANNING_SCHEMA_VERSION = 1
 GOALS_SCHEMA_VERSION = 2  # planning_goals.json 文件格式：{schema_version, goals[]}
@@ -790,6 +791,9 @@ def get_planning(store, goals_path: Path, *,
         "osaka_floor_speed": floor_speed,
         "goals": goals,
         "events": abacuses,
+        # 每种资源一张「在哪弄」途径卡：远征时薪动态算，日课/活动文案在数据文件
+        "acquisition": {name: acquisition.resource_guide(name)
+                        for name in LEDGER_RESOURCES},
     }
 
 

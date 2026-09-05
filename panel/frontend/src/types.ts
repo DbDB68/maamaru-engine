@@ -252,6 +252,25 @@ export interface PlanningGoalAdvice {
   message: string
 }
 
+export interface AcquisitionExpedition {
+  map: string
+  label: string
+  name: string
+  duration_min: number
+  amount: number
+  per_hour: number
+  level_req: number | null
+}
+
+export interface AcquisitionGuide {
+  resource: string
+  expeditions: AcquisitionExpedition[]
+  expedition_caveat?: string | null
+  mission?: string | null
+  event?: string | null
+  note?: string | null
+}
+
 export interface PlanningReport {
   schema_version: number
   generated_at: number
@@ -263,6 +282,7 @@ export interface PlanningReport {
   current?: Record<string, number | null>
   goals: PlanningGoalAdvice[]
   events?: EventAbacus[]
+  acquisition?: Record<string, AcquisitionGuide>
 }
 
 // ---- 活动日历 /api/events ----

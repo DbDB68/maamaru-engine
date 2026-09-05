@@ -5,6 +5,7 @@ import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, Pla
 import { resourceNames } from './reportModel'
 import EventTimeline from './EventTimeline.vue'
 import KobanGoalGuide from './KobanGoalGuide.vue'
+import ResourceGoalGuide from './ResourceGoalGuide.vue'
 
 const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
 const planning = ref<PlanningReport | null>(null)
@@ -125,7 +126,11 @@ function goalHeadline(goal: PlanningGoalAdvice) {
 
 function goalProgress(goal: PlanningGoalAdvice) {
   if (goal.current == null || goal.target == null || goal.target <= 0) return 0
-  return Math.min(100, Math.max(0, goal.current / goal.target * 100))
+  return Math.min(100, Math.max(0, goal.current / goal.target * 100))
+}
+
+function acquisitionGuide(goal: PlanningGoalAdvice) {
+  return planning.value?.acquisition?.[goal.resource] ?? null
 }
 
 function durationHours(seconds: number | null | undefined) {
@@ -370,6 +375,10 @@ onMounted(load)
             v-if="goal.resource === '小判' && goal.goal_mode === 'amount_target' && !['done', 'expired'].includes(goal.status)"
             :goal="goal"
             @open-expedition="emit('openExpedition')"
+          />
+          <ResourceGoalGuide
+            v-else-if="(goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
+            :guide="acquisitionGuide(goal)!"
           />
           <details>
             <summary>查看预测依据</summary>
