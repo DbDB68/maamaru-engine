@@ -292,6 +292,6 @@ class SugarMixin:
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
         if successes == 0 and not dry_run:
-            yield ("[炼糖·习合] 一把能喂的都没有；包里若明明有重刀，"
-                   "多半是上了锁——上锁的刀我碰不了，解锁后再来")
+            yield ("[炼糖·习合] 一把能喂的都没有——重刀若压在邮箱里，"
+                   "是刀位太满领不出来（先去刀解腾位）；若在包里却看不到，那是上了锁")
         return successes
