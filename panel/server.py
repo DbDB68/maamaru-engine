@@ -2327,6 +2327,19 @@ async def api_planning():
                                 STATUS_DIR / advisor.GOALS_FILENAME)
 
 
+@app.post("/api/planning/gameplay")
+async def api_gameplay_planning(request: Request):
+    from touken.gameplay_planning import estimate
+    from touken.telemetry import get_telemetry_store
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "规划参数无效"}, status_code=400)
+    try:
+        return estimate(get_telemetry_store(), body)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
 @app.post("/api/planning/goals")
 async def api_add_planning_goal(request: Request):
     body = await request.json()
