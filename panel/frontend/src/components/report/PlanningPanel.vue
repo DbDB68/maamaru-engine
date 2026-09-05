@@ -3,6 +3,8 @@ import { nextTick, onMounted, ref } from 'vue'
 import { api } from '../../api'
 import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
+// 氪金货币不立目标，下拉选项里拿掉甲州金；账本展示那边 resourceNames 照旧
+const goalResources = resourceNames.filter(name => name !== '甲州金')
 import EventTimeline from './EventTimeline.vue'
 import KobanGoalGuide from './KobanGoalGuide.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
@@ -339,7 +341,7 @@ onMounted(load)
         </label>
         <label>攒什么
           <select v-model="form.resource">
-            <option v-for="name in resourceNames" :key="name" :value="name">{{ name }}</option>
+            <option v-for="name in goalResources" :key="name" :value="name">{{ name }}</option>
           </select>
         </label>
         <label v-if="form.goal_mode === 'amount_target'">想攒到多少
