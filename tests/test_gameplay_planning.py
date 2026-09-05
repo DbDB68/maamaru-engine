@@ -46,7 +46,7 @@ class GameplayPlanningTests(unittest.TestCase):
         result = estimate(self.store, {"minutes_per_run": 1}, self.now)
         self.assertEqual(result["campaign"], card["campaign"])
         # 数据卡门票价 500：预算 1000 只够 2 圈
-        self.assertEqual(estimate(self.store, {"minutes_per_run": 1, "budget": 1000}, self.now)["runs"], 2)
+        self.assertEqual(estimate(self.store, {"minutes_per_run": 1, "budget": 1000, "free_runs": 0}, self.now)["runs"], 2)
 
     def test_missing_card_falls_back(self):
         from unittest.mock import patch
@@ -54,3 +54,20 @@ class GameplayPlanningTests(unittest.TestCase):
         with patch.object(gameplay_planning, "load_gameplay_card", return_value={}):
             result = estimate(self.store, {"minutes_per_run": 1}, self.now)
         self.assertEqual(result["campaign"], gameplay_planning._FALLBACK_CAMPAIGN)
+
+    def test_auto_free_uses_only_complete_future_days(self):
+        result = estimate(self.store, {"minutes_per_run": 3, "current_free": 2}, self.now)
+        self.assertEqual(result["free_days"], 4)
+        self.assertEqual(result["free_runs"], 14)
+
+    def test_manual_free_overrides_auto(self):
+        result = estimate(self.store, {"minutes_per_run": 3, "free_runs": 1}, self.now)
+        self.assertEqual(result["free_runs"], 1)
+
+    def test_same_day_has_no_assumed_refill(self):
+        result = estimate(self.store, {"minutes_per_run": 3, "deadline": "2026-09-05T23:59"}, self.now)
+        self.assertEqual(result["free_runs"], 0)
+
+    def test_card_price_used_for_blank_input(self):
+        result = estimate(self.store, {"price": "", "minutes_per_run": 3}, self.now)
+        self.assertEqual(result["price"], 500)

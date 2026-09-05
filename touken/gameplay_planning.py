@@ -39,10 +39,13 @@ def estimate(store, values, now=None):
     map_no = number("map_no", 1, 1, 4, True)
     hours = number("hours_per_day", 2, 0.01, 24)
     target = number("runs", 100, 0, 1000000, True)
-    free = number("free_runs", 0, 0, 1000000, True)
+    free_override = values.get("free_runs")
+    current_free = number("current_free", 0, 0, 1000000, True)
     card = load_gameplay_card()
     campaign = card.get("campaign") or _FALLBACK_CAMPAIGN
-    price = number("price", card.get("paid_run_price") or _FALLBACK_PRICE, 0, 1000000)
+    if values.get("price") in (None, ""):
+        values = {**values, "price": card.get("paid_run_price") or _FALLBACK_PRICE}
+    price = number("price", _FALLBACK_PRICE, 0, 1000000)
     budget = number("budget", 50000, 0, 1000000000)
     mode = values.get("mode", "time")
     if mode not in ("time", "runs"):
@@ -53,7 +56,14 @@ def estimate(store, values, now=None):
             end = end.replace(tzinfo=TZ)
     except (ValueError, TypeError):
         raise ValueError("截止时间无效")
+    now = now.astimezone(TZ)
+    end = end.astimezone(TZ)
     remaining = max(0, (end - now).total_seconds())
+    # 未核实刷新时刻：只自动计入明天起、截止日之前的完整日。
+    full_days = max(0, (end.date() - now.date()).days - 1)
+    daily_free = max(0, int(card.get("daily_free_runs") or 0))
+    free = number("free_runs", 0, 0, 1000000, True) if free_override not in (None, "") else current_free + full_days * daily_free
+
     previous, samples = {}, []
     events = store.recent_events(limit=1000, event_type="sortie.completed", from_ts=now.timestamp()-14*86400)
     for event in sorted(events, key=lambda e: e["ts"]):
@@ -74,11 +84,18 @@ def estimate(store, values, now=None):
     result = {"campaign": campaign, "sample_count": len(samples), "seconds_per_run": speed,
               "speed_source": "手填估计" if manual not in (None, "") else "近 14 天连续圈实测中位数",
               "runs": None, "cost": None, "hours": None, "can_finish": None,
-              "remaining_hours": remaining / 3600}
+              "remaining_hours": remaining / 3600,
+              "deadline": end.strftime("%Y-%m-%dT%H:%M"), "price": price,
+              "daily_free_runs": daily_free, "free_days": full_days,
+              "free_runs": free, "free_source": "手填总数" if free_override not in (None, "") else "完整日保守估算",
+              "campaign_status": "已结束" if now >= datetime.fromisoformat(campaign["end_at"]) else ("未开始" if now < datetime.fromisoformat(campaign["start_at"]) else "进行中")}
     if speed is None:
         return result
     # 按剩余天数折算每日时长；最后不足一天按比例计入。
     available_seconds = remaining * hours / 24
+    if free_override in (None, ""):
+        free = current_free + full_days * min(daily_free, math.floor(hours * 3600 / speed))
+        result["free_runs"] = free
     affordable = math.floor(budget / price) + free if price else 1000000000
     runs = target if mode == "runs" else min(math.floor(available_seconds / speed), affordable)
     result.update(runs=runs, cost=max(0, runs-free)*price, hours=runs*speed/3600,
