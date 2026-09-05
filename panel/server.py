@@ -2345,6 +2345,13 @@ async def api_add_planning_goal(request: Request):
     body = await request.json()
     from touken import advisor
     try:
+        if str(body.get("kind") or "") == "fragment":
+            goal = advisor.add_fragment_goal(
+                STATUS_DIR / advisor.GOALS_FILENAME,
+                fragment=str(body.get("fragment") or ""),
+                target=body.get("target"),
+                note=str(body.get("note") or ""))
+            return {"ok": True, "goal": goal}
         goal = advisor.add_goal(STATUS_DIR / advisor.GOALS_FILENAME,
                                 resource=str(body.get("resource") or ""),
                                 target=body.get("target"),

@@ -10,13 +10,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+
+from .gameplay_planning import load_gameplay_card
 
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 _MAPS_FILE = _DATA_DIR / "expedition_maps.json"
 _SOURCES_FILE = _DATA_DIR / "acquisition_sources.json"
 
 _EXPEDITION_CAVEAT = "按大成功收益排的，实际看远征手气；括号里是队伍等级要求。"
+# 掉率出处见 gameplay_meta.json 的 note：日服玩家实测，样本混着加倍期，国服待核
+_FRAGMENT_RATE_SOURCE = ("掉率来自日服玩家实测，样本还混着加倍活动期，国服实际可能更低；"
+                         "自家实测攒够数据后会换成自家的。")
 
 
 def _load_maps() -> dict:
@@ -85,3 +91,57 @@ def resource_guide(resource: str) -> dict | None:
         "event": card.get("event"),
         "note": card.get("note"),
     }
+
+
+# ── 异去碎片：「要哪件碎片，刷哪张图」 ──
+
+
+def fragment_catalog() -> dict:
+    """异去碎片清单：每种碎片一张途径卡（各图掉率排名，掉率高的在前）。
+
+    键是碎片名。数据卡没收录碎片信息时返回空 dict——不知道就是不知道。
+    """
+    maps = (load_gameplay_card("异去") or {}).get("maps") or {}
+    names: set[str] = set()
+    for meta in maps.values():
+        if isinstance(meta, dict):
+            names.update((meta.get("fragments") or {}).keys())
+    catalog = {}
+    for name in sorted(names):
+        entries = []
+        for map_no, meta in maps.items():
+            if not isinstance(meta, dict):
+                continue
+            rate = (meta.get("fragments") or {}).get(name)
+            if not isinstance(rate, (int, float)) or rate <= 0:
+                continue
+            try:
+                entries.append({"map_no": int(map_no),
+                                "label": str(meta.get("label") or map_no),
+                                "rate": float(rate)})
+            except (TypeError, ValueError):
+                continue
+        entries.sort(key=lambda e: (-e["rate"], e["map_no"]))
+        catalog[name] = {"fragment": name, "maps": entries,
+                         "best_map": entries[0] if entries else None}
+    return catalog
+
+
+def fragment_notes(*, now: datetime | None = None) -> dict:
+    """碎片玩法的公共备注：掉率出处、累计圈数里程碑、进行中的加倍活动。"""
+    card = load_gameplay_card("异去") or {}
+    campaign = card.get("campaign")
+    if isinstance(campaign, dict):
+        campaign = dict(campaign)
+        try:
+            start = datetime.fromisoformat(str(campaign.get("start_at")))
+            end = datetime.fromisoformat(str(campaign.get("end_at")))
+            moment = now or datetime.now(start.tzinfo)
+            campaign["active"] = start <= moment <= end
+        except (ValueError, TypeError):
+            campaign["active"] = None
+    else:
+        campaign = None
+    return {"rate_source": _FRAGMENT_RATE_SOURCE,
+            "milestones": card.get("milestones") or [],
+            "campaign": campaign}

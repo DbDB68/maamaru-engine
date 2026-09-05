@@ -55,6 +55,23 @@ class _FakeStore:
         return []
 
 
+class FragmentCatalogTests(unittest.TestCase):
+    def test_ranks_maps_by_rate(self):
+        catalog = acquisition.fragment_catalog()
+        # 曜变天目只在 1-4 出
+        guide = catalog["曜变天目"]
+        self.assertEqual(guide["best_map"]["map_no"], 4)
+        self.assertAlmostEqual(guide["best_map"]["rate"], 0.04)
+        # 狮子螺钿鞍：1-2（0.07）压过 1-4（0.02）
+        self.assertEqual(catalog["狮子螺钿鞍"]["best_map"]["map_no"], 2)
+
+    def test_notes_carry_source_and_milestones(self):
+        notes = acquisition.fragment_notes()
+        self.assertTrue(notes["rate_source"])
+        self.assertTrue(notes["milestones"])
+        self.assertIn("active", notes["campaign"])
+
+
 class PlanningPayloadTests(unittest.TestCase):
     def test_planning_includes_acquisition(self):
         import tempfile

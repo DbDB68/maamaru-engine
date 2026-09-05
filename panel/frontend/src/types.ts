@@ -224,8 +224,9 @@ export interface InventoryGap {
 
 export interface PlanningGoalAdvice {
   id: number
-  kind?: 'resource' | 'event'
+  kind?: 'resource' | 'event' | 'fragment'
   event?: string | null
+  fragment?: string | null
   goal_mode?: 'budget' | 'stock_target' | 'combined' | 'amount_target' | 'deadline_target' | null
   resource: string
   target: number | null
@@ -240,6 +241,9 @@ export interface PlanningGoalAdvice {
   shortfall: number | null
   extra_daily: number | null
   extra_floors: number | null
+  expected_runs?: number | null
+  best_map_label?: string | null
+  fragment_rate?: number | null
   floors_needed?: number | null
   floors_per_day?: number | null
   seconds_per_floor?: number | null
@@ -271,6 +275,24 @@ export interface AcquisitionGuide {
   note?: string | null
 }
 
+export interface FragmentMapRate {
+  map_no: number
+  label: string
+  rate: number
+}
+
+export interface FragmentGuide {
+  fragment: string
+  maps: FragmentMapRate[]
+  best_map: FragmentMapRate | null
+}
+
+export interface FragmentNotes {
+  rate_source: string
+  milestones: { runs: number; reward: string }[]
+  campaign: { name: string; rate_multiplier?: number; start_at: string; end_at: string; active?: boolean | null } | null
+}
+
 export interface PlanningReport {
   schema_version: number
   generated_at: number
@@ -283,6 +305,8 @@ export interface PlanningReport {
   goals: PlanningGoalAdvice[]
   events?: EventAbacus[]
   acquisition?: Record<string, AcquisitionGuide>
+  fragments?: Record<string, FragmentGuide>
+  fragment_notes?: FragmentNotes
 }
 
 // ---- 活动日历 /api/events ----

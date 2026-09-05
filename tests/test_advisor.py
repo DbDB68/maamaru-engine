@@ -949,3 +949,90 @@ class PreciseWindowAbacusTests(unittest.TestCase):
                                       measured=None, today=date(2026, 8, 26),
                                       now=self.NOW)
         self.assertEqual(abacus["free_runs"], 168)
+
+
+class FragmentGoalTests(unittest.TestCase):
+    """异去碎片目标：立目标校验、库存快照评估、upsert。"""
+
+    def _path(self, tmp):
+        return Path(tmp) / "goals.json"
+
+    def test_add_and_reload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._path(tmp)
+            goal = advisor.add_fragment_goal(path, fragment="曜变天目", target=3)
+            self.assertEqual(goal["kind"], "fragment")
+            self.assertEqual(goal["resource"], "曜变天目")  # 前端显示吃 resource
+            goals = advisor.load_goals(path)
+            self.assertEqual(len(goals), 1)
+            self.assertEqual(goals[0]["fragment"], "曜变天目")
+
+    def test_unknown_fragment_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                advisor.add_fragment_goal(self._path(tmp), fragment="尚方宝剑", target=1)
+
+    def test_target_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in (0, -1, "三", None, 1000):
+                with self.assertRaises(ValueError):
+                    advisor.add_fragment_goal(self._path(tmp),
+                                              fragment="曜变天目", target=bad)
+
+    def test_same_fragment_upserts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._path(tmp)
+            advisor.add_fragment_goal(path, fragment="曜变天目", target=3)
+            advisor.add_fragment_goal(path, fragment="曜变天目", target=5)
+            goals = advisor.load_goals(path)
+            self.assertEqual(len(goals), 1)
+            self.assertEqual(goals[0]["target"], 5)
+
+    def test_evaluate_active_with_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            goal = advisor.add_fragment_goal(self._path(tmp),
+                                             fragment="曜变天目", target=3)
+        advice = advisor.evaluate_goal(
+            goal, current=None, rate_info=None, floor_yield=None,
+            fragment_inventory={"曜变天目": 1},
+            fragment_guides=advisor.acquisition.fragment_catalog())
+        self.assertEqual(advice["status"], "active")
+        self.assertEqual(advice["current"], 1)
+        self.assertEqual(advice["shortfall"], 2)
+        self.assertEqual(advice["expected_runs"], 50)  # ceil(2 / 0.04)
+        self.assertEqual(advice["best_map_label"], "1-4 鸟羽")
+
+    def test_evaluate_done_and_unknown(self):
+        goal = {"id": 1, "kind": "fragment", "goal_mode": "amount_target",
+                "resource": "曜变天目", "fragment": "曜变天目", "target": 3}
+        done = advisor.evaluate_goal(
+            goal, current=None, rate_info=None, floor_yield=None,
+            fragment_inventory={"曜变天目": 5},
+            fragment_guides=advisor.acquisition.fragment_catalog())
+        self.assertEqual(done["status"], "done")
+        unknown = advisor.evaluate_goal(
+            goal, current=None, rate_info=None, floor_yield=None,
+            fragment_inventory=None,
+            fragment_guides=advisor.acquisition.fragment_catalog())
+        self.assertEqual(unknown["status"], "unknown")
+        self.assertIn("去打一圈异去", unknown["message"])
+
+    def test_get_planning_reads_fragment_snapshot(self):
+        class _FragmentStore(_FakeStore):
+            def recent_events(self, limit=100, event_type=None):
+                if event_type == "yosari.fragments":
+                    return [{"ts": time.time(),
+                             "payload": {"map_no": 4, "counts": {"曜变天目": 2}}}]
+                return super().recent_events(limit=limit, event_type=event_type)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._path(tmp)
+            advisor.add_fragment_goal(path, fragment="曜变天目", target=3)
+            planning = advisor.get_planning(_FragmentStore(), path,
+                                            today=date(2026, 8, 25))
+        goal = next(g for g in planning["goals"] if g["kind"] == "fragment")
+        self.assertEqual(goal["current"], 2)
+        self.assertEqual(goal["status"], "active")
+        # 表单下拉和指引卡用的碎片途径卡也在汇总里
+        self.assertIn("曜变天目", planning["fragments"])
+        self.assertTrue(planning["fragment_notes"]["rate_source"])

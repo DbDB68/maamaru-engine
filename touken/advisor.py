@@ -76,7 +76,17 @@ def load_goals(path: Path) -> list[dict]:
         return []
     goals = []
     for entry in entries:
-        if not isinstance(entry, dict) or entry.get("resource") not in LEDGER_RESOURCES:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("kind") == "fragment":
+            # 碎片目标：resource 就是碎片名，不走账本八资源校验；名字在立目标
+            # 时已对数据卡校验，读取时容忍（数据卡更新不该误杀老目标）
+            target = entry.get("target")
+            if (isinstance(entry.get("fragment"), str) and entry["fragment"]
+                    and isinstance(target, (int, float)) and 0 < target <= 999):
+                goals.append(entry)
+            continue
+        if entry.get("resource") not in LEDGER_RESOURCES:
             continue
         mode = entry.get("goal_mode") or "combined"
         has_target = isinstance(entry.get("target"), (int, float))
@@ -145,6 +155,42 @@ def add_goal(path: Path, *, resource: str, target=None, deadline: str = "",
         goal["target"] = parsed_target
     if deadline_date is not None:
         goal["deadline"] = deadline_date.isoformat()
+    goals.append(goal)
+    _save_goals(path, goals)
+    return goal
+
+
+def add_fragment_goal(path: Path, *, fragment: str, target, note: str = "") -> dict:
+    """立一条异去碎片目标。一种碎片至多一条，重复立原位更新。"""
+    fragment = str(fragment or "").strip()
+    catalog = acquisition.fragment_catalog()
+    if fragment not in catalog:
+        raise ValueError(f"不认识碎片「{fragment}」，异去数据卡里没有收录")
+    try:
+        target = int(target)
+    except (TypeError, ValueError):
+        raise ValueError("目标数量得是个整数")
+    if not 0 < target <= 999:
+        raise ValueError("目标数量不对劲（得大于 0，999 封顶啦）")
+    goals = load_goals(path)
+    existing = next((g for g in goals
+                     if g.get("kind") == "fragment"
+                     and g.get("fragment") == fragment), None)
+    if existing is not None:
+        existing.update({"target": target, "note": str(note or "").strip()[:50],
+                         "updated_at": time.time()})
+        _save_goals(path, goals)
+        return existing
+    goal = {
+        "id": max([int(g.get("id") or 0) for g in goals], default=0) + 1,
+        "kind": "fragment",
+        "goal_mode": "amount_target",
+        "resource": fragment,  # 前端进度条/标题都吃 resource，碎片名直接顶上
+        "fragment": fragment,
+        "target": target,
+        "note": str(note or "").strip()[:50],
+        "created_at": time.time(),
+    }
     goals.append(goal)
     _save_goals(path, goals)
     return goal
@@ -349,17 +395,77 @@ def _window_coverage(today: date, deadline: date,
     return covered, total
 
 
+def _evaluate_fragment_goal(goal: dict, *, inventory: dict | None,
+                            guides: dict | None) -> dict:
+    """碎片目标算命。进度来自 yosari.fragments 库存快照；指引来自掉率途径卡。
+
+    没有日期预测——异去打不打、每天打几圈全看安排，不按速率瞎估。
+    """
+    fragment = goal.get("fragment") or goal.get("resource")
+    target = int(goal["target"])
+    current = None
+    if isinstance(inventory, dict):
+        value = inventory.get(fragment)
+        current = int(value) if isinstance(value, (int, float)) else None
+    advice = {
+        "id": goal.get("id"), "kind": "fragment", "event": None,
+        "goal_mode": "amount_target", "resource": fragment, "fragment": fragment,
+        "target": target, "deadline": None, "estimated_deadline": None,
+        "deadline_at": None, "note": goal.get("note") or "",
+        "days_left": None, "current": current, "rate": None,
+        "event_days": 0, "event_rate": None, "projected": None,
+        "shortfall": None, "extra_daily": None, "extra_floors": None,
+        "expected_runs": None, "best_map_label": None, "fragment_rate": None,
+        "status": "unknown", "message": "",
+    }
+    guide = (guides or {}).get(fragment) or {}
+    best = guide.get("best_map") or {}
+    best_rate = best.get("rate") if isinstance(best.get("rate"), (int, float)) else None
+    if best_rate:
+        advice["best_map_label"] = best.get("label")
+        advice["fragment_rate"] = best_rate
+    if current is None:
+        advice["message"] = (f"还没读到「{fragment}」的库存，去打一圈异去，"
+                             "狐之助每圈结束会开碎片弹窗对账。")
+        return advice
+    if current >= target:
+        advice["status"] = "done"
+        advice["message"] = (f"「{fragment}」已经有 {current} 个，"
+                             f"目标 {target} 个达成啦🎉")
+        return advice
+    shortfall = int(target - current)
+    advice["shortfall"] = shortfall
+    advice["status"] = "active"
+    if best_rate and best_rate > 0:
+        import math
+        runs = max(1, math.ceil(shortfall / best_rate))
+        advice["expected_runs"] = runs
+        advice["message"] = (
+            f"「{fragment}」现在有 {current} 个，还差 {shortfall} 个。"
+            f"按日服实测掉率（{best.get('label')} 每圈约 {best_rate * 100:.0f}%），"
+            f"大约还要 {runs} 圈异去。")
+    else:
+        advice["message"] = (f"「{fragment}」现在有 {current} 个，还差 {shortfall} 个；"
+                             "数据卡还没收录它的掉率，先按自己喜欢的图刷。")
+    return advice
+
+
 def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
                   floor_yield: dict | None, today: date | None = None,
                   event_windows: list[dict] | None = None,
                   window_impacts: dict | None = None,
                   floor_speed: dict | None = None,
-                  now: datetime | None = None) -> dict:
+                  now: datetime | None = None,
+                  fragment_inventory: dict | None = None,
+                  fragment_guides: dict | None = None) -> dict:
     """给一条目标算命。status: done / on_track / behind / expired / unknown。
 
     rate_info 里 daily 是平常速度、event_daily 是活动期间速度；截止日内
     落在活动期的天数按活动速度估，其余按平常速度。
     """
+    if (goal.get("kind") or "resource") == "fragment":
+        return _evaluate_fragment_goal(goal, inventory=fragment_inventory,
+                                       guides=fragment_guides)
     now_dt = _resolve_now(today, now)
     today = today or now_dt.date()
     resource = goal["resource"]
@@ -733,6 +839,14 @@ def get_planning(store, goals_path: Path, *,
         store.recent_events(limit=50, event_type="osaka.koban_session"),
         now=now_ts)
     floor_speed = latest_osaka_floor_speed(store, now=now_ts)
+    # 碎片库存：取最近一次 yosari.fragments 快照（每圈结束差分记账时读的全量）
+    fragment_inventory = None
+    for event in store.recent_events(limit=10, event_type="yosari.fragments"):
+        payload = event.get("payload")
+        if isinstance(payload, dict) and isinstance(payload.get("counts"), dict):
+            fragment_inventory = payload["counts"]
+            break
+    fragment_guides = acquisition.fragment_catalog()
     cards = load_event_cards(Path(goals_path).parent)
     event_windows = [{"name": name, "start_date": card.get("start_date"),
                       "end_date": card.get("end_date")}
@@ -760,7 +874,9 @@ def get_planning(store, goals_path: Path, *,
                            floor_yield=floor_yield, today=today,
                            event_windows=event_windows,
                            window_impacts=window_impacts,
-                           floor_speed=floor_speed, now=now_dt)
+                           floor_speed=floor_speed, now=now_dt,
+                           fragment_inventory=fragment_inventory,
+                           fragment_guides=fragment_guides)
              for goal in load_goals(goals_path)]
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
@@ -794,6 +910,9 @@ def get_planning(store, goals_path: Path, *,
         # 每种资源一张「在哪弄」途径卡：远征时薪动态算，日课/活动文案在数据文件
         "acquisition": {name: acquisition.resource_guide(name)
                         for name in LEDGER_RESOURCES},
+        # 异去碎片途径卡 + 公共备注（掉率出处/里程碑/加倍活动），表单下拉也用这份
+        "fragments": fragment_guides,
+        "fragment_notes": acquisition.fragment_notes(now=now_dt),
     }
 
 

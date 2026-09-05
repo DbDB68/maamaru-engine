@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
 import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 // 氪金货币不立目标，下拉选项里拿掉甲州金；账本展示那边 resourceNames 照旧
 const goalResources = resourceNames.filter(name => name !== '甲州金')
+// 异去碎片清单由服务端途径卡给出（数据卡没收录就是空，不硬编）
+const fragmentNames = computed(() => Object.keys(planning.value?.fragments || {}))
+watch(() => form.value.kind, (kind) => {
+  if (kind === 'fragment' && !form.value.fragment) {
+    form.value.fragment = fragmentNames.value[0] || ''
+  }
+})
 import EventTimeline from './EventTimeline.vue'
 import KobanGoalGuide from './KobanGoalGuide.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
+import FragmentGoalGuide from './FragmentGoalGuide.vue'
 
 const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
 const planning = ref<PlanningReport | null>(null)
@@ -20,7 +28,7 @@ const activityPaces = ref<Record<string, ActivityPace[]>>({})
 
 const formOpen = ref(false)
 const saving = ref(false)
-const form = ref({ goal_mode: 'amount_target' as 'amount_target' | 'deadline_target', resource: '小判', target: 100000, deadline: '', note: '' })
+const form = ref({ kind: 'resource' as 'resource' | 'fragment', goal_mode: 'amount_target' as 'amount_target' | 'deadline_target', resource: '小判', fragment: '', target: 100000, deadline: '', note: '' })
 
 function applyTimingFallback(report: PlanningReport, runs: any[]) {
   // 兼容已经启动、暂时不能为了热加载而重启的旧后端。
@@ -131,6 +139,10 @@ function goalProgress(goal: PlanningGoalAdvice) {
   return Math.min(100, Math.max(0, goal.current / goal.target * 100))
 }
 
+function fragmentGuide(goal: PlanningGoalAdvice) {
+  return planning.value?.fragments?.[goal.fragment || ''] ?? null
+}
+
 function acquisitionGuide(goal: PlanningGoalAdvice) {
   return planning.value?.acquisition?.[goal.resource] ?? null
 }
@@ -152,6 +164,7 @@ function floorPace(seconds: number | null | undefined) {
 
 function goalProgressMeta(goal: PlanningGoalAdvice) {
   if (goal.status === 'done') return ''
+  if (goal.kind === 'fragment') return ''  // 碎片目标的指引全在 FragmentGoalGuide 卡里
   if (goal.status === 'expired') return '已到期'
   const remaining = goal.goal_mode === 'stock_target' && goal.remaining_seconds != null
     ? `距收摊 ${durationHours(goal.remaining_seconds)}`
@@ -288,7 +301,12 @@ async function saveGoal() {
   goalNotice.value = ''
   saving.value = true
   try {
-    await api.addPlanningGoal({
+    await api.addPlanningGoal(form.value.kind === 'fragment' ? {
+      kind: 'fragment',
+      fragment: form.value.fragment,
+      target: Number(form.value.target),
+      note: form.value.note,
+    } : {
       goal_mode: form.value.goal_mode,
       resource: form.value.resource,
       ...(form.value.goal_mode === 'amount_target'
@@ -297,7 +315,7 @@ async function saveGoal() {
       note: form.value.note,
     })
     formOpen.value = false
-    form.value = { goal_mode: 'amount_target', resource: '小判', target: 100000, deadline: '', note: '' }
+    form.value = { kind: 'resource', goal_mode: 'amount_target', resource: '小判', fragment: '', target: 100000, deadline: '', note: '' }
     await load()
     goalNotice.value = '目标已保存。'
     emit('goalSaved')
@@ -333,19 +351,30 @@ onMounted(load)
         <button type="button" class="planning-close" aria-label="关闭目标表单" @click="formOpen = false">×</button>
       </header>
       <div class="planning-form-fields">
-        <label>目标看什么
+        <label>目标类型
+          <select v-model="form.kind">
+            <option value="resource">攒资源</option>
+            <option value="fragment">集碎片（异去）</option>
+          </select>
+        </label>
+        <label v-if="form.kind === 'resource'">目标看什么
           <select v-model="form.goal_mode">
             <option value="amount_target">攒到多少</option>
             <option value="deadline_target">到哪一天</option>
           </select>
         </label>
-        <label>攒什么
+        <label v-if="form.kind === 'resource'">攒什么
           <select v-model="form.resource">
             <option v-for="name in goalResources" :key="name" :value="name">{{ name }}</option>
           </select>
         </label>
-        <label v-if="form.goal_mode === 'amount_target'">想攒到多少
-          <input v-model.number="form.target" type="number" min="0" step="1000" required>
+        <label v-else>集哪种碎片
+          <select v-model="form.fragment" required>
+            <option v-for="name in fragmentNames" :key="name" :value="name">{{ name }}</option>
+          </select>
+        </label>
+        <label v-if="form.goal_mode === 'amount_target'">{{ form.kind === 'fragment' ? '想集几个' : '想攒到多少' }}
+          <input v-model.number="form.target" type="number" min="1" :step="form.kind === 'fragment' ? 1 : 1000" required>
         </label>
         <label v-else>想看到哪天
           <input v-model="form.deadline" type="date" :min="localToday()" required>
@@ -363,7 +392,7 @@ onMounted(load)
     <section v-if="planning?.goals.length" class="planning-goal-list planning-goals-section">
         <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
           <header>
-            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标' }} · {{ goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止` }}</small></span>
+            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.kind === 'fragment' ? '碎片目标 · 异去' : `${goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标'} · ${goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止`}` }}</small></span>
             <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
@@ -381,6 +410,12 @@ onMounted(load)
           <ResourceGoalGuide
             v-else-if="(goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
             :guide="acquisitionGuide(goal)!"
+          />
+          <FragmentGoalGuide
+            v-else-if="goal.kind === 'fragment'"
+            :goal="goal"
+            :guide="fragmentGuide(goal)"
+            :notes="planning?.fragment_notes ?? null"
           />
           <details>
             <summary>查看预测依据</summary>
