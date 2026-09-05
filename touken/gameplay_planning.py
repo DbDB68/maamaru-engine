@@ -1,11 +1,29 @@
-"""按玩法估算次数、工时和门票预算；计算全部在服务端。"""
+"""按玩法估算次数、工时和门票预算；计算全部在服务端。
+
+门票价、每日免费次数和本期加倍活动来自 touken/data/gameplay_meta.json
+玩法数据卡（出处见卡内 note）；数据卡缺失时退回内置默认值。
+"""
+import json
 import math
 import statistics
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 TZ = timezone(timedelta(hours=8))
-CAMPAIGN = {"name": "异去 · 宝物碎片掉落率 2 倍", "start_at": "2026-09-03T10:00:00+08:00",
-            "end_at": "2026-09-10T10:00:00+08:00", "source": "https://www.bilibili.com/read/cv52768115/"}
+_DATA_DIR = Path(__file__).resolve().parent / "data"
+_FALLBACK_CAMPAIGN = {"name": "异去 · 宝物碎片掉落率 2 倍", "start_at": "2026-09-03T10:00:00+08:00",
+                      "end_at": "2026-09-10T10:00:00+08:00", "source": "https://www.bilibili.com/read/cv52768115/"}
+_FALLBACK_PRICE = 500
+
+
+def load_gameplay_card(name="异去"):
+    """读玩法数据卡；文件缺失或没有该玩法时返回空字典，由调用方兜底。"""
+    try:
+        cards = json.loads((_DATA_DIR / "gameplay_meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    card = cards.get(name)
+    return card if isinstance(card, dict) else {}
 
 
 def estimate(store, values, now=None):
@@ -22,13 +40,15 @@ def estimate(store, values, now=None):
     hours = number("hours_per_day", 2, 0.01, 24)
     target = number("runs", 100, 0, 1000000, True)
     free = number("free_runs", 0, 0, 1000000, True)
-    price = number("price", 500, 0, 1000000)
+    card = load_gameplay_card()
+    campaign = card.get("campaign") or _FALLBACK_CAMPAIGN
+    price = number("price", card.get("paid_run_price") or _FALLBACK_PRICE, 0, 1000000)
     budget = number("budget", 50000, 0, 1000000000)
     mode = values.get("mode", "time")
     if mode not in ("time", "runs"):
         raise ValueError("请选择按时间或目标次数规划")
     try:
-        end = datetime.fromisoformat(values.get("deadline") or CAMPAIGN["end_at"])
+        end = datetime.fromisoformat(values.get("deadline") or campaign["end_at"])
         if end.tzinfo is None:
             end = end.replace(tzinfo=TZ)
     except (ValueError, TypeError):
@@ -51,7 +71,7 @@ def estimate(store, values, now=None):
         previous[event["run_id"]] = event
     manual = values.get("minutes_per_run")
     speed = number("minutes_per_run", 1, 0.01, 180) * 60 if manual not in (None, "") else (statistics.median(samples) if samples else None)
-    result = {"campaign": CAMPAIGN, "sample_count": len(samples), "seconds_per_run": speed,
+    result = {"campaign": campaign, "sample_count": len(samples), "seconds_per_run": speed,
               "speed_source": "手填估计" if manual not in (None, "") else "近 14 天连续圈实测中位数",
               "runs": None, "cost": None, "hours": None, "can_finish": None,
               "remaining_hours": remaining / 3600}

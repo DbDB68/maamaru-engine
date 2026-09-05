@@ -1,0 +1,33 @@
+{
+  "异去": {
+    "mechanics": "yosari",
+    "unlock": "通关普图 6-4 后解锁",
+    "ticket_item": "归城提灯",
+    "daily_free_runs": 3,
+    "free_run_exp_multiplier": 5,
+    "paid_run_price": 500,
+    "paid_run_exp_multiplier": 1,
+    "maps": {
+      "1": {"label": "1-1", "fragment_rate_total": null},
+      "2": {"label": "1-2 会津", "fragment_rate_total": 0.19, "fragment_rate_boss": 0.07, "fragment_rate_enroute": 0.12,
+            "fragments": {"狮子螺钿鞍": 0.07, "锷·双鹤图": 0.04, "三所物·菊": 0.04, "三所物·狮子": 0.04}},
+      "3": {"label": "1-3 宇都宫", "fragment_rate_total": 0.10, "fragment_rate_boss": 0.04, "fragment_rate_enroute": 0.06,
+            "fragments": {"南蛮胴具足": 0.04, "锷·双鹤图": 0.02, "三所物·菊": 0.01, "三所物·狮子": 0.03}},
+      "4": {"label": "1-4 鸟羽", "fragment_rate_total": 0.18, "fragment_rate_boss": 0.04, "fragment_rate_enroute": 0.14,
+            "fragments": {"曜变天目": 0.04, "狮子螺钿鞍": 0.02, "南蛮胴具足": 0.02, "锷·月下梅树透图": 0.03, "三所物·菊": 0.04, "三所物·狮子": 0.04}}
+    },
+    "milestones": [
+      {"runs": 500, "reward": "解锁第二章「江户的记忆」，并送火车切"},
+      {"runs": 800, "reward": "火车切"},
+      {"runs": 1100, "reward": "火车切"}
+    ],
+    "campaign": {
+      "name": "异去 · 宝物碎片掉落率 2 倍",
+      "rate_multiplier": 2,
+      "start_at": "2026-09-03T10:00:00+08:00",
+      "end_at": "2026-09-10T10:00:00+08:00",
+      "source": "https://www.bilibili.com/read/cv52768115/"
+    },
+    "note": "门票：每天补 3 个五倍经验提灯，出阵一次消耗一个；用完后 500 小判买一倍经验提灯继续打（TapTap 国服向 tips，2026-07-02）。碎片结合剂第一个送、后续小判购买，价格待核。掉率为日服玩家实测（gametohkenranbu，2025-03-07；样本含 2/3 倍活动期间，基础掉率应低于表内数值；国服数值待自家遥测校准）；1-1 无特色碎片，该验证未测。碎片名按日服原文简写，国服译名待核。双倍活动起止取自 9 月 1 日官方更新公告（cv52768115）。里程碑为 1-4 通关后累计回数（同一 TapTap 来源，累计口径待核）。脚本目前只支持第一章，第二章数据暂不收录。"
+  }
+}

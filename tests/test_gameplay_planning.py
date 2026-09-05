@@ -38,3 +38,19 @@ class GameplayPlanningTests(unittest.TestCase):
         for value in ("nan", "inf", -1):
             with self.assertRaises(ValueError):
                 estimate(self.store, {"budget": value}, self.now)
+
+    def test_campaign_and_price_come_from_card(self):
+        from touken.gameplay_planning import load_gameplay_card
+        card = load_gameplay_card()
+        self.assertTrue(card["campaign"]["end_at"])
+        result = estimate(self.store, {"minutes_per_run": 1}, self.now)
+        self.assertEqual(result["campaign"], card["campaign"])
+        # 数据卡门票价 500：预算 1000 只够 2 圈
+        self.assertEqual(estimate(self.store, {"minutes_per_run": 1, "budget": 1000}, self.now)["runs"], 2)
+
+    def test_missing_card_falls_back(self):
+        from unittest.mock import patch
+        from touken import gameplay_planning
+        with patch.object(gameplay_planning, "load_gameplay_card", return_value={}):
+            result = estimate(self.store, {"minutes_per_run": 1}, self.now)
+        self.assertEqual(result["campaign"], gameplay_planning._FALLBACK_CAMPAIGN)
