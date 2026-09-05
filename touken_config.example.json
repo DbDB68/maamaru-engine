@@ -1677,6 +1677,23 @@
           511
         ]
       }
+    },
+    "fragments_button": [
+      895,
+      632
+    ],
+    "fragments_popup": {
+      "title_expected": "可以获得的宝物碎片",
+      "ocr_roi": [
+        30,
+        30,
+        1230,
+        500
+      ],
+      "close": [
+        1255,
+        30
+      ]
     }
   },
   "expedition": {

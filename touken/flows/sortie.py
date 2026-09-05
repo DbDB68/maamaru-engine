@@ -18,6 +18,7 @@
 备注：章节/小图坐标是老配置里估的，首次用新章节前要实测校准。
 """
 
+import os
 import re
 import time
 
@@ -25,6 +26,40 @@ from .. import sword_db
 from ..maa_adapter import roi_4to4
 from .battle import find_deploy_button
 from ..map_read import CV2_AVAILABLE, boss_distance_from_image
+
+
+def _parse_fragment_counts(tokens: list) -> dict:
+    """「可以获得的宝物碎片」弹窗 OCR 词元 → {碎片名: 所持数}。
+
+    tokens: [(文本, x, y)]。名字词元以“碎片”结尾且在弹窗上部导航区
+    之外（y>150，排除标题“可以获得的宝物碎片”）；数量词元形如“3 个”，
+    取名字正下方（纵向 80px、横向 80px 以内）最近的一个。配不对的名字
+    不进结果——宁可缺数，不可瞎编。
+    """
+    names = [(text, x, y) for text, x, y in tokens
+             if text.endswith("碎片") and y > 150]
+    counts = []
+    for text, x, y in tokens:
+        m = re.fullmatch(r"(\d+)\s*个", text)
+        if m:
+            counts.append((int(m.group(1)), x, y))
+    result = {}
+    for name, nx, ny in names:
+        below = [(c, cx, cy) for c, cx, cy in counts
+                 if 0 < cy - ny <= 80 and abs(cx - nx) <= 80]
+        if below:
+            best = min(below, key=lambda item: (item[2] - ny) ** 2
+                       + (item[1] - nx) ** 2)
+            result[name] = best[0]
+    return result
+
+
+def _parse_popup_map(tokens: list) -> int | None:
+    """弹窗顶部小图选择器（如“四 鸟羽”）→ 小图号；认不出返回 None。"""
+    for text, _x, y in tokens:
+        if y < 150 and text in ("一", "二", "三", "四"):
+            return ("一", "二", "三", "四").index(text) + 1
+    return None
 
 
 class SortieMixin:
@@ -143,6 +178,12 @@ class SortieMixin:
         map_page_ready = False
         record_saved = False
         self._map_miss_count = 0
+        # 蹲点模式（MAAMARU_YOSARI_WATCH=1）：异去行军每一帧存盘，
+        # 事后翻碎片掉落画面长什么样。只服务异去，正常跑不开。
+        watch_dir = self._yosari_watch_dir(cfg_key)
+        watch_seq = 0
+        # 碎片库存差分：每圈结束开弹窗读一次所持数，与上次读数对比得收益。
+        frag_inv = None
         # 刀装恢复与伤势处理是两项独立决策：是否保存/使用记录一只看
         # auto_equip；若先检测到伤势，仍按 injury_action 处理并停止或续跑。
         auto_equip_active = bool(auto_equip)
@@ -194,6 +235,13 @@ class SortieMixin:
                 if not area_ok:
                     yield "[出阵] 没识别到小图页的部队选择按钮（章节坐标或页面状态不对），停止"
                     return
+                if cfg_key == "yosari" and frag_inv is None:
+                    baseline = self._read_yosari_fragments(cfg)
+                    if baseline == "stuck":
+                        yield "[异去] 碎片弹窗关不掉，为防误点收工；你去瞅一眼"
+                        return
+                    if baseline:
+                        frag_inv = baseline
             else:
                 yield "[异去] 已回到四张小图页，直接开始下一圈"
             self._click_point(map_cfg["maps"][str(map_no)])
@@ -350,6 +398,9 @@ class SortieMixin:
             drop_credit = None
             for _ in range(300):  # 安全上限
                 self.maa.screenshot(force=True)
+                if watch_dir is not None:
+                    watch_seq += 1
+                    self._dump_watch_frame(watch_dir, loop_no, watch_seq)
 
                 if self._deny_heavy_injury_warning(cfg):
                     yield "[出阵] 🛑 出现重伤行军警告，已点【否】，准备返回本丸"
@@ -494,6 +545,27 @@ class SortieMixin:
                         "sortie.completed", mode=cfg_key, chapter=chapter,
                         map_no=map_no, team_no=team_no, sequence=loop_no)
                 repair_attempts = 0
+                if cfg_key == "yosari":
+                    inv = self._read_yosari_fragments(cfg)
+                    if inv == "stuck":
+                        yield "[异去] 碎片弹窗关不掉，为防误点收工；你去瞅一眼"
+                        return
+                    if inv:
+                        gained = {}
+                        if frag_inv and frag_inv.get("map_no") == inv["map_no"]:
+                            for name, count in inv["counts"].items():
+                                diff = count - frag_inv["counts"].get(name, 0)
+                                if diff > 0:
+                                    gained[name] = diff
+                        if hasattr(self, "record_event"):
+                            self.record_event(
+                                "yosari.fragments", map_no=inv["map_no"],
+                                sequence=loop_no, counts=inv["counts"],
+                                gained=gained)
+                        frag_inv = inv
+                        if gained:
+                            yield ("[异去] 🧩 碎片进账：" + "、".join(
+                                f"{name}×{num}" for name, num in gained.items()))
                 loop_no += 1
             elif interrupted:
                 yield "[出阵] ⚠️ 行军因伤势中断，已返回本丸；重新检查轻/中/重伤"
@@ -738,6 +810,67 @@ class SortieMixin:
         if not self.maa.ocr(expected, roi_4to4(*roi_raw)):
             return False
         return bool(find_deploy_button(self.maa, cfg))
+
+    def _yosari_watch_dir(self, cfg_key: str):
+        """蹲点目录：仅异去且显式开环境变量才启用，返回 None 表示不蹲。"""
+        if cfg_key != "yosari" or os.environ.get("MAAMARU_YOSARI_WATCH") != "1":
+            return None
+        try:
+            from ..runtime_paths import STATUS_DIR
+            folder = STATUS_DIR / "debug" / "yosari_watch" / time.strftime("%Y%m%d_%H%M%S")
+            folder.mkdir(parents=True, exist_ok=True)
+            return folder
+        except Exception:
+            return None
+
+    def _dump_watch_frame(self, folder, loop_no: int, seq: int):
+        """把行军监控刚取的帧存成 JPEG；任何异常都不许打断行军。"""
+        try:
+            image = self.maa.screenshot(force=False)
+            if image is None:
+                return
+            from PIL import Image as _PILImage
+            _PILImage.fromarray(image[:, :, ::-1]).save(
+                str(folder / f"loop{loop_no}_{seq:04d}.jpg"), quality=70)
+        except Exception:
+            pass
+
+    def _read_yosari_fragments(self, cfg: dict):
+        """小图页开「宝物碎片」弹窗，OCR 读各类碎片所持数，读完关窗。
+
+        返回 {"map_no": int|None, "counts": {碎片名: 个数}}；
+        弹窗没开起来或识别翻车都返回 None，绝不影响出阵；
+        弹窗关不掉返回 "stuck"——调用方必须收工，弹窗会挡住选图点击。
+        """
+        popup = cfg.get("fragments_popup", {})
+        button = cfg.get("fragments_button", [895, 632])
+        title = popup.get("title_expected", "可以获得的宝物碎片")
+        close = popup.get("close", [1255, 30])
+        roi = roi_4to4(*popup.get("ocr_roi", [30, 30, 1230, 500]))
+
+        def _popup_tokens() -> list:
+            self.maa.screenshot(force=True)
+            return [(text, pt.x, pt.y) for text, pt in self.maa.ocr_all(roi)]
+
+        try:
+            self._click_point(button)
+            time.sleep(1.2)
+            tokens = _popup_tokens()
+            if not any(title in text for text, _, _ in tokens):
+                return None
+            result = {"map_no": _parse_popup_map(tokens),
+                      "counts": _parse_fragment_counts(tokens)}
+        except Exception:
+            return None
+        for _ in range(3):
+            self._click_point(close)
+            time.sleep(0.8)
+            try:
+                if not any(title in text for text, _, _ in _popup_tokens()):
+                    return result
+            except Exception:
+                return None
+        return "stuck"
 
     def _save_map_miss(self, chapter: int, map_no: int, loop_no: int):
         """只保存无法判读的小地图，供用户主动反馈；正常识别不落盘。"""
