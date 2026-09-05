@@ -10,9 +10,8 @@
   筛选 → 物品种类 → 全刀剑 → 确定 → 一键领取
   → 奖励确认窗关 X → 可能蹦购买详情（劝氪金）关 X
 习合：
-  强化 → 习合标签 → 点第一把没喂过的刀 → 一键选择 →
-  习合开始（灰的说明没重刀了，换下一把）→ 二次确认 →
-  动画连点跳过 → 回列表换下一把，循环
+  强化 → 习合标签 → 第一行选择 → 一键选择 → 习合 → 二次确认 → 跳动画
+  → 当前本体能继续则继续；不能则返回，重新选择第一行（游戏隐藏无法习合的刀剑）。
 保护（黄锁）的刀只是当不了素材，游戏原生防误喂；本体该吃吃，
 脚本不检测锁、也不设任何名单——认亮着的「选择」按钮就点
 
@@ -29,9 +28,7 @@ import time
 
 from ..maa_adapter import roi_4to4, Point
 
-_ROW_CY = [166, 268, 369, 470, 572, 666]
 _MAX_CYCLES = 60  # 习合循环安全上限（正常几十轮顶天，防识别抽风死循环）
-_MAX_SWIPES = 10  # 本体列表翻页上限
 
 
 class SugarMixin:
@@ -184,7 +181,7 @@ class SugarMixin:
 
     def _shugo_loop_stream(self, dry_run: bool):
         """
-        习合喂到没人（列表翻完/全喂过）为止。
+        当前本体持续习合，不能继续时返回选择第一行。
         Returns: 喂了几轮
         """
         yield "[炼糖·习合] 正在导航到强化..."
@@ -202,98 +199,68 @@ class SugarMixin:
         self.maa.click(tab)
         time.sleep(2.0)
 
-        exhausted = set()  # 喂过/没重刀的本体名字
         successes = 0
-        swipes = 0
-
+        in_materials = False
         for _ in range(_MAX_CYCLES):
-            if dry_run and len(exhausted) >= 3:
-                yield "[炼糖·习合] 演习模式看 3 把就够了，跳出"
-                break
             self.maa.screenshot(force=True)
-
-            # 找第一把没喂过的本体
-            base = None
-            for cy in _ROW_CY:
-                tokens = self.maa.ocr_all(roi_4to4(160, cy + 12, 290, cy + 50))
-                name = max((t for t, _ in tokens), key=len, default="")
-                if len(name) < 2 or name in exhausted:
-                    continue
+            if not in_materials:
+                # 游戏隐藏无法习合的本体；始终选择当前第一行，不按刀名排除。
                 btn = self.maa.template_match(
-                    "选择png.png", roi_4to4(1150, cy - 45, 1275, cy + 45), threshold=0.75)
-                if btn:
-                    base = (name, btn)
+                    "选择png.png", roi_4to4(1150, 121, 1275, 211), threshold=0.75)
+                if not btn:
+                    yield "[炼糖·习合] 第一行没有可选本体，结束本圈习合"
                     break
-
-            if base is None:
-                if swipes >= _MAX_SWIPES:
-                    yield "[炼糖·习合] 列表翻完了，收工"
-                    break
-                self.maa.swipe(640, 550, 640, 250, 800)
-                swipes += 1
+                self.maa.click(btn)
                 time.sleep(2.0)
-                continue
-            name, btn = base
-            self.maa.click(btn)
-            time.sleep(2.0)
+                self.maa.screenshot(force=True)
+                if not self._sugar_materials_visible():
+                    raise RuntimeError("炼糖：未能确认素材界面，停止操作")
+                in_materials = True
+                if dry_run:
+                    yield "[炼糖·习合] （演习）已进入第一行本体的素材界面，不动手"
+                    self.maa.click(Point(141, 25))
+                    return 0
 
-            # 素材界面确认
-            self.maa.screenshot(force=True)
-            if not self.maa.template_match("一键选择.png", threshold=0.75):
-                yield f"[炼糖·习合] 点 {name} 没进素材界面，跳过"
-                exhausted.add(name)
+            # 满乱舞后按钮会变灰，仍是素材页；返回后换新的第一行。
+            select = self.maa.template_match("一键选择.png", threshold=0.75)
+            if not select:
                 self.maa.click(Point(141, 25))
                 time.sleep(1.5)
+                in_materials = False
                 continue
-
-            if dry_run:
-                yield f"[炼糖·习合] （演习）本体 {name} 可进素材界面，不动手"
-                exhausted.add(name)
-                self.maa.click(Point(141, 25))
-                time.sleep(1.5)
-                continue
-
-            self.maa.click(Point(1203, 481))  # 一键选择
+            self.maa.click(select)
             time.sleep(1.5)
             self.maa.screenshot(force=True)
             go = self.maa.template_match("习合开始.png", threshold=0.7)
             if not go:
-                yield f"[炼糖·习合] {name} 没有能喂的重刀，换下一把"
-                exhausted.add(name)
                 self.maa.click(Point(141, 25))
                 time.sleep(1.5)
+                in_materials = False
                 continue
-
-            self.maa.click(go)  # 习合开始
+            self.maa.click(go)
             time.sleep(2.0)
             self.maa.screenshot(force=True)
             if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
-                yield f"[炼糖·习合] {name} 确认弹窗没出现，换下一把"
-                exhausted.add(name)
-                self.maa.click(Point(141, 25))
-                time.sleep(1.5)
-                continue
-            self.maa.click(Point(785, 630))  # 确认
+                raise RuntimeError("炼糖：未能确认习合弹窗，停止操作")
+            self.maa.click(Point(785, 630))
 
-            # 连点跳过动画，直到回素材界面
-            backed = False
             for _ in range(12):
                 time.sleep(1.5)
                 self.maa.screenshot(force=True)
-                if self.maa.template_match("一键选择.png", threshold=0.75):
-                    backed = True
+                if self._sugar_materials_visible():
                     break
-                self.maa.click(Point(290, 550))  # 安全点：成果面板区
+                self.maa.click(Point(290, 550))
+            else:
+                raise RuntimeError("炼糖：习合后返回素材界面超时，未计入成功次数")
             successes += 1
-            yield f"[炼糖·习合] 炼了一轮: {name}（第 {successes} 糖）" + ("" if backed else "（回界面超时）")
-
-            # 回本体列表，接着炼
-            self.maa.click(Point(141, 25))
-            time.sleep(1.5)
+            yield f"[炼糖·习合] 完成第 {successes} 轮习合"
+            # 留在当前本体，下一轮继续一键选择，不往返本体列表。
+        else:
+            raise RuntimeError("炼糖：习合达到安全操作上限，停止操作，未确认清完")
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
-        if successes == 0 and not dry_run:
-            yield ("[炼糖·习合] 一把能喂的都没有——重刀若压在邮箱里，"
-                   "是刀位太满领不出来（先去刀解腾位）；包里明明有重刀却看不到，"
-                   "是没同名狗粮可吃，被「隐藏无法习合的刀剑」自动藏了")
         return successes
+
+    def _sugar_materials_visible(self):
+        # 文字可同时识别亮/灰按钮，不能用亮按钮判断满级后的返回状态。
+        return bool(self.maa.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)))
