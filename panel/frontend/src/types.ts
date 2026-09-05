@@ -252,6 +252,9 @@ export interface PlanningGoalAdvice {
   remaining_seconds?: number | null
   time_margin_seconds?: number | null
   can_finish?: boolean | null
+  planned_spending?: number | null
+  impact_days?: number | null
+  conflicting_goal?: string | null
   status: 'done' | 'on_track' | 'behind' | 'active' | 'expired' | 'unknown'
   message: string
 }

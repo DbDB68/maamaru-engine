@@ -811,6 +811,44 @@ def add_event_goal(store, goals_path: Path, event: str, *,
     return result
 
 
+def add_gameplay_budget_goal(store, goals_path: Path, values: dict, *,
+                             now: datetime | None = None) -> dict:
+    """把玩法试算结果保存成活动预算目标。
+
+    预算数字、截止时间和当前家底都由服务端决定；前端只提交玩家选择，
+    不自行拼出目标金额。当前只有异去使用这条轻量玩法试算链。
+    """
+    from .gameplay_planning import estimate
+
+    now_dt = now or datetime.now(_TZ)
+    result = estimate(store, values, now=now_dt)
+    cost = result.get("cost")
+    if cost is None:
+        raise ValueError("还缺这张图的圈速，暂时不能立活动预算")
+    if cost <= 0:
+        raise ValueError("这套方案不需要额外小判，不用另立预算")
+    campaign = result.get("campaign") or {}
+    try:
+        end_dt = datetime.fromisoformat(str(result.get("deadline") or ""))
+    except ValueError:
+        raise ValueError("这套方案还没有可用的截止时间") from None
+    if end_dt.tzinfo is None:
+        end_dt = end_dt.replace(tzinfo=_TZ)
+    if end_dt <= now_dt:
+        raise ValueError("这期活动已经结束，不能再立预算")
+
+    event = str(campaign.get("name") or "异去").split(" · ", 1)[0]
+    goal = _upsert_event_goal(
+        goals_path, event=event, target=int(cost),
+        deadline=end_dt.date().isoformat(), deadline_at=end_dt.isoformat(),
+        note=f"{event}活动预算", goal_mode="budget")
+    current = _current_balances(store, now_dt.timestamp()).get("小判")
+    shortfall = None if current is None else max(0, int(cost - current))
+    return {"goal": goal, "estimate": result, "available_now": current,
+            "shortfall": shortfall,
+            "sufficient": None if shortfall is None else shortfall == 0}
+
+
 def get_planning(store, goals_path: Path, *,
                  today: date | None = None,
                  now: datetime | None = None) -> dict:
@@ -869,6 +907,7 @@ def get_planning(store, goals_path: Path, *,
                                now=now_dt)
         if impact:
             window_impacts[name] = impact
+    saved_goals = load_goals(goals_path)
     goals = [evaluate_goal(goal, current=current.get(goal["resource"]),
                            rate_info=rates.get(goal["resource"]),
                            floor_yield=floor_yield, today=today,
@@ -877,7 +916,49 @@ def get_planning(store, goals_path: Path, *,
                            floor_speed=floor_speed, now=now_dt,
                            fragment_inventory=fragment_inventory,
                            fragment_guides=fragment_guides)
-             for goal in load_goals(goals_path)]
+             for goal in saved_goals]
+    # 已确认的活动预算是未来会花掉的钱，不属于“怎么攒”。把它对小判
+    # 数量目标的影响单独算清楚，避免前端拿家底、预算和日均自行拼数。
+    live_budgets = []
+    for goal in goals:
+        if (goal.get("kind") != "event"
+                or goal.get("goal_mode") != "budget"
+                or (goal.get("target") or 0) <= 0):
+            continue
+        try:
+            if (goal.get("deadline")
+                    and date.fromisoformat(goal["deadline"]) < today):
+                continue
+        except ValueError:
+            continue
+        live_budgets.append(goal)
+    koban_rate = (rates.get("小判") or {}).get("daily")
+    amount_goals = [goal for goal in goals
+                    if goal.get("resource") == "小判"
+                    and goal.get("goal_mode") == "amount_target"
+                    and goal.get("status") != "done"]
+    if koban_rate and koban_rate > 0 and amount_goals and live_budgets:
+        import math
+        total_spending = sum(int(goal["target"]) for goal in live_budgets)
+        for goal in amount_goals:
+            base_days = int(goal.get("days_left") or 0)
+            adjusted_days = max(1, math.ceil(
+                ((goal.get("target") or 0) - (goal.get("current") or 0)
+                 + total_spending) / koban_rate))
+            goal["planned_spending"] = total_spending
+            goal["impact_days"] = max(0, adjusted_days - base_days)
+            goal["days_left"] = adjusted_days
+            goal["estimated_deadline"] = (
+                today + timedelta(days=adjusted_days)).isoformat()
+            goal["message"] += (
+                f" 已确认的活动预算共 {total_spending:,} 小判；若按计划花掉，"
+                f"预计再推迟约 {goal['impact_days']} 天。")
+        for budget in live_budgets:
+            budget["impact_days"] = max(
+                1, math.ceil(int(budget["target"]) / koban_rate))
+            budget["conflicting_goal"] = (
+                amount_goals[0].get("note")
+                or f"{amount_goals[0].get('resource')}目标")
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
                 for name, card in cards.items()]

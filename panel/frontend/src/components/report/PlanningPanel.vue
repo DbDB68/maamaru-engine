@@ -16,6 +16,7 @@ import EventTimeline from './EventTimeline.vue'
 import KobanGoalGuide from './KobanGoalGuide.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
+import GameplayPlanner from './GameplayPlanner.vue'
 
 const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
 const planning = ref<PlanningReport | null>(null)
@@ -113,6 +114,11 @@ const statusLabel: Record<string, string> = {
 }
 
 function goalStatusLabel(goal: PlanningGoalAdvice) {
+  if (goal.kind === 'event' && goal.goal_mode === 'budget') {
+    if (goal.status === 'expired') return '已收摊'
+    if (goal.current != null && goal.target != null && goal.current >= goal.target) return '已备齐'
+    return goal.shortfall != null ? '还需准备' : '待看家底'
+  }
   if (goal.status === 'done' || goal.status === 'expired') return statusLabel[goal.status]
   if (goal.goal_mode === 'stock_target' && goal.can_finish === false) return '来不及'
   if (goal.goal_mode === 'stock_target' && goal.can_finish === true) return '来得及'
@@ -254,6 +260,13 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
   finally { abacusGoalSaving.value = '' }
 }
 
+async function gameplayGoalSaved() {
+  await load()
+  goalNotice.value = '「异去」活动预算已保存。'
+  emit('goalSaved')
+  await scrollToElement('.planning-success')
+}
+
 async function load() {
   loading.value = true
   try {
@@ -390,33 +403,40 @@ onMounted(load)
     </form>
 
     <section v-if="planning?.goals.length" class="planning-goal-list planning-goals-section">
-        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
+        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true, 'is-budget': goal.kind === 'event' && goal.goal_mode === 'budget' }]">
           <header>
             <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.kind === 'fragment' ? '碎片目标 · 异去' : `${goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标'} · ${goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止`}` }}</small></span>
             <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
-          <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
-          <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
-          <div class="planning-goal-progress">
-            <progress v-if="goal.current != null && goal.target != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
-            <p><span>当前 <b>{{ fmt(goal.current) }}</b><template v-if="goal.target != null"> / {{ fmt(goal.target) }}</template> {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
-          </div>
-          <KobanGoalGuide
-            v-if="goal.resource === '小判' && goal.goal_mode === 'amount_target' && !['done', 'expired'].includes(goal.status)"
-            :goal="goal"
-            @open-expedition="emit('openExpedition')"
-          />
-          <ResourceGoalGuide
-            v-else-if="(goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
-            :guide="acquisitionGuide(goal)!"
-          />
-          <FragmentGoalGuide
-            v-else-if="goal.kind === 'fragment'"
-            :goal="goal"
-            :guide="fragmentGuide(goal)"
-            :notes="planning?.fragment_notes ?? null"
-          />
+          <template v-if="goal.kind === 'event' && goal.goal_mode === 'budget'">
+            <strong class="planning-goal-result">{{ goal.current != null && goal.target != null && goal.current >= goal.target ? `已留好 ${fmt(goal.target)} 小判` : `预算还差 ${fmt(goal.shortfall)} 小判` }}</strong>
+            <p class="planning-next-action">这是准备花在{{ goal.event || '活动' }}里的钱，不计作小判获取进度。</p>
+            <p v-if="goal.impact_days && goal.conflicting_goal" class="budget-impact">若按计划花掉，{{ goal.conflicting_goal }}预计推迟约 <b>{{ goal.impact_days }} 天</b>。</p>
+          </template>
+          <template v-else>
+            <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
+            <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
+            <div class="planning-goal-progress">
+              <progress v-if="goal.current != null && goal.target != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
+              <p><span>当前 <b>{{ fmt(goal.current) }}</b><template v-if="goal.target != null"> / {{ fmt(goal.target) }}</template> {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
+            </div>
+            <KobanGoalGuide
+              v-if="goal.resource === '小判' && goal.goal_mode === 'amount_target' && !['done', 'expired'].includes(goal.status)"
+              :goal="goal"
+              @open-expedition="emit('openExpedition')"
+            />
+            <ResourceGoalGuide
+              v-else-if="(goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
+              :guide="acquisitionGuide(goal)!"
+            />
+            <FragmentGoalGuide
+              v-else-if="goal.kind === 'fragment'"
+              :goal="goal"
+              :guide="fragmentGuide(goal)"
+              :notes="planning?.fragment_notes ?? null"
+            />
+          </template>
           <details>
             <summary>查看预测依据</summary>
             <p>{{ goal.message }}</p>
@@ -428,6 +448,8 @@ onMounted(load)
       <span><b>还没有目标</b><small>有想攒的资源或活动预算时，再立一个。</small></span>
       <button type="button" class="secondary" @click="openCustomForm">＋ 立个目标</button>
     </div>
+
+    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 
     <EventTimeline
       id="event-timeline"
@@ -466,13 +488,14 @@ onMounted(load)
 .planning-form-actions { display: flex; gap: 8px; margin-top: 12px; }
 .planning-goal-list { display: grid; gap: 10px; }
 .planning-goals-section { scroll-margin-top: 12px; }
-.planning-goal { padding: 16px 18px; background: linear-gradient(120deg, color-mix(in srgb, var(--fox-gold-pale) 46%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--paper-line); border-left: 5px solid var(--paper-line); border-radius: 12px; }
+.planning-goal { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-left: 5px solid var(--paper-line); border-radius: 12px; }
 .planning-goal.done { border-left-color: #4d7a3a; }
 .planning-goal.on_track { border-left-color: var(--fox-gold); }
 .planning-goal.behind { border-left-color: #b0492e; }
 .planning-goal.active { border-left-color: #5b813f; }
 .planning-goal.pace-behind { border-left-color: #b0492e; }
 .planning-goal.pace-on-track { border-left-color: #5b813f; }
+.planning-goal.is-budget { border-left-color: #9b6652; }
 .planning-goal > header { display: flex; align-items: flex-start; gap: 8px; }
 .planning-goal > header > span { display: grid; gap: 1px; min-width: 0; }
 .planning-goal > header small { color: var(--ink-dim); font-size: 11px; }
@@ -481,9 +504,11 @@ onMounted(load)
 .planning-goal.on_track > header em { color: var(--fox-gold-deep); border-color: var(--fox-gold); }
 .planning-goal.active > header em { color: #426b36; border-color: #77a164; }
 .planning-goal.pace-behind > header em { color: #9f3d28; border-color: #c98673; }
+.planning-goal.is-budget > header em { color: #784738; border-color: #b98775; }
 .planning-delete { padding: 0 3px; color: var(--ink-dim); background: transparent; border: 0; font-size: 17px; cursor: pointer; }
 .planning-goal-result { display: block; margin-top: 14px; font-size: clamp(22px, 3vw, 28px); line-height: 1.15; }
 .planning-next-action { margin: 6px 0 0; color: var(--ink-dim); }
+.budget-impact { margin: 12px 0 0; padding: 9px 11px; color: #754738; background: #f3e6df; border-left: 3px solid #9b6652; font-size: 12px; line-height: 1.55; }
 .planning-goal.behind .planning-next-action, .planning-goal.pace-behind .planning-next-action { color: #9f3d28; }
 .planning-goal-progress { margin-top: 14px; }
 .planning-goal-progress progress { display: block; width: 100%; height: 7px; overflow: hidden; accent-color: var(--fox-gold); border: 0; border-radius: 999px; }

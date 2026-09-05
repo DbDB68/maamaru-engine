@@ -410,6 +410,29 @@ class GetPlanningTests(unittest.TestCase):
         self.assertIsNone(abacus["sufficient"])
         self.assertIsNone(abacus["shortfall"])
 
+    def test_activity_budget_delays_amount_target_without_becoming_income(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "goals.json"
+            goals = [
+                {"id": 1, "kind": "resource", "goal_mode": "amount_target",
+                 "resource": "小判", "target": 10000, "note": "千万小判"},
+                {"id": 2, "kind": "event", "event": "异去",
+                 "goal_mode": "budget", "resource": "小判", "target": 2000,
+                 "deadline": "2026-09-10", "note": "异去活动预算"},
+            ]
+            path.write_text(json.dumps({"schema_version": 2, "goals": goals},
+                                       ensure_ascii=False), encoding="utf-8")
+            planning = advisor.get_planning(
+                _FakeStore(), path, today=date(2026, 8, 25),
+                now=datetime(2026, 8, 25, 12, tzinfo=advisor._TZ))
+        saving = next(goal for goal in planning["goals"] if goal["id"] == 1)
+        spending = next(goal for goal in planning["goals"] if goal["id"] == 2)
+        self.assertEqual(saving["planned_spending"], 2000)
+        self.assertEqual(saving["impact_days"], 4)
+        self.assertEqual(saving["estimated_deadline"], "2026-08-31")
+        self.assertEqual(spending["impact_days"], 4)
+        self.assertEqual(spending["conflicting_goal"], "千万小判")
+
 
 class EventGoalTests(unittest.TestCase):
     """牛评审：活动攒钱目标的语义是「预算 vs 家底」，
@@ -498,6 +521,26 @@ class EventGoalTests(unittest.TestCase):
             store, _ = self._setup(tmp, 9000)
             with self.assertRaises(ValueError):
                 advisor.add_event_goal(store, Path(tmp) / "g.json", "南瓜大作战")
+
+    def test_gameplay_plan_is_saved_as_its_own_budget_goal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp, 120000)
+            path = Path(tmp) / "planning_goals.json"
+            estimate = {
+                "campaign": {"name": "异去 · 宝物碎片掉落率 2 倍"},
+                "deadline": "2026-09-10T10:00", "cost": 81500,
+            }
+            now = datetime(2026, 9, 6, 12, tzinfo=advisor._TZ)
+            with patch("touken.gameplay_planning.estimate",
+                       return_value=estimate):
+                result = advisor.add_gameplay_budget_goal(
+                    store, path, {"hours_per_day": 2}, now=now)
+            goal = result["goal"]
+            self.assertEqual(goal["kind"], "event")
+            self.assertEqual(goal["event"], "异去")
+            self.assertEqual(goal["goal_mode"], "budget")
+            self.assertEqual(goal["target"], 81500)
+            self.assertTrue(result["sufficient"])
 
 
 class OsakaStockGoalTests(unittest.TestCase):

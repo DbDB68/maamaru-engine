@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { PlanningGoalAdvice } from '../../types'
-import GameplayPlanner from './GameplayPlanner.vue'
 
 const props = defineProps<{ goal: PlanningGoalAdvice }>()
 const emit = defineEmits<{ openExpedition: [] }>()
 
-const showYosari = ref(false)
 const expeditionDaily = 6100
 const gap = computed(() => Math.max(0, Number(props.goal.target || 0) - Number(props.goal.current || 0)))
 const recentDaily = computed(() => Math.max(0, Number(props.goal.rate || 0)))
@@ -25,13 +23,9 @@ function fmt(value: number) {
       <b v-if="gap">还差 {{ fmt(gap) }}</b>
     </header>
 
-    <p class="guide-intro">
-      预测日期只是照最近习惯往后推。まあ丸把能稳定做的、等活动再做的，以及会花掉小判的玩法分开列给你。
-    </p>
-
     <div class="strategy-list">
       <article class="strategy-card primary-strategy">
-        <span class="strategy-mark">稳</span>
+        <span class="strategy-mark">远</span>
         <div>
           <small>每天都能做 · 稳定底盘</small>
           <h5>把远征改成小判优先</h5>
@@ -44,7 +38,7 @@ function fmt(value: number) {
       </article>
 
       <article class="strategy-card">
-        <span class="strategy-mark">等</span>
+        <span class="strategy-mark">城</span>
         <div>
           <small>活动开放时 · 集中获取</small>
           <h5>大阪城再集中挖一段</h5>
@@ -53,18 +47,7 @@ function fmt(value: number) {
         </div>
       </article>
 
-      <article class="strategy-card spending-strategy">
-        <span class="strategy-mark">花</span>
-        <div>
-          <small>当前活动 · 先看目标冲突</small>
-          <h5>异去加成值得花多少小判？</h5>
-          <p>异去是换碎片的消费方案，不是攒小判的来源。先算参与成本，再决定这期打到哪里。</p>
-        </div>
-        <button type="button" class="secondary" @click="showYosari = !showYosari">{{ showYosari ? '收起活动算盘' : '算算参与成本' }}</button>
-      </article>
     </div>
-
-    <GameplayPlanner v-if="showYosari" class="embedded-gameplay" />
   </section>
 </template>
 
@@ -75,12 +58,10 @@ function fmt(value: number) {
 .koban-guide > header small { color: var(--ink-dim); font-size: 11px; }
 .koban-guide > header h4 { margin: 0; font-size: 17px; }
 .koban-guide > header > b { color: var(--fox-gold-deep); font-size: 13px; }
-.guide-intro { max-width: 720px; margin: 7px 0 13px; color: var(--ink-dim); font-size: 12px; line-height: 1.65; }
-.strategy-list { display: grid; gap: 8px; }
-.strategy-card { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 12px; background: color-mix(in srgb, var(--paper-card) 82%, var(--paper-panel)); border: 1px solid var(--paper-line); border-radius: 10px; }
-.strategy-card.primary-strategy { background: color-mix(in srgb, #e9efdf 58%, var(--paper-card)); border-color: color-mix(in srgb, #7f9d68 50%, var(--paper-line)); }
-.strategy-card.spending-strategy { background: color-mix(in srgb, #f3e6df 48%, var(--paper-card)); }
-.strategy-mark { display: grid; width: 30px; height: 30px; place-items: center; color: var(--fox-gold-deep); background: var(--fox-gold-pale); border-radius: 50%; font-size: 12px; font-weight: 700; }
+.strategy-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin-top: 11px; overflow: hidden; background: var(--paper-line); border: 1px solid var(--paper-line); border-radius: 8px; }
+.strategy-card { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px; padding: 12px 13px; background: var(--paper-card); }
+.strategy-card.primary-strategy { grid-template-columns: 32px minmax(0, 1fr) auto; }
+.strategy-mark { display: grid; width: 30px; height: 30px; place-items: center; color: var(--fox-gold-deep); border: 1px solid var(--paper-line); border-radius: 50%; font-size: 11px; font-weight: 700; }
 .strategy-card > div { min-width: 0; }
 .strategy-card small { color: var(--ink-dim); font-size: 10px; }
 .strategy-card h5 { margin: 2px 0 3px; font-size: 14px; }
@@ -88,9 +69,9 @@ function fmt(value: number) {
 .strategy-card p b { color: var(--ink); }
 .strategy-card .strategy-impact { margin-top: 3px; color: var(--ink); }
 .strategy-card button { white-space: nowrap; }
-.embedded-gameplay { margin: 10px 0 0; }
 @media (max-width: 700px) {
-  .strategy-card { grid-template-columns: 32px minmax(0, 1fr); }
+  .strategy-list { grid-template-columns: 1fr; }
+  .strategy-card, .strategy-card.primary-strategy { grid-template-columns: 32px minmax(0, 1fr); }
   .strategy-card button { grid-column: 2; justify-self: start; }
 }
 @media (max-width: 480px) {

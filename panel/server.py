@@ -2340,6 +2340,22 @@ async def api_gameplay_planning(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+@app.post("/api/planning/gameplay-goal")
+async def api_add_gameplay_budget_goal(request: Request):
+    """把服务端玩法试算的结果保存为独立活动预算。"""
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "规划参数无效"}, status_code=400)
+    from touken import advisor
+    from touken.telemetry import get_telemetry_store
+    try:
+        result = advisor.add_gameplay_budget_goal(
+            get_telemetry_store(), STATUS_DIR / advisor.GOALS_FILENAME, body)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return {"ok": True, **result}
+
+
 @app.post("/api/planning/goals")
 async def api_add_planning_goal(request: Request):
     body = await request.json()

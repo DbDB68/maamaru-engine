@@ -121,6 +121,9 @@ export const api = {
   addEventGoal: (event: string, target?: number) => request<EventGoalResult>('/api/planning/event-goals', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, ...(target == null ? {} : { target }) }),
   }),
+  addGameplayGoal: (value: Record<string, unknown>) => request<{ ok: boolean; goal: any; estimate: any }>('/api/planning/gameplay-goal', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
   logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {
