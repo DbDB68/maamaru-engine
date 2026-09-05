@@ -232,7 +232,6 @@ class SugarMixin:
                 swipes += 1
                 time.sleep(2.0)
                 continue
-
             name, btn = base
             self.maa.click(btn)
             time.sleep(2.0)
@@ -292,4 +291,7 @@ class SugarMixin:
             time.sleep(1.5)
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
+        if successes == 0 and not dry_run:
+            yield ("[炼糖·习合] 一把能喂的都没有；包里若明明有重刀，"
+                   "多半是上了锁——上锁的刀我碰不了，解锁后再来")
         return successes
