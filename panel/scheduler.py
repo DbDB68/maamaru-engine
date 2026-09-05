@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from touken.runtime_paths import SCHEDULE_PATH
+from touken.runtime_paths import SCHEDULE_PATH, STATE_DIR
 
 _SCHED_PATH = SCHEDULE_PATH
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
@@ -168,11 +168,13 @@ def _minute_of_day(hhmm: str) -> int:
 
 
 def _emulator_ready(config_path: str) -> bool:
-    """只检查 ADB；绝不调用 ensure_emulator，避免擅自启动模拟器。"""
+    """只在游戏进程仍在时接管；退出游戏或关模拟器后不主动启动。"""
     try:
-        from touken.emulator import adb_alive
+        from touken.emulator import _run
         cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
-        return adb_alive(cfg.get("adb_path", ""), cfg.get("adb_address", ""))
+        result = _run([cfg.get("adb_path", ""), "-s", cfg.get("adb_address", ""),
+                       "shell", "pidof", cfg.get("daily", {}).get("logout", {}).get("package", "com.youzu.djlw")], timeout=5)
+        return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
 
@@ -220,7 +222,13 @@ def _custom_due(cfg: dict, now_min: int, today: str) -> list:
     auto = cfg["automation"]
     grace = 10
     out = []
+    latest = {}
     for idx, e in enumerate(cfg.get("entries", [])):
+        if e.get("enabled", True) and _minute_of_day(e.get("time", "08:00")) <= now_min:
+            team = int(e.get("team_no", 2))
+            if team not in latest or e.get("time", "08:00") >= latest[team][1].get("time", "08:00"):
+                latest[team] = (idx, e)
+    for idx, e in latest.values():
         if not e.get("enabled", True):
             continue
         due = _minute_of_day(e.get("time", "08:00"))
@@ -237,58 +245,137 @@ def _custom_due(cfg: dict, now_min: int, today: str) -> list:
     return out
 
 
+def managed_teams(cfg=None):
+    cfg = load_config() if cfg is None else cfg
+    auto = cfg.get("automation", {})
+    if not auto.get("enabled"):
+        return set()
+    if auto.get("mode") == "preset":
+        return {int(t) for t in auto.get("teams", [2, 3, 4])}
+    return {int(e.get("team_no", 2)) for e in cfg.get("entries", [])
+            if e.get("enabled", True)}
+
+
+def expedition_records():
+    try:
+        return json.loads((STATE_DIR / "expeditions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def team_available(team, records, now):
+    record = records.get(str(team), {})
+    try:
+        end = time.mktime(time.strptime(record["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
+        end += int(record["duration_min"]) * 60
+        return now >= end
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+class DeferredDispatches:
+    """Keep one outstanding departure per team while the shared runner is busy."""
+    def __init__(self):
+        self.jobs = {}
+        self.signature = None
+
+    def update(self, cfg, due, now):
+        auto = cfg["automation"]
+        signature = json.dumps([auto.get(k) for k in
+            ("enabled", "mode", "preset", "start_time", "teams", "paused_until")]
+            + [cfg.get("entries", [])], sort_keys=True)
+        if signature != self.signature:
+            self.jobs.clear()
+            self.signature = signature
+        for job in due:
+            team = job["team_no"]
+            if team not in self.jobs:
+                self.jobs[team] = {**job, "observed_at": now}
+            elif auto.get("mode") == "custom" and job["key"] != self.jobs[team]["key"]:
+                # Custom times describe the latest intention, not a backlog to replay.
+                self.jobs[team] = {**job, "observed_at": now}
+        return list(self.jobs.values())
+
+
+def record_completed_dispatch(cfg, job, before, records, now):
+    record = records.get(str(job["team_no"]), {})
+    if (record.get("map_code") != job["map_code"] or not record.get("dispatched_at")
+            or record.get("dispatched_at") == before):
+        return False
+    auto = cfg["automation"]
+    auto.setdefault("last_runs", {})[job["key"]] = record["dispatched_at"]
+    if job.get("shift_key"):
+        delay = job["late_min"] + int((now - job["observed_at"]) / 60)
+        shifts = auto.setdefault("lane_shifts", {})
+        shifts[job["shift_key"]] = shifts.get(job["shift_key"], 0) + delay
+    return True
+
+
 def start_scheduler(config_path: str, emit_fn):
-    """30 秒巡检；先预告 15 秒，再接管游戏。"""
+    """5 秒巡检；任务占用时保留安排，空闲后预告 15 秒接管。"""
     def _loop():
         from .script_runner import get_runner
         runner = get_runner()
+        queue = DeferredDispatches()
         pending = {}
+        inflight = None
+        waiting = False
+        retry_after = {}
         while True:
             try:
                 cfg = load_config()
                 auto = cfg.get("automation", {})
-                if not auto.get("enabled"):
-                    pending.clear()
-                    time.sleep(5)
-                    continue
-                paused = auto.get("paused_until", "")
-                if paused and paused > time.strftime("%Y-%m-%d %H:%M:%S"):
-                    pending.clear()
-                    time.sleep(5)
-                    continue
                 now = time.time()
+                records = expedition_records()
+                if inflight and not runner.is_running:
+                    job, before = inflight
+                    # Settings may have changed while the worker was running.
+                    queue.update(cfg, [], now)
+                    held = queue.jobs.get(job["team_no"])
+                    if not held or held["key"] != job["key"]:
+                        pass
+                    elif record_completed_dispatch(cfg, job, before, records, now):
+                        save_config(cfg)
+                        queue.jobs.pop(job["team_no"], None)
+                    else:
+                        retry_after[job["key"]] = now + 300
+                        emit_fn("scheduler", "远征未确认派遣成功，五分钟后再检查，不记为完成")
+                    inflight = None
+                paused = auto.get("paused_until", "")
+                if not auto.get("enabled") or (paused and paused > time.strftime("%Y-%m-%d %H:%M:%S")):
+                    queue.jobs.clear()
+                    pending.clear()
+                    time.sleep(5)
+                    continue
                 now_min = int(time.strftime("%H")) * 60 + int(time.strftime("%M"))
                 today = time.strftime("%Y-%m-%d")
-                due = (_preset_due(cfg, now_min, today)
-                       if auto.get("mode") == "preset"
+                due = (_preset_due(cfg, now_min, today) if auto.get("mode") == "preset"
                        else _custom_due(cfg, now_min, today))
-                ready = _emulator_ready(config_path)
-                if runner.is_running or not ready:
+                jobs = queue.update(cfg, due, now)
+                if runner.is_running:
                     pending.clear()
-                elif due:
-                    job = due[0]
-                    if job["key"] not in pending:
-                        pending[job["key"]] = now
-                        emit_fn("scheduler",
-                                f"⏳ 15 秒后接管游戏：{TEAM_NAMES[job['team_no']]} → "
-                                f"{job['map_code']}（可在远征配置里暂停）")
-                    elif now - pending[job["key"]] >= 15:
-                        run_id = runner.start("dispatch", config_path, {
-                            "team_no": str(job["team_no"]),
-                            "map_code": job["map_code"],
-                        })
-                        if run_id:
-                            auto.setdefault("last_runs", {})[job["key"]] = time.strftime(
-                                "%Y-%m-%d %H:%M:%S")
-                            if job.get("apply_shift"):
-                                auto.setdefault("lane_shifts", {})[job["shift_key"]] = job["apply_shift"]
-                            cfg["automation"] = auto
-                            save_config(cfg)
-                            pending.pop(job["key"], None)
-                            emit_fn("scheduler",
-                                    f"🕐 开始派遣 {TEAM_NAMES[job['team_no']]} → {job['map_code']}")
-                active_keys = {j["key"] for j in due}
-                pending = {k: v for k, v in pending.items() if k in active_keys}
+                    if jobs and runner.current_script != "dispatch" and not waiting:
+                        emit_fn("scheduler", "等当前工作流或任务结束后继续远征")
+                        waiting = True
+                elif not _emulator_ready(config_path):
+                    pending.clear()
+                else:
+                    waiting = False
+                    ready = [j for j in jobs if team_available(j["team_no"], records, now)
+                             and now >= retry_after.get(j["key"], 0)]
+                    if ready:
+                        job = ready[0]
+                        if job["key"] not in pending:
+                            pending[job["key"]] = now
+                            emit_fn("scheduler", f"⏳ 15 秒后接管游戏：{TEAM_NAMES[job['team_no']]} → {job['map_code']}（可在远征配置里暂停）")
+                        elif now - pending[job["key"]] >= 15:
+                            run_id = runner.start("dispatch", config_path, {
+                                "team_no": str(job["team_no"]), "map_code": job["map_code"],
+                                "scheduled": True})
+                            if run_id:
+                                inflight = (job, records.get(str(job["team_no"]), {}).get("dispatched_at"))
+                                pending.clear()
+                                emit_fn("scheduler", f"🕐 开始派遣 {TEAM_NAMES[job['team_no']]} → {job['map_code']}")
             except Exception as exc:
                 print(f"[时刻表] 异常: {exc}", flush=True)
             time.sleep(5)

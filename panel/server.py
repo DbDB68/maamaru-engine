@@ -406,11 +406,14 @@ def _daily_plan_inputs(params):
     practice_plan = dict(saved_practice)
     if practice_plan.get("team_no") not in (None, ""):
         practice_plan["team_no"] = int(practice_plan["team_no"])
-    # 日课里的“远征”沿用独立远征页的常用安排；自动排班是另一套配置，绝不混用。
-    from .scheduler import find_map, load_config
+    # 排班接管的队伍只收奖励，续派由排班统一负责。
+    from .scheduler import find_map, load_config, managed_teams
+    schedule = load_config()
+    owned = managed_teams(schedule)
     expedition_plan = []
-    for row in load_config().get("common_plan", []):
-        if not row.get("enabled") or not row.get("map_code"):
+    for row in schedule.get("common_plan", []):
+        if (not row.get("enabled") or not row.get("map_code")
+                or int(row["team_no"]) in owned):
             continue
         found = find_map(row["map_code"])
         expedition_plan.append({
@@ -590,6 +593,9 @@ def _build_dispatch(agent, config_path, params):
         return
     records = _read_expedition_records()
     remain = _expedition_remaining(records.get(str(team_no), {}))
+    if params.get("scheduled") and remain > 0:
+        yield "[远征] 队伍仍在外面，交回排班等待，不占用任务位置"
+        return
     if remain > 600:
         yield f"[远征] 部队{team_no}还剩 {remain // 60} 分钟，超过十分钟，本次跳过"
         return
@@ -623,14 +629,14 @@ def _read_expedition_records() -> dict:
 
 def _build_expedition_manager(agent, config_path, params):
     """收取归来队伍，最多等十分钟，再按“常用安排”派遣。"""
-    from .scheduler import find_map, load_config
+    from .scheduler import find_map, load_config, managed_teams
 
     plan = [p for p in load_config().get("common_plan", [])
             if p.get("enabled") and p.get("map_code")]
-    if not plan:
-        yield "[远征管理] 没有启用任何常用安排，先去配置页勾选部队"
-        return
-
+    owned = managed_teams()
+    plan = [p for p in plan if int(p["team_no"]) not in owned]
+    if owned:
+        yield "[远征管理] 自动排班负责的队伍只收归来奖励，续派交给排班"
     yield "[远征管理] 先回本丸刷新归来状态并领取结算"
     yield from agent.collect_expedition_stream(redispatch=None)
 
