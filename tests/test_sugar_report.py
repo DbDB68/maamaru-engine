@@ -33,31 +33,30 @@ class SugarReportStatusTests(unittest.TestCase):
         self.assertFalse(_is_success_status(status))
 
 
-class _BlockedSugarFlow(SugarMixin):
-    """每圈都领不动、只能喂 2 轮的假流程（复刻 9-05 邮箱 999+ 冤案现场）。"""
+class ScriptedFlow(SugarMixin):
+    def __init__(self, feeds):
+        self.feeds = iter(feeds)
+        self.rounds = 0
 
     def _inbox_claim_stream(self, dry_run):
-        if False:
-            yield
+        yield from ()
         return "blocked"
 
     def _shugo_loop_stream(self, dry_run):
-        if False:
-            yield
-        return 2
+        yield from ()
+        self.rounds += 1
+        return next(self.feeds)
 
 
 class SugarStreamTests(unittest.TestCase):
-    def test_cap_exit_reports_total_fed(self):
-        flow = _BlockedSugarFlow()
+    def test_progress_runs_past_ten_rounds(self):
+        flow = ScriptedFlow([2] * 15 + [0] * 3)
         messages = list(flow.sugar_stream())
-        last = messages[-1]
-        self.assertIn("到安全上限", last)
-        self.assertIn("只消化了 20 轮", last)
-        self.assertIn("刀解腾位置", last)
-        status = _sugar_report_status(last)
-        self.assertFalse(_is_success_status(status))
+        self.assertEqual(flow.rounds, 18)
+        self.assertIn("持续没有进展", messages[-1])
+        self.assertFalse(_is_success_status(_sugar_report_status(messages[-1])))
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_success_resets_stall_counter(self):
+        flow = ScriptedFlow([0, 0, 1, 0, 0, 1, 0, 0, 0])
+        list(flow.sugar_stream())
+        self.assertEqual(flow.rounds, 9)

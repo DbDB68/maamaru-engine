@@ -84,3 +84,24 @@ class SugarFlowTests(unittest.TestCase):
         flow = Flow()
         list(flow._shugo_loop_stream(True))
         self.assertEqual(flow.maa.feeds, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_progress_runs_past_sixty_feeds(self, sleep):
+        flow = Flow()
+        flow.maa.remaining = [80, 1]
+        list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.feeds, 81)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_repeated_unfeedable_body_stops(self, sleep):
+        flow = Flow()
+        flow.maa.remaining = [0, 0]
+        original_click = flow.maa.click
+        def click(target):
+            original_click(target)
+            if flow.maa.state == "list":
+                flow.maa.body = 0
+        flow.maa.click = click
+        with self.assertRaisesRegex(RuntimeError, "持续没有进展"):
+            list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.picks, 3)

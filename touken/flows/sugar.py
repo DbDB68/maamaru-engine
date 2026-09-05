@@ -28,7 +28,7 @@ import time
 
 from ..maa_adapter import roi_4to4, Point
 
-_MAX_CYCLES = 60  # 习合循环安全上限（正常几十轮顶天，防识别抽风死循环）
+_MAX_NO_PROGRESS = 3  # 连续三次未完成习合才停止；成功一次即清零
 
 
 class SugarMixin:
@@ -39,17 +39,18 @@ class SugarMixin:
         流式炼糖（按需工具，不是日课）：
         收件 → 习合喂到没人 → 再收件 → 再喂……直到邮件里没刀了收工。
         所持满了领不动也不死循环：喂过一轮（消耗重刀腾位置）再试一次，
-        还领不动就收工让用户自己想办法（刀解/氪刀位）。
+        连续三圈未完成习合才停止；有进展则继续。
 
         Yields:
             str: 执行状态消息
         """
-        total_fed = 0
-        for cycle in range(1, 11):  # 外层安全上限 10 圈
+        cycle = 0
+        stalled = 0
+        while True:
+            cycle += 1
             yield f"[炼糖] ===== 第 {cycle} 圈 ====="
             inbox = yield from self._inbox_claim_stream(dry_run)
             fed = yield from self._shugo_loop_stream(dry_run)
-            total_fed += fed
             yield f"[炼糖] 第 {cycle} 圈结算：收件={inbox} 喂了={fed} 轮"
             if dry_run:
                 yield "[炼糖] 演习模式只跑一圈，收工"
@@ -57,18 +58,12 @@ class SugarMixin:
             if inbox == "empty":
                 yield "[炼糖] 邮件里没刀了，收工"
                 return
-            if inbox in ("claimed", "blocked") and fed == 0:
-                # 领到了但一把都喂不动（全是单张没重刀），再收也是白跑
-                if inbox == "blocked":
-                    yield "[炼糖] 所持满了领不动、也没重刀可喂腾位置，收工（去刀解或氪刀位吧）"
-                else:
-                    yield "[炼糖] 领到的刀都没重刀可喂，收工"
+            stalled = stalled + 1 if fed == 0 else 0
+            if stalled >= _MAX_NO_PROGRESS:
+                yield "[炼糖] 持续没有进展：连续 3 圈未完成习合，停止操作，邮箱未确认清完"
                 return
-            if inbox == "failed" and fed == 0:
-                yield "[炼糖] 收件失败也喂不动，收工"
-                return
-        yield (f"[炼糖] 到安全上限 10 圈收工：邮箱还压着邮件，刀位一直满员是瓶颈，"
-               f"这次只消化了 {total_fed} 轮；先去刀解腾位置，或者有空多跑几趟")
+            if fed == 0:
+                yield f"[炼糖] 本圈未完成习合，重新收件检查（连续 {stalled} 圈）"
 
     # ==================== 收件箱 ====================
 
@@ -201,7 +196,10 @@ class SugarMixin:
 
         successes = 0
         in_materials = False
-        for _ in range(_MAX_CYCLES):
+        stalled = 0
+        while True:
+            if stalled >= _MAX_NO_PROGRESS:
+                raise RuntimeError("炼糖：持续没有进展，连续 3 次返回重选仍未完成习合，停止操作")
             self.maa.screenshot(force=True)
             if not in_materials:
                 # 游戏隐藏无法习合的本体；始终选择当前第一行，不按刀名排除。
@@ -227,6 +225,7 @@ class SugarMixin:
                 self.maa.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
+                stalled += 1
                 continue
             self.maa.click(select)
             time.sleep(1.5)
@@ -236,6 +235,7 @@ class SugarMixin:
                 self.maa.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
+                stalled += 1
                 continue
             self.maa.click(go)
             time.sleep(2.0)
@@ -252,11 +252,10 @@ class SugarMixin:
                 self.maa.click(Point(290, 550))
             else:
                 raise RuntimeError("炼糖：习合后返回素材界面超时，未计入成功次数")
+            stalled = 0
             successes += 1
             yield f"[炼糖·习合] 完成第 {successes} 轮习合"
             # 留在当前本体，下一轮继续一键选择，不往返本体列表。
-        else:
-            raise RuntimeError("炼糖：习合达到安全操作上限，停止操作，未确认清完")
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
         return successes
