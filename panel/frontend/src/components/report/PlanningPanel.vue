@@ -13,10 +13,10 @@ watch(() => form.value.kind, (kind) => {
   }
 })
 import EventTimeline from './EventTimeline.vue'
-import KobanGoalGuide from './KobanGoalGuide.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
 import GameplayPlanner from './GameplayPlanner.vue'
+import PlanningOverview from './PlanningOverview.vue'
 
 const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
 const planning = ref<PlanningReport | null>(null)
@@ -26,6 +26,8 @@ const error = ref('')
 const timelineError = ref('')
 const goalNotice = ref('')
 const activityPaces = ref<Record<string, ActivityPace[]>>({})
+const budgetGoals = computed(() => (planning.value?.goals || []).filter(goal => goal.kind === 'event' && goal.goal_mode === 'budget'))
+const customGoals = computed(() => (planning.value?.goals || []).filter(goal => goal.kind !== 'event'))
 
 const formOpen = ref(false)
 const saving = ref(false)
@@ -350,13 +352,21 @@ onMounted(load)
 
 <template>
   <section class="planning-panel" :class="{ loading }">
-    <header class="planning-toolbar">
-      <div><h3>当前目标</h3><span v-if="planning?.goals.length">{{ planning.goals.length }} 个</span></div>
-      <button v-if="!formOpen && planning?.goals.length" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
+    <header class="planning-page-heading">
+      <div><small>狐之助替你盯全局</small><h3>本丸规划</h3></div>
+      <p>先看锻刀短板和小判去向；特别想攒什么，再单独立目标。</p>
     </header>
 
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
+
+    <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" @open-expedition="emit('openExpedition')" />
+    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
+
+    <header class="planning-toolbar">
+      <div><h3>自定目标</h3><span v-if="customGoals.length">{{ customGoals.length }} 个</span></div>
+      <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
+    </header>
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
       <header>
@@ -402,32 +412,22 @@ onMounted(load)
       </div>
     </form>
 
-    <section v-if="planning?.goals.length" class="planning-goal-list planning-goals-section">
-        <article v-for="goal in planning.goals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true, 'is-budget': goal.kind === 'event' && goal.goal_mode === 'budget' }]">
+    <section v-if="customGoals.length" class="planning-goal-list planning-goals-section">
+        <article v-for="goal in customGoals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
           <header>
             <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.kind === 'fragment' ? '碎片目标 · 异去' : `${goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标'} · ${goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止`}` }}</small></span>
             <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
-          <template v-if="goal.kind === 'event' && goal.goal_mode === 'budget'">
-            <strong class="planning-goal-result">{{ goal.current != null && goal.target != null && goal.current >= goal.target ? `已留好 ${fmt(goal.target)} 小判` : `预算还差 ${fmt(goal.shortfall)} 小判` }}</strong>
-            <p class="planning-next-action">这是准备花在{{ goal.event || '活动' }}里的钱，不计作小判获取进度。</p>
-            <p v-if="goal.impact_days && goal.conflicting_goal" class="budget-impact">若按计划花掉，{{ goal.conflicting_goal }}预计推迟约 <b>{{ goal.impact_days }} 天</b>。</p>
-          </template>
-          <template v-else>
+          <template>
             <strong class="planning-goal-result">{{ goalHeadline(goal) }}</strong>
             <p v-if="goalAction(goal)" class="planning-next-action">{{ goalAction(goal) }}</p>
             <div class="planning-goal-progress">
               <progress v-if="goal.current != null && goal.target != null" :value="goalProgress(goal)" max="100" :aria-label="`${goal.resource}目标进度`" />
               <p><span>当前 <b>{{ fmt(goal.current) }}</b><template v-if="goal.target != null"> / {{ fmt(goal.target) }}</template> {{ goal.resource }}</span><span v-if="goalProgressMeta(goal)">{{ goalProgressMeta(goal) }}</span></p>
             </div>
-            <KobanGoalGuide
-              v-if="goal.resource === '小判' && goal.goal_mode === 'amount_target' && !['done', 'expired'].includes(goal.status)"
-              :goal="goal"
-              @open-expedition="emit('openExpedition')"
-            />
             <ResourceGoalGuide
-              v-else-if="(goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
+              v-if="goal.resource !== '小判' && (goal.kind || 'resource') === 'resource' && goal.goal_mode !== 'stock_target' && !['done', 'expired'].includes(goal.status) && acquisitionGuide(goal)"
               :guide="acquisitionGuide(goal)!"
             />
             <FragmentGoalGuide
@@ -449,8 +449,6 @@ onMounted(load)
       <button type="button" class="secondary" @click="openCustomForm">＋ 立个目标</button>
     </div>
 
-    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
-
     <EventTimeline
       id="event-timeline"
       :timeline="timeline"
@@ -471,6 +469,11 @@ onMounted(load)
 
 <style scoped>
 .planning-panel { display: grid; gap: 10px; }
+.planning-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 2px; }
+.planning-page-heading div { display: grid; gap: 2px; }
+.planning-page-heading small { color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.planning-page-heading h3 { margin: 0; font-size: 20px; }
+.planning-page-heading p { max-width: 520px; margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.55; text-align: right; }
 .planning-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 0 2px; }
 .planning-toolbar > div { display: flex; align-items: baseline; gap: 8px; }
 .planning-toolbar h3 { margin: 0; font-size: 18px; }
@@ -508,7 +511,6 @@ onMounted(load)
 .planning-delete { padding: 0 3px; color: var(--ink-dim); background: transparent; border: 0; font-size: 17px; cursor: pointer; }
 .planning-goal-result { display: block; margin-top: 14px; font-size: clamp(22px, 3vw, 28px); line-height: 1.15; }
 .planning-next-action { margin: 6px 0 0; color: var(--ink-dim); }
-.budget-impact { margin: 12px 0 0; padding: 9px 11px; color: #754738; background: #f3e6df; border-left: 3px solid #9b6652; font-size: 12px; line-height: 1.55; }
 .planning-goal.behind .planning-next-action, .planning-goal.pace-behind .planning-next-action { color: #9f3d28; }
 .planning-goal-progress { margin-top: 14px; }
 .planning-goal-progress progress { display: block; width: 100%; height: 7px; overflow: hidden; accent-color: var(--fox-gold); border: 0; border-radius: 999px; }
@@ -526,6 +528,8 @@ onMounted(load)
   .planning-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 520px) {
+  .planning-page-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .planning-page-heading p { text-align: left; }
   .planning-form { padding: 14px; }
   .planning-form-fields { grid-template-columns: 1fr; }
   .planning-goal { padding: 14px; }

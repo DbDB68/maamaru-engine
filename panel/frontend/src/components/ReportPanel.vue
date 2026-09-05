@@ -85,7 +85,7 @@ const goalStatusRank: Record<PlanningGoalAdvice['status'], number> = {
 
 function goalForResource(resource: string) {
   return [...(planning.value?.goals || [])]
-    .filter(goal => goal.resource === resource)
+    .filter(goal => goal.resource === resource && (goal.kind || 'resource') === 'resource')
     .sort((left, right) => goalStatusRank[left.status] - goalStatusRank[right.status])[0] || null
 }
 
@@ -330,7 +330,7 @@ const reportInsights = computed<ReportInsight[]>(() => {
   }
 
   const goal = [...(planning.value?.goals || [])]
-    .filter(item => ['behind', 'on_track', 'active', 'done'].includes(item.status))
+    .filter(item => (item.kind || 'resource') !== 'event' && ['behind', 'on_track', 'active', 'done'].includes(item.status))
     .sort((left, right) => goalStatusRank[left.status] - goalStatusRank[right.status])[0]
   if (goal) {
     const urgent = goal.status === 'behind'

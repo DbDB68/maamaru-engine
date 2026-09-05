@@ -433,6 +433,42 @@ class GetPlanningTests(unittest.TestCase):
         self.assertEqual(spending["impact_days"], 4)
         self.assertEqual(spending["conflicting_goal"], "千万小判")
 
+    def test_automatic_watches_group_forge_resources_and_recent_koban_spend(self):
+        now = datetime(2026, 8, 25, 12, tzinfo=advisor._TZ)
+
+        class _WatchStore:
+            def resource_ledger(self, from_ts, to_ts):
+                return {
+                    "per_resource": [
+                        {"resource": "小判", "closing": 120000},
+                        {"resource": "木炭", "closing": 5000},
+                        {"resource": "玉钢", "closing": 2000},
+                        {"resource": "冷却材", "closing": 6000},
+                        {"resource": "砥石", "closing": 3000},
+                    ],
+                    "daily_series": [],
+                    "attributions": [
+                        {"resource": "小判", "delta": -300,
+                         "ts": now.timestamp() - 86400},
+                        {"resource": "小判", "delta": -900,
+                         "ts": now.timestamp() - 20 * 86400},
+                    ],
+                }
+
+            def recent_events(self, limit=100, event_type=None):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            planning = advisor.get_planning(
+                _WatchStore(), Path(tmp) / "goals.json",
+                forge_recipe=[1000, 500, 1000, 500],
+                today=now.date(), now=now)
+        self.assertEqual(planning["resource_watch"]["forge_capacity"], 4)
+        self.assertEqual(planning["resource_watch"]["limiting"], ["玉钢"])
+        self.assertEqual(planning["koban_watch"]["current"], 120000)
+        self.assertEqual(planning["koban_watch"]["confirmed_spending"], 300)
+        self.assertEqual(planning["koban_watch"]["spending_days"], 14)
+
 
 class EventGoalTests(unittest.TestCase):
     """牛评审：活动攒钱目标的语义是「预算 vs 家底」，

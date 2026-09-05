@@ -304,6 +304,18 @@ export interface PlanningReport {
   rates: Record<string, { daily: number | null; days_observed: number }>
   koban_per_floor: { per_floor: number; sessions: number } | null
   osaka_floor_speed?: { seconds_per_floor: number; floors: number; run_started_at?: number | null } | null
+  resource_watch?: {
+    resources: { resource: string; current: number | null; per_forge: number; forge_capacity: number | null }[]
+    forge_capacity: number | null
+    limiting: string[]
+  }
+  koban_watch?: {
+    current: number | null
+    reserved: number
+    available: number | null
+    confirmed_spending: number
+    spending_days: number
+  }
   current?: Record<string, number | null>
   goals: PlanningGoalAdvice[]
   events?: EventAbacus[]

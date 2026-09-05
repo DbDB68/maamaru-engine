@@ -2323,8 +2323,13 @@ async def api_planning():
     """攒钱目标 + 按近日净收支速率推算的到期预测。契约见 touken/advisor.py。"""
     from touken import advisor
     from touken.telemetry import get_telemetry_store
+    try:
+        config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        config = {}
     return advisor.get_planning(get_telemetry_store(),
-                                STATUS_DIR / advisor.GOALS_FILENAME)
+                                STATUS_DIR / advisor.GOALS_FILENAME,
+                                forge_recipe=(config.get("forge") or {}).get("recipe"))
 
 
 @app.post("/api/planning/gameplay")

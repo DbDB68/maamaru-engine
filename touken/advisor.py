@@ -850,6 +850,7 @@ def add_gameplay_budget_goal(store, goals_path: Path, values: dict, *,
 
 
 def get_planning(store, goals_path: Path, *,
+                 forge_recipe: list | None = None,
                  today: date | None = None,
                  now: datetime | None = None) -> dict:
     """汇总入口：store 是 telemetry 仓库（resource_ledger / recent_events）。"""
@@ -959,6 +960,33 @@ def get_planning(store, goals_path: Path, *,
             budget["conflicting_goal"] = (
                 amount_goals[0].get("note")
                 or f"{amount_goals[0].get('resource')}目标")
+    forge_resources = ["木炭", "玉钢", "冷却材", "砥石"]
+    if (not isinstance(forge_recipe, list) or len(forge_recipe) != 4
+            or any(not isinstance(value, (int, float)) or value <= 0
+                   for value in forge_recipe)):
+        forge_recipe = [700, 700, 700, 700]
+    resource_rows = []
+    for name, cost in zip(forge_resources, forge_recipe):
+        balance = current.get(name)
+        resource_rows.append({
+            "resource": name, "current": balance, "per_forge": int(cost),
+            "forge_capacity": (None if balance is None
+                               else max(0, int(balance // cost))),
+        })
+    known_capacities = [row["forge_capacity"] for row in resource_rows
+                        if row["forge_capacity"] is not None]
+    forge_capacity = min(known_capacities) if len(known_capacities) == 4 else None
+    limiting = ([row["resource"] for row in resource_rows
+                 if row["forge_capacity"] == forge_capacity]
+                if forge_capacity is not None else [])
+    confirmed_spending = sum(
+        -int(round(item.get("delta") or 0))
+        for item in ledger.get("attributions", [])
+        if item.get("resource") == "小判"
+        and (item.get("delta") or 0) < 0
+        and (item.get("ts") or 0) >= now_ts - RATE_WINDOW_DAYS * 86400)
+    reserved = sum(int(goal["target"]) for goal in live_budgets)
+    koban_current = current.get("小判")
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
                 for name, card in cards.items()]
@@ -986,6 +1014,19 @@ def get_planning(store, goals_path: Path, *,
         "current": current,
         "koban_per_floor": floor_yield,
         "osaka_floor_speed": floor_speed,
+        "resource_watch": {
+            "resources": resource_rows,
+            "forge_capacity": forge_capacity,
+            "limiting": limiting,
+        },
+        "koban_watch": {
+            "current": koban_current,
+            "reserved": reserved,
+            "available": (None if koban_current is None
+                          else int(koban_current - reserved)),
+            "confirmed_spending": confirmed_spending,
+            "spending_days": RATE_WINDOW_DAYS,
+        },
         "goals": goals,
         "events": abacuses,
         # 每种资源一张「在哪弄」途径卡：远征时薪动态算，日课/活动文案在数据文件
