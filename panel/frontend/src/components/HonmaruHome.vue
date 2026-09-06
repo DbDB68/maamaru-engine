@@ -411,8 +411,6 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .planning-rows dd { margin: 0; color: #173d6e; font-variant-numeric: tabular-nums; text-align: right; }
 .planning-rows dd.budget-ready { display: inline-flex; align-items: center; gap: 5px; color: #315f42; font-weight: 600; }
 .planning-rows dd.budget-ready::before { content: '备'; display: grid; width: 18px; height: 18px; place-items: center; color: #a34535; border: 1px solid #a34535; border-radius: 50%; box-shadow: inset 0 0 0 1px #a3453540; font: 9px/1 serif; transform: rotate(-8deg); }
-.home-event-card { position: relative; }
-.home-event-card::before { content: ''; position: absolute; top: -27px; left: 18px; width: 13px; height: 30px; border-left: 1px solid #b7a58f; border-radius: 55%; box-shadow: -1px 0 0 #f7f0df; opacity: .78; transform: rotate(7deg); }
 .home-inventory { padding: 0 5px; }
 .home-inventory header { display: flex; justify-content: space-between; align-items: baseline; }
 .home-inventory header h2 { margin: 0; }
@@ -442,7 +440,6 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .avatar-picker img { width: 54px; height: 54px; object-fit: cover; border: 3px solid #e5dac4; }
 .avatar-picker small { display: block; color: var(--ink-dim); font-size: 10px; }
 .avatar-picker input { font-size: 12px; width: 100%; }
-@media (min-width: 721px) and (max-width: 1100px) { .home-event-card::before { top: 50%; left: -21px; width: 22px; height: 12px; border-top: 1px solid #b7a58f; border-left: 0; transform: rotate(-3deg); } }
 @media (max-width: 1100px) { .honmaru-home { grid-template-columns: 175px minmax(0, 1fr); gap: 25px; } .honmaru-keepsakes { grid-column: 2; grid-template-columns: 1fr 1fr; gap: 20px; } .home-inventory { grid-column: 1 / -1; } .home-inventory dl { grid-template-columns: 1fr 1fr; gap: 10px 25px; } }
 @media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 74px; padding: 4px 4px 11px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-inventory { grid-column: 1; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) { .honmaru-home button { transition: none; } }
