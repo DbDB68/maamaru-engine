@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, PlanningGoalAdvice, PlanningReport } from '../types'
+import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
-import { eventTime, runTitle, runStatusLabel, shanghaiDate } from './report/reportModel'
+import { categoryOf, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
-const emit = defineEmits<{ office: []; report: []; planning: [] }>()
+const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
 const emptyProfile = (): HonmaruProfile => ({ honmaru_name: '', saniwa_name: '', province: '', attendant: '', motto: '', joined_on: '', avatar: '' })
 const profile = ref<HonmaruProfile>(emptyProfile())
 const draft = ref<HonmaruProfile>(emptyProfile())
 const notes = ref<HonmaruNote[]>([])
 const runs = ref<any[]>([])
-const goals = ref<PlanningGoalAdvice[]>([])
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
+const todayKobanSpending = ref<number | null>(null)
+const briefUpdatedAt = ref(0)
 const editingProfile = ref(false)
 const writing = ref(false)
 const noteBody = ref('')
@@ -64,10 +65,45 @@ const groups = computed(() => {
   }
   return result
 })
-const activeGoals = computed(() => goals.value.filter(goal => !['done', 'expired'].includes(goal.status)).slice(0, 3))
 const resourceWatch = computed(() => planning.value?.resource_watch)
 const kobanWatch = computed(() => planning.value?.koban_watch)
 const nearestEvent = computed<EventTimelineEntry | null>(() => timeline.value?.ongoing[0] || timeline.value?.upcoming[0] || null)
+const latestRun = computed(() => runs.value[0] || null)
+const briefTime = computed(() => briefUpdatedAt.value
+  ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(briefUpdatedAt.value)
+  : '--:--')
+const briefFreshness = computed(() => {
+  if (!briefUpdatedAt.value) return '整理中'
+  const minutes = Math.max(0, Math.floor((now.value - briefUpdatedAt.value) / 60000))
+  return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前更新` : `${briefTime.value} 更新`
+})
+const caretakerBrief = computed(() => {
+  if (active.value) return { title: '本丸正在执务', detail: props.activity?.step || `${props.activity?.label || '当前任务'}正在进行，不需要你守在这里。` }
+  const run = latestRun.value
+  if (!run) return { title: '本丸无事', detail: '暂时没有需要你处理的事情，放心按自己的步调来。' }
+  if (run.status === 'failed') return { title: '刚才执务没有顺利收工', detail: `${runTitle(run)}已经停下，具体停在哪里替您留在记录里了。` }
+  if (run.status === 'stopped') return { title: '本丸无事，这一趟已经停稳', detail: `${runTitle(run)}已按您的意思停止，本丸现在是安全的。` }
+  return { title: '本丸无事，刚刚顺利收工', detail: `${runTitle(run).replace(' · ', '跑完 ')}，带回来的家底已经替您记好了。` }
+})
+const briefChanges = computed(() => {
+  const deltas = latestRun.value?.attributed_resource_delta || {}
+  return Object.entries(deltas)
+    .filter(([, value]) => Number(value))
+    .sort(([left], [right]) => resourceNames.indexOf(left) - resourceNames.indexOf(right))
+    .slice(0, 6)
+    .map(([name, value]) => ({ name, value: signed(Number(value)) }))
+})
+const resourceBrief = computed(() => {
+  const parts: string[] = []
+  const limiting = resourceWatch.value?.limiting || []
+  if (limiting.length) parts.push(`${limiting.join('、')}还是四项资源里最少的`)
+  if (todayKobanSpending.value === 0) parts.push('小判今日没有新的支出')
+  else if (todayKobanSpending.value != null) parts.push(`小判今日已记下 ${fmt(todayKobanSpending.value)} 支出`)
+  const event = nearestEvent.value
+  if (event?.budget?.sufficient === true) parts.push(`${event.name}预算已经备齐`)
+  else if (event?.budget?.shortfall != null) parts.push(`${event.name}预算还差 ${fmt(event.budget.shortfall)} 小判`)
+  return parts.length ? `${parts.join('；')}。` : '家底还在慢慢整理，有值得留意的变化再来告诉您。'
+})
 const forgeCapacityPercent = computed(() => {
   const capacities = (resourceWatch.value?.resources || []).flatMap(item => item.forge_capacity == null ? [] : [item.forge_capacity])
   const maximum = Math.max(...capacities, 0)
@@ -78,11 +114,6 @@ function fmt(value: number | null | undefined) { return value == null ? '尚未�
 function resource(name: string) {
   const value = inventory.value?.resources?.[name]
   return typeof value === 'number' ? value.toLocaleString() : '未记录'
-}
-function goalName(goal: PlanningGoalAdvice) {
-  if (goal.note) return goal.note
-  if (goal.kind === 'event') return goal.event || '活动目标'
-  return `${goal.resource}${goal.target == null ? '目标' : ` · ${goal.target.toLocaleString()}`}`
 }
 function dateLabel(date: string) { return date === today.value ? '今天' : date.replaceAll('-', '.') }
 function eventMoment(event: EventTimelineEntry) {
@@ -103,6 +134,7 @@ function eventBudget(event: EventTimelineEntry) {
   return '正在核算'
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : '暂时没能保存，请再试一次。' }
+function openBriefReport() { latestRun.value ? emit('records') : emit('report') }
 
 async function loadHome() {
   const data = await api.honmaruHome()
@@ -113,9 +145,16 @@ async function loadHome() {
 async function loadSummaries() {
   const jobs = [
     { label: '近期记录', run: async () => { runs.value = (await api.dataRuns(12)).items } },
-    { label: '规划', run: async () => { planning.value = await api.planning(); goals.value = planning.value.goals } },
+    { label: '规划', run: async () => { planning.value = await api.planning() } },
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
     { label: '家底', run: async () => { inventory.value = (await api.dashboard()).inventory } },
+    { label: '今日账目', run: async () => {
+      const ledger = await api.resourceLedger(1)
+      todayKobanSpending.value = Math.abs(ledger.attributions
+        .filter(item => item.resource === '小判' && item.delta < 0 && shanghaiDate(item.ts) === today.value
+          && !['unknown', 'human'].includes(categoryOf(item.source)))
+        .reduce((sum, item) => sum + item.delta, 0))
+    } },
   ]
   const results = await Promise.allSettled(jobs.map(job => job.run()))
   return results.flatMap((result, index) => result.status === 'rejected' ? [jobs[index]!.label] : [])
@@ -128,6 +167,7 @@ async function refresh() {
     ...(results[0]!.status === 'rejected' ? ['个人档案和小记'] : []),
     ...(results[1]!.status === 'fulfilled' ? results[1]!.value : ['本丸近况']),
   ]
+  if (results[1]!.status === 'fulfilled') briefUpdatedAt.value = Date.now()
   loading.value = false
 }
 function editProfile() {
@@ -229,8 +269,15 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
       <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('report')">更早的执务记录在本丸账里 →</button>
     </section>
 
-    <aside class="honmaru-keepsakes" aria-label="目标与账房">
-      <PaperCard variant="dashboard" class="home-goals"><header><p class="home-eyebrow">留张便笺</p><h2>最近惦记着</h2></header><ul v-if="activeGoals.length" class="home-goal-list"><li v-for="goal in activeGoals" :key="goal.id"><strong>{{ goalName(goal) }}</strong><p>{{ goal.message }}</p></li></ul><p v-else class="home-muted">想攒的家底、想完成的活动，定好目标就放在这里。</p><button type="button" class="home-text-button" @click="emit('planning')">去看看我的规划 →</button></PaperCard>
+    <aside class="honmaru-keepsakes" aria-label="小报与账房">
+      <PaperCard variant="dashboard" class="home-brief">
+        <header class="brief-meta"><span>狐之助小报 · {{ briefTime }}</span><span>{{ briefFreshness }}</span></header>
+        <h2>{{ caretakerBrief.title }}</h2>
+        <p class="brief-detail">{{ caretakerBrief.detail }}</p>
+        <div v-if="briefChanges.length" class="brief-changes" aria-label="这一趟的家底变化"><span v-for="item in briefChanges" :key="item.name"><b>{{ item.name }}</b> {{ item.value }}</span></div>
+        <p class="brief-resource">{{ resourceBrief }}</p>
+        <button type="button" class="home-text-button" @click="openBriefReport">{{ latestRun ? '看看这一趟的记录' : '去看看本丸记录' }} →</button>
+      </PaperCard>
       <section class="home-planning-card home-forge-card">
         <p class="home-eyebrow">锻刀盘</p>
         <h2><span aria-hidden="true">⚒</span> {{ resourceWatch?.forge_capacity == null ? '等待资源盘点' : `现在最缺${resourceWatch.limiting.join('、') || '的资源'}` }}</h2>
@@ -336,12 +383,16 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-empty p { color: var(--ink-dim); line-height: 1.9; font-size: 12px; margin-bottom: 18px; }
 .honmaru-keepsakes { display: grid; gap: 25px; min-width: 0; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
-.home-goals { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: 2px; box-shadow: 2px 3px 0 #e5dac4; }
-.home-goals::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
-.home-goal-list { padding: 0; margin: 0; list-style: none; }
-.home-goal-list li { border-bottom: 1px dashed #d5c8a9; padding-bottom: 12px; margin-bottom: 12px; overflow-wrap: anywhere; }
-.home-goal-list strong { font-size: 13px; font-weight: 500; }
-.home-goal-list p, .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
+.home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: 2px; box-shadow: 2px 3px 0 #e5dac4; }
+.home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
+.brief-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: #806748; font-size: 10px; }
+.home-brief h2 { color: #173d6e; font-weight: 500; }
+.brief-detail { color: #173d6e; font-size: 12px; line-height: 1.65; }
+.brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: #e3e9df; font-size: 10px; }
+.brief-changes span { white-space: nowrap; }
+.brief-changes b { font-weight: 500; }
+.brief-resource { margin: 10px 0 !important; padding: 10px; color: #173d6e; background: #e3e9df; font-size: 11px; line-height: 1.65; }
+.honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
 .home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }

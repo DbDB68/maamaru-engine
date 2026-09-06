@@ -12,11 +12,11 @@ import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourc
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{ 'open-wishlist': []; 'open-expedition': [] }>()
-const props = defineProps<{ initialSection?: 'report' | 'planning' }>()
+const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning' }>()
 
 const days = ref(7)
-const honmaruTab = ref<'report' | 'planning'>(props.initialSection || 'report')
-const view = ref<'chart' | 'records'>('chart')
+const honmaruTab = ref<'report' | 'planning'>(props.initialSection === 'planning' ? 'planning' : 'report')
+const view = ref<'chart' | 'records'>(props.initialSection === 'records' ? 'records' : 'chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
 const planning = ref<PlanningReport | null>(null)
@@ -1132,7 +1132,10 @@ async function refreshRecords() {
   await load(days.value)
   if (recordDate.value) await loadRecordDay(recordDate.value)
 }
-onMounted(() => load())
+onMounted(async () => {
+  await load()
+  if (view.value === 'records' && recordDate.value) await loadRecordDay(recordDate.value)
+})
 </script>
 
 <template>
