@@ -571,7 +571,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @planning="reportEntry = 'planning'; tab = 'report'" @wishlist="openWishlist" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @planning="reportEntry = 'planning'; tab = 'report'" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">
