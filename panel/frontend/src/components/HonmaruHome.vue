@@ -367,7 +367,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-day { margin-top: 24px; }
 .honmaru-home .journal-date { font-size: 13px; display: flex; align-items: center; gap: 10px; margin-bottom: 13px; color: var(--home-green); }
 .journal-date span { font-size: 10px; color: var(--ink-dim); font-weight: 400; }
-.journal-entry { padding: 17px 18px; margin-bottom: 12px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: 3px; }
+.journal-entry { padding: 17px 18px; margin-bottom: 12px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: var(--r-md); }
 .journal-entry.personal-entry { position: relative; border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 3px), 97% 100%, 93% calc(100% - 2px), 88% 100%, 82% calc(100% - 2px), 76% 100%, 69% calc(100% - 2px), 62% 100%, 54% calc(100% - 2px), 47% 100%, 39% calc(100% - 2px), 31% 100%, 23% calc(100% - 2px), 15% 100%, 8% calc(100% - 2px), 0 100%); }
 .journal-entry.personal-entry::after { content: ''; position: absolute; top: 0; right: 0; width: 11px; height: 11px; background: linear-gradient(225deg, var(--paper) 0 47%, #c9bda7 50% 57%, #eee6d5 60%); }
 .journal-entry.personal-entry header button { margin-right: 8px; }
@@ -385,7 +385,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-empty p { color: var(--ink-dim); line-height: 1.9; font-size: 12px; margin-bottom: 18px; }
 .honmaru-keepsakes { display: grid; gap: 25px; min-width: 0; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
-.home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: 2px; box-shadow: 2px 3px 0 #e5dac4; }
+.home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
 .brief-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: #806748; font-size: 10px; }
 .home-brief h2 { color: #173d6e; font-weight: 500; }
@@ -393,17 +393,17 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: linear-gradient(105deg, #edf0e7d9, #dce4dbb8 52%, #f4f3e9c7); border-block: 1px solid #ffffff75; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 10px; }
 .brief-changes span { white-space: nowrap; }
 .brief-changes b { font-weight: 500; }
-.brief-resource { margin: 10px 0 !important; padding: 10px; color: #173d6e; background: linear-gradient(105deg, #e9eee6d9, #dfe7ddb8 48%, #f2f2e9c7); border-block: 1px solid #ffffff70; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 11px; line-height: 1.65; }
+.honmaru-home .brief-resource { margin: 10px 0; padding: 10px; color: #173d6e; background: linear-gradient(105deg, #e9eee6d9, #dfe7ddb8 48%, #f2f2e9c7); border-block: 1px solid #ffffff70; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 11px; line-height: 1.65; }
 .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
 .home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }
-.planning-lead { margin-bottom: 8px !important; color: #173d6e; font-size: 13px; }
+.honmaru-home .planning-lead { margin-bottom: 8px; color: #173d6e; font-size: 13px; }
 .pencil-mark { position: relative; z-index: 0; display: inline-block; padding-inline: 2px; font-weight: inherit; }
 .pencil-mark::after { content: ''; position: absolute; z-index: -1; left: -1px; right: 1px; bottom: 0; height: 3px; background: linear-gradient(177deg, transparent 18%, #756c6090 31% 55%, transparent 69%); transform: rotate(-1.2deg); }
 .forge-meter { height: 8px; margin: 10px 0; overflow: hidden; background: #dfddd2; }
 .forge-meter i { display: block; height: 100%; background: #668764; }
-.planning-note { margin: 10px 0 8px !important; color: #796e5f; font-size: 11px; line-height: 1.7; }
+.honmaru-home .planning-note { margin: 10px 0 8px; color: #796e5f; font-size: 11px; line-height: 1.7; }
 .hakata-mark { margin-right: 4px; color: #173d6e; font-size: 11px; }
 .planning-rows { margin: 0; border-top: 1px solid #ded6c7; }
 .planning-rows div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #ded6c7; font-size: 12px; }
@@ -421,9 +421,9 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .home-load-error, .home-notice { grid-column: 1 / -1; padding: 10px 14px; background: #f2e2cd; font-size: 12px; }
 .home-load-error button { background: transparent; border: 0; text-decoration: underline; margin-left: 12px; color: inherit; }
 .home-notice { background: #e8ecdf; }
-.home-dialog-shell { width: min(510px, calc(100% - 24px)); max-height: 90dvh; padding: 0; border: 0; border-radius: 8px; background: var(--paper-card); box-shadow: 0 18px 70px #0004; }
+.home-dialog-shell { width: min(510px, calc(100% - 24px)); max-height: 90dvh; padding: 0; border: 0; border-radius: 12px; background: var(--paper-card); box-shadow: var(--shadow-pop); }
 .home-dialog-shell::backdrop { background: #30291f77; }
-.home-dialog { padding: 25px; color: var(--ink); border: 1px solid #c8bda6; border-radius: 8px; }
+.home-dialog { padding: 25px; color: var(--ink); border: 1px solid #c8bda6; border-radius: 12px; }
 .home-dialog > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 23px; }
 .home-dialog h2 { font-size: 19px; }
 .home-dialog > header button { color: var(--ink); background: transparent; border: 0; font-size: 24px; padding: 0 5px; }
@@ -431,7 +431,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .profile-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
 .profile-fields label, .note-label { display: grid; gap: 6px; font-size: 12px; }
 .field-wide { grid-column: 1 / -1; }
-.home-dialog input:not([type='file']), .home-dialog textarea { width: 100%; min-width: 0; padding: 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 4px; }
+.home-dialog input:not([type='file']), .home-dialog textarea { width: 100%; min-width: 0; padding: 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: var(--r-sm); }
 .home-dialog textarea { resize: vertical; }
 .home-dialog footer { display: flex; justify-content: flex-end; gap: 20px; margin-top: 22px; }
 .home-dialog form > small { display: block; color: var(--ink-dim); text-align: right; margin-top: 5px; }

@@ -378,7 +378,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-tags { display: flex; align-items: center; gap: 6px; }
 .event-state { color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
 .is-ongoing .event-state { color: #4d7137; }
-.experience-tag { padding: 1px 6px; color: var(--ink-dim); background: var(--paper-panel); border-radius: 999px; font-size: 9px; font-weight: 700; letter-spacing: .03em; }
+.experience-tag { padding: 1px 6px; color: var(--ink-dim); background: var(--paper-panel); border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .03em; }
 .experience-tag.source-measured { color: #426b36; background: color-mix(in srgb, #dcebd6 76%, var(--paper-card)); }
 .experience-tag.source-history { color: #805f20; background: var(--fox-gold-pale); }
 .experience-tag.source-estimate { color: #765e50; background: color-mix(in srgb, #e9ded4 74%, var(--paper-card)); }

@@ -88,25 +88,25 @@ function fmt(value: number | null | undefined) {
 .resource-four p { display: grid; gap: 3px; margin: 0; padding: 10px 9px; border-left: 1px solid var(--paper-line); }
 .resource-four p:first-child { border-left: 0; }
 .resource-four span { display: flex; align-items: center; justify-content: space-between; gap: 4px; color: var(--ink-dim); font-size: 10px; }
-.resource-four em { padding: 1px 4px; color: #9f3d28; background: #f3e6df; border-radius: 999px; font-size: 8px; font-style: normal; }
+.resource-four em { padding: 1px 4px; color: #9f3d28; background: #f3e6df; border-radius: 999px; font-size: 10px; font-style: normal; }
 .resource-four b { font-size: 14px; }
-.resource-four small { color: var(--ink-dim); font-size: 9px; }
+.resource-four small { color: var(--ink-dim); font-size: 10px; }
 .resource-four .limiting { background: color-mix(in srgb, #f3e6df 58%, var(--paper-card)); }
-.koban-watch { border-left: 5px solid #b78527 !important; }
-.koban-watch > header { justify-content: flex-start !important; }
+.planning-overview .koban-watch { border-left: 5px solid #b78527; }
+.planning-overview .koban-watch > header { justify-content: flex-start; }
 .hakata-seal { display: grid; flex: 0 0 36px; width: 36px; height: 36px; place-items: center; color: #fffaf0; background: #b78527; border: 2px solid #75510c; border-radius: 50%; box-shadow: inset 0 0 0 2px #dfc06d; font-size: 16px; font-weight: 700; }
 .koban-watch blockquote { margin: 13px 0; padding: 9px 11px; color: #5f4a22; background: var(--fox-gold-pale); border: 0; border-left: 3px solid #b78527; font-size: 11px; line-height: 1.6; }
 .koban-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--paper-line); border-radius: 7px; }
 .koban-numbers p { display: grid; gap: 3px; margin: 0; padding: 9px; border-left: 1px solid var(--paper-line); }
 .koban-numbers p:first-child { border-left: 0; }
-.koban-numbers small { color: var(--ink-dim); font-size: 9px; }
+.koban-numbers small { color: var(--ink-dim); font-size: 10px; }
 .koban-numbers b { font-size: 14px; }
 .spending-trace { margin: 10px 0 0; color: var(--ink-dim); font-size: 10px; }
 .spending-trace b { color: var(--ink); }
 .budget-list { display: grid; gap: 0; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--paper-line); list-style: none; }
 .budget-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--paper-line); font-size: 11px; }
 .budget-list span { display: grid; gap: 2px; }
-.budget-list small { color: var(--ink-dim); font-size: 9px; }
+.budget-list small { color: var(--ink-dim); font-size: 10px; }
 .koban-watch > button { margin-top: 10px; }
 @media (max-width: 760px) {
   .planning-overview { grid-template-columns: 1fr; }

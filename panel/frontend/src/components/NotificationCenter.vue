@@ -138,7 +138,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   border-radius: 999px;
   background: #b5423a;
   color: #fff;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
   font-style: normal;
   display: grid;
@@ -154,8 +154,8 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   overflow-y: auto;
   background: var(--paper-card);
   border: 1px solid var(--paper-line);
-  border-radius: 14px;
-  box-shadow: 0 12px 32px rgba(61, 50, 41, .22);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
   padding: 12px;
   z-index: 60;
   display: grid;
@@ -173,7 +173,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .notice-card {
   border: 1px solid var(--paper-line);
   border-left-width: 4px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 10px 12px;
   background: var(--paper);
   display: grid;
@@ -210,7 +210,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 }
 
 .notice-card dl { margin: 0; display: grid; gap: 4px; }
-.notice-card dt { font-size: 11.5px; font-weight: 700; color: var(--ink-dim); }
+.notice-card dt { font-size: 11px; font-weight: 700; color: var(--ink-dim); }
 .notice-card dd { margin: 0; font-size: 13px; color: var(--ink); line-height: 1.5; }
 
 .notice-card footer {
