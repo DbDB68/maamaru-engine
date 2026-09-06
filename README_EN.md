@@ -172,6 +172,12 @@ Maamaru is open source under the [AGPL-3.0-or-later](LICENSE) license.
 
 We jokingly call our multi-agent workflow the MCS: the frontend cow, automation cow, outsourced-IT cow, and README cow each take a part of the job, while the human carries context between them, makes the decisions, and signs off on the result. Why cows? Codex's desktop pet is named **NULL**, which sounds a lot like the Chinese word for cow when you say it quickly.
 
+### The Scripture Forged Beneath the Moon `🌙`
+
 > _This sacred text was not wrought by one hand alone. In faithful observance of the ancient art of vibe coding, we hereby record every fellow cultivator's contribution at its source._
+
+In ancient times, Moonshot AI sent Kimi K3 down from the heavens to forge the backend. Then came GPT-5.6 of the High Heavens to preside over the frontend. WorkBuddy DeepSeek V4 offered one final touch of enlightenment, and thus the *Maamaru Sutra* was complete.
+
+> _This Honmaru follows the Great Python, with Java as its aide. If there are bugs, such is the Mandate of Heaven; if there are none, all credit belongs to our fellow cultivators._
 
 </details>
