@@ -219,5 +219,74 @@ class DropSwordRecognitionTests(unittest.TestCase):
         self.assertEqual(flow.maa.calls, 2)  # 一拍宽限 + 一拍确认，就撤
 
 
+class _ScriptedMaa:
+    """章节页三态剧本（2026-09-07 异去跳级事故）：
+    decide 被点满 flip_at 次之前停在章节页（"决定"在，别的都不在）；
+    点满后翻到 mode 指定的落点——"map"=小图页（右下角有"部队选择"按钮），
+    "team"=部队选择页（顶部标题"部队选择"），模拟点已选中项直接跳级。"""
+
+    def __init__(self, flip_at, mode):
+        self.flip_at = flip_at
+        self.mode = mode
+        self.decide_clicks = 0
+
+    def screenshot(self, force=False):
+        pass
+
+    def click(self, point):
+        self.decide_clicks += 1
+
+    def ocr(self, expected, roi, match_mode="contains"):
+        if self.decide_clicks >= self.flip_at:
+            if self.mode == "team" and expected == "部队选择":
+                return Point(640, 27)
+            if self.mode == "map" and expected in ("部队", "选择"):
+                return Point(1203, 641)
+        return None
+
+    def template_match(self, template, roi=None, threshold=0.8):
+        if template == "decide.png" and self.decide_clicks < self.flip_at:
+            return Point(1204, 640)
+        return None
+
+
+class _NavHost(_Host):
+    """记录坐标点击的出阵宿主，带上部队选择页标题地标配置"""
+
+    def __init__(self, maa):
+        super().__init__()
+        self.maa = maa
+        self.config["sortie"]["team_ui_ocr"] = {
+            "expected": "部队选择", "roi": [506, 1, 774, 77]}
+        self.clicks = []
+
+    def _click_point(self, pt):
+        self.clicks.append(tuple(pt))
+
+
+class RememberedSelectionJumpTests(unittest.TestCase):
+    """游戏记住上次选的章节/小图：点已选中项=确认，直接跳进下一级界面。"""
+
+    def test_preselected_chapter_jump_is_followed(self):
+        # 点完章节+决定，游戏直接跳进部队选择页：不许再等"部队选择"按钮等死
+        host = _NavHost(_ScriptedMaa(flip_at=1, mode="team"))
+        logs = _run(host, auto_march=False)
+
+        self.assertTrue(any("跳进部队选择页" in m for m in logs))
+        self.assertFalse(any("没识别到小图页" in m for m in logs))
+        self.assertNotIn((20, 20), host.clicks)  # 跳级了就不许再点小图坐标
+
+    def test_swallowed_chapter_tap_is_retried(self):
+        # 第一口章节+决定被游戏吞了（还在章节页）：状态循环补点第二口，正常进小图页
+        host = _NavHost(_ScriptedMaa(flip_at=2, mode="map"))
+        with patch("touken.flows.sortie.time.monotonic",
+                   side_effect=[i * 3.0 for i in range(200)]):
+            logs = _run(host, auto_march=False)
+
+        self.assertTrue(any("再补一次章节+决定" in m for m in logs))
+        self.assertFalse(any("没识别到小图页" in m for m in logs))
+        self.assertIn((20, 20), host.clicks)  # 落到小图页后照点小图
+
+
 if __name__ == "__main__":
     unittest.main()

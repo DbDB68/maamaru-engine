@@ -65,6 +65,15 @@ def _parse_popup_map(tokens: list) -> int | None:
 class SortieMixin:
     """合战场出阵。依赖宿主类的 navigate_to_stream、_click_point、_enable_auto_march。"""
 
+    def _on_team_select_page(self, cfg: dict) -> bool:
+        """顶部标题 OCR 判断当前是否已经在部队选择页（复用 _last_image）。"""
+        ocr_cfg = cfg.get("team_ui_ocr", {})
+        roi_raw = ocr_cfg.get("roi")
+        if not roi_raw:
+            return False
+        return bool(self.maa.ocr(expected=ocr_cfg.get("expected", "部队选择"),
+                                 roi=roi_4to4(*roi_raw)))
+
     def sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
                       auto_march: bool = True, max_loops: int = 1,
                       formation_mode: str = "manual",
@@ -215,37 +224,63 @@ class SortieMixin:
                         yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
                         return
 
-                # ========== 2. 选章节 → 决定 ==========
-                self._click_point(map_cfg["chapters"][str(chapter)])
-                time.sleep(0.5)
-                self.maa.screenshot(force=True)
-                decide = self.maa.template_match(cfg["decide_button"]["template"])
-                if decide:
-                    self.maa.click(decide)
-                    time.sleep(1.5)
-
-                # ========== 3. 等小图页 ==========
+                # ========== 2/3. 章节页 → 小图页（状态驱动，不认死流程） ==========
+                # 游戏会记住上次选的章节/小图：点到已选中的项等于确认，直接跳进
+                # 下一级界面（2026-09-07 老大实测机制，当天翻车实锤）。所以每拍
+                # 先认自己在哪页再动手，三种落点都接得住：
+                #   部队选择页（顶部标题）= 被跳级了，跳过点小图直接跟上；
+                #   小图页（右下角"部队选择"）= 正常落点；
+                #   章节页（"决定"还在）= 上一口点击被吞，补点章节+决定。
                 area_ok = False
-                for _ in range(10):
+                jumped = False
+                nav_tapped = False
+                last_nav_tap = 0.0
+                for _ in range(25):  # 约 20~25 秒预算
                     self.maa.screenshot(force=True)
+                    if self._on_team_select_page(cfg):
+                        jumped = True
+                        break
                     if find_deploy_button(self.maa, cfg):
                         area_ok = True
                         break
-                    time.sleep(0.5)
-                if not area_ok:
+                    now = time.monotonic()
+                    if now - last_nav_tap >= 2.0:
+                        decide = self.maa.template_match(
+                            cfg["decide_button"]["template"])
+                        if decide:
+                            if nav_tapped:
+                                yield "[出阵] 章节页没点动，再补一次章节+决定"
+                            self._click_point(map_cfg["chapters"][str(chapter)])
+                            time.sleep(0.5)
+                            self.maa.screenshot(force=True)
+                            decide = self.maa.template_match(
+                                cfg["decide_button"]["template"])
+                            if decide:
+                                self.maa.click(decide)
+                            nav_tapped = True
+                            last_nav_tap = now
+                    time.sleep(0.7)
+                if jumped:
+                    yield "[出阵] 游戏记着上次选的图，一点就跳进部队选择页了，跟上"
+                elif not area_ok:
                     yield "[出阵] 没识别到小图页的部队选择按钮（章节坐标或页面状态不对），停止"
                     return
-                if cfg_key == "yosari" and frag_inv is None:
+                if area_ok and cfg_key == "yosari" and frag_inv is None:
                     baseline = self._read_yosari_fragments(cfg)
                     if baseline == "stuck":
                         yield "[异去] 碎片弹窗关不掉，为防误点收工；你去瞅一眼"
                         return
                     if baseline:
                         frag_inv = baseline
+                elif jumped and cfg_key == "yosari" and frag_inv is None:
+                    # 跳级进场没路过小图页，碎片弹窗开不了；圈末读数会自动当上基线
+                    yield "[异去] 跳级进场，本圈碎片基线跳过，下圈开始记账"
             else:
                 yield "[异去] 已回到四张小图页，直接开始下一圈"
-            self._click_point(map_cfg["maps"][str(map_no)])
-            time.sleep(1.0)
+                jumped = False
+            if not jumped:
+                self._click_point(map_cfg["maps"][str(map_no)])
+                time.sleep(1.0)
             map_page_ready = False
 
             # ========== 4. 部队选择 → 选部队 ==========
