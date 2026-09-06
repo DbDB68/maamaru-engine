@@ -11,6 +11,7 @@ const props = defineProps<{
   runs: any[]
   manualSessions: ManualSession[]
   selectedDate: string
+  highlightRunId?: string
   hasMoreEvents: boolean
   hasMoreRuns: boolean
   loading: boolean
@@ -237,7 +238,12 @@ const allRecords = computed(() => {
   ].sort((a, b) => b.ts - a.ts)
 })
 const selectedRecords = computed(() => allRecords.value.filter(entry => shanghaiDate(entry.ts) === props.selectedDate))
-const visibleRecords = computed(() => selectedRecords.value.slice(0, timelineLimit.value))
+const visibleRecords = computed(() => {
+  const visible = selectedRecords.value.slice(0, timelineLimit.value)
+  if (!props.highlightRunId || visible.some(entry => entry.kind === 'run' && entry.run.run_id === props.highlightRunId)) return visible
+  const highlighted = selectedRecords.value.find(entry => entry.kind === 'run' && entry.run.run_id === props.highlightRunId)
+  return highlighted ? [...visible, highlighted].sort((left, right) => right.ts - left.ts) : visible
+})
 const selectedRunCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'run').length)
 const selectedManualCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'manual').length)
 const selectedActivityCount = computed(() => selectedRecords.value.filter(entry => entry.kind === 'activity').length)
@@ -365,7 +371,7 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
         <template #opposite="slotProps"><time>{{ recordTime(slotProps.item.ts) }}</time></template>
         <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : slotProps.item.kind === 'manual' ? '你' : '·' }}</span></template>
         <template #content="slotProps">
-          <details v-if="slotProps.item.kind === 'run'" :key="recordKey(slotProps.item)" class="record-run">
+          <details v-if="slotProps.item.kind === 'run'" :id="`run-${slotProps.item.run.run_id}`" :key="recordKey(slotProps.item)" class="record-run" :class="{ 'record-run-highlight': slotProps.item.run.run_id === highlightRunId }" :open="slotProps.item.run.run_id === highlightRunId">
             <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ runStatusLabel(slotProps.item.run) }} · {{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
             <div class="run-evidence">
               <p v-if="Number(slotProps.item.run.loops) > 0 && !hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
@@ -408,6 +414,7 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
 .record-marker.run { color: var(--ink); background: var(--fox-gold-pale); box-shadow: 0 0 0 1px var(--fox-gold); }
 .record-marker.manual { color: #315875; background: #e6eef4; box-shadow: 0 0 0 1px #7d9ab2; font-size: 11px; font-weight: 700; }
 .record-run, .record-activity { min-width: 0; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.record-run-highlight { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent); }
 .record-manual { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 11px 12px; background: color-mix(in srgb, #e6eef4 70%, var(--paper)); border: 1px solid #a9bccb; border-radius: 10px; }
 .record-manual > span { display: grid; gap: 2px; min-width: 0; }
 .record-manual small, .record-manual em, .record-manual p { color: var(--ink-dim); font-size: 11px; font-style: normal; }

@@ -32,6 +32,7 @@ const error = ref('')
 const hasMoreEvents = ref(false), hasMoreRuns = ref(false)
 const eventCursor = ref<number | null>(null), runCursor = ref<number | null>(null)
 const recordDate = ref('')
+const recordHighlightRunId = ref('')
 const recordLoading = ref(false)
 const recordHasMoreEvents = ref(false), recordHasMoreRuns = ref(false)
 const recordEventCursor = ref<number | null>(null), recordRunCursor = ref<number | null>(null)
@@ -65,6 +66,7 @@ const ledgerOnboarding = ref<LedgerOnboarding | null>(null)
 const ledgerOnboardingBusy = ref('')
 const planningPanelRef = ref<{ openCustomForm: () => Promise<void> } | null>(null)
 const swordWishlist = ref<string[]>([])
+const failedRun = ref<any | null>(null)
 
 const rangeItems = [{ value: 1, label: '24 小时' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' }]
 const honmaruItems = [
@@ -230,6 +232,7 @@ type ReportInsight = {
   score: number
   resource?: string
   date?: string
+  runId?: string
   target?: 'chart' | 'planning' | 'records'
 }
 
@@ -317,7 +320,9 @@ const reportInsights = computed<ReportInsight[]>(() => {
   const completed = Number(summary.value?.runs?.by_status?.completed || 0)
   const failed = Number(summary.value?.runs?.by_status?.failed || 0)
   if (failed) items.push({ key: 'failed-runs', tone: 'alert', score: 98,
-    title: `${rangeLabel.value}有 ${failed} 次任务没顺利收工`, detail: '已经停止继续操作；可以到“全部记录”查看是哪一轮。', target: 'records' })
+    title: `${rangeLabel.value}有 ${failed} 次任务没顺利收工`, detail: '已经停止继续操作；点开会带你到最近一次翻车记录。', target: 'records',
+    date: failedRun.value ? shanghaiDate(Number(failedRun.value.started_at)) : undefined,
+    runId: failedRun.value?.run_id })
   if (completed || sortieCount.value) {
     const details = []
     if (sortieCount.value) details.push(`出阵 ${sortieCount.value.toLocaleString()} 圈${topSortie.value ? `，主要在${topSortie.value}` : ''}`)
@@ -361,7 +366,16 @@ function insightToneLabel(tone: ReportInsight['tone']) {
 
 async function followInsight(insight: ReportInsight) {
   if (insight.target === 'planning') return openPlanning()
-  if (insight.target === 'records') return switchView('records')
+  if (insight.target === 'records') {
+    if (!insight.date) return switchView('records')
+    recordHighlightRunId.value = insight.runId || ''
+    recordDate.value = insight.date
+    view.value = 'records'
+    await loadRecordDay(insight.date)
+    await nextTick()
+    if (insight.runId) document.getElementById(`run-${insight.runId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
   if (insight.target === 'chart' && insight.resource) {
     mode.value = 'single'
     chooseResource(insight.resource)
@@ -666,12 +680,14 @@ async function loadRecordDay(date: string) {
 }
 
 function selectRecordDate(date: string) {
+  recordHighlightRunId.value = ''
   recordDate.value = date
   view.value = 'records'
   void loadRecordDay(date)
 }
 
 function switchView(nextView: 'chart' | 'records') {
+  recordHighlightRunId.value = ''
   view.value = nextView
   if (nextView !== 'records') return
   const date = recordDate.value || latestRecordDate()
@@ -1052,10 +1068,12 @@ async function importLedgerPreview() {
 async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding, nextLists] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null), api.configLists().catch((): Record<string, string[]> => ({}))])
+    const rangeStartedAt = Date.now() / 1000 - nextDays * 86400
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextFailedRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding, nextLists] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.dataRuns(1, undefined, rangeStartedAt, undefined, 'failed'), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null), api.configLists().catch((): Record<string, string[]> => ({}))])
     summary.value = nextSummary
     ledger.value = nextLedger
     planning.value = nextPlanning
+    failedRun.value = nextFailedRuns.items[0] || null
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.started_at >= Date.now() / 1000 - nextDays * 86400)
     hasMoreEvents.value = nextEvents.has_more
@@ -1293,7 +1311,7 @@ onMounted(() => load())
         </section>
       </template>
 
-      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 
       <template v-else>

@@ -440,6 +440,16 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual([event["event_type"] for event in events], ["target"])
         self.assertEqual([run["run_id"] for run in runs], ["target"])
 
+    def test_run_pages_can_filter_failed_status(self):
+        self.store.start_run("completed", "daily", started_at=100)
+        self.store.finish_run("completed", "completed", ended_at=110)
+        self.store.start_run("failed", "daily", started_at=200)
+        self.store.finish_run("failed", "failed", ended_at=210)
+
+        runs = self.store.recent_run_summaries(status="failed")
+
+        self.assertEqual([run["run_id"] for run in runs], ["failed"])
+
     def test_public_api_contract_uses_versioned_store(self):
         from panel.server import api_data_events, api_data_ocr, api_data_summary
 

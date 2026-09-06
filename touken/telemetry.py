@@ -1211,11 +1211,15 @@ class TelemetryStore:
     def recent_run_summaries(self, limit: int = 20, script: str | None = None,
                              before_started_at: float | None = None,
                              from_ts: float | None = None,
-                             to_ts: float | None = None) -> list[dict]:
+                             to_ts: float | None = None,
+                             status: str | None = None) -> list[dict]:
         clauses, args = ["status != 'running'"], []
         if script:
             clauses.append("script = ?")
             args.append(script)
+        if status:
+            clauses.append("status = ?")
+            args.append(status)
         if before_started_at is not None:
             clauses.append("started_at < ?")
             args.append(float(before_started_at))

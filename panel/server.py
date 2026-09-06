@@ -1935,13 +1935,15 @@ async def api_data_events(limit: int = 100, event_type: str = "",
 async def api_data_runs(limit: int = 20, script: str = "",
                         before_started_at: float | None = None,
                         from_ts: float | None = None,
-                        to_ts: float | None = None):
+                        to_ts: float | None = None,
+                        status: str = ""):
     """每轮任务的结构化结算；圈速按相邻完成事件计算，不含盘点时间。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     page_limit = max(1, min(int(limit), 100))
     items = get_telemetry_store().recent_run_summaries(
         limit=page_limit + 1, script=script or None,
-        before_started_at=before_started_at, from_ts=from_ts, to_ts=to_ts)
+        before_started_at=before_started_at, from_ts=from_ts, to_ts=to_ts,
+        status=status or None)
     has_more = len(items) > page_limit
     items = items[:page_limit]
     return {

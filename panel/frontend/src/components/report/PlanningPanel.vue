@@ -352,11 +352,6 @@ onMounted(load)
 
 <template>
   <section class="planning-panel" :class="{ loading }">
-    <header class="planning-page-heading">
-      <div><small>狐之助替你盯全局</small><h3>本丸规划</h3></div>
-      <p>先看锻刀短板和小判去向；特别想攒什么，再单独立目标。</p>
-    </header>
-
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
@@ -446,7 +441,6 @@ onMounted(load)
 
     <div v-else-if="planning" class="planning-empty-state">
       <span><b>还没有目标</b><small>有想攒的资源或活动预算时，再立一个。</small></span>
-      <button type="button" class="secondary" @click="openCustomForm">＋ 立个目标</button>
     </div>
 
     <EventTimeline
@@ -469,11 +463,6 @@ onMounted(load)
 
 <style scoped>
 .planning-panel { display: grid; gap: 10px; }
-.planning-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 2px; }
-.planning-page-heading div { display: grid; gap: 2px; }
-.planning-page-heading small { color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
-.planning-page-heading h3 { margin: 0; font-size: 20px; }
-.planning-page-heading p { max-width: 520px; margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.55; text-align: right; }
 .planning-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 0 2px; }
 .planning-toolbar > div { display: flex; align-items: baseline; gap: 8px; }
 .planning-toolbar h3 { margin: 0; font-size: 18px; }
@@ -528,8 +517,6 @@ onMounted(load)
   .planning-form-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 520px) {
-  .planning-page-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
-  .planning-page-heading p { text-align: left; }
   .planning-form { padding: 14px; }
   .planning-form-fields { grid-template-columns: 1fr; }
   .planning-goal { padding: 14px; }
