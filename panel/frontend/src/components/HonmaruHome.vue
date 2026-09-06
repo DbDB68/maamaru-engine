@@ -281,7 +281,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
       <section class="home-planning-card home-forge-card">
         <p class="home-eyebrow">锻刀盘</p>
         <h2><span aria-hidden="true">⚒</span> {{ resourceWatch?.forge_capacity == null ? '等待资源盘点' : `现在最缺${resourceWatch.limiting.join('、') || '的资源'}` }}</h2>
-        <p v-if="resourceWatch?.forge_capacity != null" class="planning-lead">还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉</p>
+        <p v-if="resourceWatch?.forge_capacity != null" class="planning-lead">还能锻 <b class="pencil-mark">{{ fmt(resourceWatch.forge_capacity) }}</b> 炉</p>
         <div class="forge-meter" role="progressbar" aria-label="最短资源相对余量" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="forgeCapacityPercent"><i :style="{ width: `${forgeCapacityPercent}%` }" /></div>
         <p class="planning-note">四项资源按当前配比折算；まあ丸只提醒最先卡住的那项。</p>
         <button type="button" class="home-text-button" @click="emit('planning')">去本丸 · 规划调整 →</button>
@@ -290,7 +290,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p class="home-eyebrow">博多账房</p>
         <h2><span class="hakata-mark" aria-hidden="true">博</span> 小判消耗监督</h2>
         <dl class="planning-rows">
-          <div><dt>现有家底</dt><dd>{{ fmt(kobanWatch?.current) }}</dd></div>
+          <div><dt>现有家底</dt><dd><span class="pencil-mark">{{ fmt(kobanWatch?.current) }}</span></dd></div>
           <div><dt>已经答应要花</dt><dd>{{ fmt(kobanWatch?.reserved) }}</dd></div>
           <div><dt>近 {{ kobanWatch?.spending_days || 14 }} 天支出</dt><dd>{{ fmt(kobanWatch?.confirmed_spending) }}</dd></div>
         </dl>
@@ -301,7 +301,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
-          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd>{{ eventMoment(nearestEvent) }}</dd></div><div><dt>预算</dt><dd>{{ eventBudget(nearestEvent) }}</dd></div></dl>
+          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div></dl>
           <p class="planning-note">{{ nearestEvent.budget?.message || nearestEvent.note || '活动安排已经收在日程里。' }}</p>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
@@ -332,7 +332,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .home-primary { padding: 9px 16px; border: 1px solid var(--home-green); border-radius: 5px; color: #fffaf0; background: var(--home-green); font-weight: 600; white-space: nowrap; }
 .home-primary:hover { background: #405844; }
 .honmaru-profile { padding: 5px 22px 22px 0; border-right: 1px solid var(--paper-line); overflow-wrap: anywhere; }
-.profile-portrait { display: grid; place-items: center; width: 88px; height: 88px; padding: 5px; margin-bottom: 22px; border: 1px solid #c8bda6; background: var(--paper-card); box-shadow: 3px 4px 0 #d9ceba; transform: rotate(-3deg); }
+.profile-portrait { display: grid; place-items: center; width: 88px; height: 100px; padding: 6px 6px 16px; margin-bottom: 22px; border: 1px solid #c8bda6; background: #fbf8ee; box-shadow: 3px 4px 0 #d9ceba; transform: rotate(-3deg); }
 .profile-portrait img { width: 100%; height: 100%; object-fit: cover; }
 .profile-portrait > span { display: grid; place-items: center; width: 100%; height: 100%; font: 36px Georgia, 'Microsoft YaHei', serif; color: #65735d; background: #e2e7d6; }
 .honmaru-profile h1 { font-size: 24px; line-height: 1.4; margin-bottom: 12px; }
@@ -368,7 +368,9 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .honmaru-home .journal-date { font-size: 13px; display: flex; align-items: center; gap: 10px; margin-bottom: 13px; color: var(--home-green); }
 .journal-date span { font-size: 10px; color: var(--ink-dim); font-weight: 400; }
 .journal-entry { padding: 17px 18px; margin-bottom: 12px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: 3px; }
-.journal-entry.personal-entry { border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; }
+.journal-entry.personal-entry { position: relative; border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 3px), 97% 100%, 93% calc(100% - 2px), 88% 100%, 82% calc(100% - 2px), 76% 100%, 69% calc(100% - 2px), 62% 100%, 54% calc(100% - 2px), 47% 100%, 39% calc(100% - 2px), 31% 100%, 23% calc(100% - 2px), 15% 100%, 8% calc(100% - 2px), 0 100%); }
+.journal-entry.personal-entry::after { content: ''; position: absolute; top: 0; right: 0; width: 11px; height: 11px; background: linear-gradient(225deg, var(--paper) 0 47%, #c9bda7 50% 57%, #eee6d5 60%); }
+.journal-entry.personal-entry header button { margin-right: 8px; }
 .journal-entry header { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 10px; font-size: 10px; color: var(--ink-dim); }
 .journal-entry header button, .entry-status { margin-left: auto; font-size: 10px; }
 .entry-kind { color: #7c715e; }
@@ -388,15 +390,17 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .brief-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: #806748; font-size: 10px; }
 .home-brief h2 { color: #173d6e; font-weight: 500; }
 .brief-detail { color: #173d6e; font-size: 12px; line-height: 1.65; }
-.brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: #e3e9df; font-size: 10px; }
+.brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: linear-gradient(105deg, #edf0e7d9, #dce4dbb8 52%, #f4f3e9c7); border-block: 1px solid #ffffff75; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 10px; }
 .brief-changes span { white-space: nowrap; }
 .brief-changes b { font-weight: 500; }
-.brief-resource { margin: 10px 0 !important; padding: 10px; color: #173d6e; background: #e3e9df; font-size: 11px; line-height: 1.65; }
+.brief-resource { margin: 10px 0 !important; padding: 10px; color: #173d6e; background: linear-gradient(105deg, #e9eee6d9, #dfe7ddb8 48%, #f2f2e9c7); border-block: 1px solid #ffffff70; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 11px; line-height: 1.65; }
 .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
 .home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }
 .planning-lead { margin-bottom: 8px !important; color: #173d6e; font-size: 13px; }
+.pencil-mark { position: relative; z-index: 0; display: inline-block; padding-inline: 2px; font-weight: inherit; }
+.pencil-mark::after { content: ''; position: absolute; z-index: -1; left: -1px; right: 1px; bottom: 0; height: 3px; background: linear-gradient(177deg, transparent 18%, #756c6090 31% 55%, transparent 69%); transform: rotate(-1.2deg); }
 .forge-meter { height: 8px; margin: 10px 0; overflow: hidden; background: #dfddd2; }
 .forge-meter i { display: block; height: 100%; background: #668764; }
 .planning-note { margin: 10px 0 8px !important; color: #796e5f; font-size: 11px; line-height: 1.7; }
@@ -405,6 +409,10 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .planning-rows div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #ded6c7; font-size: 12px; }
 .planning-rows dt { color: #173d6e; }
 .planning-rows dd { margin: 0; color: #173d6e; font-variant-numeric: tabular-nums; text-align: right; }
+.planning-rows dd.budget-ready { display: inline-flex; align-items: center; gap: 5px; color: #315f42; font-weight: 600; }
+.planning-rows dd.budget-ready::before { content: '备'; display: grid; width: 18px; height: 18px; place-items: center; color: #a34535; border: 1px solid #a34535; border-radius: 50%; box-shadow: inset 0 0 0 1px #a3453540; font: 9px/1 serif; transform: rotate(-8deg); }
+.home-event-card { position: relative; }
+.home-event-card::before { content: ''; position: absolute; top: -27px; left: 18px; width: 13px; height: 30px; border-left: 1px solid #b7a58f; border-radius: 55%; box-shadow: -1px 0 0 #f7f0df; opacity: .78; transform: rotate(7deg); }
 .home-inventory { padding: 0 5px; }
 .home-inventory header { display: flex; justify-content: space-between; align-items: baseline; }
 .home-inventory header h2 { margin: 0; }
@@ -434,7 +442,8 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .avatar-picker img { width: 54px; height: 54px; object-fit: cover; border: 3px solid #e5dac4; }
 .avatar-picker small { display: block; color: var(--ink-dim); font-size: 10px; }
 .avatar-picker input { font-size: 12px; width: 100%; }
+@media (min-width: 721px) and (max-width: 1100px) { .home-event-card::before { top: 50%; left: -21px; width: 22px; height: 12px; border-top: 1px solid #b7a58f; border-left: 0; transform: rotate(-3deg); } }
 @media (max-width: 1100px) { .honmaru-home { grid-template-columns: 175px minmax(0, 1fr); gap: 25px; } .honmaru-keepsakes { grid-column: 2; grid-template-columns: 1fr 1fr; gap: 20px; } .home-inventory { grid-column: 1 / -1; } .home-inventory dl { grid-template-columns: 1fr 1fr; gap: 10px 25px; } }
-@media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 66px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-inventory { grid-column: 1; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
+@media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 74px; padding: 4px 4px 11px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-inventory { grid-column: 1; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) { .honmaru-home button { transition: none; } }
 </style>
