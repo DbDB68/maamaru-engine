@@ -1,5 +1,7 @@
 # まあ丸 `🦊` — 《刀剑乱舞 ONLINE》国服本丸管家
 
+**简体中文** · [English](README_EN.md)
+
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
