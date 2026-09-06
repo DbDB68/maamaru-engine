@@ -380,8 +380,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-panel button, .wf-dialog button { cursor: pointer; font: inherit; }
 .wf-panel button:disabled, .wf-dialog button:disabled { cursor: default; opacity: .42; }
 .wf-panel button:focus-visible, .wf-dialog button:focus-visible, .wf-dialog input:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
-.wf-layout { display: grid; grid-template-columns: 205px minmax(0, 1fr); gap: 28px; align-items: start; padding: 22px clamp(22px, 4vw, 58px); }
-.wf-library { padding-top: 8px; min-width: 0; }
+.wf-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 0; align-items: stretch; padding: 0; }
+/* 侧栏与系统设置导航同款：贴左缘、自成一列米色带。 */
+.wf-library { min-width: 0; padding: 22px 14px; background: #f1e7d6; border-right: 1px solid var(--line); }
 .wf-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
 .wf-library h3 { margin: 0; font-size: 13px; }
 .wf-library > header > span { font-size: 11px; color: var(--ink-dim); }
@@ -399,7 +400,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-preset:hover { background: var(--paper-panel); }
 .wf-preset.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }
 .wf-library-note { font-size: 11px; line-height: 1.9; color: var(--ink-dim); margin: 24px 12px; }
-.wf-editor { padding: 0; min-width: 0; border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
+.wf-editor { margin: 22px clamp(22px, 4vw, 58px); align-self: start; padding: 0; min-width: 0; border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
 .wf-edit-fields { border: 0; margin: 0; padding: 25px 26px 22px; min-width: 0; }
 .wf-editor-head { display: flex; gap: 16px; align-items: center; padding-bottom: 24px; }
 .wf-tutorial { margin: -8px 0 20px; padding: 12px 14px; background: var(--paper-panel); border-radius: 5px; color: var(--ink-dim); font-size: 12px; line-height: 1.8; }
@@ -495,14 +496,15 @@ button.wf-danger { color: #a04b3a; }
 .wf-switch > p { color: var(--ink-dim); font-size: 13px; line-height: 1.7; }
 .wf-switch-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
 @media (max-width: 1000px) {
-  .wf-layout { grid-template-columns: 170px minmax(0, 1fr); gap: 18px; }
+  .wf-layout { grid-template-columns: 170px minmax(0, 1fr); }
   .wf-edit-fields { padding: 20px 18px; }
   .wf-toolbar { padding: 14px 18px; }
   .wf-step-detail { padding-left: 18px; }
 }
 @media (max-width: 720px) {
-  .wf-layout { grid-template-columns: 1fr; gap: 18px; padding: 16px 14px; }
-  .wf-library { padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .wf-layout { grid-template-columns: 1fr; }
+  .wf-library { padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .wf-editor { margin: 16px 14px; }
   .wf-library > header { flex: 1; margin: 0; }
   .wf-new { width: auto; }
   .wf-presets { display: flex; width: 100%; overflow-x: auto; gap: 8px; margin: 0; padding-bottom: 3px; }
@@ -539,4 +541,6 @@ button.wf-danger { color: #a04b3a; }
   .wf-picker-footer > span { font-size: 11px; }
   .wf-switch { padding: 22px 18px; }
 }
+/* 像素主题：侧栏与 .system-nav 同板。 */
+:global(body[data-theme='pixel']) .wf-library { background: #e8dfca; border-color: #c8bea5; }
 </style>
