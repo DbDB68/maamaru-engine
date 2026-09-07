@@ -17,6 +17,12 @@ let timer: ReturnType<typeof setTimeout> | undefined
 let revision = 0
 
 const canSave = computed(() => result.value?.cost != null && result.value.cost > 0 && result.value.campaign_status !== '已结束')
+// 按次数模式才用：目标总时长按剩余天数均摊，每天要挂多久
+const dailyHours = computed(() => {
+  const r = result.value
+  if (!r || r.hours == null || r.remaining_hours <= 0) return null
+  return r.hours * 24 / r.remaining_hours
+})
 const dateText = (value: string) => new Date(value).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false})
 
 watch(form, () => {
@@ -83,7 +89,8 @@ onMounted(() => {
       <template v-if="result?.runs != null">
         <div><small>{{ form.mode === 'runs' ? '计划出阵' : '预计能打' }}</small><strong>{{ result.runs.toLocaleString() }}<em> 次</em></strong></div>
         <div><small>需要小判</small><strong>{{ result.cost?.toLocaleString() }}<em> 枚</em></strong></div>
-        <div><small>到截止一共要挂</small><strong>{{ result.hours?.toFixed(1) }}<em> 小时</em></strong></div>
+        <div v-if="form.mode === 'runs'"><small>到截止一共要挂</small><strong>{{ result.hours?.toFixed(1) }}<em> 小时</em></strong><small v-if="dailyHours != null" class="daily-avg">摊下来每天约 {{ dailyHours.toFixed(1) }} 小时</small></div>
+        <div v-else><small>其中免费提灯</small><strong>{{ result.free_runs.toLocaleString() }}<em> 次</em></strong></div>
       </template>
       <template v-else-if="result">
         <div class="missing-pace"><strong>还差这张图的圈速</strong><span>跑过几圈后会自动采用实测，也可以在下方先填一个。</span></div>
@@ -92,7 +99,7 @@ onMounted(() => {
     </div>
 
     <div class="budget-decision">
-      <p v-if="result?.runs != null">每天 {{ form.hours_per_day }} 小时，最多花 {{ Number(form.budget).toLocaleString() }} 小判。保存后，它会作为一笔独立活动预算，并告诉你会让攒钱目标推迟多久。</p>
+      <p v-if="result?.runs != null">{{ form.mode === 'runs' ? `目标打 ${result.runs.toLocaleString()} 次` : `每天 ${form.hours_per_day} 小时` }}，最多花 {{ Number(form.budget).toLocaleString() }} 小判。保存后，它会作为一笔独立活动预算，并告诉你会让攒钱目标推迟多久。</p>
       <p v-else>先补一个圈速，才能把这套异去方案保存成活动预算。</p>
       <button type="button" class="primary" :disabled="!canSave || saving" @click="saveGoal">{{ saving ? '正在留预算……' : saved ? '活动预算已更新' : '按这个方案立为活动预算' }}</button>
     </div>
@@ -141,6 +148,7 @@ h3 { margin: 3px 0 0; font-size: 19px; }
 .budget-result em { color: var(--ink-dim); font-size: 11px; font-style: normal; font-weight: 400; }
 .budget-result > small, .budget-result > p { align-self: center; margin: 0; padding: 14px 16px; color: var(--ink-dim); }
 .budget-result .missing-pace { grid-column: 1 / -1; border-left: 0; }
+.budget-result .daily-avg { font-size: 11px; }
 .budget-result .missing-pace strong { font-size: 16px; }
 .budget-result .missing-pace span { color: var(--ink-dim); font-size: 12px; }
 .budget-decision { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 16px; }

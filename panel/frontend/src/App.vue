@@ -97,6 +97,17 @@ const homeEntries = computed<HomeLayoutEntry[]>(() => (homeLayoutLoaded.value ? 
   .filter(key => scripts.value[key])
   .map(key => ({ kind: 'script' as const, key, label: scripts.value[key].label })))
   .filter(entry => entry.kind !== 'script' || (scripts.value[entry.key] && !eventHidden.value.includes(entry.key))))
+// 编辑模式渲染【未过滤】的完整清单（editOrder），行号和移动操作的下标严格对齐。
+// 用过滤后的 homeEntries 渲染会把活动未开放的脚本藏掉，editOrder 里它们还在，
+// 上移/下移就会点到错位的行（2026-09-07 老大实测：挪工作流，动的却是炼糖/刷花）。
+const editEntries = computed<HomeLayoutEntry[]>(() => editOrder.value.map(key => {
+  if (key.startsWith('wf:')) {
+    const preset = homeWorkflows.value.find(item => `wf:${item.id}` === key)
+    return { kind: 'workflow' as const, key, label: preset ? preset.name : key }
+  }
+  const info = scripts.value[key]
+  return { kind: 'script' as const, key, label: info ? info.label : key }
+}))
 const eventHiddenLabels = computed(() => eventHidden.value
   .filter(key => scripts.value[key])
   .map(key => scripts.value[key].label))
@@ -583,17 +594,17 @@ watch(tab, value => {
           <button type="button" class="home-functions-arrow previous" aria-label="上一个常用功能" :disabled="editingHome || homeScriptIndex <= 0" @click="chooseAdjacentHome(-1)">‹</button>
         <nav ref="homeFunctionsNav">
           <template v-if="editingHome">
-            <div v-for="(entry, index) in homeEntries" :key="entry.key" class="home-entry-row">
+            <div v-for="(entry, index) in editEntries" :key="entry.key" class="home-entry-row">
               <button
                 :data-script="entry.key"
                 :class="{ active: selected === entry.key }"
                 @click="selected = entry.key"
               >
-                <span><img class="task-menu-icon" :src="taskIcon(entry.kind === 'workflow' ? 'workflow' : entry.key)" alt="">{{ entry.label }}</span>
+                <span><img class="task-menu-icon" :src="taskIcon(entry.kind === 'workflow' ? 'workflow' : entry.key)" alt="">{{ entry.label }}<small v-if="entry.kind === 'script' && eventHidden.includes(entry.key)">（未开放）</small></span>
               </button>
               <span class="home-entry-tools">
                 <button type="button" title="往上挪" :disabled="index === 0 || savingHomeLayout" @click="moveHomeEntry(index, -1)">↑</button>
-                <button type="button" title="往下挪" :disabled="index === homeEntries.length - 1 || savingHomeLayout" @click="moveHomeEntry(index, 1)">↓</button>
+                <button type="button" title="往下挪" :disabled="index === editEntries.length - 1 || savingHomeLayout" @click="moveHomeEntry(index, 1)">↓</button>
                 <button type="button" :disabled="savingHomeLayout" @click="hideHomeEntry(entry.key)">收起</button>
               </span>
             </div>
