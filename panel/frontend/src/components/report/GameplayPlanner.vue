@@ -83,7 +83,7 @@ onMounted(() => {
       <template v-if="result?.runs != null">
         <div><small>{{ form.mode === 'runs' ? '计划出阵' : '预计能打' }}</small><strong>{{ result.runs.toLocaleString() }}<em> 次</em></strong></div>
         <div><small>需要小判</small><strong>{{ result.cost?.toLocaleString() }}<em> 枚</em></strong></div>
-        <div><small>大约用时</small><strong>{{ result.hours?.toFixed(1) }}<em> 小时</em></strong></div>
+        <div><small>到截止一共要挂</small><strong>{{ result.hours?.toFixed(1) }}<em> 小时</em></strong></div>
       </template>
       <template v-else-if="result">
         <div class="missing-pace"><strong>还差这张图的圈速</strong><span>跑过几圈后会自动采用实测，也可以在下方先填一个。</span></div>
@@ -100,7 +100,7 @@ onMounted(() => {
 
     <div class="outing-choice">
       <label>想去哪张图<PixelControl v-model="form.map_no" as="select" numeric><option :value="1">1-1 函馆</option><option :value="2">1-2 会津</option><option :value="3">1-3 宇都宫</option><option :value="4">1-4 鸟羽</option></PixelControl></label>
-      <div><span>每天留多少时间</span><SegmentedControl :model-value="form.hours_per_day" @update:model-value="form.hours_per_day = Number($event)" label="每天出阵时间" :items="[{value: 1, label: '1 小时'}, {value: 2, label: '2 小时'}, {value: 3, label: '3 小时'}, {value: 6, label: '6 小时'}]" /></div>
+      <div><span>每天挂机几小时</span><SegmentedControl :model-value="form.hours_per_day" @update:model-value="form.hours_per_day = Number($event)" label="每天出阵时间" :items="[{value: 1, label: '1 小时'}, {value: 2, label: '2 小时'}, {value: 3, label: '3 小时'}, {value: 6, label: '6 小时'}]" /></div>
     </div>
 
     <details class="adjustments"><summary>换个目标，或调整预算</summary>
