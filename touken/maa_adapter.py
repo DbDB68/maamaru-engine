@@ -288,7 +288,11 @@ class MAAAdapter:
             return False
         print("[MAA] 资源加载成功")
 
-        # 3. 连接 ADB
+        # 3. 连接 ADB（配置的地址拒连时先找备胎：无头 MuMu 只开 emulator-5554）
+        from .emulator import adb_alive, resolve_adb_address
+        if not adb_alive(self.adb_path, self.adb_address):
+            self.adb_address = resolve_adb_address(self.adb_path,
+                                                   self.adb_address)
         print(f"[MAA] 连接 ADB: {self.adb_address}")
         if not Path(self.adb_path).exists():
             print(f"[MAA 错误] 找不到 adb: {self.adb_path}")

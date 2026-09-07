@@ -32,10 +32,37 @@ def adb_alive(adb_path: str, address: str) -> bool:
         return False
 
 
+def resolve_adb_address(adb_path: str, address: str, emit=print) -> str:
+    """配置的 ADB 地址连不上时找备胎设备。
+
+    无头运行的 MuMu（窗口被关但 VM 还活着）不开 16384，只暴露经典
+    模拟器口 emulator-5554（2026-09-07 晚实测：窗口消失后 16384 拒连，
+    工作流三趟全死在连接上）。仅当 adb devices 里恰好只有一台
+    emulator-* 时才换线——有多台说明可能跑着别的模拟器，不乱认。
+    """
+    try:
+        _run([adb_path, "connect", address], timeout=15)
+        if adb_alive(adb_path, address):
+            return address
+        r = _run([adb_path, "devices"], timeout=15)
+        cands = [ln.split()[0] for ln in (r.stdout or "").splitlines()
+                 if ln.startswith("emulator-")
+                 and ln.strip().endswith("device")]
+        if len(cands) == 1:
+            emit(f"[模拟器] {address} 连不上，发现无头模拟器 {cands[0]}，改走这条线")
+            return cands[0]
+    except Exception:
+        pass
+    return address  # 维持原地址，后面的自启动逻辑接着兜底
+
+
 def ensure_emulator(adb_path: str, address: str, manager_path: str = None,
                     instance: int = 0, emit=print, max_wait_s: int = 360) -> bool:
     """确保模拟器在线：已经在跑秒回 True；没在跑就拉起来等开机"""
     if adb_alive(adb_path, address):
+        return True
+    # 备胎通道：无头 MuMu 不开 16384，恰好一台 emulator-* 活着就算在线
+    if resolve_adb_address(adb_path, address, emit=emit) != address:
         return True
     if not manager_path:
         emit("[模拟器] ADB 连不上，也没配 MuMuManager 路径，没法自启动")
