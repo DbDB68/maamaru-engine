@@ -107,37 +107,54 @@ class ExpeditionMixin:
             return
         time.sleep(1.0)
 
-        # ========== 2. 选时代卡 ==========
-        yield f"[远征] 🗺️ 翻去时代{era}..."
-        self._click_point(cfg["eras"][str(era)])
-        time.sleep(1.0)
-
-        # ========== 3. 选小图：给了卡位按坐标点，没给就 OCR 点名字 ==========
-        if map_slot is not None:
-            slots = cfg.get("map_slots", {})
-            if str(map_slot) not in slots:
-                yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
-                return
-            yield f"[远征] 🗺️ 点小图卡位{map_slot}..."
-            self._click_point(slots[str(map_slot)])
-            time.sleep(1.0)
-        elif map_name:
-            yield f"[远征] 🔍 找小图「{map_name}」..."
-            map_roi = roi_4to4(*cfg["map_ocr_roi"])
-            map_pt = None
-            for _ in range(6):
-                self.maa.screenshot(force=True)
-                map_pt = self.maa.ocr(expected=map_name, roi=map_roi)
-                if map_pt:
-                    break
-                time.sleep(0.5)
-            if not map_pt:
-                yield f"[远征] 没找到小图「{map_name}」（名字写错了？时代不对？要翻页？），停"
-                return
-            self.maa.click(map_pt)
-            time.sleep(1.0)
-        else:
+        # ========== 2/3. 选时代卡 → 选小图（点完必须看到图名才算数） ==========
+        # 时代卡和小图卡位都是盲点坐标；点歪了会把队伍派去错误的图，
+        # 而第 9 步的"远征中"验证只认红字不认图，派错了也假绿。
+        # 所以选完必须全屏 OCR 对一遍图名，对不上重选一次，再不行就停。
+        expect_name = map_name
+        if not expect_name and map_slot is not None:
+            _, expect_name, _ = _map_meta(era, map_slot)
+        slots = cfg.get("map_slots", {})
+        if map_slot is not None and str(map_slot) not in slots:
+            yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
+            return
+        if map_slot is None and not map_name:
             yield "[远征] 既没给地图名字也没给卡位，不知道去哪，停"
+            return
+
+        selected = False
+        for attempt in range(2):
+            if attempt:
+                yield "[远征] 没确认选中目标图，重选一次"
+            yield f"[远征] 🗺️ 翻去时代{era}..."
+            self._click_point(cfg["eras"][str(era)])
+            time.sleep(1.0)
+
+            if map_slot is not None:
+                yield f"[远征] 🗺️ 点小图卡位{map_slot}..."
+                self._click_point(slots[str(map_slot)])
+                time.sleep(1.0)
+            else:
+                yield f"[远征] 🔍 找小图「{map_name}」..."
+                map_roi = roi_4to4(*cfg["map_ocr_roi"])
+                map_pt = None
+                for _ in range(6):
+                    self.maa.screenshot(force=True)
+                    map_pt = self.maa.ocr(expected=map_name, roi=map_roi)
+                    if map_pt:
+                        break
+                    time.sleep(0.5)
+                if not map_pt:
+                    yield f"[远征] 没找到小图「{map_name}」（名字写错了？时代不对？要翻页？），停"
+                    return
+                self.maa.click(map_pt)
+                time.sleep(1.0)
+
+            if not expect_name or self._confirm_map_selected(expect_name):
+                selected = True
+                break
+        if not selected:
+            yield f"[远征] 两次都没确认选中「{expect_name}」，怕派错队伍，停"
             return
 
         # ========== 4. 点"部队选择" → 等部队选择界面 ==========
@@ -396,6 +413,23 @@ class ExpeditionMixin:
         return
 
     # ==================== 收菜辅助 ====================
+
+    def _confirm_map_selected(self, expect_name: str) -> bool:
+        """全屏 OCR 确认目标图名在画面上（选中后详情面板和卡列表都有名字）。
+        只比汉字、双向包含，防 OCR 吃掉「·」或详略名差异。"""
+        target = re.sub(r"[^一-鿿]", "", expect_name or "")
+        if len(target) < 2:
+            return True  # 名字太短没法对，别挡路
+        self.maa.screenshot(force=True)
+        try:
+            tokens = self.maa.ocr_all(roi_4to4(0, 0, 1280, 720)) or []
+        except Exception:
+            return False
+        for text, _point in tokens:
+            t = re.sub(r"[^一-鿿]", "", str(text))
+            if len(t) >= 2 and (t in target or target in t):
+                return True
+        return False
 
     def _read_settlement_rewards(self, cfg) -> tuple[dict, str | None]:
         """读取结算页四行基础资源；任何一行没读清就只跳过该行。"""

@@ -161,13 +161,13 @@ class DailyReportTests(unittest.TestCase):
             "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了",
             "[南瓜] 剪影更新没生效（令牌烧完了，或者有弹窗没驱散掉），收工",
             "[南瓜] 更新完部队选择按钮没回来",
+            "[SHOP] 购买按钮没识别到或点了没反应，本次未购买",
         ):
             self.assertTrue(_is_fail(msg), msg)
 
     def test_benign_skip_and_fallback_wording_stays_green(self):
-        """幂等跳过、兜底坐标、可自愈的提示不许误伤。"""
+        """幂等跳过、可自愈的提示不许误伤。"""
         for msg in (
-            "[SHOP] 模板匹配购买按钮失败，使用固定坐标 (100, 200)",
             "[SHOP] 今日暖心礼包已售罄，说明此前已经领取，跳过",
             "[签到] 没有领取奖励按钮（今天签过了？），跳过",
             "[签到] 没直接落在签到页，点签到标签",
@@ -303,6 +303,81 @@ class ShopGiftTests(unittest.TestCase):
                          (885, 265, 330, 95))
         self.assertEqual([roi.x for expected, roi in flow.maa.ocr_rois
                           if expected == "暖心"], [0, 700])
+
+    class _ShopMaa:
+        """走完暖心礼包全程的柜台：认"暖心"、认领取模板、0价标签在买完之前一直在。
+        buy_via_ocr=True 时文字兜底能找到"购买"按钮 (500,500)。"""
+
+        def __init__(self, buy_via_ocr=False):
+            self.clicks = []
+            self.buy_via_ocr = buy_via_ocr
+            self.bought = False
+
+        def screenshot(self, force=False):
+            pass
+
+        def click(self, point):
+            self.clicks.append((point.x, point.y))
+            if (point.x, point.y) == (500, 500):
+                self.bought = True
+
+        def ocr(self, expected, roi, match_mode="contains"):
+            if expected == "暖心":
+                return Point(145, 145)
+            if expected == "0":
+                return None if self.bought else Point(850, 417)
+            if expected == "购买" and self.buy_via_ocr:
+                return Point(500, 500)
+            return None
+
+        def template_match(self, template, roi=None, threshold=0.7):
+            if template == "领取.png":
+                return Point(400, 300)
+            return None
+
+        def exists(self, template):
+            return False
+
+    @staticmethod
+    def _shop_flow(maa):
+        class Flow(RewardsMixin):
+            def __init__(self):
+                self.current_location = "万屋"
+                self.maa = maa
+                self.config = {"shop": {"free_gift": {
+                    "find_text": {"expected": "暖心", "roi": [0, 100, 700, 650]},
+                    "claim_button": {"template": "领取.png"},
+                    "popup_verify": {"expected": "0",
+                                     "roi": [806, 400, 911, 435]},
+                    "popup_buy": {"template": "购买.png",
+                                  "roi": [400, 450, 900, 600],
+                                  "fallback_target": [638, 502]},
+                }}}
+
+            def navigate_to_stream(self, location):
+                return iter(())
+
+        return Flow()
+
+    def test_unrecognized_buy_button_never_blind_clicks(self):
+        # 购买按钮模板和文字都认不出：绝不盲点固定坐标（2026-09-07 起禁用），
+        # 如实报"本次未购买"让成绩单判红
+        flow = self._shop_flow(self._ShopMaa(buy_via_ocr=False))
+        with patch("touken.flows.rewards.time.sleep"):
+            logs = list(flow.claim_free_gift_stream())
+
+        self.assertTrue(any("本次未购买" in m for m in logs))
+        self.assertEqual(flow.maa.clicks, [(400, 300)])  # 只点过领取
+        self.assertNotIn((638, 502), flow.maa.clicks)    # 旧盲点坐标不许碰
+
+    def test_ocr_fallback_buy_confirmed_by_price_vanishing(self):
+        # 模板认不出购买按钮 → 文字兜底点 (500,500)；0价标签消失才算买成
+        flow = self._shop_flow(self._ShopMaa(buy_via_ocr=True))
+        with patch("touken.flows.rewards.time.sleep"):
+            logs = list(flow.claim_free_gift_stream())
+
+        self.assertIn((500, 500), flow.maa.clicks)
+        self.assertTrue(any("领取成功" in m for m in logs))
 
 
 class TaskRewardTests(unittest.TestCase):

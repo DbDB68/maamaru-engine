@@ -159,29 +159,57 @@ class RewardsMixin:
                 self._click_template_config(close_config)
             return
 
-        # 5. 点击弹窗购买按钮
+        # 5. 点击弹窗购买按钮（状态驱动：点完必须看到0价标签消失才算买成）
         yield "[SHOP] 点击购买按钮..."
         buy_config = shop_config["popup_buy"]
         buy_roi_raw = buy_config.get("roi", [0, 0, 1280, 720])
         buy_roi = roi_4to4(buy_roi_raw[0], buy_roi_raw[1], buy_roi_raw[2], buy_roi_raw[3])
 
-        buy_result = self.maa.template_match(
-            template=buy_config["template"],
-            roi=buy_roi,
-            threshold=0.5
-        )
-
-        if buy_result:
+        bought = False
+        for _ in range(3):
+            buy_result = self.maa.template_match(
+                template=buy_config["template"],
+                roi=buy_roi,
+                threshold=0.5
+            )
+            if not buy_result:
+                # 模板认不出用文字兜底；都认不出绝不盲点固定坐标
+                # （2026-09-07 起禁用盲点：点位飘了会买错东西，花的是真小判）
+                buy_result = self.maa.ocr("购买", buy_roi)
+                if buy_result:
+                    yield (f"[SHOP] 通过文字找到购买按钮 at "
+                           f"({buy_result.x}, {buy_result.y})")
+            if not buy_result:
+                break
             self.maa.click(buy_result)
             yield f"[SHOP] 点击购买 at ({buy_result.x}, {buy_result.y})"
-        else:
-            # 使用配置的固定坐标
-            fallback = buy_config.get("fallback_target", [640, 550])
-            yield f"[SHOP] 模板匹配购买按钮失败，使用固定坐标 {fallback}"
-            self._click_point(fallback)
+            # 0价标签连续两帧消失 = 购买被受理（单帧 OCR 抖一下不算数）
+            for _ in range(8):
+                time.sleep(0.5)
+                self.maa.screenshot(force=True)
+                if self.maa.ocr(expected=verify_config["expected"],
+                                roi=verify_roi,
+                                match_mode=verify_config.get("match_mode",
+                                                             "contains")):
+                    continue
+                self.maa.screenshot(force=True)
+                if not self.maa.ocr(
+                        expected=verify_config["expected"], roi=verify_roi,
+                        match_mode=verify_config.get("match_mode",
+                                                     "contains")):
+                    bought = True
+                    break
+            if bought:
+                break
+            yield "[SHOP] 购买弹窗还在，补点一次"
 
-        yield "[SHOP] 等待领取完成..."
-        time.sleep(1.0)
+        if not bought:
+            yield "[SHOP] 购买按钮没识别到或点了没反应，本次未购买"
+            # 弹窗别留给下一个流程
+            close_config = shop_config.get("popup_close")
+            if close_config:
+                self._click_template_config(close_config)
+            return
 
         # 6. 关闭可能的后续弹窗
         close_config = shop_config.get("popup_close")
