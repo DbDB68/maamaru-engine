@@ -1090,6 +1090,26 @@ def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
     return cards[event]
 
 
+# 一圈钥匙的合理上限：实测 9~37 把，OCR 读岔会产生 10157 这种垃圾值
+MAX_PLAUSIBLE_KEYS_PER_RUN = 100
+
+
+def _legacy_period_in_window(marker, name: str, start_dt, end_dt) -> bool:
+    """老版本（2026-09-07 前）把期次标签打成「活动名@跑圈当天日期」，
+    同名且日期落在本期窗口内的老标签仍算本期实测，别让数据白跑。"""
+    prefix = f"{name}@"
+    if not (isinstance(marker, str) and marker.startswith(prefix)):
+        return False
+    try:
+        day = date.fromisoformat(marker[len(prefix):])
+    except ValueError:
+        return False
+    if start_dt is None:
+        return False
+    upper = end_dt.date() if end_dt else date.max
+    return start_dt.date() <= day <= upper
+
+
 def measured_keys_per_run(store, *, name: str | None = None,
                           card: dict | None = None,
                           limit: int = 50) -> dict | None:
@@ -1107,12 +1127,13 @@ def measured_keys_per_run(store, *, name: str | None = None,
         payload = event.get("payload")
         if not (isinstance(payload, dict)
                 and isinstance(payload.get("keys"), (int, float))
-                and payload["keys"] > 0):
+                and 0 < payload["keys"] <= MAX_PLAUSIBLE_KEYS_PER_RUN):
             continue
         if this_period:
             marker = payload.get("period")
             if marker:
-                if marker != this_period:
+                if marker != this_period and not _legacy_period_in_window(
+                        marker, name, start_dt, end_dt):
                     continue  # 别期的实测
             elif start_dt is not None:
                 ts = event.get("ts")

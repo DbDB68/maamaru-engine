@@ -811,6 +811,63 @@ class MeasuredKeysTests(unittest.TestCase):
                 return []
         self.assertIsNone(advisor.measured_keys_per_run(_Store()))
 
+    CARD = {"start_date": "2026-08-27",
+            "start_at": "2026-08-27T10:00:00+08:00",
+            "end_at": "2026-09-10T05:00:00+08:00"}
+
+    def _store(self, events):
+        class _Store:
+            def recent_events(self, limit=100, event_type=None):
+                return events
+        return _Store()
+
+    def test_current_period_marker_counts(self):
+        events = [{"payload": {"keys": 10,
+                               "period": "江户城潜入调查@2026-08-27"}},
+                  {"payload": {"keys": 20,
+                               "period": "江户城潜入调查@2027-08-27"}}]
+        result = advisor.measured_keys_per_run(
+            self._store(events), name="江户城潜入调查", card=self.CARD)
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(result["per_run"], 10)
+
+    def test_legacy_run_date_marker_in_window_counts(self):
+        # 老版本把期次标签打成跑圈当天日期：落在本期窗口内的仍算本期
+        events = [{"payload": {"keys": 10,
+                               "period": "江户城潜入调查@2026-09-07"}},
+                  {"payload": {"keys": 20,
+                               "period": "江户城潜入调查@2026-08-20"}},  # 窗口前
+                  {"payload": {"keys": 30,
+                               "period": "江户城潜入调查@2026-09-11"}},  # 窗口后
+                  {"payload": {"keys": 40,
+                               "period": "别的活动@2026-09-01"}}]
+        result = advisor.measured_keys_per_run(
+            self._store(events), name="江户城潜入调查", card=self.CARD)
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(result["per_run"], 10)
+
+    def test_implausible_ocr_garbage_dropped(self):
+        events = [{"payload": {"keys": 10157,
+                               "period": "江户城潜入调查@2026-08-27"}},
+                  {"payload": {"keys": -10105,
+                               "period": "江户城潜入调查@2026-08-27"}},
+                  {"payload": {"keys": 25,
+                               "period": "江户城潜入调查@2026-08-27"}}]
+        result = advisor.measured_keys_per_run(
+            self._store(events), name="江户城潜入调查", card=self.CARD)
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(result["per_run"], 25)
+
+    def test_markerless_events_fall_back_to_ts_window(self):
+        start = datetime(2026, 8, 27, 12, 0).timestamp()
+        before = datetime(2026, 8, 26, 12, 0).timestamp()
+        events = [{"ts": start, "payload": {"keys": 10}},
+                  {"ts": before, "payload": {"keys": 99}}]
+        result = advisor.measured_keys_per_run(
+            self._store(events), name="江户城潜入调查", card=self.CARD)
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(result["per_run"], 10)
+
 
 class EventCardStorageTests(unittest.TestCase):
     def setUp(self):

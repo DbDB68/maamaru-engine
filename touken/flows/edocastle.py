@@ -100,6 +100,17 @@ class EdocastleMixin:
         boss = archive.get("boss", 2)
         skip_point = cfg.get("skip_tap", [775, 695])
 
+        # 记账期次：必须是「活动名@开幕日」（算盘的期次口径），
+        # 不能拿跑圈当天日期——否则实测全被当成别届数据丢弃
+        # （2026-09-07 前就是这么写错的，老数据由读取端兼容）
+        from ..advisor import load_event_cards
+        from ..event_history import period_key
+        from ..runtime_paths import STATE_DIR
+        period = period_key(
+            "江户城潜入调查",
+            load_event_cards(STATE_DIR).get("江户城潜入调查") or {},
+        ) or f"江户城潜入调查@{time.strftime('%Y-%m-%d')}"
+
         # ========== 1. 导航到出阵 ==========
         yield "[江户城] 正在导航到出阵…"
         for nav_msg in self.navigate_to_stream("出阵"):
@@ -196,17 +207,17 @@ class EdocastleMixin:
                 yield f"[江户城] 结算后钥匙总数没读到，按 HUD 估算 {keys_after} 把"
             delta = keys_after - keys_before
             total_keys += delta
-            period = f"江户城潜入调查@{time.strftime('%Y-%m-%d')}"
             if ok:
                 if hasattr(self, "record_event"):
-                    self.record_event(
-                        "edocastle.run_completed",
-                        keys=delta,
-                        period=period,
-                        difficulty=4,
-                        run_no=runs_done + 1,
-                        team_no=team_no,
-                    )
+                    from ..advisor import MAX_PLAUSIBLE_KEYS_PER_RUN
+                    payload = dict(period=period, difficulty=4,
+                                   run_no=runs_done + 1, team_no=team_no)
+                    if 0 < delta <= MAX_PLAUSIBLE_KEYS_PER_RUN:
+                        payload["keys"] = delta
+                    else:
+                        yield (f"[江户城] 本圈钥匙差 {delta:+d} 离谱，"
+                               "疑似 OCR 读岔，这趟不记场均")
+                    self.record_event("edocastle.run_completed", **payload)
                 yield (
                     f"[江户城] ✓ 第 {runs_done + 1} 圈收工，本圈钥匙 {delta:+d} "
                     f"（累计 {total_keys} 把）"
