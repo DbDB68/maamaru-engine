@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from touken.emulator_discovery import (
     auto_configure_emulator,
@@ -138,7 +139,7 @@ class EmulatorDiscoveryTests(unittest.TestCase):
 class ResolveAdbAddressTests(unittest.TestCase):
     """无头 MuMu 备胎地址（2026-09-07：窗口消失后 16384 拒连，工作流三趟全灭）"""
 
-    def _run_with(self, monkeypatch, devices_out, alive):
+    def _run_with(self, devices_out, alive):
         import touken.emulator as emu
 
         class R:
@@ -151,49 +152,38 @@ class ResolveAdbAddressTests(unittest.TestCase):
             if cmd[1:2] == ["devices"]:
                 return R(devices_out)
             return R("")
-        monkeypatch.setattr(emu, "_run", fake_run)
-        monkeypatch.setattr(emu, "adb_alive",
-                            lambda adb_path, address: alive(address))
-        return emu
+        # 不用 pytest.MonkeyPatch：发布流水线只装 unittest 环境
+        return emu, patch.multiple(
+            emu, _run=fake_run,
+            adb_alive=lambda adb_path, address: alive(address))
 
     def test_configured_address_alive_stays(self):
-        import pytest
-        mp = pytest.MonkeyPatch()
-        emu = self._run_with(mp, "", alive=lambda a: True)
-        try:
+        emu, patches = self._run_with("", alive=lambda a: True)
+        with patches:
             self.assertEqual(
                 emu.resolve_adb_address("adb", "127.0.0.1:16384",
                                         emit=lambda m: None),
                 "127.0.0.1:16384")
-        finally:
-            mp.undo()
 
     def test_single_headless_emulator_becomes_fallback(self):
-        import pytest
-        # 用 monkeypatch 保证还原
-        mp = pytest.MonkeyPatch()
-        emu = self._run_with(mp, "List of devices attached\nemulator-5554\tdevice\n",
-                             alive=lambda a: a == "emulator-5554")
-        try:
+        emu, patches = self._run_with(
+            "List of devices attached\nemulator-5554\tdevice\n",
+            alive=lambda a: a == "emulator-5554")
+        with patches:
             self.assertEqual(
                 emu.resolve_adb_address("adb", "127.0.0.1:16384",
                                         emit=lambda m: None),
                 "emulator-5554")
-        finally:
-            mp.undo()
 
     def test_multiple_emulators_never_guessed(self):
-        import pytest
-        mp = pytest.MonkeyPatch()
-        emu = self._run_with(mp, "emulator-5554\tdevice\nemulator-5556\tdevice\n",
-                             alive=lambda a: False)
-        try:
+        emu, patches = self._run_with(
+            "emulator-5554\tdevice\nemulator-5556\tdevice\n",
+            alive=lambda a: False)
+        with patches:
             self.assertEqual(
                 emu.resolve_adb_address("adb", "127.0.0.1:16384",
                                         emit=lambda m: None),
                 "127.0.0.1:16384")
-        finally:
-            mp.undo()
 
 
 if __name__ == "__main__":
