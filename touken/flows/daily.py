@@ -577,6 +577,21 @@ class DailyMixin:
             if acted:
                 clean = 0
                 continue
+            # 上次出阵被打断（手动停/断电/断网隔夜），重登会问要不要续打。
+            # 脚本对旧断点毫无记忆，续打等于闭眼进战斗（重伤拦截/阵型都不在
+            # 岗）——点【否】清掉中断数据回本丸，最多损失一圈没结算的进度。
+            # （断网自愈流程里的【是】是另一码事：那是脚本自己刚断的线。）
+            if self._network_resume_visible():
+                print("[扫地] 检测到续打弹窗（上次出阵中断），点【否】清掉回本丸")
+                no_pt = self.maa.ocr("否", roi_4to4(680, 420, 930, 510),
+                                     match_mode="exact")
+                if no_pt:
+                    self.maa.click(no_pt)
+                else:
+                    self._click_point((800, 467))  # 【否】1280x720 固定坐标兜底
+                time.sleep(3.0)
+                clean = 0
+                continue
             # 冷启动恰逢资源更新时，选完线路后登录页可能晚到或重新出现。
             # login() 只负责配置里的那一次点击；扫地阶段再看见登录按钮就补点，
             # 直到真正通过本丸目录探针，不能把“点过登录”当成“已经登录”。

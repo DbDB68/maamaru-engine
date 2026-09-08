@@ -214,6 +214,10 @@ class _LoginPopupFlow(DailyMixin):
         self.maa = _LoginPopupMaa()
         self.report_reads = 0
 
+    # 生产上由 LoginMixin 提供；扫地测试默认没有续打弹窗
+    def _network_resume_visible(self):
+        return False
+
     def _collect_report_gains(self):
         self.report_reads += 1
         return ["[内番] 测试刀剑男士 机动+1"]
@@ -259,6 +263,39 @@ class LoginPopupSweepTests(unittest.TestCase):
 
         self.assertTrue(arrived)
         self.assertEqual(flow.maa.clicks, [flow.maa.login_point])
+
+    def test_stale_resume_popup_is_dismissed_with_no(self):
+        # 隔夜中断的续打弹窗：脚本对断点没记忆，点【否】清掉回本丸，
+        # 不能点【是】闭眼进战斗（2026-09-08 老大手动中断后任务卡死）
+        class Maa(_LoginPopupMaa):
+            def __init__(self):
+                super().__init__()
+                self.stage = "resume"
+                self.no_point = Point(800, 467)
+
+            def ocr(self, expected, roi, **kw):
+                if expected == "否" and self.stage == "resume":
+                    return self.no_point
+                return super().ocr(expected, roi, **kw)
+
+            def click(self, target):
+                self.clicks.append(target)
+                if target == self.no_point:
+                    self.stage = "home"
+                return True
+
+        class Flow(_LoginPopupFlow):
+            def _network_resume_visible(self):
+                return self.maa.stage == "resume"
+
+        flow = Flow()
+        flow.maa = Maa()
+
+        with patch("touken.flows.daily.time.sleep"):
+            arrived = flow._popup_sweep(max_rounds=5)
+
+        self.assertTrue(arrived)
+        self.assertEqual(flow.maa.clicks, [flow.maa.no_point])
 
 
 class DailyLoginGateTests(unittest.TestCase):
