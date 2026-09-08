@@ -23,12 +23,15 @@ def _edo_card(**overrides):
 class _Store:
     """events: [(ts, payload)] 直接喂 edocastle.run_completed。"""
 
-    def __init__(self, events):
+    def __init__(self, events, refills=None):
         self._events = events
+        self._refills = refills or []
 
     def recent_events(self, limit=100, event_type=None):
         if event_type == "edocastle.run_completed":
             return [{"ts": ts, "payload": p} for ts, p in self._events]
+        if event_type == "ticket.refilled":
+            return [{"ts": ts, "payload": p} for ts, p in self._refills]
         return []
 
 
@@ -91,6 +94,25 @@ class ArchiveTests(unittest.TestCase):
                 store, "江户城潜入调查", card, Path(tmp),
                 now=datetime(2026, 9, 12, tzinfo=_TZ)))
             self.assertEqual(len(event_history.load_history(Path(tmp))), 1)
+
+    def test_archive_records_koban_spent(self):
+        card = _edo_card()
+        store = _Store(
+            [(_ts(2026, 8, 28), {"keys": 5})],
+            refills=[
+                (_ts(2026, 8, 30), {"delta": -300, "ticket_price": 300}),
+                (_ts(2026, 9, 2), {"delta": -300, "ticket_price": 300}),
+                (_ts(2026, 9, 3), {"source": "江户城"}),   # 没金额按票价补
+                (_ts(2026, 10, 1), {"delta": -300}),      # 窗口外不算
+            ])
+        with tempfile.TemporaryDirectory() as tmp:
+            period = event_history.archive_if_finished(
+                store, "江户城潜入调查", card, Path(tmp),
+                now=datetime(2026, 9, 11, tzinfo=_TZ))
+            self.assertEqual(period["koban_spent"], 900)
+            # 落盘后再读回来也一样
+            loaded = event_history.load_history(Path(tmp))
+            self.assertEqual(loaded[0]["koban_spent"], 900)
 
 
 class AttributionTests(unittest.TestCase):

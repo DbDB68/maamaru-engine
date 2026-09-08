@@ -7,8 +7,9 @@
 - ongoing：进行中置顶，按谁最先结束排序
 - upcoming：7 天内开始排第二，按开始时间排序
 - later：更远的活动（前端做紧凑行）
+- ended：刚收官（结束 7 天内）的活动带本期小结，超时就下轴
 - unverified：公告正文抓的时间候选，没核实前沉底，不进正式轴
-- 已结束的不上轴；一场活动只出现一次（同时带开始和结束）
+- 一场活动只出现一次（同时带开始和结束）
 
 纯函数，不碰网络和文件；server 端点负责凑齐输入。
 """
@@ -24,6 +25,8 @@ except Exception:  # pragma: no cover - 老 Python 兜底
     _TZ = timezone(timedelta(hours=8))
 
 UPCOMING_DAYS = 7
+# 刚收官小结的展示窗口：收摊后再留 7 天，超时下轴
+ENDED_GRACE_DAYS = 7
 
 # 绑活动的脚本 → 活动名（知识卡/公告候选里的名字）。不在表里的脚本
 # （日课、合战场、远征等常驻功能）永远不受活动开关联动影响。
@@ -146,8 +149,32 @@ def _entry(name: str, card: dict, abacus: dict | None,
     return entry
 
 
+def _summary_for(name: str, card: dict, periods: list[dict]) -> dict | None:
+    """本期归档的收官小结；这期没跑（没归档）返回 None。"""
+    from .event_history import period_key
+    key = period_key(name, card)
+    if not key:
+        return None
+    for period in periods or []:
+        if f"{period.get('event')}@{period.get('start_date')}" != key:
+            continue
+        obtained = period.get("keys_total")
+        goal = card.get("keys_total")
+        return {
+            "runs": period.get("runs"),
+            "keys_per_run": period.get("keys_per_run"),
+            "keys_total": obtained,
+            "full_clear": bool(obtained is not None and goal
+                               and obtained >= goal),
+            "koban_spent": period.get("koban_spent"),
+            "period": key,
+        }
+    return None
+
+
 def build_timeline(cards: dict, abacuses: list[dict],
                    announcements: list[dict], *,
+                   periods: list[dict] | None = None,
                    now: datetime | None = None) -> dict:
     """合成时间轴。cards/abacuses 来自 advisor，announcements 来自爬虫。"""
     now = now or datetime.now(_TZ)
@@ -156,13 +183,19 @@ def build_timeline(cards: dict, abacuses: list[dict],
     upcoming_limit = now + timedelta(days=UPCOMING_DAYS)
     abacus_by_name = {a.get("event"): a for a in abacuses or []}
 
-    ongoing, upcoming, later = [], [], []
+    ongoing, upcoming, later, ended = [], [], [], []
     for name, card in (cards or {}).items():
         start_dt, end_dt, precise = _card_window(card)
         if start_dt is None:
             continue  # 没日期的卡（休眠卡）不上轴
         if end_dt is not None and end_dt <= now:
-            continue  # 已结束
+            # 刚收官的留 7 天小结；超时下轴
+            if now - end_dt <= timedelta(days=ENDED_GRACE_DAYS):
+                entry = _entry(name, card, None, start_dt, end_dt,
+                               precise, now)
+                entry["summary"] = _summary_for(name, card, periods)
+                ended.append(entry)
+            continue
         entry = _entry(name, card, abacus_by_name.get(name),
                        start_dt, end_dt, precise, now)
         if start_dt <= now:
@@ -174,6 +207,8 @@ def build_timeline(cards: dict, abacuses: list[dict],
     ongoing.sort(key=lambda e: (e["end_at"] or e["end_date"] or "9999"))
     upcoming.sort(key=lambda e: (e["start_at"] or e["start_date"]))
     later.sort(key=lambda e: (e["start_at"] or e["start_date"]))
+    ended.sort(key=lambda e: (e["end_at"] or e["end_date"] or ""),
+               reverse=True)
 
     # 待确认：公告候选里，名字没对上任何知识卡的才算「没核实」；
     # 已结束的候选不上轴；同一活动在多篇公告重复出现只留一条
@@ -206,6 +241,7 @@ def build_timeline(cards: dict, abacuses: list[dict],
         "ongoing": ongoing,
         "upcoming": upcoming,
         "later": later,
+        "ended": ended,
         "unverified": unverified,
     }
 

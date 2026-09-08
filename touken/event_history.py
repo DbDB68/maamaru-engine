@@ -9,6 +9,7 @@
     {"event": "江户城潜入调查", "start_date": "2026-08-27",
      "mechanics": "edocastle", "rules": {...规则快照...},
      "runs": 286, "keys_total": 1459, "keys_per_run": 5.1,
+     "koban_spent": 15000,
      "closed_at": 1694...}]}
 
 规矩：只新增或安全迁移（备份+原子替换），原始记录永不删除。
@@ -107,6 +108,50 @@ def find_matching_period(periods: list[dict], name: str,
     return best
 
 
+def _window_bounds(card: dict):
+    """卡的窗口转成本地 datetime 对；缺任意一端返回 (None, None)。"""
+    def _parse(raw, end_of_day: bool):
+        raw = str(raw or "")
+        if not raw:
+            return None
+        try:
+            if "T" in raw:
+                return datetime.fromisoformat(raw)
+            return datetime.combine(
+                date.fromisoformat(raw[:10]),
+                datetime.max.time() if end_of_day else datetime.min.time(),
+                tzinfo=_TZ)
+        except ValueError:
+            return None
+    return (_parse(card.get("start_at") or card.get("start_date"), False),
+            _parse(card.get("end_at") or card.get("end_date"), True))
+
+
+def _koban_spent(store, card: dict) -> int | None:
+    """本期窗口内 ticket.refilled 的小判支出合计（正数）。窗口不明返回 None。"""
+    start_dt, end_dt = _window_bounds(card)
+    if start_dt is None or end_dt is None:
+        return None
+    price = int(card.get("ticket_price") or 0)
+    spent = 0
+    try:
+        events = store.recent_events(event_type="ticket.refilled", limit=500)
+    except Exception:
+        return None
+    for event in events:
+        ts = event.get("ts")
+        if not isinstance(ts, (int, float)) \
+                or not (start_dt.timestamp() <= ts <= end_dt.timestamp()):
+            continue
+        payload = event.get("payload")
+        delta = payload.get("delta") if isinstance(payload, dict) else None
+        if isinstance(delta, (int, float)) and delta < 0:
+            spent += int(-delta)
+        elif price:
+            spent += price  # 没记金额的老数据按票价补
+    return spent
+
+
 def archive_if_finished(store, name: str, card: dict, status_dir: Path, *,
                         now: datetime | None = None) -> dict | None:
     """本期已结束且有实测数据 → 懒归档进档案（幂等）。
@@ -140,6 +185,8 @@ def archive_if_finished(store, name: str, card: dict, status_dir: Path, *,
         "runs": measured["runs"],
         "keys_total": measured.get("keys_total"),
         "keys_per_run": round(measured["per_run"], 2),
+        # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
+        "koban_spent": _koban_spent(store, card),
         "closed_at": time.time(),
     }
     if append_period(status_dir, period):

@@ -48,6 +48,7 @@ const goalByEvent = computed(() => new Map(props.goals.filter(item => item.event
 const activeGroups = computed(() => [
   { key: 'ongoing', title: '正在进行', items: props.timeline?.ongoing || [] },
   { key: 'upcoming', title: '即将开始', items: props.timeline?.upcoming || [] },
+  { key: 'ended', title: '刚收官', items: props.timeline?.ended || [] },
 ].filter(group => group.items.length))
 const hasFormalEvents = computed(() => activeGroups.value.length > 0 || Boolean(props.timeline?.later.length))
 
@@ -83,6 +84,7 @@ function eventRange(entry: EventTimelineEntry) {
 }
 
 function axisMoment(entry: EventTimelineEntry, group: string) {
+  if (group === 'ended') return `${shortDate(entry.end_at || entry.end_date)} 收摊`
   if (group === 'ongoing') {
     if (entry.days_left === 0) return '今天结束'
     if (entry.days_left === 1) return '明天结束'
@@ -252,7 +254,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
               <header>
                 <div>
                   <span class="event-tags">
-                    <span v-if="group.key !== 'ongoing'" class="event-state">即将开始</span>
+                    <span v-if="group.key === 'upcoming'" class="event-state">即将开始</span>
+                    <span v-else-if="group.key === 'ended'" class="event-state">已收官</span>
                     <span v-if="supportsTokenLearning(entry)" class="experience-tag" :class="`source-${abacusFor(entry)?.keys_source || 'new'}`">{{ experienceLabel(entry) }}</span>
                   </span>
                   <h5>{{ entry.name }}</h5>
@@ -260,7 +263,17 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <span class="event-range">{{ eventRange(entry) }}</span>
               </header>
 
-              <p v-if="eventSummary(entry)" class="event-summary">{{ eventSummary(entry) }}</p>
+              <p v-if="group.key !== 'ended' && eventSummary(entry)" class="event-summary">{{ eventSummary(entry) }}</p>
+
+              <section v-if="group.key === 'ended'" class="event-ended-summary">
+                <p v-if="!entry.summary" class="ended-empty">这期狐之助没跑，没留下数据。</p>
+                <template v-else>
+                  <b v-if="entry.summary.full_clear" class="ended-clear">四座宝库全开 🎉</b>
+                  <p>打了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.keys_per_run }} 把 · 共拿 {{ fmt(entry.summary.keys_total) }} 把</p>
+                  <p v-if="entry.summary.koban_spent != null">{{ entry.summary.koban_spent > 0 ? `补票花了 ${fmt(entry.summary.koban_spent)} 小判` : '白票全程够用，一个小判没花' }}</p>
+                  <small>本期数据已归档，下期复刻狐之助会参考。</small>
+                </template>
+              </section>
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
                 <header>
@@ -286,7 +299,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="budgetText(entry)">{{ budgetText(entry) }}</p>
               </div>
 
-              <div v-if="abacusFor(entry)?.goal_mode === 'stock_target'" class="event-stock-target">
+              <div v-if="group.key !== 'ended' && abacusFor(entry)?.goal_mode === 'stock_target'" class="event-stock-target">
                 <div v-if="goalFor(entry)" class="stock-goal-linked">
                   <span><small>已立目标</small><b>{{ fmt(goalFor(entry)?.target) }} {{ goalFor(entry)?.resource }}</b></span>
                   <details>
@@ -304,14 +317,14 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 </template>
               </div>
 
-              <div v-else-if="abacusFor(entry)?.keys_total && abacusFor(entry)?.keys_per_run == null" class="event-estimate">
+              <div v-else-if="group.key !== 'ended' && abacusFor(entry)?.keys_total && abacusFor(entry)?.keys_per_run == null" class="event-estimate">
                 <label>你一圈通常拿几把钥匙？
                   <input v-model="estimateInputs[entry.name]" type="number" min="1" max="200" step="1" placeholder="填个估计">
                 </label>
                 <button type="button" class="primary" :disabled="estimateSaving === entry.name" @click="submitEstimate(entry)">{{ estimateSaving === entry.name ? '计算中……' : '帮我算' }}</button>
               </div>
 
-              <div v-else-if="abacusFor(entry)?.koban_cost && entry.budget?.sufficient !== true && entry.budget?.koban_cost !== 0" class="event-actions">
+              <div v-else-if="group.key !== 'ended' && abacusFor(entry)?.koban_cost && entry.budget?.sufficient !== true && entry.budget?.koban_cost !== 0" class="event-actions">
                 <span v-if="goalFor(entry)">已加入“当前目标”</span>
                 <button v-else type="button" class="primary" :disabled="goalSaving === entry.name" @click="emit('add-goal', abacusFor(entry)!)">{{ goalSaving === entry.name ? '正在立目标……' : '把缺口立成目标' }}</button>
               </div>
@@ -412,6 +425,11 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-budget.ready b { color: #426b36; }
 .event-budget p { margin: 0; color: var(--ink-dim); font-size: 12px; }
 .event-estimate { display: flex; align-items: flex-end; gap: 8px; margin-top: 11px; padding: 10px 11px; background: var(--fox-gold-pale); border-radius: 8px; }
+.event-ended-summary { margin-top: 11px; padding: 10px 11px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-radius: 8px; }
+.event-ended-summary p { margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; }
+.event-ended-summary .ended-clear { color: #426b36; font-size: 14px; }
+.event-ended-summary .ended-empty { margin: 0; }
+.event-ended-summary small { display: block; margin-top: 6px; color: var(--ink-dim); font-size: 10px; }
 .event-estimate label { display: grid; flex: 1 1 auto; gap: 4px; font-size: 12px; }
 .event-estimate input { width: min(190px, 100%); background: var(--paper-card); }
 .event-stock-target { display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: end; gap: 7px 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, #dcebd6 62%, var(--paper-card)); border-radius: 8px; }

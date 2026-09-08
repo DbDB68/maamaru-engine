@@ -411,6 +411,17 @@ export interface EventTimelineEntry {
   days_left: number | null
   days_until_start?: number
   budget: EventTimelineBudget | null
+  summary?: EventPeriodSummary | null
+}
+
+// 刚收官活动的本期小结（来自 event_history 归档）
+export interface EventPeriodSummary {
+  runs: number | null
+  keys_per_run: number | null
+  keys_total: number | null
+  full_clear: boolean
+  koban_spent: number | null
+  period: string
 }
 
 export interface EventTimelineCandidate {
@@ -428,6 +439,7 @@ export interface EventTimelineReport {
   ongoing: EventTimelineEntry[]
   upcoming: EventTimelineEntry[]
   later: EventTimelineEntry[]
+  ended?: EventTimelineEntry[]
   unverified: EventTimelineCandidate[]
 }
 

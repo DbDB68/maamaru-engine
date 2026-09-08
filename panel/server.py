@@ -2308,7 +2308,7 @@ async def api_events():
 async def api_events_timeline():
     """事件时间轴：已核实活动按 进行中/7天内/更远 分组排序，
     公告时间候选沉底待确认。契约见 touken/event_timeline.py。"""
-    from touken import advisor, event_timeline
+    from touken import advisor, event_history, event_timeline
     from touken.telemetry import get_telemetry_store
     planning = advisor.get_planning(get_telemetry_store(),
                                     STATUS_DIR / advisor.GOALS_FILENAME)
@@ -2316,7 +2316,8 @@ async def api_events_timeline():
     timeline = event_timeline.build_timeline(
         advisor.load_event_cards(STATUS_DIR),
         planning.get("events", []),
-        calendar.get("announcements", []))
+        calendar.get("announcements", []),
+        periods=event_history.load_history(STATUS_DIR))
     return {**timeline, "calendar_stale": stale}
 
 

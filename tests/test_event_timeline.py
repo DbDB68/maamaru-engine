@@ -35,12 +35,57 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual([e["name"] for e in tl["later"]], ["下个月"])
 
     def test_ended_events_stay_off_axis(self):
+        # 收官超过 7 天才真正下轴（7 天内进「刚收官」组）
         cards = {"已结束": _card(start_date="2026-08-01",
-                               end_date="2026-08-25")}
+                               end_date="2026-08-10")}
         tl = event_timeline.build_timeline(cards, [], [], now=NOW)
         self.assertEqual(tl["ongoing"], [])
         self.assertEqual(tl["upcoming"], [])
         self.assertEqual(tl["later"], [])
+        self.assertEqual(tl["ended"], [])
+
+    def test_recently_ended_shows_summary(self):
+        cards = {"江户城潜入调查": _card(start_date="2026-08-27",
+                                       end_date="2026-09-05",
+                                       keys_total=1500)}
+        periods = [{"event": "江户城潜入调查", "start_date": "2026-08-27",
+                    "runs": 46, "keys_total": 899, "keys_per_run": 19.54,
+                    "koban_spent": 4800, "rules": {}}]
+        after = datetime(2026, 9, 7, 15, 0, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], [],
+                                           periods=periods, now=after)
+        self.assertEqual(tl["ongoing"], [])
+        self.assertEqual(len(tl["ended"]), 1)
+        summary = tl["ended"][0]["summary"]
+        self.assertEqual(summary["runs"], 46)
+        self.assertEqual(summary["keys_total"], 899)
+        self.assertFalse(summary["full_clear"])
+        self.assertEqual(summary["koban_spent"], 4800)
+        # 拿满就算全开
+        periods[0]["keys_total"] = 1500
+        tl = event_timeline.build_timeline(cards, [], [],
+                                           periods=periods, now=after)
+        self.assertTrue(tl["ended"][0]["summary"]["full_clear"])
+
+    def test_ended_without_archive_has_no_summary(self):
+        # 这期没跑（没归档）：收官卡还在，summary 为空让前端说人话
+        cards = {"没打的活动": _card(start_date="2026-08-20",
+                                   end_date="2026-09-05")}
+        after = datetime(2026, 9, 7, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], [], periods=[],
+                                           now=after)
+        self.assertEqual(len(tl["ended"]), 1)
+        self.assertIsNone(tl["ended"][0]["summary"])
+
+    def test_grace_period_expires_after_a_week(self):
+        cards = {"江户城潜入调查": _card(start_date="2026-08-27",
+                                       end_date="2026-09-05")}
+        within = event_timeline.build_timeline(
+            cards, [], [], now=datetime(2026, 9, 11, tzinfo=_TZ))
+        self.assertEqual(len(within["ended"]), 1)
+        late = event_timeline.build_timeline(
+            cards, [], [], now=datetime(2026, 9, 14, tzinfo=_TZ))
+        self.assertEqual(late["ended"], [])
 
     def test_date_only_card_counts_ongoing_through_end_date(self):
         # 没时刻的卡：结束日当天一整天都算进行中
