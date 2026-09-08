@@ -754,6 +754,38 @@ class EventAbacusTests(unittest.TestCase):
         self.assertIsNone(abacus["keys_source"])
         self.assertIn("还没数", abacus["message"])
 
+    def test_measured_progress_counts_only_remaining_keys(self):
+        # 已拿 899 把就只算还差 601 把：31 圈，不是从零开始的 77 圈
+        measured = {"per_run": 19.5, "runs": 46, "keys_total": 899,
+                    "source": "measured"}
+        abacus = advisor.event_abacus(
+            "江户城潜入调查", _edo_card(), measured=measured, today=self.TODAY)
+        self.assertEqual(abacus["keys_obtained"], 899)
+        self.assertEqual(abacus["keys_remaining"], 601)
+        self.assertEqual(abacus["runs_total"], 77)
+        self.assertEqual(abacus["runs_needed"], 31)
+        self.assertIn("已拿 899 把", abacus["message"])
+        self.assertIn("31 圈", abacus["message"])
+
+    def test_full_clear_reports_done_and_costs_nothing(self):
+        measured = {"per_run": 19.5, "runs": 80, "keys_total": 1520,
+                    "source": "measured"}
+        abacus = advisor.event_abacus(
+            "江户城潜入调查", _edo_card(), measured=measured, today=self.TODAY)
+        self.assertEqual(abacus["runs_needed"], 0)
+        self.assertEqual(abacus["paid_tickets"], 0)
+        self.assertEqual(abacus["koban_cost"], 0)
+        self.assertIn("全开啦", abacus["message"])
+
+    def test_estimate_source_ignores_stray_keys_total(self):
+        # 上期经验/估计的 keys_total 不是本期进度，不许扣
+        measured = {"per_run": 10.0, "runs": 100, "keys_total": 999,
+                    "source": "history"}
+        abacus = advisor.event_abacus(
+            "江户城潜入调查", _edo_card(), measured=measured, today=self.TODAY)
+        self.assertIsNone(abacus["keys_obtained"])
+        self.assertEqual(abacus["runs_needed"], 150)
+
     def test_estimate_without_end_date_gives_worst_case(self):
         abacus = advisor.event_abacus(
             "江户城潜入调查",

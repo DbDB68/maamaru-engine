@@ -358,6 +358,9 @@ export interface EventAbacus {
   note: string
   keys_per_run: number | null
   keys_source: 'measured' | 'history' | 'estimate' | null
+  keys_obtained?: number | null
+  keys_remaining?: number | null
+  runs_total?: number | null
   keys_basis?: string | null
   runs_needed: number | null
   free_runs: number | null
@@ -390,6 +393,10 @@ export interface EventTimelineBudget {
   available_now: number | null
   shortfall: number | null
   sufficient: boolean | null
+  paid_tickets?: number | null
+  runs_needed?: number | null
+  free_runs?: number | null
+  keys_obtained?: number | null
   message: string
 }
 

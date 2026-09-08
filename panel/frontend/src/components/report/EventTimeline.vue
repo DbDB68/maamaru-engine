@@ -178,6 +178,10 @@ function eventSummary(entry: EventTimelineEntry) {
   if (!abacus) return entry.note
   if (abacus.runs_needed != null) {
     const ticketNote = entry.budget?.koban_cost === 0 ? ' · 免费手形够目标' : ''
+    if (abacus.keys_obtained) {
+      if (abacus.runs_needed === 0) return '四座宝库已全开 🎉'
+      return `已拿 ${fmt(abacus.keys_obtained)} 把 · 再打约 ${fmt(abacus.runs_needed)} 圈全开${ticketNote}`
+    }
     return `全开预计 ${fmt(abacus.runs_needed)} 圈${ticketNote}`
   }
   return abacus.message || entry.note
@@ -197,8 +201,9 @@ function budgetText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget) return ''
   if (budget.koban_cost === 0) return ''
-  if (budget.sufficient === true) return `预计需要 ${fmt(budget.koban_cost)} 小判，家底已经备齐。`
-  if (budget.shortfall != null) return `目前还差 ${fmt(budget.shortfall)} 小判。`
+  const tickets = budget.paid_tickets != null ? `补票约 ${fmt(budget.paid_tickets)} 张，折 ` : ''
+  if (budget.sufficient === true) return `${tickets}${fmt(budget.koban_cost)} 小判，家底已经备齐。`
+  if (budget.shortfall != null) return `${tickets}${fmt(budget.koban_cost)} 小判，目前还差 ${fmt(budget.shortfall)}。`
   return budget.message
 }
 

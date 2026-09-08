@@ -1273,6 +1273,9 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
         "note": card.get("note") or "",
         "keys_per_run": None,
         "keys_source": None,
+        "keys_obtained": None,
+        "keys_remaining": None,
+        "runs_total": None,
         "runs_needed": None,
         "free_runs": None,
         "paid_tickets": None,
@@ -1309,19 +1312,35 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
         return abacus
 
     import math
-    runs = math.ceil(keys_total / keys_per_run)
+    # 本期实测带已拿钥匙总数：圈数/补票按「还差多少」算，不按满额虚高
+    # （2026-09-08 老大气笑了现场：打了 46 圈拿 899 把，卡上还按 1500 把算）
+    obtained = None
+    if source == "measured":
+        raw_obtained = (measured or {}).get("keys_total")
+        if isinstance(raw_obtained, (int, float)) and raw_obtained > 0:
+            obtained = int(raw_obtained)
+    abacus["keys_obtained"] = obtained
+    remaining = max(0, keys_total - obtained) if obtained else keys_total
+    abacus["keys_remaining"] = remaining
+    runs_total = math.ceil(keys_total / keys_per_run)
+    abacus["runs_total"] = runs_total
+    runs = math.ceil(remaining / keys_per_run)
     abacus["runs_needed"] = runs
     label = {"measured": "实测", "history": "上期经验",
              "estimate": "估计"}.get(source, "估计")
+    if obtained:
+        progress = f"已拿 {obtained:,} 把，还差 {remaining:,} 把——"
+    else:
+        progress = ""
 
     start_dt, end_dt, precise = _card_window(card)
     if end_dt is None:
         # 不知道结束日：算不出白票能顶多少，给全自费上限
         abacus["koban_cost"] = runs * ticket_price
         abacus["message"] = (
-            f"按{label}场均 {keys_per_run:.1f} 把钥匙，全开四座宝库要打 "
-            f"{runs} 圈。门票 {ticket_price} 小判/张，全自费最坏 "
-            f"{runs * ticket_price:,} 小判；每天白送 {daily_free} 张票，"
+            f"{progress}按{label}场均 {keys_per_run:.1f} 把钥匙，"
+            f"全开四座宝库还要打 {runs} 圈。门票 {ticket_price} 小判/张，"
+            f"全自费最坏 {runs * ticket_price:,} 小判；每天白送 {daily_free} 张票，"
             "排进日常就能省一大截。等结束日定了狐之助再算细账。")
         return abacus
 
@@ -1348,14 +1367,18 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
     end_label = card.get("end_at") or card["end_date"]
     if precise and isinstance(end_label, str) and "T" in end_label:
         end_label = end_label.replace("T", " ")[:16]
-    if paid == 0:
+    if remaining == 0:
         abacus["message"] = (
-            f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈——"
+            f"四座宝库全开啦🎉 已拿 {obtained:,} 把，剩下的票留着也没处花，"
+            "想刷宝库奖励可以继续，不想刷就收工。")
+    elif paid == 0:
+        abacus["message"] = (
+            f"{progress}按{label}场均 {keys_per_run:.1f} 把，再打 {runs} 圈全开——"
             f"到 {end_label} 的白票（{free_desc}）就够用了，"
             "一个小判都不用花🎉")
     else:
         abacus["message"] = (
-            f"按{label}场均 {keys_per_run:.1f} 把，全开要打 {runs} 圈；"
+            f"{progress}按{label}场均 {keys_per_run:.1f} 把，再打 {runs} 圈全开；"
             f"到 {end_label}（还剩 {days_left} 天）白票能顶 "
             f"{free_runs} 圈，还得补 {paid} 张票 ≈ {paid * ticket_price:,} 小判。")
     return abacus

@@ -137,6 +137,10 @@ def _entry(name: str, card: dict, abacus: dict | None,
             "available_now": abacus.get("available_now"),
             "shortfall": abacus.get("shortfall"),
             "sufficient": abacus.get("sufficient"),
+            "paid_tickets": abacus.get("paid_tickets"),
+            "runs_needed": abacus.get("runs_needed"),
+            "free_runs": abacus.get("free_runs"),
+            "keys_obtained": abacus.get("keys_obtained"),
             "message": abacus.get("message") or "",
         }
     return entry
