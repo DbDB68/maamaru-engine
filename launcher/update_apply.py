@@ -59,8 +59,20 @@ def prepare_apply(installer: Path, expected_sha256: str, version: str) -> dict:
 
 def run_plan(plan_path: Path) -> int:
     """Wait for the launcher, snapshot its program directory, then run Inno Setup."""
-    plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
-    _validate_plan(plan)
+    plan: dict = {}
+    try:
+        loaded = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise ValueError("更新计划格式不正确")
+        plan = loaded
+        _validate_plan(plan)
+    except (OSError, ValueError, KeyError, ApplyError) as exc:
+        # 校验失败也要留下结果并把旧启动器拉回来，不能裸崩在 PyInstaller 弹窗上。
+        _record_result(False, plan, f"更新计划校验失败：{exc}", rolled_back=False)
+        previous = plan.get("previous_executable")
+        if previous:
+            _restart(Path(previous))
+        return 3
     installer = Path(plan["installer"])
     program_dir = Path(plan["program_dir"])
     backup_dir = Path(plan["backup_dir"])
@@ -120,7 +132,11 @@ def _validate_plan(plan: dict) -> None:
         raise ApplyError("更新计划的用户数据目录不匹配")
     program_dir = Path(plan["program_dir"]).resolve()
     if program_dir != _program_dir().resolve():
-        raise ApplyError("更新计划的程序目录不匹配")
+        # 更新助手是启动器复制到暂存区的副本，自身旁边没有 manifest.json，
+        # 无法从自身位置推回自定义过的安装目录；此时改为要求计划指向
+        # 一个真实存在的まあ丸安装目录（安装器总会安放 manifest.json）。
+        if _has_local_manifest() or not (program_dir / "manifest.json").is_file():
+            raise ApplyError("更新计划的程序目录不匹配")
     if program_dir == data_root or program_dir.is_relative_to(data_root):
         raise ApplyError("程序目录不能位于用户数据目录内")
 
@@ -132,6 +148,13 @@ def _program_dir() -> Path:
             return current
     local = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     return (local / "Programs" / "Maamaru").resolve()
+
+
+def _has_local_manifest() -> bool:
+    """当前进程自身是否坐在一个真实的安装目录里（更新助手副本为 False）。"""
+    if not getattr(sys, "frozen", False):
+        return False
+    return (Path(sys.executable).resolve().parent / "manifest.json").is_file()
 
 
 def _wait_for_process(pid: int, timeout: int) -> None:
@@ -171,12 +194,13 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def _record_result(ok: bool, plan: dict, message: str, rolled_back: bool) -> None:
+    backup_dir = str(plan.get("backup_dir", ""))
     _write_json(RESULT_PATH, {
         "ok": ok,
-        "version": plan["version"],
+        "version": plan.get("version", "?"),
         "message": message,
         "rolled_back": rolled_back,
-        "backup_dir": plan["backup_dir"] if Path(plan["backup_dir"]).is_dir() else None,
+        "backup_dir": backup_dir if backup_dir and Path(backup_dir).is_dir() else None,
     })
 
 

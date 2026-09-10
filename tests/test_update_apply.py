@@ -55,6 +55,48 @@ class UpdateApplyTests(unittest.TestCase):
                 with self.assertRaises(update_apply.ApplyError):
                     update_apply._validate_plan(plan)
 
+    def test_update_helper_accepts_custom_install_dir_with_manifest(self):
+        """助手副本看不到真实安装目录时，manifest.json 可作替代凭证。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, updates = self._plan(Path(tmp))
+            (Path(plan["program_dir"]) / "manifest.json").write_text("{}", encoding="utf-8")
+            elsewhere = Path(tmp) / "elsewhere"
+            with patch.object(update_apply, "UPDATES_DIR", updates), \
+                    patch.object(update_apply, "DATA_ROOT", Path(plan["data_root"])), \
+                    patch.object(update_apply, "_program_dir", return_value=elsewhere), \
+                    patch.object(update_apply, "_has_local_manifest", return_value=False):
+                update_apply._validate_plan(plan)
+
+    def test_mismatched_program_dir_without_manifest_still_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, updates = self._plan(Path(tmp))
+            elsewhere = Path(tmp) / "elsewhere"
+            with patch.object(update_apply, "UPDATES_DIR", updates), \
+                    patch.object(update_apply, "DATA_ROOT", Path(plan["data_root"])), \
+                    patch.object(update_apply, "_program_dir", return_value=elsewhere), \
+                    patch.object(update_apply, "_has_local_manifest", return_value=False):
+                with self.assertRaises(update_apply.ApplyError):
+                    update_apply._validate_plan(plan)
+
+    def test_invalid_plan_records_failure_and_restarts_previous(self):
+        """计划校验失败要留结果、拉回旧启动器，而不是裸崩。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, updates = self._plan(Path(tmp))
+            plan["program_dir"] = str(Path(plan["data_root"]) / "program")
+            plan_path = updates / "plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            with patch.object(update_apply, "UPDATES_DIR", updates), \
+                    patch.object(update_apply, "DATA_ROOT", Path(plan["data_root"])), \
+                    patch.object(update_apply, "RESULT_PATH", updates / "result.json"), \
+                    patch.object(update_apply, "_program_dir", return_value=Path(plan["program_dir"])), \
+                    patch.object(update_apply, "_restart") as restart:
+                self.assertEqual(update_apply.run_plan(plan_path), 3)
+            restart.assert_called_once_with(Path(plan["previous_executable"]))
+            result = json.loads((updates / "result.json").read_text(encoding="utf-8"))
+            self.assertFalse(result["ok"])
+            self.assertIn("更新计划校验失败", result["message"])
+            self.assertFalse(result["rolled_back"])
+
 
 if __name__ == "__main__":
     unittest.main()
