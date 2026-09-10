@@ -214,6 +214,11 @@ class SortieMixin:
                 # 动画一盖上来就被挡住，脚本在动画里乱点会彻底打乱卡死。
                 # 只点安全区把动画跳完，直到“决定”按钮完整出现，再走章节选择。
                 if cfg_key == "yosari":
+                    # 累计圈数里程碑弹窗（500/800/1100 圈送火车切）是
+                    # 「确定」键，会挡在章节页前面把等决定的循环卡死
+                    # （2026-09-10 第 62 圈实测翻车），进等待前先收一次
+                    if self._dismiss_yosari_milestone(cfg):
+                        yield "[异去] 🎁 累计圈数里程碑奖励（火车切）已领，继续"
                     # 火车切渐入演出会让"决定"按钮先露脸再被盖住、说完才回来，
                     # 必须连续命中才算真就绪；章节页点安全区验证过无害，边等边点加速推对话。
                     if not self.wait_landmark_skipping(
@@ -221,8 +226,19 @@ class SortieMixin:
                             skip_point=cfg.get("skip_tap"),
                             timeout_s=90, stable_hits=3,
                             tap_even_when_found=True):
-                        yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
-                        return
+                        # 弹窗可能在等待中途才弹出来，收一次再试
+                        if self._dismiss_yosari_milestone(cfg):
+                            yield "[异去] 🎁 累计圈数里程碑奖励（火车切）已领，继续"
+                            if not self.wait_landmark_skipping(
+                                    template=cfg["decide_button"]["template"],
+                                    skip_point=cfg.get("skip_tap"),
+                                    timeout_s=30, stable_hits=3,
+                                    tap_even_when_found=True):
+                                yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
+                                return
+                        else:
+                            yield "[异去] 剧情演出跳不完，没看到“决定”按钮，停止"
+                            return
 
                 # ========== 2/3. 章节页 → 小图页（状态驱动，不认死流程） ==========
                 # 游戏会记住上次选的章节/小图：点到已选中的项等于确认，直接跳进
@@ -287,8 +303,16 @@ class SortieMixin:
             # 合战场点完小图会【直接】进部队选择界面，没有中间按钮；
             # 但保险起见：没在部队选择界面时才去找"部队选择"按钮点
             if not self._wait_for_team_select(cfg, attempts=12, open_after=2):
-                yield "[出阵] 部队选择界面没打开，本圈放弃"
-                continue
+                # 里程碑弹窗（确定键）也会挡在部队选择前面，收一次再试
+                if cfg_key == "yosari" and self._dismiss_yosari_milestone(cfg):
+                    yield "[异去] 🎁 累计圈数里程碑奖励（火车切）已领，继续"
+                    if not self._wait_for_team_select(cfg, attempts=12,
+                                                      open_after=2):
+                        yield "[出阵] 部队选择界面没打开，本圈放弃"
+                        continue
+                else:
+                    yield "[出阵] 部队选择界面没打开，本圈放弃"
+                    continue
 
             self._pick_team(team_no)
 
@@ -708,6 +732,32 @@ class SortieMixin:
         except Exception:
             pass
         return None
+
+    def _dismiss_yosari_milestone(self, cfg: dict) -> bool:
+        """收掉异去累计圈数里程碑弹窗（500/800/1100 圈送火车切）。
+
+        弹窗是「确定」键而不是章节页的「决定」键，只会等决定的循环
+        被它卡死（2026-09-10 第 62 圈实测翻车：老大手动点确定后才
+        看到火车切获得窗）。双条件防误点：确定按钮 + 画面里出现
+        「火车切」才动手；点完确定还有获得窗，用安全区收掉。
+        返回 True = 本回合收过弹窗。
+        """
+        handled = False
+        for _ in range(3):
+            self.maa.screenshot(force=True)
+            confirm = self.maa.template_match("通用_确定.png")
+            if not confirm:
+                break
+            if not self.maa.ocr(expected="火车切"):
+                break
+            self.maa.click(confirm)
+            handled = True
+            time.sleep(1.2)
+        if handled:
+            self.skip_safe(3, point=cfg.get("skip_tap"))
+            if hasattr(self, "record_event"):
+                self.record_event("yosari.milestone_claimed")
+        return handled
 
     def _enter_yosari(self, cfg: dict) -> bool:
         """从默认的“过去”切换到右上角“异去”，并用文字复核。"""

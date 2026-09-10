@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from touken import acquisition, advisor
@@ -70,6 +71,78 @@ class FragmentCatalogTests(unittest.TestCase):
         self.assertTrue(notes["rate_source"])
         self.assertTrue(notes["milestones"])
         self.assertIn("active", notes["campaign"])
+
+
+class _YosariStore:
+    """按剧本返回 sortie.completed 事件。"""
+
+    def __init__(self, events):
+        self._events = events
+
+    def recent_events(self, limit=100, event_type=None, from_ts=None):
+        return [e for e in self._events
+                if (event_type is None or e["event_type"] == event_type)
+                and (from_ts is None or e["ts"] >= from_ts)][:limit]
+
+
+def _yosari_event(ts, mode="yosari"):
+    return {"ts": ts, "event_type": "sortie.completed",
+            "payload": {"mode": mode}}
+
+
+class YosariMilestoneProgressTests(unittest.TestCase):
+    def _baseline(self, tmp, runs=500, as_of=1000.0):
+        from pathlib import Path
+        path = Path(tmp) / "yosari_milestone.json"
+        path.write_text(json.dumps({"runs": runs, "as_of_ts": as_of}),
+                        encoding="utf-8")
+        return path
+
+    def test_baseline_plus_counted_after(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _YosariStore([
+                _yosari_event(900.0),            # 基线之前，不算
+                _yosari_event(1000.0),           # 恰好等于基线时刻，不算
+                _yosari_event(1001.0),
+                _yosari_event(1002.0),
+                _yosari_event(1003.0, mode="sortie"),  # 非异去，不算
+            ])
+            progress = acquisition.yosari_milestone_progress(
+                store, self._baseline(tmp))
+        self.assertEqual(progress["total_runs"], 502)
+        self.assertEqual(progress["counted_after_baseline"], 2)
+        self.assertEqual(progress["next_milestone"]["runs"], 800)
+        self.assertEqual(progress["remaining"], 298)
+
+    def test_all_milestones_done(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _YosariStore([_yosari_event(1001.0)])
+            progress = acquisition.yosari_milestone_progress(
+                store, self._baseline(tmp, runs=1100))
+        self.assertEqual(progress["total_runs"], 1101)
+        self.assertIsNone(progress["next_milestone"])
+        self.assertEqual(progress["remaining"], 0)
+
+    def test_no_baseline_returns_none(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            progress = acquisition.yosari_milestone_progress(
+                _YosariStore([_yosari_event(1.0)]),
+                Path(tmp) / "missing.json")
+        self.assertIsNone(progress)
+
+    def test_fragment_notes_carry_progress_when_calibrated(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = acquisition.fragment_notes(
+                store=_YosariStore([]),
+                baseline_path=self._baseline(tmp))
+        self.assertEqual(notes["milestone_progress"]["total_runs"], 500)
+        # 没基线/没 store 时不出这个键（没锚点的累计只会说谎）
+        self.assertNotIn("milestone_progress", acquisition.fragment_notes())
 
 
 class PlanningPayloadTests(unittest.TestCase):

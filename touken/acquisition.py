@@ -127,7 +127,57 @@ def fragment_catalog() -> dict:
     return catalog
 
 
-def fragment_notes(*, now: datetime | None = None) -> dict:
+def yosari_milestone_progress(store, baseline_path) -> dict | None:
+    """异去累计圈数里程碑进度。
+
+    游戏内的累计通关数从开服算起，telemetry 记账开始得晚，两头对不上；
+    所以用「校准基线 + 基线之后自家记账」拼总数：基线文件记录老大在
+    游戏里程碑弹窗里看到的真实累计（500 圈送火车切那次）和当时时间戳，
+    之后的圈数从 telemetry 的 sortie.completed 里数。
+    没校准过基线就返回 None——没锚点的累计只会说谎。
+    """
+    try:
+        data = json.loads(Path(baseline_path).read_text(encoding="utf-8"))
+        base_runs = int(data["runs"])
+        as_of = float(data["as_of_ts"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    counted = 0
+    for event in store.recent_events(limit=100000,
+                                     event_type="sortie.completed",
+                                     from_ts=as_of):
+        if event.get("ts", 0) <= as_of:
+            continue
+        payload = event.get("payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                continue
+        if payload.get("mode") == "yosari":
+            counted += 1
+    total = base_runs + counted
+    milestones = (load_gameplay_card("异去") or {}).get("milestones") or []
+    next_ms = None
+    for ms in milestones:
+        try:
+            runs = int(ms.get("runs", 0))
+        except (TypeError, ValueError):
+            continue
+        if runs > total:
+            next_ms = {"runs": runs, "reward": str(ms.get("reward") or "")}
+            break
+    return {
+        "total_runs": total,
+        "baseline_runs": base_runs,
+        "counted_after_baseline": counted,
+        "next_milestone": next_ms,
+        "remaining": (next_ms["runs"] - total) if next_ms else 0,
+    }
+
+
+def fragment_notes(*, now: datetime | None = None, store=None,
+                   baseline_path=None) -> dict:
     """碎片玩法的公共备注：掉率出处、累计圈数里程碑、进行中的加倍活动。"""
     card = load_gameplay_card("异去") or {}
     campaign = card.get("campaign")
@@ -142,6 +192,11 @@ def fragment_notes(*, now: datetime | None = None) -> dict:
             campaign["active"] = None
     else:
         campaign = None
-    return {"rate_source": _FRAGMENT_RATE_SOURCE,
-            "milestones": card.get("milestones") or [],
-            "campaign": campaign}
+    notes = {"rate_source": _FRAGMENT_RATE_SOURCE,
+             "milestones": card.get("milestones") or [],
+             "campaign": campaign}
+    if store is not None and baseline_path is not None:
+        progress = yosari_milestone_progress(store, baseline_path)
+        if progress is not None:
+            notes["milestone_progress"] = progress
+    return notes

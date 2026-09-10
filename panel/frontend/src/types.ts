@@ -293,6 +293,13 @@ export interface FragmentGuide {
 export interface FragmentNotes {
   rate_source: string
   milestones: { runs: number; reward: string }[]
+  milestone_progress?: {
+    total_runs: number
+    baseline_runs: number
+    counted_after_baseline: number
+    next_milestone: { runs: number; reward: string } | null
+    remaining: number
+  }
   campaign: { name: string; rate_multiplier?: number; start_at: string; end_at: string; active?: boolean | null } | null
 }
 

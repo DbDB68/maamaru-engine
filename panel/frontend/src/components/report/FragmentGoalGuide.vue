@@ -66,6 +66,9 @@ function pct(rate: number) {
         <div>
           <small>累计圈数 · 顺手拿的</small>
           <h5>打着打着还有里程碑奖励</h5>
+          <p v-if="props.notes.milestone_progress" class="strategy-impact">
+            已累计 <b>{{ props.notes.milestone_progress.total_runs }} 圈</b><template v-if="props.notes.milestone_progress.next_milestone">，距 {{ props.notes.milestone_progress.next_milestone.runs }} 圈（{{ props.notes.milestone_progress.next_milestone.reward }}）还差 <b>{{ props.notes.milestone_progress.remaining }} 圈</b></template><template v-else>，里程碑全部拿下了</template>。
+          </p>
           <p><template v-for="(milestone, index) in props.notes.milestones" :key="milestone.runs">
             <template v-if="index">；</template>累计 {{ milestone.runs }} 圈送 {{ milestone.reward }}
           </template>。</p>

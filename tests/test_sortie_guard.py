@@ -288,5 +288,79 @@ class RememberedSelectionJumpTests(unittest.TestCase):
         self.assertIn((20, 20), host.clicks)  # 落到小图页后照点小图
 
 
+class _MilestoneMaa:
+    """里程碑弹窗场景：通用_确定按帧出现，OCR 能看到/看不到「火车切」。"""
+
+    def __init__(self, confirm_frames, sword_text):
+        self._frames = list(confirm_frames)
+        self._sword_text = sword_text
+        self.clicks = []
+
+    def screenshot(self, force=False):
+        pass
+
+    def click(self, point):
+        self.clicks.append((point.x, point.y))
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if template == "通用_确定.png" and self._frames:
+            return Point(640, 500) if self._frames.pop(0) else None
+        return None
+
+    def ocr(self, expected, roi=None, match_mode="contains"):
+        if expected == "火车切" and self._sword_text:
+            return Point(1, 1)
+        return None
+
+
+class _MilestoneHost(SortieMixin):
+    def __init__(self, maa):
+        self.maa = maa
+        self.clicks = []
+        self.skips = 0
+        self.events = []
+        self.config = {}
+
+    def _click_point(self, pt):
+        self.clicks.append(tuple(pt))
+
+    def skip_safe(self, times, interval=0.8, point=None):
+        self.skips += times
+
+    def record_event(self, event_type, **payload):
+        self.events.append(event_type)
+
+
+class YosariMilestonePopupTests(unittest.TestCase):
+    """500/800/1100 圈里程碑弹窗：确定键不是「决定」，等决定会被卡死
+    （2026-09-10 第 62 圈实测翻车）。"""
+
+    CFG = {"skip_tap": [290, 550]}
+
+    @patch("touken.flows.sortie.time.sleep")
+    def test_confirm_plus_sword_text_is_claimed(self, _sleep):
+        # 弹窗出现 → 点确定 → 下一帧弹窗消失 → 安全区收获得窗
+        host = _MilestoneHost(_MilestoneMaa([True, False], sword_text=True))
+        self.assertTrue(host._dismiss_yosari_milestone(self.CFG))
+        self.assertEqual(host.maa.clicks, [(640, 500)])
+        self.assertEqual(host.clicks, [])
+        self.assertEqual(host.skips, 3)
+        self.assertEqual(host.events, ["yosari.milestone_claimed"])
+
+    @patch("touken.flows.sortie.time.sleep")
+    def test_confirm_without_sword_text_is_not_touched(self, _sleep):
+        # 只有确定键、画面里没有「火车切」：不认识就不碰，防误点
+        host = _MilestoneHost(_MilestoneMaa([True], sword_text=False))
+        self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
+        self.assertEqual(host.maa.clicks, [])
+        self.assertEqual(host.skips, 0)
+
+    @patch("touken.flows.sortie.time.sleep")
+    def test_no_popup_is_noop(self, _sleep):
+        host = _MilestoneHost(_MilestoneMaa([False], sword_text=False))
+        self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
+        self.assertEqual(host.maa.clicks, [])
+
+
 if __name__ == "__main__":
     unittest.main()

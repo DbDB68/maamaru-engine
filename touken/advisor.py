@@ -1034,7 +1034,9 @@ def get_planning(store, goals_path: Path, *,
                         for name in LEDGER_RESOURCES},
         # 异去碎片途径卡 + 公共备注（掉率出处/里程碑/加倍活动），表单下拉也用这份
         "fragments": fragment_guides,
-        "fragment_notes": acquisition.fragment_notes(now=now_dt),
+        "fragment_notes": acquisition.fragment_notes(
+            now=now_dt, store=store,
+            baseline_path=status_dir / "yosari_milestone.json"),
     }
 
 
