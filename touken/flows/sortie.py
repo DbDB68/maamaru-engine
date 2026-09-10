@@ -739,16 +739,18 @@ class SortieMixin:
         弹窗是「确定」键而不是章节页的「决定」键，只会等决定的循环
         被它卡死（2026-09-10 第 62 圈实测翻车：老大手动点确定后才
         看到火车切获得窗）。双条件防误点：确定按钮 + 画面里出现
-        「火车切」才动手；点完确定还有获得窗，用安全区收掉。
+        「奖励」才动手（老大回忆弹窗原句说的是"奖励"而非刀名，
+        「火车切」留作兜底）；点完确定还有获得窗，用安全区收掉。
         返回 True = 本回合收过弹窗。
         """
+        full = roi_4to4(0, 0, 1280, 720)
         handled = False
         for _ in range(3):
             self.maa.screenshot(force=True)
             confirm = self.maa.template_match("通用_确定.png")
             if not confirm:
                 break
-            if not self.maa.ocr(expected="火车切"):
+            if not (self.maa.ocr("奖励", full) or self.maa.ocr("火车切", full)):
                 break
             self.maa.click(confirm)
             handled = True

@@ -289,11 +289,11 @@ class RememberedSelectionJumpTests(unittest.TestCase):
 
 
 class _MilestoneMaa:
-    """里程碑弹窗场景：通用_确定按帧出现，OCR 能看到/看不到「火车切」。"""
+    """里程碑弹窗场景：通用_确定按帧出现，OCR 能看到/看不到「奖励」。"""
 
-    def __init__(self, confirm_frames, sword_text):
+    def __init__(self, confirm_frames, milestone_text):
         self._frames = list(confirm_frames)
-        self._sword_text = sword_text
+        self._milestone_text = milestone_text
         self.clicks = []
 
     def screenshot(self, force=False):
@@ -308,7 +308,7 @@ class _MilestoneMaa:
         return None
 
     def ocr(self, expected, roi=None, match_mode="contains"):
-        if expected == "火车切" and self._sword_text:
+        if expected in ("奖励", "火车切") and expected in self._milestone_text:
             return Point(1, 1)
         return None
 
@@ -338,9 +338,9 @@ class YosariMilestonePopupTests(unittest.TestCase):
     CFG = {"skip_tap": [290, 550]}
 
     @patch("touken.flows.sortie.time.sleep")
-    def test_confirm_plus_sword_text_is_claimed(self, _sleep):
-        # 弹窗出现 → 点确定 → 下一帧弹窗消失 → 安全区收获得窗
-        host = _MilestoneHost(_MilestoneMaa([True, False], sword_text=True))
+    def test_confirm_plus_reward_text_is_claimed(self, _sleep):
+        # 弹窗出现（原句写「奖励」）→ 点确定 → 下一帧弹窗消失 → 安全区收获得窗
+        host = _MilestoneHost(_MilestoneMaa([True, False], "奖励"))
         self.assertTrue(host._dismiss_yosari_milestone(self.CFG))
         self.assertEqual(host.maa.clicks, [(640, 500)])
         self.assertEqual(host.clicks, [])
@@ -348,16 +348,23 @@ class YosariMilestonePopupTests(unittest.TestCase):
         self.assertEqual(host.events, ["yosari.milestone_claimed"])
 
     @patch("touken.flows.sortie.time.sleep")
-    def test_confirm_without_sword_text_is_not_touched(self, _sleep):
-        # 只有确定键、画面里没有「火车切」：不认识就不碰，防误点
-        host = _MilestoneHost(_MilestoneMaa([True], sword_text=False))
+    def test_confirm_plus_sword_name_fallback_is_claimed(self, _sleep):
+        # 兜底：画面只认出「火车切」三个字也照样领
+        host = _MilestoneHost(_MilestoneMaa([True, False], "火车切"))
+        self.assertTrue(host._dismiss_yosari_milestone(self.CFG))
+        self.assertEqual(host.maa.clicks, [(640, 500)])
+
+    @patch("touken.flows.sortie.time.sleep")
+    def test_confirm_without_milestone_text_is_not_touched(self, _sleep):
+        # 只有确定键、画面里既没有「奖励」也没有「火车切」：不认识就不碰，防误点
+        host = _MilestoneHost(_MilestoneMaa([True], ""))
         self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
         self.assertEqual(host.maa.clicks, [])
         self.assertEqual(host.skips, 0)
 
     @patch("touken.flows.sortie.time.sleep")
     def test_no_popup_is_noop(self, _sleep):
-        host = _MilestoneHost(_MilestoneMaa([False], sword_text=False))
+        host = _MilestoneHost(_MilestoneMaa([False], ""))
         self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
         self.assertEqual(host.maa.clicks, [])
 
