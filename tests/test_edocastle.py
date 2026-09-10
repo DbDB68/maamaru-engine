@@ -14,6 +14,7 @@ from touken.edo_route import (
     decide_next,
     load_archive,
 )
+from touken.flows.battle import BattleMixin
 from touken.flows.edocastle import EdocastleMixin
 
 
@@ -170,6 +171,7 @@ class _MapRunHost(EdocastleMixin):
         from types import SimpleNamespace
         self.maa = SimpleNamespace(
             screenshot=lambda force=False: None,
+            ocr=lambda expected, roi=None: None,
             ocr_all=lambda roi, image=None: [],
             template_match=lambda *a, **k: None,
             save_screenshot=lambda path: True,
@@ -185,9 +187,9 @@ class _MapRunHost(EdocastleMixin):
     def _read_hud_steps(self, cfg):
         return next(self._step_reads, None)
 
-    def _wait_formation_page(self, cfg, timeout_s=5.0, skip_point=None,
-                             formation_mode="manual"):
-        return False  # 全是空点，没有战斗
+    def _wait_node_outcome(self, cfg, skip_point, formation_mode,
+                           timeout_s=20.0):
+        return "map"  # 全是空点，没有战斗
 
     def _wait_map_landmark(self, cfg, timeout_s=15.0):
         return True
@@ -199,13 +201,13 @@ class _MapRunHost(EdocastleMixin):
         pass
 
 
-def _run_map(flow):
+def _run_map(flow, cfg=None):
     """驱动 _map_run_stream 生成器，返回 (消息列表, 返回值)。"""
     from touken.edo_route import load_archive
     archive = load_archive(ARCHIVE_PATH)
     gen = flow._map_run_stream(
-        {}, archive, EDOCASTLE_TOUR, archive.get("boss", 2), [775, 695],
-        "manual", "fixed", "鱼鳞阵",
+        cfg or {}, archive, EDOCASTLE_TOUR, archive.get("boss", 2), [775, 695],
+        "manual", "鱼鳞阵",
     )
     msgs = []
     while True:
@@ -250,7 +252,7 @@ class _BattleGateMaa:
         return expected if expected in self.frame else None
 
 
-class _BattleGateHost(EdocastleMixin):
+class _BattleGateHost(EdocastleMixin, BattleMixin):
     def __init__(self, frames):
         self.maa = _BattleGateMaa(frames)
         self.clicked = []
@@ -364,6 +366,179 @@ class EdocastleEntryGateTests(unittest.TestCase):
             target_ocr_expected="地图点选择")
         self.assertTrue(ok)
         self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
+
+
+class EdocastleNodeOutcomeTests(unittest.TestCase):
+    """点完节点后的统一观察窗：迟到的战斗也必须被认出来。
+
+    2026-09-09 翻车原型：战斗迟了 7 秒才开场，掉进「5 秒阵型窗 +
+    12 秒地图窗」之间的盲区，被当成空点一路盲点。
+    """
+
+    CFG = {
+        "map_ready": {"expected": "地图点选择", "roi": [45, 605, 245, 715]},
+    }
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_late_auto_battle_is_caught_beyond_old_5s_window(self, _sleep):
+        """第 8 拍才出现自动标志（战斗迟到），也必须认成战斗。"""
+        frames = [set()] * 7 + [{"battle/阵形选择自动.png"}]
+        flow = _BattleGateHost(frames)
+        outcome = flow._wait_node_outcome(self.CFG, [775, 695], "auto",
+                                          timeout_s=20)
+        self.assertEqual(outcome, "battle")
+        self.assertEqual(flow.clicked, [[775, 695]] * 7)
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_battle_result_page_counts_as_battle(self, _sleep):
+        """战果页已出现 = 战斗已被接管，绝不能当空点继续点穿。"""
+        frames = [set(), set(), {"battle/ui战斗结果.png"}]
+        flow = _BattleGateHost(frames)
+        outcome = flow._wait_node_outcome(self.CFG, [775, 695], "auto",
+                                          timeout_s=20)
+        self.assertEqual(outcome, "battle_result")
+        self.assertEqual(flow.clicked, [[775, 695], [775, 695]])
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_empty_node_returns_map(self, _sleep):
+        frames = [set(), {"地图点选择"}]
+        flow = _BattleGateHost(frames)
+        outcome = flow._wait_node_outcome(self.CFG, [775, 695], "manual",
+                                          timeout_s=20)
+        self.assertEqual(outcome, "map")
+        self.assertEqual(flow.clicked, [[775, 695]])
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_all_blind_returns_none(self, _sleep):
+        frames = [set()] * 3
+        flow = _BattleGateHost(frames)
+        outcome = flow._wait_node_outcome(self.CFG, [775, 695], "manual",
+                                          timeout_s=0.5)
+        self.assertIsNone(outcome)
+
+
+class _OutcomeMapRunHost(_MapRunHost):
+    """节点结果按剧本给：None=啥也没发生，配合 maa.ocr 走点空重试/停手。"""
+
+    def __init__(self, step_reads, outcomes):
+        super().__init__(step_reads)
+        self._outcomes = iter(outcomes)
+
+    def _wait_node_outcome(self, cfg, skip_point, formation_mode,
+                           timeout_s=20.0):
+        return next(self._outcomes, "map")
+
+
+MAP_CFG = {"map_ready": {"expected": "地图点选择", "roi": [45, 605, 245, 715]}}
+
+
+class EdocastleMistapRecoveryTests(unittest.TestCase):
+    def test_missed_node_click_retries_without_retreat(self):
+        """点空（点击被动画吞掉）：地图还在 → 原地重新决策，不撤退不记账。"""
+        # 首次点 19 什么都没发生（None），重试后一路空点到王点收工
+        flow = _OutcomeMapRunHost(
+            [6, 5, 4, 2, 1, None],
+            [None, "map", "map", "map", "map", "map"],
+        )
+        flow.maa.ocr = lambda expected, roi=None: expected  # 地图活着
+        msgs, result = _run_map(flow, MAP_CFG)
+        self.assertEqual(result, (0, True))
+        self.assertTrue(any("点空" in m for m in msgs))
+        self.assertFalse(any("撤退" in m for m in msgs))
+        # 同一个节点被点了两次
+        self.assertEqual(flow.clicked.count(flow.clicked[0]), 2)
+
+    def test_unknown_outcome_stops_without_blind_retreat(self):
+        """既没开打也没回地图：停手留证返回失败，不点任何撤退坐标。"""
+        flow = _OutcomeMapRunHost([6], [None])
+        # maa.ocr 默认返回 None：地图也认不出
+        msgs, result = _run_map(flow, MAP_CFG)
+        self.assertEqual(result, (0, False))
+        self.assertTrue(any("停手留证" in m for m in msgs))
+
+
+class EdocastleInMapTests(unittest.TestCase):
+    CFG = {
+        "map_landmark": {"template": "江户城/地图难度标签.png"},
+        "map_ready": {"expected": "地图点选择", "roi": [45, 605, 245, 715]},
+    }
+
+    def test_banner_alone_is_not_map(self):
+        """难度旗在战斗结算页背景里也有，单看旗子会误判（2026-09-09 翻车）。"""
+        flow = _BattleGateHost([{"江户城/地图难度标签.png"}])
+        self.assertFalse(flow._in_map(self.CFG))
+
+    def test_banner_plus_map_text_is_map(self):
+        flow = _BattleGateHost([{"江户城/地图难度标签.png", "地图点选择"}])
+        self.assertTrue(flow._in_map(self.CFG))
+
+
+class _BailHost(_BattleGateHost):
+    def __init__(self, frames):
+        super().__init__(frames)
+        import tempfile
+        self._root = tempfile.mkdtemp()
+        self.skipped = 0
+
+    def skip_safe(self, times, interval=0.8, point=None):
+        self.skipped += times
+
+
+def _run_bail(flow, cfg):
+    gen = flow._bail_out_stream(cfg)
+    msgs = []
+    while True:
+        try:
+            msgs.append(next(gen))
+        except StopIteration as stop:
+            return msgs, stop.value
+
+
+class EdocastleBailOutTests(unittest.TestCase):
+    CFG = {
+        "map_landmark": {"template": "江户城/地图难度标签.png"},
+        "map_ready": {"expected": "地图点选择", "roi": [45, 605, 245, 715]},
+        "retreat": {"tab_point": [1240, 595], "home_button": [1050, 429],
+                    "confirm_yes": [497, 470]},
+        "skip_tap": [775, 695],
+    }
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_menu_not_opening_aborts_before_blind_clicks(self, _sleep):
+        """行动选择菜单没打开：只点 tab，不碰返回本丸/确认，绝不谎报回城。"""
+        flow = _BailHost([set()])
+        msgs, ok = _run_bail(flow, self.CFG)
+        self.assertFalse(ok)
+        self.assertEqual(flow.clicked, [[1240, 595]])
+        self.assertTrue(any("撤退中止" in m for m in msgs))
+        self.assertFalse(any("已主动回城" in m for m in msgs))
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_still_in_map_after_confirm_is_reported_not_lied(self, _sleep):
+        """点了确认但人还在地图：如实汇报撤退没生效。"""
+        flow = _BailHost([
+            {"返回本丸"},  # 菜单打开
+            {"江户城/地图难度标签.png", "地图点选择"},  # 撤完仍在地图
+        ])
+        msgs, ok = _run_bail(flow, self.CFG)
+        self.assertFalse(ok)
+        self.assertEqual(flow.clicked, [[1240, 595], [1050, 429], [497, 470]])
+        self.assertTrue(any("撤退没生效" in m for m in msgs))
+        self.assertFalse(any("已主动回城" in m for m in msgs))
+        self.assertEqual(flow.skipped, 0)
+
+    @patch("touken.flows.edocastle.time.sleep")
+    def test_verified_retreat_reports_honestly(self, _sleep):
+        """菜单验证 + 撤完确认离开地图，才报「已主动回城」。"""
+        flow = _BailHost([
+            {"返回本丸"},
+            set(),  # 撤完既没旗也没地图文字 → 确实离开了
+        ])
+        msgs, ok = _run_bail(flow, self.CFG)
+        self.assertTrue(ok)
+        self.assertEqual(flow.clicked, [[1240, 595], [1050, 429], [497, 470]])
+        self.assertTrue(any("已主动回城" in m for m in msgs))
+        self.assertEqual(flow.skipped, 4)
 
 
 if __name__ == "__main__":

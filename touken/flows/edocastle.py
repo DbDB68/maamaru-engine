@@ -179,9 +179,10 @@ class EdocastleMixin:
             # 无论正常结算还是败北/意外回城，都先尝试回到入场屏记账
             if not ok:
                 yield "[江户城] 本圈异常，看看是不是还在地图里…"
+                recovered = False
                 if self._in_map(cfg):
                     yield "[江户城] 还站在地图里，走「返回本丸」撤退"
-                    yield from self._bail_out_stream(cfg)
+                    recovered = yield from self._bail_out_stream(cfg)
                 elif self._formation_mode_state() is not None:
                     # 卡在阵型选择页：战斗里没有撤退按钮，只能打完再走撤退。
                     # 这会页面早过了进场动画，再试一次选阵型通常能成。
@@ -190,13 +191,24 @@ class EdocastleMixin:
                             cfg, formation_mode,
                             formation, skip_point):
                         if self._wait_map_landmark(cfg, timeout_s=30):
-                            yield from self._bail_out_stream(cfg)
+                            recovered = yield from self._bail_out_stream(cfg)
                         else:
                             yield "[江户城] 战斗打完没回到地图，停"
                     else:
                         yield "[江户城] 阵型还是选不动，停在战斗里了，需要手动看一眼"
+                else:
+                    self._save_debug_shot(debug_dir, "aborted_unknown")
+                    yield ("[江户城] 认不出现场（不在地图也不在阵型页），"
+                           "停手留证（截图已存），不盲撤")
+                if not recovered:
+                    # 没能把局面收回已知状态：原地停手等手动处理，不再拿
+                    # 安全区盲点（2026-09-09：盲点把撤退点击全打进了战斗
+                    # 结算页，还谎报「已回城」）。
+                    yield "[江户城] 本圈收不回已知状态，已停手，请手动看一眼游戏"
+                    return
 
             if not self._wait_entry_screen(cfg, skip_point, timeout_s=30):
+                self._save_debug_shot(debug_dir, "entry_screen_missing")
                 yield "[江户城] 结算后没回到入场屏，停"
                 return
 
@@ -342,6 +354,7 @@ class EdocastleMixin:
         last_progress = time.monotonic()
         safe_steps = 0
         ocr_misses = 0
+        mistaps = 0
 
         while True:
             # 无进展看门狗：120 秒没走到下一步/没打完，停
@@ -373,19 +386,25 @@ class EdocastleMixin:
             self._click_point(coord)
             time.sleep(1.5)
 
-            # 判断是战斗还是非战斗
-            formation_appeared = self._wait_formation_page(
-                cfg, timeout_s=5, skip_point=skip_point,
-                formation_mode=formation_mode,
-            )
+            # 战斗可能迟到（慢加载时阵型页/自动标志几秒内都不出现，
+            # 自动阵型又不需要人点阵型，战斗在后台自己就开打了——
+            # 2026-09-09 实测翻车），所以统一观察窗全程同时盯四个信号
+            outcome = self._wait_node_outcome(
+                cfg, skip_point, formation_mode, timeout_s=20)
 
-            if formation_appeared:
-                yield "[江户城] 紫点战斗，选阵型开打"
-                if not self._fight_one_battle(
-                    cfg, formation_mode, formation, skip_point
-                ):
-                    yield "[江户城] 战斗处理失败，停"
-                    return 0, False
+            if outcome in ("battle", "battle_result"):
+                mistaps = 0
+                if outcome == "battle":
+                    yield "[江户城] 紫点战斗，选阵型开打"
+                    if not self._fight_one_battle(
+                        cfg, formation_mode, formation, skip_point
+                    ):
+                        yield "[江户城] 战斗处理失败，停"
+                        return 0, False
+                else:
+                    # 战果页已出现：阵型页早过去了，回头找阵型只会盲点
+                    # 战果页，直接等战斗流程走完回地图
+                    yield "[江户城] 战斗开场慢了半拍，已自行开打，等战果"
 
                 if nxt == boss:
                     # 王点战结束等横幅
@@ -401,29 +420,28 @@ class EdocastleMixin:
                         cfg, skip_point, timeout_s=30):
                     yield "[江户城] 战斗后没回到地图，停"
                     return 0, False
+            elif outcome == "map":
+                mistaps = 0
+                node_kind = "黄点钥匙" if self._looks_like_key_node(cfg) else "空点"
+                yield f"[江户城] {node_kind}，继续逛"
             else:
-                # 钥匙/空点，等地图屏
-                if not self._wait_map_landmark(cfg, timeout_s=12):
-                    # 也可能formation出现得慢，再验一次
-                    self.maa.screenshot(force=True)
-                    if self._formation_mode_state(
-                        allow_auto_without_title=formation_mode != "auto"
-                    ) is not None:
-                        yield "[江户城] 原来是战斗点，只是 formation 出现慢了"
-                        if not self._fight_one_battle(
-                            cfg, formation_mode, formation, skip_point
-                        ):
-                            yield "[江户城] 战斗处理失败，停"
-                            return 0, False
-                        if not self._wait_map_landmark(cfg, timeout_s=20):
-                            yield "[江户城] 战斗后没回到地图，停"
-                            return 0, False
-                    else:
-                        yield "[江户城] 点完节点地图没回来，停"
+                # 20 秒既没开打也没回地图。最后不点击地验一次地图：
+                # 地图活着 = 刚才那下被动画吞了点空了，原地重新决策；
+                # 地图也不在 = 认不出现场，停手留证，绝不盲撤。
+                self.maa.screenshot(force=True)
+                ready = cfg["map_ready"]
+                ready_roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
+                if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+                    mistaps += 1
+                    if mistaps >= 3:
+                        yield "[江户城] 连续点空 3 次，节点坐标可能漂了，停"
                         return 0, False
-                else:
-                    node_kind = "黄点钥匙" if self._looks_like_key_node(cfg) else "空点"
-                    yield f"[江户城] {node_kind}，继续逛"
+                    yield "[江户城] 刚才那下像点空了，地图还在，重新决策"
+                    continue
+                self._save_debug_shot(debug_dir, "node_outcome_unknown")
+                yield ("[江户城] 点完节点后既没开打也没回地图，认不出现场，"
+                       "停手留证（截图已存），不盲动")
+                return 0, False
 
             current = nxt
             new_steps = self._read_hud_steps(cfg)
@@ -449,6 +467,43 @@ class EdocastleMixin:
             if safe_steps > 60:
                 yield "[江户城] 单圈步数超过安全上限，停"
                 return 0, False
+
+    # ---------- 内部：点完节点后的统一观察窗 ----------
+
+    def _wait_node_outcome(self, cfg: dict, skip_point: list,
+                           formation_mode: str, timeout_s: float = 20.0):
+        """点完节点后等局面落地。
+
+        返回 "battle"（阵型页/自动标志出现，需要走选阵型流程）、
+        "battle_result"（战果页已出现，战斗已被自动阵型接管甚至打完）、
+        "map"（左下角『地图点选择』回来，空点/钥匙点）、None（超时）。
+
+        旧实现是「5 秒等阵型页 + 12 秒等地图」两个互不衔接的观察窗：
+        战斗只要晚于 5 秒开场就掉进盲区，被当成空点一路盲点，点穿战果
+        页还把撤退三连点打进了结算（2026-09-09 第 7 圈实测翻车）。
+        自动阵型不需要人点阵型，战斗迟到完全正常，所以整个等待期间
+        必须同时盯四个信号；战果页一旦出现立即停手，绝不点穿江户城
+        专属的钥匙/步数横幅。
+        """
+        ready = cfg["map_ready"]
+        ready_roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            if self._formation_mode_state(
+                allow_auto_without_title=formation_mode != "auto"
+            ) is not None:
+                return "battle"
+            if formation_mode == "auto" and self._formation_auto_marker_visible():
+                return "battle"
+            if self.maa.template_match("battle/ui战斗结果.png"):
+                return "battle_result"
+            if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+                return "map"
+            if skip_point:
+                self._click_point(skip_point)
+            time.sleep(0.9)
+        return None
 
     # ---------- 内部：单场战斗 ----------
 
@@ -716,9 +771,18 @@ class EdocastleMixin:
     # ---------- 内部：地图内撤退 ----------
 
     def _in_map(self, cfg: dict) -> bool:
-        """当前是否还停在地图屏（右侧难度标签为地标）。"""
+        """当前是否真站在可操作的地图屏（撤退前必须先过这关）。
+
+        光认右侧难度旗不够：战斗结算页的背景里也带着这面旗
+        （2026-09-09 实测误判，把撤退三连点全点进了结算页）。
+        必须同时看到左下角『地图点选择』才算地图真的可操作。
+        """
         self.maa.screenshot(force=True)
-        return bool(self.maa.template_match(cfg["map_landmark"]["template"]))
+        if not self.maa.template_match(cfg["map_landmark"]["template"]):
+            return False
+        ready = cfg["map_ready"]
+        roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
+        return bool(self.maa.ocr(expected=ready["expected"], roi=roi))
 
     def _bail_out_stream(self, cfg: dict):
         """地图内主动撤退：行动选择 tab → 返回本丸 → 是 → 点掉回城结算。
@@ -726,14 +790,36 @@ class EdocastleMixin:
         坐标已实测（2026-08-27）：tab (1240,595)、返回本丸 (1050,429)、
         确认「是」(497,470)。主动回城只带回了了了几把钥匙（按规则打折），
         但比卡死在地图里强。
+
+        每步都验证、逐步推进，撤不动就如实汇报并停手留证，绝不谎报
+        「已回城」（2026-09-09：旧版盲点三坐标记假账，其实全点在了
+        战斗结算页上）。返回 True 表示确认已离开地图。
         """
         retreat = cfg.get("retreat", {})
+        # 调用方已确认地图可操作。点开 tab 后必须真的看到「返回本丸」
+        # 菜单项才继续，否则界面不是预想的样子，停手。
         self._click_point(retreat.get("tab_point", [1240, 595]))
-        time.sleep(1.5)
+        menu_open = False
+        for _ in range(5):
+            time.sleep(0.8)
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected="返回本丸"):
+                menu_open = True
+                break
+        if not menu_open:
+            self._save_debug_shot(None, "bail_menu_fail")
+            yield "[江户城] 行动选择菜单没打开，撤退中止，停手留证（截图已存）"
+            return False
         self._click_point(retreat.get("home_button", [1050, 429]))
         time.sleep(1.5)
         self._click_point(retreat.get("confirm_yes", [497, 470]))
         time.sleep(3.0)
+        # 确认撤退真的生效：还站在可操作的地图上就是没撤成
+        if self._in_map(cfg):
+            self._save_debug_shot(None, "bail_still_in_map")
+            yield "[江户城] 点了撤退但人还在地图，撤退没生效，停手留证（截图已存）"
+            return False
         # 「主动回城」结算屏点掉
         self.skip_safe(4, point=cfg.get("skip_tap", [775, 695]))
         yield "[江户城] 已主动回城（钥匙按规则打折，认栽）"
+        return True
