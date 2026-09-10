@@ -136,6 +136,10 @@ export const api = {
   saveConfigLists: (value: Record<string, string[]>) => request<{ ok: boolean }>('/api/config-lists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
+  emulatorConfig: () => request<{ adb_address: string; default_address: string; adb_path: string }>('/api/emulator-config'),
+  saveEmulatorConfig: (value: { adb_address: string }) => request<{ ok: boolean; adb_address: string }>('/api/emulator-config', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
   expeditionSchedule: () => request<any>('/api/expedition-schedule'),
   saveExpeditionSchedule: (value: any) => request<{ ok: boolean }>('/api/expedition-schedule', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),

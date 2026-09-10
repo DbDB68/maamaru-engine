@@ -1394,6 +1394,48 @@ async def api_save_config_lists(request: Request):
     return {"ok": True}
 
 
+_ADB_ADDRESS_RE = re.compile(r"^(?:[\w.-]+:\d{1,5}|emulator-\d{1,5})$")
+
+
+def _valid_adb_address(address: str) -> bool:
+    if not _ADB_ADDRESS_RE.match(address):
+        return False
+    if address.startswith("emulator-"):
+        return True
+    port = int(address.rsplit(":", 1)[1])
+    return 1 <= port <= 65535
+
+
+@app.get("/api/emulator-config")
+async def api_get_emulator_config():
+    """当前 ADB 连接配置；adb_address 为空表示下次启动时自动探测。"""
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    return {
+        "adb_address": str(cfg.get("adb_address", "")).strip(),
+        "default_address": _DEFAULT_ADB_ADDR,
+        "adb_path": str(cfg.get("adb_path", "")),
+    }
+
+
+@app.post("/api/emulator-config")
+async def api_save_emulator_config(request: Request):
+    """手动指定 ADB 地址；留空则删掉配置，回到自动探测。"""
+    body = await request.json()
+    address = str(body.get("adb_address", "")).strip()
+    if address and not _valid_adb_address(address):
+        return JSONResponse(
+            {"error": "地址格式不对，应该类似 127.0.0.1:16384 或 emulator-5554"},
+            status_code=400,
+        )
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    if address:
+        cfg["adb_address"] = address
+    else:
+        cfg.pop("adb_address", None)
+    _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "adb_address": address}
+
+
 # ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
 
 _agent_gateway = None
