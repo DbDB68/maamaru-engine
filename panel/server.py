@@ -618,6 +618,10 @@ def _build_sakura(agent, config_path, params):
         slot=_i(params, "slot", 1))
 
 
+def _build_sword_inventory(agent, config_path, params):
+    yield from agent.sword_inventory_stream()
+
+
 def _build_forge(agent, config_path, params):
     if str(params.get("forge_limited")) == "true":
         yield from _build_forge_limited(agent, config_path, params)
@@ -1119,6 +1123,9 @@ register_script("snapshot", "库存快照",
                 "手动拍一次完整家底（含小判）刷新看板；日常已由锻刀收工顺手拍+顶栏顺路更新覆盖，想立刻刷新看板才用",
                 _wrap_inventory("库存", _build_simple("status_snapshot_stream"),
                                 inventory=False))
+register_script("sword_inventory", "刀帐盘点",
+                "走进刀剑男士一览，逐页认出每把刀的等级、疲劳和属性记成快照；全程只看不点，怕漏会如实报缺口",
+                _wrap_inventory("刀帐盘点", _build_sword_inventory))
 
 
 # ── 自定义工作流（乐高排班）──

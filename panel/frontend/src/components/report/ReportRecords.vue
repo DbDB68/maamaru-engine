@@ -40,7 +40,7 @@ const eventNames: Record<string, string> = {
   'sword.obtained': '刀剑男士来本丸', 'naihanka.gains': '内番收工',
   'dismantle.completed': '刀解完成', 'equipment.restored': '恢复刀装',
   'ticket.refilled': '补充活动手形', 'yosari.ticket_refilled': '补充异去提灯',
-  'yosari.fragments': '记录异去碎片',
+  'yosari.fragments': '记录异去碎片', 'sword_inventory.completed': '刀帐盘点完成',
 }
 
 function hanafudaDifficulty(value: unknown) {
@@ -115,6 +115,10 @@ function eventDetail(item: any) {
   if (item.event_type === 'yosari.fragments') {
     const gained = Object.values(p.gained || {}).reduce((sum: number, value: any) => sum + Number(value || 0), 0)
     return gained ? `${p.map_no ?? '？'}图 · 本圈新增 ${gained} 枚碎片` : `${p.map_no ?? '？'}图 · 碎片数量已记录`
+  }
+  if (item.event_type === 'sword_inventory.completed') {
+    const owned = p.owned == null ? '' : `（所持 ${p.owned}${p.missing ? `，缺 ${p.missing}` : ''}）`
+    return `认出 ${p.count ?? '？'} 把刀${owned}`
   }
   if (item.event_type === 'network.recovered') {
     return p.mode === 'resumed' ? '断线后接回战斗，继续干活'

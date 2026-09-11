@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 8
+TELEMETRY_SCHEMA_VERSION = 9
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -126,6 +126,30 @@ class TelemetryStore:
                 loops INTEGER NOT NULL,
                 note TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS sword_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at REAL NOT NULL,
+                owned INTEGER,
+                capacity INTEGER,
+                sword_count INTEGER NOT NULL DEFAULT 0,
+                missing INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS sword_snapshot_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                sword_id TEXT NOT NULL,
+                name_zh TEXT NOT NULL,
+                level INTEGER,
+                tou_level INTEGER,
+                survival INTEGER,
+                survival_max INTEGER,
+                fatigue INTEGER,
+                fatigue_max INTEGER,
+                stats TEXT NOT NULL DEFAULT '{}',
+                kiwame_date TEXT,
+                locked INTEGER,
+                page_no INTEGER
+            );
             CREATE INDEX IF NOT EXISTS idx_observations_ts ON observations(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_observations_run ON observations(run_id);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
@@ -137,6 +161,10 @@ class TelemetryStore:
                 ON human_reports(gap_key);
             CREATE INDEX IF NOT EXISTS idx_manual_sessions_started
                 ON manual_sessions(started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_sword_snapshots_ts
+                ON sword_snapshots(captured_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_sword_rows_snapshot
+                ON sword_snapshot_rows(snapshot_id);
         """)
         conn.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
@@ -672,6 +700,67 @@ class TelemetryStore:
         )
         self._conn().commit()
         return cursor.rowcount > 0
+
+    # ---------- 刀帐快照（刀剑男士一览逐页扫描的落库） ----------
+
+    def save_sword_snapshot(self, rows: list[dict], *, owned: int | None = None,
+                            capacity: int | None = None,
+                            captured_at: float | None = None,
+                            missing: int | None = None) -> int:
+        """写一份刀帐快照（头 + 每刀一行），返回快照 id。
+
+        rows 的每项：sword_id/name_zh 必填，其余字段缺省 None；
+        stats 是九属性 dict（键=属性名），按 JSON 存。
+        """
+        ts = float(captured_at or time.time())
+        conn = self._conn()
+        cursor = conn.execute(
+            "INSERT INTO sword_snapshots(captured_at, owned, capacity, sword_count, missing) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (ts, owned, capacity, len(rows), missing),
+        )
+        snapshot_id = cursor.lastrowid
+        conn.executemany(
+            "INSERT INTO sword_snapshot_rows(snapshot_id, sword_id, name_zh, level, "
+            "tou_level, survival, survival_max, fatigue, fatigue_max, stats, "
+            "kiwame_date, locked, page_no) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(snapshot_id, row["sword_id"], row["name_zh"],
+              row.get("level"), row.get("tou_level"),
+              row.get("survival"), row.get("survival_max"),
+              row.get("fatigue"), row.get("fatigue_max"),
+              _json(row.get("stats") or {}),
+              row.get("kiwame_date"), row.get("locked"), row.get("page_no"))
+             for row in rows],
+        )
+        conn.commit()
+        return int(snapshot_id)
+
+    def recent_sword_snapshots(self, limit: int = 20) -> list[dict]:
+        rows = self._conn().execute(
+            "SELECT id, captured_at, owned, capacity, sword_count, missing "
+            "FROM sword_snapshots ORDER BY captured_at DESC, id DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def sword_snapshot_detail(self, snapshot_id: int) -> dict | None:
+        head = self._conn().execute(
+            "SELECT id, captured_at, owned, capacity, sword_count, missing "
+            "FROM sword_snapshots WHERE id = ?", (int(snapshot_id),),
+        ).fetchone()
+        if not head:
+            return None
+        rows = self._conn().execute(
+            "SELECT sword_id, name_zh, level, tou_level, survival, survival_max, "
+            "fatigue, fatigue_max, stats, kiwame_date, locked, page_no "
+            "FROM sword_snapshot_rows WHERE snapshot_id = ? ORDER BY id",
+            (int(snapshot_id),),
+        ).fetchall()
+        out = dict(head)
+        out["swords"] = [{**dict(row), "stats": _loads(row["stats"], {})}
+                         for row in rows]
+        return out
 
     def inventory_gaps(self, limit: int = 50) -> list[dict]:
         """Return resource changes between a prior closing snapshot and next run start."""

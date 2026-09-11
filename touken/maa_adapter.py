@@ -479,6 +479,23 @@ class MAAAdapter:
         print(f"[ADB] 滑动 ({x1},{y1}) → ({x2},{y2})")
         return True
 
+    def touch_swipe(self, x1: int, y1: int, x2: int, y2: int,
+                    duration_ms: int = 400) -> bool:
+        """MAA 内核触摸注入的滑动（终点传位移）。
+
+        裸 adb input swipe 在部分游戏 UI 上根本不被识别——刀帐图鉴的
+        竖向网格、一览的横向翻页都实测只有内核注入有效；而 input tap
+        哪里都好使。两种通道并存，按页面选。"""
+        if not self._initialized:
+            print("[MAA 错误] 未初始化")
+            return False
+        try:
+            self.controller.post_swipe(x1, y1, x2 - x1, y2 - y1, duration_ms)
+            return True
+        except Exception as exc:
+            print(f"[MAA] 内核滑动 ({x1},{y1}) → ({x2},{y2}) 失败: {exc}")
+            return False
+
     def click(self, target: Point) -> bool:
         """
         点击坐标
