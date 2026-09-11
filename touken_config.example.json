@@ -1316,6 +1316,85 @@
       695
     ]
   },
+  "hanafuda": {
+    "team_no": 3,
+    "difficulty": 4,
+    "max_runs": 0,
+    "use_koban_refill": false,
+    "repair_threshold": "heavy",
+    "auto_equip": false,
+    "activity_entry": {
+      "template": "活动.png"
+    },
+    "ui_title": {
+      "template": "花札/ui秘宝之里.png"
+    },
+    "difficulty_cards": {
+      "1": [228, 300],
+      "2": [512, 300],
+      "3": [794, 300],
+      "4": [1082, 300]
+    },
+    "deploy_button": {
+      "ocr": {
+        "expected": ["部队", "选择"],
+        "roi": [1110, 580, 1279, 710]
+      }
+    },
+    "team_ui_ocr": {
+      "expected": "部队选择",
+      "roi": [506, 1, 774, 77]
+    },
+    "depart_button": {
+      "template": "team/即刻出阵.png"
+    },
+    "equip_warning_button": {
+      "template": "team/继续出阵.png"
+    },
+    "injury_deny_button": {
+      "template": "否.png"
+    },
+    "injury_stamps": {
+      "重伤": {
+        "template": "battle/ui重伤.png",
+        "threshold": 0.88
+      },
+      "中伤": {
+        "template": "battle/中伤.png",
+        "threshold": 0.88
+      },
+      "轻伤": {
+        "template": "battle/轻伤.png",
+        "threshold": 0.88
+      }
+    },
+    "injury_stamp_roi": [220, 90, 340, 690],
+    "injury_status_roi": [0, 90, 570, 690],
+    "confirm_ui": {
+      "template": "花札/ui出阵确认.png"
+    },
+    "confirm_button": {
+      "template": "通用_确定.png",
+      "roi": [536, 565, 742, 637],
+      "target": [640, 627]
+    },
+    "map_hud_ocr": {
+      "expected": "剩余行动次数",
+      "roi": [20, 5, 180, 45]
+    },
+    "bubble_ocr": {
+      "roi": [380, 420, 960, 500]
+    },
+    "bubble_tap": [870, 394],
+    "hud_tama_ocr": {
+      "roi": [265, 28, 350, 55],
+      "upscale": 3
+    },
+    "tama_total_ocr": {
+      "roi": [890, 188, 1100, 235]
+    },
+    "skip_tap": [775, 695]
+  },
   "osaka": {
     "team_no": 3,
     "activity_entry": {

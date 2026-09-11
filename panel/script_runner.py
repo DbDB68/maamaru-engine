@@ -234,7 +234,7 @@ class ScriptRunner:
         else:
             place = {
                 "sortie": "合战场", "yosari": "异去", "raid": "联队战",
-                "pumpkin": "南瓜大作战", "daily": "一键日课",
+                "pumpkin": "南瓜大作战", "hanafuda": "秘宝之里", "daily": "一键日课",
             }.get(script, "本次出阵")
         parts = [f"{place} {summary['loops']} 圈"]
         average = summary.get("average_loop_seconds")

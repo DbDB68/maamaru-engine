@@ -79,14 +79,14 @@ const logTaskLabel = computed(() => running.value
 
 const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
-  daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
+  daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', hanafuda: 'hanafuda.png', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
   sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'workflow.svg',
 }
 
 const selectedInfo = computed(() => scripts.value[selected.value])
 // 常用功能默认清单：后端布局接口不可用时兜底用，顺序与旧版硬编码一致。
-const fallbackHomeOrder = ['daily', 'sortie', 'yosari', 'osaka', 'edocastle', 'expedition', 'smith', 'pumpkin', 'raid', 'sugar', 'sakura', 'practice', 'snapshot']
+const fallbackHomeOrder = ['daily', 'sortie', 'yosari', 'osaka', 'edocastle', 'hanafuda', 'expedition', 'smith', 'pumpkin', 'raid', 'sugar', 'sakura', 'practice', 'snapshot']
 const homeLayoutEntries = ref<HomeLayoutEntry[]>([])
 const homeLayoutLoaded = ref(false)
 const homeHiddenList = ref<string[]>([])
@@ -231,10 +231,10 @@ function openWishlist() {
 const scriptGroups = computed(() => {
   const entries = Object.entries(scripts.value)
   const take = (...keys: string[]) => entries.filter(([key]) => keys.includes(key))
-  const used = new Set(['daily', 'raid', 'pumpkin', 'edocastle', 'sortie', 'yosari', 'osaka', 'sakura', 'practice', 'expedition', 'smith', 'sugar', 'snapshot'])
+  const used = new Set(['daily', 'raid', 'pumpkin', 'edocastle', 'hanafuda', 'sortie', 'yosari', 'osaka', 'sakura', 'practice', 'expedition', 'smith', 'sugar', 'snapshot'])
   return [
     { label: '日常配置', entries: take('daily') },
-    { label: '出阵配置', entries: take('raid', 'pumpkin', 'edocastle', 'sortie', 'yosari', 'osaka', 'sakura', 'practice') },
+    { label: '出阵配置', entries: take('raid', 'pumpkin', 'edocastle', 'hanafuda', 'sortie', 'yosari', 'osaka', 'sakura', 'practice') },
     { label: '后勤配置', entries: take('expedition', 'smith', 'sugar', 'snapshot') },
     { label: '其他配置', entries: entries.filter(([key]) => !used.has(key)) },
   ].filter(group => group.entries.length)
@@ -268,7 +268,7 @@ const stagePlace = computed(() => {
   const script = String(dashboardRun.value.script || '')
   const step = String(dashboardRun.value.step || '')
   if (/(锻刀|手入|刀解|合成|炼糖|根兵糖)/.test(step) || ['forge', 'repair', 'sugar'].includes(script)) return '锻冶工房'
-  if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|换队长|派遣)/.test(step) || ['raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch', 'osaka'].includes(script)) return '出阵之路'
+  if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|换队长|派遣|花牌|秘宝)/.test(step) || ['raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch', 'osaka', 'hanafuda'].includes(script)) return '出阵之路'
   return '本丸庭院'
 })
 const stageActive = computed(() => !ledgerMode.value && (running.value || Boolean(dashboardRun.value?.active)))

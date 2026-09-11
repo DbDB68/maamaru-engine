@@ -29,7 +29,7 @@ from .script_runner import _SCRIPTS
 # 注意只管照抄，不保证每个 key 都注册了（比如 smith）——
 # 解析时不认识的 key 静默丢弃。
 DEFAULT_ORDER = ["daily", "sortie", "yosari", "osaka", "edocastle",
-                 "expedition", "smith", "pumpkin", "raid", "sugar",
+                 "hanafuda", "expedition", "smith", "pumpkin", "raid", "sugar",
                  "sakura", "practice", "snapshot"]
 
 

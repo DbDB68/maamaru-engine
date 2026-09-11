@@ -506,6 +506,15 @@ def _build_edocastle(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵")
 
 
+def _build_hanafuda(agent, config_path, params):
+    runs = _run_count(params, 0, "max_runs")
+    yield from agent.hanafuda_stream(
+        team_no=_i(params, "team_no", 3),
+        difficulty=_i(params, "difficulty", 4),
+        max_runs=runs,
+        auto_refill=_bool(params.get("use_koban_refill", False)))
+
+
 def _build_sortie(agent, config_path, params):
     yield from agent.sortie_stream(
         chapter=_i(params, "chapter", 1),
@@ -802,6 +811,19 @@ register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点�
                         {"key": "use_koban_refill", "type": "toggle",
                           "label": "是否补充手形", "default": False},
                         *_formation_fields()])
+register_script("hanafuda", "秘宝之里", "花牌收集：挂上委托后图内全自动，令牌跑完收工",
+                _wrap_inventory("花札", _build_hanafuda),
+                params=[{"key": "difficulty", "type": "select", "label": "打哪个难度",
+                         "options": [["1", "难度·易"], ["2", "难度·普"],
+                                     ["3", "难度·难"], ["4", "难度·超难"]],
+                         "default": "4"},
+                        _team_field("3"),
+                        {"key": "max_runs", "type": "number", "label": "出阵次数",
+                         "default": 0, "min": 0, "max": 99,
+                         "help": "0 表示把当天通行令牌跑完为止。图内全程游戏自动行军，脚本只盯异常。"},
+                        {"key": "use_koban_refill", "type": "toggle",
+                         "label": "是否补充通行令牌", "default": False,
+                         "help": "开启后令牌不足时自动用小判补充；关闭则令牌跑完收工。"}])
 register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
@@ -980,7 +1002,8 @@ for _wf_script, _wf_builder in (
         ("practice", _build_practice), ("raid", _build_raid),
         ("edocastle", _build_edocastle), ("sortie", _build_sortie),
         ("yosari", _build_yosari), ("osaka", _build_osaka),
-        ("pumpkin", _build_pumpkin), ("sakura", _build_sakura)):
+        ("pumpkin", _build_pumpkin), ("sakura", _build_sakura),
+        ("hanafuda", _build_hanafuda)):
     _wf_node(_wf_script, _wf_builder, "battle", merge_saved=True,
              detail=[_equip_warning_status])
 # 演练专项判分（打了却一场没赢不算绿）照旧补上
@@ -1615,6 +1638,7 @@ _SCRIPT_FLAVOR = {
     "raid": "正在和时间溯行军搏斗中⚔️",
     "pumpkin": "正在南瓜田里刨剪影🎃",
     "edocastle": "正在江户城摸黑巡游🏯",
+    "hanafuda": "正在秘宝之里收集花牌🎴",
     "sortie": "正在出阵打图🗡",
     "yosari": "正在提灯照耀的异去探索🏮",
     "osaka": "正在大阪城地下咔咔挖土⛏️",

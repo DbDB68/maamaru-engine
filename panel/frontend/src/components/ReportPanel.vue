@@ -1273,7 +1273,7 @@ onMounted(async () => {
         <form v-if="manualSessionFormOpen" class="manual-session-form" @submit.prevent="saveManualSession">
           <header><div><h4>{{ editingManualSessionId ? '修改手动活动' : '补记一段活动' }}</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false; editingManualSessionId = null">×</button></header>
           <div class="manual-session-fields">
-            <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
+            <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="hanafuda">秘宝之里</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
             <label>圈数<input v-model.number="manualSessionForm.loops" type="number" min="1" max="100000" step="1" required></label>
             <label>开始时间<input v-model="manualSessionForm.started_at" type="datetime-local" required></label>
             <label>结束时间<input v-model="manualSessionForm.ended_at" type="datetime-local" required></label>
