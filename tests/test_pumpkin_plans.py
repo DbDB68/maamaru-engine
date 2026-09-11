@@ -195,7 +195,8 @@ class PumpkinPlanTests(unittest.TestCase):
         field = next(field for field in list_scripts()["daily"]["params"]
                      if field.get("key") == "forge_times")
         self.assertEqual(field["default"], 3)
-        self.assertEqual(field["max"], 12)
+        # 上限与锻刀积木（times）一致，日课也能一次排满 200 炉
+        self.assertEqual(field["max"], 200)
 
     def test_daily_forge_recipe_reaches_daily_stream(self):
         agent = FakeAgent()
