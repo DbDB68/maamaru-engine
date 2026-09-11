@@ -22,7 +22,7 @@ class HanafudaConfigTests(unittest.TestCase):
         self.assertIn("hanafuda", cfg)
         hana = cfg["hanafuda"]
         self.assertEqual(hana["difficulty"], 4)
-        self.assertEqual(hana["refill_run_limit"], 6)
+        self.assertEqual(hana["max_runs"], 6)
         self.assertEqual(hana["repair_threshold"], "heavy")  # 虚拟伤害，中伤照跑
         self.assertIn("auto_equip", hana)
         self.assertEqual(set(hana["difficulty_cards"].keys()),
@@ -76,10 +76,10 @@ class HanafudaPanelTests(unittest.TestCase):
         from panel.server import list_scripts
         info = list_scripts()["hanafuda"]
         keys = [field.get("key") for field in info["params"]]
-        self.assertEqual(keys, ["difficulty", "team_no", "use_koban_refill",
-                                "refill_run_limit"])
-        self.assertEqual(info["params"][-1]["visibleWhen"],
-                         {"key": "use_koban_refill", "is": "true"})
+        self.assertEqual(keys, ["difficulty", "team_no", "runs",
+                                "use_koban_refill"])
+        self.assertEqual(info["params"][2]["min"], 1)
+        self.assertNotIn("help", info["params"][2])
         difficulty = info["params"][0]
         self.assertEqual(difficulty["options"][-1], ["4", "难度·超难"])
         self.assertEqual(difficulty["default"], "4")
@@ -98,7 +98,7 @@ class HanafudaPanelTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent):
             list(_wrap_inventory("花札", _build_hanafuda)(
                 "config.json", {"difficulty": "2", "team_no": "4",
-                                "refill_run_limit": "5",
+                                "runs": "5",
                                 "use_koban_refill": True}))
         self.assertEqual(agent.hanafuda_args["difficulty"], 2)
         self.assertEqual(agent.hanafuda_args["team_no"], 4)
@@ -109,8 +109,8 @@ class HanafudaPanelTests(unittest.TestCase):
         with patch("panel.server._make_agent", return_value=agent):
             list(_wrap_inventory("花札", _build_hanafuda)(
                 "config.json", {"difficulty": "4", "team_no": "3",
-                                "max_runs": "99", "use_koban_refill": False}))
-        self.assertEqual(agent.hanafuda_args["max_runs"], 0)
+                                "max_runs": "0", "use_koban_refill": False}))
+        self.assertEqual(agent.hanafuda_args["max_runs"], 6)
         self.assertFalse(agent.hanafuda_args["auto_refill"])
 
 

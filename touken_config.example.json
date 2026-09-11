@@ -1153,7 +1153,7 @@
     "map_archive": "resource/base/maps/edocastle-4.json",
     "use_koban_refill": false,
     "ticket_price": 300,
-    "refill_run_limit": 6,
+    "max_runs": 6,
     "repair_threshold": "heavy",
     "auto_equip": false,
     "tour": [
@@ -1319,7 +1319,7 @@
   "hanafuda": {
     "team_no": 3,
     "difficulty": 4,
-    "refill_run_limit": 6,
+    "max_runs": 6,
     "use_koban_refill": false,
     "repair_threshold": "heavy",
     "auto_equip": false,

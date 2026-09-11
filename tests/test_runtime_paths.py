@@ -140,7 +140,7 @@ class RuntimePathsTests(unittest.TestCase):
                     "difficulty": 4,
                     "map_archive": "resource/base/maps/edocastle-4.json",
                     "use_koban_refill": False,
-                    "refill_run_limit": 6,
+                    "max_runs": 6,
                 }
             }
             (bundle / "touken_config.example.json").write_text(
@@ -202,7 +202,7 @@ class RuntimePathsTests(unittest.TestCase):
             # 安全出阵链和地图可操作门闩依赖的键全部补齐
             for key in ("repair_threshold", "auto_equip", "injury_deny_button",
                         "injury_stamps", "injury_stamp_roi", "injury_status_roi",
-                        "map_ready", "ticket_price", "refill_run_limit"):
+                        "map_ready", "ticket_price"):
                 self.assertIn(key, merged, f"老安装没补到 edocastle.{key}")
             self.assertEqual(
                 merged["map_ready"]["expected"], "地图点选择")

@@ -54,7 +54,7 @@ class HanafudaMixin:
         Args:
             team_no: 部队编号，默认读配置 hanafuda.team_no
             difficulty: 难度 1易/2普/3难/4超难，默认读配置 hanafuda.difficulty
-            max_runs: 内部安全上限；不补票时为 0（令牌跑完），补票时必须为正数
+            max_runs: 本次最多跑几圈，必须为正数
             auto_refill: 票尽时是否用小判补票（走游戏自己的补票弹窗），
                 默认读配置 hanafuda.use_koban_refill
         """
@@ -70,10 +70,8 @@ class HanafudaMixin:
         if auto_refill is None:
             auto_refill = bool(cfg.get("use_koban_refill", False))
         if max_runs is None:
-            max_runs = (int(cfg.get(
-                "refill_run_limit", cfg.get("max_runs", 6)))
-                        if auto_refill else 0)
-        if auto_refill and max_runs <= 0:
+            max_runs = int(cfg.get("max_runs", cfg.get("refill_run_limit", 6)))
+        if max_runs <= 0:
             max_runs = 6
         repair_threshold = str(cfg.get("repair_threshold", "heavy"))
         auto_equip = bool(cfg.get("auto_equip", False))

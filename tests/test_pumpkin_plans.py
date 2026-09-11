@@ -48,10 +48,10 @@ class PumpkinPlanTests(unittest.TestCase):
     def test_edocastle_exposes_the_formation_choices_it_actually_uses(self):
         fields = list_scripts()["edocastle"]["params"]
         by_key = {field["key"]: field for field in fields}
-        self.assertNotIn("max_runs", by_key)
+        self.assertEqual(by_key["runs"]["label"], "出阵次数")
+        self.assertEqual(by_key["runs"]["min"], 1)
+        self.assertNotIn("help", by_key["runs"])
         self.assertEqual(by_key["use_koban_refill"]["label"], "是否补充手形")
-        self.assertEqual(by_key["refill_run_limit"]["visibleWhen"],
-                         {"key": "use_koban_refill", "is": "true"})
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
         # 阵形策略选项已拆：手动=固定点所选阵形，自动=游戏选、抓瞎时
@@ -60,18 +60,17 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["formation"]["options"][-1], ["逆行阵", "逆行阵"])
 
-    def test_edocastle_only_uses_a_run_limit_when_refill_is_enabled(self):
+    def test_edocastle_always_uses_a_positive_run_limit(self):
         agent = FakeAgent()
         list(_build_edocastle(agent, None, {
-            "team_no": "3", "max_runs": "99", "use_koban_refill": False,
+            "team_no": "3", "runs": "9", "use_koban_refill": False,
         }))
-        self.assertEqual(agent.edocastle_args["max_runs"], 0)
+        self.assertEqual(agent.edocastle_args["max_runs"], 9)
 
         list(_build_edocastle(agent, None, {
-            "team_no": "3", "refill_run_limit": "8",
-            "use_koban_refill": True,
+            "team_no": "3", "max_runs": "0", "use_koban_refill": True,
         }))
-        self.assertEqual(agent.edocastle_args["max_runs"], 8)
+        self.assertEqual(agent.edocastle_args["max_runs"], 6)
 
         list(_build_edocastle(agent, None, {
             "team_no": "3", "max_runs": "7", "use_koban_refill": True,
