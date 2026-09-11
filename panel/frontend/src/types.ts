@@ -23,7 +23,7 @@ export interface VisibilityRule {
 
 export interface ParamField {
   key: string
-  type: 'select' | 'number' | 'text' | 'checks' | 'note' | 'toggle'
+  type: 'select' | 'number' | 'text' | 'checks' | 'note' | 'toggle' | 'duration-list'
   label?: string
   default?: unknown
   options?: Option[]

@@ -336,6 +336,13 @@ body[data-theme='pixel'] .settings-drawer p, body[data-theme='pixel'] .drawer-se
 .checks button.active { color: #75560b; background: var(--gold-soft); border-color: #d39b08; }
 .checks-actions { display: inline-flex; gap: 4px; margin-right: 4px; padding-right: 8px; border-right: 1px solid #d7c9b5; }
 .checks-actions button { color: var(--ink-dim); background: transparent; border-style: dashed; }
+.duration-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.duration-pick .pixel-control { width: 64px; }
+.duration-pick i { color: var(--ink-dim); font-style: normal; font-weight: 700; }
+.duration-add { padding: 7px 10px; border: 1px dashed #b6a791; background: #eee4d2; }
+.duration-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.duration-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; color: #75560b; background: var(--gold-soft); border: 1px solid #d39b08; }
+.duration-empty { color: #7b6e61; font-size: 12px; }
 .advanced-settings-slot { padding: 0 0 22px; }
 .advanced-settings-label { display: block; margin-bottom: 8px; color: var(--ink-soft); font-size: 13px; }
 .advanced-setting-link { display: flex; width: 100%; padding: 13px 15px; align-items: center; justify-content: space-between; color: inherit; background: #f4ecdd; border: 1px solid #c8baa5; text-align: left; }
