@@ -161,7 +161,7 @@ class _ForgeHost(SmithMixin):
     def dismantle_stream(self, max_dismantle=1, _from_forge=False):
         yield "分解完成 1 把"
 
-    def _start_forge(self, cy):
+    def _start_forge(self, cy, recipe=None):
         self.ignited += 1
         return True
 
@@ -211,6 +211,12 @@ class _LimitedForgeMaa:
             return Point(660, 380)
         return None
 
+    def ocr_all(self, roi):
+        # 配比页四行当前值都是 700（与默认配方一致 → _apply_recipe 全部跳过）
+        if 690 <= roi.to_list()[0] <= 700:
+            return [("700", Point(800, 200))]
+        return []
+
 
 class StartForgeLimitedCampaignTests(unittest.TestCase):
     def test_popup_is_confirmed_with_yes(self):
@@ -232,6 +238,136 @@ class StartForgeLimitedCampaignTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(flow.maa.clicked, [(850, 205), (1146, 608)])
+
+
+class RecipeValidationTests(unittest.TestCase):
+    def test_override_beats_config_and_range_is_enforced(self):
+        flow = SmithMixin()
+        flow.config = {"forge": {"recipe": [350, 350, 350, 350]}}
+        self.assertEqual(flow._forge_recipe(), [350, 350, 350, 350])
+        self.assertEqual(flow._forge_recipe([300, 300, 300, 300]),
+                         [300, 300, 300, 300])
+        # 越界（键盘只接受三位数，下限 10）/ 缺项 → 回落配置；配置也坏 → 700×4
+        self.assertEqual(flow._forge_recipe([5, 300, 300, 300]),
+                         [350, 350, 350, 350])
+        self.assertEqual(flow._forge_recipe([1000, 300, 300, 300]),
+                         [350, 350, 350, 350])
+        flow.config = {"forge": {"recipe": [1, 2, 3]}}
+        self.assertEqual(flow._forge_recipe(), [700, 700, 700, 700])
+
+
+class _RecipeMaa:
+    """配比页现场：行 OCR 出当前值；点行数字区开键盘（顶部 OCR 出资源名）；
+    敲数字入缓冲；点「输入」(640,602) 把缓冲写回该行并关窗"""
+
+    def __init__(self, current, broken_row=None):
+        self.current = dict(current)
+        self.broken_row = broken_row  # 模拟某行键盘打不开
+        self.dialog = None
+        self.digits = ""
+        self.clicked = []
+
+    _ROWS = {"木炭": 221, "玉钢": 353, "冷却材": 486, "砥石": 577}
+
+    def screenshot(self, force=False):
+        pass
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if expected == "锻刀资源投入" and self.dialog is None:
+            return Point(640, 70)
+        if self.dialog is not None and expected == self.dialog:
+            return Point(557, 198)
+        return None
+
+    def ocr_all(self, roi):
+        if self.dialog is None:
+            for name, y in self._ROWS.items():
+                if roi.to_list() == [690, y - 45, 220, 90]:
+                    return [(str(self.current[name]), Point(800, y))]
+        return []
+
+    def click(self, pt):
+        pos = (pt.x, pt.y)
+        self.clicked.append(pos)
+        if self.dialog is None and pos[0] == 700:
+            for name, y in self._ROWS.items():
+                if pos[1] == y and name != self.broken_row:
+                    self.dialog = name
+                    self.digits = ""
+            return
+        if self.dialog is not None and pos == (640, 602):  # 输入
+            self.current[self.dialog] = int(self.digits)
+            self.dialog = None
+            return
+        if self.dialog is not None:
+            for d, p in SmithMixin._KEYPAD.items():
+                if pos == p:
+                    self.digits += d
+
+
+class ApplyRecipeTests(unittest.TestCase):
+    def test_rows_already_matching_are_skipped(self):
+        flow = SmithMixin()
+        flow.config = {"forge": {}}
+        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
+        with patch("touken.flows.smith.time.sleep"):
+            self.assertTrue(flow._apply_recipe([700, 700, 700, 700]))
+        self.assertEqual(flow.maa.clicked, [])  # 一致就一下都不点
+
+    def test_mismatching_rows_get_typed_in_full(self):
+        flow = SmithMixin()
+        flow.config = {"forge": {}}
+        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 300, "冷却材": 700, "砥石": 300})
+        with patch("touken.flows.smith.time.sleep"):
+            self.assertTrue(flow._apply_recipe([300, 300, 300, 300]))
+        self.assertEqual(flow.maa.current["木炭"], 300)
+        self.assertEqual(flow.maa.current["冷却材"], 300)
+        # 已一致的行不重设
+        self.assertNotIn((700, 353), flow.maa.clicked)
+        self.assertNotIn((700, 577), flow.maa.clicked)
+
+    def test_dialog_not_opening_aborts_safely(self):
+        flow = SmithMixin()
+        flow.config = {"forge": {}}
+        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700},
+                              broken_row="木炭")
+        with patch("touken.flows.smith.time.sleep"):
+            self.assertFalse(flow._apply_recipe([300, 300, 300, 300]))
+        # 键盘没开就一个数字键都不许敲
+        keypad = set(SmithMixin._KEYPAD.values())
+        self.assertFalse(any(c in keypad for c in flow.maa.clicked))
+
+    def test_unreadable_row_is_reset_not_guessed(self):
+        flow = SmithMixin()
+        flow.config = {"forge": {}}
+        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
+        flow.maa.ocr_all = lambda roi: []  # 全读不出
+        with patch("touken.flows.smith.time.sleep"):
+            self.assertTrue(flow._apply_recipe([700, 700, 700, 700]))
+        # 读不出就当不一致，重设一遍（幂等无害）
+        self.assertIn((700, 221), flow.maa.clicked)
+
+
+class PanelRecipeFieldTests(unittest.TestCase):
+    def test_forge_and_daily_both_carry_recipe_fields(self):
+        from panel import server
+        from panel.daily_workflow import recipe_from_params
+        scripts = server.list_scripts()
+        for key in ("forge", "daily"):
+            keys = {f["key"] for f in scripts[key]["params"]}
+            for rk in ("recipe_charcoal", "recipe_steel",
+                       "recipe_coolant", "recipe_whetstone"):
+                self.assertIn(rk, keys, f"{key} 缺 {rk}")
+        self.assertEqual(recipe_from_params(
+            {"recipe_charcoal": "300", "recipe_steel": "300",
+             "recipe_coolant": "300", "recipe_whetstone": "300"}),
+            [300, 300, 300, 300])
+        self.assertIsNone(recipe_from_params({"recipe_charcoal": "abc"}))
+        self.assertIsNone(recipe_from_params({"recipe_charcoal": 5,
+                                              "recipe_steel": 300,
+                                              "recipe_coolant": 300,
+                                              "recipe_whetstone": 300}))
+        self.assertIsNone(recipe_from_params({}))
 
 
 if __name__ == "__main__":

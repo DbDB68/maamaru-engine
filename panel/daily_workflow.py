@@ -1,6 +1,32 @@
 """默认日课模板：保留日课专属编排，复用现有执行方法，不另写玩法。"""
 import copy
 
+RECIPE_KEYS = ("recipe_charcoal", "recipe_steel", "recipe_coolant", "recipe_whetstone")
+
+
+def recipe_fields():
+    """锻刀配方四个数字字段（配置页锻刀脚本和一键日课共用）"""
+    names = zip(RECIPE_KEYS, ("木炭", "玉钢", "冷却材", "砥石"))
+    return [{"key": key, "type": "number", "label": f"配方·{zh}",
+             "default": 700, "min": 10, "max": 999,
+             **({"help": "点火前自动把配比设成这四个数。游戏会记住上次配方，"
+                         "一致时跳过不重设。"} if i == 0 else {})}
+            for i, (key, zh) in enumerate(names)]
+
+
+def recipe_from_params(params):
+    """从面板参数读配方；缺键/越界（10~999）返回 None（= 用配置文件里的配方）"""
+    out = []
+    for key in RECIPE_KEYS:
+        try:
+            v = int(params.get(key))
+        except (TypeError, ValueError):
+            return None
+        if not 10 <= v <= 999:
+            return None
+        out.append(v)
+    return out
+
 
 def make_template(settings, config, daily_steps):
     daily = (settings.get("params", {}).get("daily") or {})
@@ -58,10 +84,11 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
         yield from agent._dismantle_step()
 
     def daily_forge(agent, params, config_path):
+        recipe = recipe_from_params(params)
         if params.get("watch"):
             yield from workflow.NODE_REGISTRY["forge"]["run"](agent, params, config_path)
         else:
-            yield from agent.forge_stream(times=int(params.get("times", 3)))
+            yield from agent.forge_stream(times=int(params.get("times", 3)), recipe=recipe)
 
     def daily_sortie(agent, params, config_path):
         plan = plan_inputs(params)[2]

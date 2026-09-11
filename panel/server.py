@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .log_store import get_store
 from .honmaru_home import create_home_router
 from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
+from .daily_workflow import install_daily_template, recipe_fields, recipe_from_params
 from touken.diagnostics import build_diagnostic_bundle
 from touken.runtime_paths import (
     BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
@@ -608,7 +609,8 @@ def _build_forge(agent, config_path, params):
         # 面板传的是字符串 "03:20:00, 04:00:00"
         watch = [w.strip() for w in re.split(r"[，,、;；\s]+", str(watch_raw)) if w.strip()]
     yield from agent.forge_stream(
-        times=_i(params, "times", 3), watch=watch)
+        times=_i(params, "times", 3), watch=watch,
+        recipe=recipe_from_params(params))
 
 
 def _build_repair(agent, config_path, params):
@@ -746,6 +748,7 @@ register_script("daily", "一键日课", "",
                         {"key": "forge_times", "type": "number", "label": "锻刀次数",
                          "default": 3, "min": 1, "max": 12,
                          "help": "日课点火的目标炉数。只使用空闲炉、不消耗加速符；炉位不够时实际次数会少于设定值。"},
+                        *recipe_fields(),
                         {"key": "sortie_mode", "type": "select", "label": "出阵安排",
                          "options": [["none", "不出阵"],
                                      ["raid", "联队战"],
@@ -1032,6 +1035,7 @@ register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；�
                 params=[{"key": "times", "type": "number", "label": "最多锻几炉",
                          "default": 3, "min": 1, "max": 12,
                          "help": "脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常一次只能锻 2 炉；日课的锻刀次数在「一键日课」表单里改。"},
+                        *recipe_fields(),
                         {"key": "watch", "type": "duration-list",
                          "label": "目标时长（命中时手机报喜，不添加则不盯）",
                          "default": ""}])
@@ -1106,7 +1110,6 @@ _wf_node("repair", _build_repair, "chore")
 _wf_node("expedition", _build_expedition_manager, "chore")
 
 
-from .daily_workflow import install_daily_template  # noqa: E402
 install_daily_template(
     _workflow, _SCRIPTS, _load_settings=lambda: _load_panel_settings(),
     config=_CFG_DATA, daily_steps=_DAILY_STEPS, plan_inputs=_daily_plan_inputs)

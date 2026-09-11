@@ -3,8 +3,8 @@
 上层业务：锻刀 + 刀解（俩界面挨着，互相救场，放一起）
 
 锻刀规矩（用户亲授）：
-  1. 配比不用调，默认 700×4（配置 forge.recipe 可改，账目跟着配置走），
-     点锻刀即可，加速符不勾（省着）
+  1. 配方默认 700×4（配置 forge.recipe 或面板字段可改，点火前自动在
+     配比页数字键盘设值，账目跟着配方走），加速符不勾（省着）
   2. 有"完成"的炉子顺手收刀；刀位满了会蹦氪金弹窗——
      关掉，去刀解一把白名单腾出位置，再回来收
   3. 每日锻 3 次做日课
@@ -99,7 +99,8 @@ class SmithMixin:
 
     # ==================== 锻刀 ====================
 
-    def forge_stream(self, times: int = 3, watch: list | None = None):
+    def forge_stream(self, times: int = 3, watch: list | None = None,
+                     recipe: list | None = None):
         """
         流式锻刀：收完成的炉，给空闲炉点火，一天锻 times 次
 
@@ -107,10 +108,12 @@ class SmithMixin:
             times: 点几炉
             watch: 目标时长清单（限锻刀的时间身份证，如 ["03:20:00"]）。
                    点火后倒计时命中（±90秒，倒计时会走字）就报喜+手机推送
+            recipe: 点火配方 [木炭,玉钢,冷却材,砥石]，None 读配置 forge.recipe
 
         Yields:
             str: 执行状态消息
         """
+        recipe = self._forge_recipe(recipe)
         watch_secs = {s for s in (_dur_to_sec(w) for w in (watch or [])) if s}
         if watch_secs:
             yield f"[锻刀] 🎯 盯梢目标时长：{'、'.join(watch or [])}"
@@ -167,7 +170,7 @@ class SmithMixin:
 
             if kind == "空闲中":
                 yield f"[锻刀] 给炉子点火（第 {forged + 1}/{times} 炉）"
-                if self._start_forge(cy):
+                if self._start_forge(cy, recipe):
                     forged += 1
                     slot_no = _SLOT_CY.index(cy) + 1
                     countdown = self._read_countdown(cy)
@@ -182,7 +185,7 @@ class SmithMixin:
                             started_payload["duration_secs"] = countdown[1]
                         started_id = self.record_event("forge.started",
                                                        **started_payload)
-                        self._emit_forge_costs(started_id)
+                        self._emit_forge_costs(started_id, recipe)
                     if hit:
                         yield f"[锻刀] 🎉🎉🎉 喜报！这炉倒计时 {hit}，目标时长命中！快去看！"
                         try:
@@ -261,14 +264,17 @@ class SmithMixin:
             pass
         return None
 
-    def _start_forge(self, cy: int) -> bool:
-        """给空闲炉点火：进配比界面 → 点锻刀 → 等回到状况界面"""
+    def _start_forge(self, cy: int, recipe: list | None = None) -> bool:
+        """给空闲炉点火：进配比界面 → 设配方 → 点锻刀 → 等回到状况界面"""
         self.maa.click(Point(850, cy))  # 该行锻刀按钮
         time.sleep(2.5)
         self.maa.screenshot(force=True)
         if not self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
             return False
-        self.maa.click(Point(1146, 608))  # 锻刀（默认700×4，不勾加速符）
+        # 点火前把配比设成配置配方；游戏会记住上次值，一致时自动跳过
+        if not self._apply_recipe(recipe):
+            return False
+        self.maa.click(Point(1146, 608))  # 锻刀（不勾加速符）
         # 点火后回状况界面有过场，没等到就当作没点成（防连锁误操作）
         for _ in range(12):
             time.sleep(1.5)
@@ -288,16 +294,62 @@ class SmithMixin:
                     continue
         return False
 
-    def _forge_recipe(self) -> list:
-        """点火配方：读配置 forge.recipe（顺序 木炭/玉钢/冷却材/砥石），
-        缺省/配置坏了回落 700×4"""
-        recipe = (self.config.get("forge") or {}).get("recipe")
-        if (isinstance(recipe, list) and len(recipe) == 4
-                and all(isinstance(v, (int, float)) and v > 0 for v in recipe)):
-            return [int(v) for v in recipe]
+    def _forge_recipe(self, override: list | None = None) -> list:
+        """点火配方：运行时覆盖 > 配置 forge.recipe（顺序 木炭/玉钢/冷却材/砥石），
+        缺省/配置坏了回落 700×4。合法范围 10~999（配比键盘是三位数）"""
+        for recipe in (override,
+                       ((getattr(self, "config", None) or {}).get("forge") or {})
+                       .get("recipe")):
+            if (isinstance(recipe, list) and len(recipe) == 4
+                    and all(isinstance(v, (int, float)) and 10 <= v <= 999
+                            for v in recipe)):
+                return [int(v) for v in recipe]
         return list(_DEFAULT_RECIPE)
 
-    def _emit_forge_costs(self, started_event_id):
+    # ---- 配比键盘（2026-09-11 真机科研）：点行内数字区弹三位数字键盘，
+    # 敲键写入高亮位并自动前进（百→十→个→绕回），「输入」确认。
+    # X 取消实测点不掉，所以写值永远三位全敲覆盖，不依赖原值。----
+    _RECIPE_ROW_Y = dict(zip(_FORGE_RES, (221, 353, 486, 577)))
+    _KEYPAD = {"1": (506, 273), "2": (640, 273), "3": (768, 273),
+               "4": (506, 352), "5": (640, 352), "6": (768, 352),
+               "7": (506, 433), "8": (640, 433), "9": (768, 433),
+               "0": (640, 512)}
+    _KEYPAD_CONFIRM = (640, 602)  # 「输入」
+
+    def _read_recipe_row(self, name: str):
+        """OCR 读配比页某行的当前三位数；读不出返回 None（宁可重设也不猜）"""
+        y = self._RECIPE_ROW_Y[name]
+        tokens = self.maa.ocr_all(roi_4to4(690, y - 45, 910, y + 45))
+        m = re.search(r"\d{1,3}", "".join(str(t) for t, _ in tokens))
+        return int(m.group()) if m else None
+
+    def _set_forge_row(self, name: str, value: int) -> bool:
+        """点开某行的数字键盘，三位全敲后确认。任何一步对不上都算失败。"""
+        self.maa.click(Point(700, self._RECIPE_ROW_Y[name]))
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        if not self.maa.ocr(name, roi_4to4(400, 150, 900, 240)):
+            return False  # 键盘没开 / 开错行，别乱敲
+        for d in f"{value:03d}":
+            self.maa.click(Point(*self._KEYPAD[d]))
+            time.sleep(0.6)
+        self.maa.click(Point(*self._KEYPAD_CONFIRM))
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        return bool(self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
+
+    def _apply_recipe(self, override: list | None = None) -> bool:
+        """点火前把配比页四项设成目标配方；OCR 读出来已一致的行跳过"""
+        target = self._forge_recipe(override)
+        self.maa.screenshot(force=True)
+        for name, value in zip(_FORGE_RES, target):
+            if self._read_recipe_row(name) == value:
+                continue
+            if not self._set_forge_row(name, value):
+                return False
+        return True
+
+    def _emit_forge_costs(self, started_event_id, recipe=None):
         """点火成功的资源记账：四资源按配方负扣 + 委托符 -1。
 
         配方是配置已知值（不勾加速符是流程定死的），不用 OCR，
@@ -307,7 +359,7 @@ class SmithMixin:
                    "evidence": "known_recipe", "script": "forge"}
         if isinstance(started_event_id, int):
             payload["source_event_id"] = started_event_id
-        for name, cost in zip(_FORGE_RES, self._forge_recipe()):
+        for name, cost in zip(_FORGE_RES, self._forge_recipe(recipe)):
             if hasattr(self, "record_resource_change"):
                 self.record_resource_change(name, -cost, **payload)
             else:
