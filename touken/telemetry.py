@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 7
+TELEMETRY_SCHEMA_VERSION = 8
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -151,6 +151,11 @@ class TelemetryStore:
             conn.execute("ALTER TABLE human_reports ADD COLUMN claimed_delta REAL")
         if "group_id" not in report_cols:
             conn.execute("ALTER TABLE human_reports ADD COLUMN group_id TEXT")
+        # v8 原地补列：自定义工作流的预设名（旧记录保持 NULL，显示回落到「自定义工作流」）
+        run_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(runs)").fetchall()}
+        if "label" not in run_cols:
+            conn.execute("ALTER TABLE runs ADD COLUMN label TEXT")
         conn.commit()
 
     def close(self) -> None:
@@ -165,17 +170,30 @@ class TelemetryStore:
         return (os.environ.get("MAAMARU_RUN_ID") or None,
                 os.environ.get("MAAMARU_SCRIPT") or None)
 
-    def start_run(self, run_id: str, script: str, started_at: float | None = None) -> None:
+    def start_run(self, run_id: str, script: str, started_at: float | None = None,
+                  label: str | None = None) -> None:
         try:
             self.prune()
             self._conn().execute(
-                "INSERT OR REPLACE INTO runs(run_id, script, started_at, ended_at, status) "
-                "VALUES (?, ?, ?, NULL, 'running')",
-                (run_id, script, started_at or time.time()),
+                "INSERT OR REPLACE INTO runs(run_id, script, started_at, ended_at, status, label) "
+                "VALUES (?, ?, ?, NULL, 'running', ?)",
+                (run_id, script, started_at or time.time(), label),
             )
             self._conn().commit()
         except Exception:
             pass
+
+    def delete_run(self, run_id: str) -> bool:
+        """删掉一轮任务记录，连同它名下的事件和识别观测，成绩单不再显示。"""
+        conn = self._conn()
+        cursor = conn.execute("DELETE FROM runs WHERE run_id = ?", (str(run_id),))
+        if cursor.rowcount <= 0:
+            conn.commit()
+            return False
+        conn.execute("DELETE FROM events WHERE run_id = ?", (str(run_id),))
+        conn.execute("DELETE FROM observations WHERE run_id = ?", (str(run_id),))
+        conn.commit()
+        return True
 
     def finish_run(self, run_id: str, status: str, ended_at: float | None = None) -> None:
         try:
@@ -1114,7 +1132,7 @@ class TelemetryStore:
     def run_summary(self, run_id: str) -> dict | None:
         """Build one human-facing task result from structured events only."""
         run = self._conn().execute(
-            "SELECT run_id, script, started_at, ended_at, status FROM runs WHERE run_id = ?",
+            "SELECT run_id, script, started_at, ended_at, status, label FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
         if not run:
@@ -1181,6 +1199,7 @@ class TelemetryStore:
                     if e["payload"].get("selected_floor") is not None]
         return {
             "run_id": run["run_id"], "script": run["script"],
+            "label": run["label"],
             "started_at": run["started_at"], "ended_at": run["ended_at"],
             "status": run["status"],
             "duration_seconds": ((run["ended_at"] - run["started_at"])

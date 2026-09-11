@@ -2024,6 +2024,15 @@ async def api_data_runs(limit: int = 20, script: str = "",
     }
 
 
+@app.delete("/api/data/runs/{run_id}")
+async def api_delete_run(run_id: str):
+    """删掉一条任务运行记录（连同它名下的事件明细）。"""
+    from touken.telemetry import get_telemetry_store
+    if not get_telemetry_store().delete_run(run_id):
+        return JSONResponse({"ok": False, "reason": "找不到这条任务记录"}, status_code=404)
+    return {"ok": True}
+
+
 @app.post("/api/data/runs/{run_id}/attach-inventory")
 async def api_attach_run_inventory(run_id: str):
     """把用户刚手动盘点的库存补为指定任务的收工快照。"""

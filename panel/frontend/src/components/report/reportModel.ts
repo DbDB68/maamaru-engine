@@ -87,7 +87,9 @@ export function loopTime(seconds: number | null): string {
 }
 
 export function runTitle(run: any): string {
-  const name = scriptNames[run.script] || '挂机任务'
+  const name = (typeof run.label === 'string' && run.label.trim())
+    ? run.label
+    : (scriptNames[run.script] || '挂机任务')
   const loops = Number(run.loops || 0)
   if (run.script === 'osaka' && run.selected_floor != null) {
     return loops > 0 ? `大阪城 ${run.selected_floor}F · ${loops} 圈` : `大阪城 ${run.selected_floor}F`

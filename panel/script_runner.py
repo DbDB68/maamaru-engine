@@ -115,7 +115,9 @@ class ScriptRunner:
                         self._current_workflow = {"id": preset["id"], "name": preset["name"]}
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
                 from touken.telemetry import get_telemetry_store
-                get_telemetry_store().start_run(run_id, script_name, self._current_started)
+                workflow_label = (self._current_workflow or {}).get("name") or None
+                get_telemetry_store().start_run(
+                    run_id, script_name, self._current_started, label=workflow_label)
             except Exception as exc:
                 self._proc = None
                 msg = f"[面板] 工人子进程启动失败: {exc}"

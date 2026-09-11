@@ -450,6 +450,79 @@ class TelemetryStoreTests(unittest.TestCase):
 
         self.assertEqual([run["run_id"] for run in runs], ["failed"])
 
+    def test_old_database_without_label_column_migrates_in_place(self):
+        import sqlite3
+        db_path = Path(self.temp.name) / "old.db"
+        conn = sqlite3.connect(str(db_path))
+        # v7 及更早的 runs 表没有 label 列，老数据照样能打开
+        conn.execute(
+            "CREATE TABLE runs (run_id TEXT PRIMARY KEY, script TEXT NOT NULL, "
+            "started_at REAL NOT NULL, ended_at REAL, "
+            "status TEXT NOT NULL DEFAULT 'running')")
+        conn.execute(
+            "INSERT INTO runs(run_id, script, started_at, ended_at, status) "
+            "VALUES ('old-run', 'workflow', 100, 200, 'completed')")
+        conn.commit()
+        conn.close()
+
+        store = TelemetryStore(db_path)
+        try:
+            result = store.run_summary("old-run")
+            self.assertIsNone(result["label"])
+            self.assertEqual(result["script"], "workflow")
+            self.assertEqual(
+                [run["run_id"] for run in store.recent_run_summaries()],
+                ["old-run"])
+        finally:
+            store.close()
+
+    def test_start_run_stores_workflow_label_and_summary_exposes_it(self):
+        self.store.start_run("wf-1", "workflow", started_at=100, label="每日挖地+日课")
+        self.store.record_event("osaka.floor_completed", {"selected_floor": 88})
+        self.store.finish_run("wf-1", "completed", ended_at=200)
+
+        result = self.store.run_summary("wf-1")
+        self.assertEqual(result["label"], "每日挖地+日课")
+
+        self.store.start_run("daily-1", "daily", started_at=300)
+        self.store.finish_run("daily-1", "completed", ended_at=400)
+        self.assertIsNone(self.store.run_summary("daily-1")["label"])
+
+    def test_delete_run_removes_run_and_its_events_and_observations(self):
+        self.store.start_run("run-1", "osaka", started_at=100)
+        conn = self.store._conn()
+        conn.execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (110, 'run-1', 'osaka', 'osaka.floor_completed', '{}')")
+        conn.execute(
+            "INSERT INTO observations(ts, run_id, script, kind, roi, tokens) "
+            "VALUES (111, 'run-1', 'osaka', 'match', '[]', '[]')")
+        conn.commit()
+        self.store.finish_run("run-1", "failed", ended_at=200)
+
+        self.assertTrue(self.store.delete_run("run-1"))
+        self.assertFalse(self.store.delete_run("run-1"))
+        self.assertIsNone(self.store.run_summary("run-1"))
+        self.assertEqual(self.store.recent_events(
+            event_type="osaka.floor_completed"), [])
+        self.assertEqual(self.store.recent_observations(), [])
+
+    def test_delete_run_api_follows_store_contract(self):
+        from panel.server import api_delete_run
+
+        self.store.start_run("run-1", "daily", started_at=100)
+        self.store.record_event("task_rewards.claimed", {"tab": "当前"})
+        self.store.finish_run("run-1", "completed", ended_at=200)
+
+        with patch("touken.telemetry._store", self.store):
+            response = asyncio.run(api_delete_run("run-1"))
+            missing = asyncio.run(api_delete_run("run-1"))
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(self.store.recent_events(
+            event_type="task_rewards.claimed"), [])
+
     def test_public_api_contract_uses_versioned_store(self):
         from panel.server import api_data_events, api_data_ocr, api_data_summary
 

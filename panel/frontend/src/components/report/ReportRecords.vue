@@ -310,6 +310,18 @@ async function deleteManualSession(session: ManualSession) {
   } finally { deletingManual.value = 0 }
 }
 
+const deletingRun = ref('')
+async function deleteRun(run: any) {
+  if (!window.confirm(`删掉这条“${runTitle(run)}”的任务记录吗？它名下的成绩明细会一起消失。`)) return
+  deletingRun.value = run.run_id
+  try {
+    await api.deleteRun(run.run_id)
+    emit('refresh')
+  } catch (cause) {
+    attachError.value = cause instanceof Error ? cause.message : '任务记录删除失败'
+  } finally { deletingRun.value = '' }
+}
+
 const attachingRun = ref('')
 const inventoryNotice = ref<Record<string, string>>({})
 const attachError = ref('')
@@ -381,6 +393,7 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
               <div v-if="runActivities(slotProps.item.run).length" class="run-activities"><p v-for="item in runActivities(slotProps.item.run)" :key="item.id"><time>{{ recordTime(item.ts) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
               <p v-else-if="!attributedStats(slotProps.item.run) && !deltaStats(slotProps.item.run)" class="run-upkeep-quiet">这次任务没有额外成绩明细。</p>
               <div v-if="!slotProps.item.run.has_resource_comparison && canAttachInventory(slotProps.item.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === slotProps.item.run.run_id" @click="attachInventory(slotProps.item.run)">{{ attachingRun === slotProps.item.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[slotProps.item.run.run_id]">{{ inventoryNotice[slotProps.item.run.run_id] }}</em></div>
+              <div class="run-actions"><button type="button" class="run-delete" :disabled="deletingRun === slotProps.item.run.run_id" @click="deleteRun(slotProps.item.run)">{{ deletingRun === slotProps.item.run.run_id ? '删除中…' : '删除这条记录' }}</button></div>
             </div>
           </details>
           <article v-else-if="slotProps.item.kind === 'manual'" :key="recordKey(slotProps.item)" class="record-manual">
@@ -430,6 +443,8 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
 .record-run summary small, .record-activity small { color: var(--ink-dim); font-size: 11px; }
 .record-run summary > em { overflow: hidden; color: var(--fox-gold-deep); font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .record-activity { padding: 11px 12px; }
+.run-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.run-delete { padding: 3px 7px; color: var(--danger); background: transparent; border: 0; cursor: pointer; font-size: 11px; }
 .record-activity > details summary { margin-top: 7px; color: var(--fox-gold-deep); cursor: pointer; font-size: 11px; }
 .record-activity > details p { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; margin: 6px 0 0; color: var(--ink-dim); font-size: 11px; }
 .record-activity > details time { white-space: nowrap; }
