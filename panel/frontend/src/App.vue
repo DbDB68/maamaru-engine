@@ -79,7 +79,7 @@ const logTaskLabel = computed(() => running.value
 
 const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
-  daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', hanafuda: 'hanafuda.png', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
+  daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', hanafuda: 'hanafuda.png?v=2', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
   sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'workflow.svg',
 }
