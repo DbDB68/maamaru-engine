@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import platform
 import re
@@ -112,6 +113,89 @@ def _debug_logs(debug_dir: Path) -> list[tuple[str, str]]:
     return output
 
 
+def _expedition_schedule_summary(data_root: Path, now: float | None = None) -> str:
+    """排班开关、时刻表与各队派遣记录快照，用来隔空定位「排班没接管」。
+
+    只含开关、时刻、地图编号和归来预估，不含任何敏感信息。
+    """
+    now = time.time() if now is None else now
+    now_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
+    lines = ["远征排班状态摘要", f"生成时间: {now_text}", ""]
+
+    try:
+        raw_cfg = json.loads((Path(data_root) / "config" / "expedition.json").read_text(encoding="utf-8"))
+        cfg = raw_cfg if isinstance(raw_cfg, dict) else {}
+    except (OSError, ValueError):
+        cfg = {}
+        lines.append("- 未找到排班配置文件：从未保存过排班设置，自动排班按默认关闭")
+
+    auto = cfg.get("automation")
+    auto = auto if isinstance(auto, dict) else {}
+    enabled = bool(auto.get("enabled", False))
+    lines.append(f"- 自动排班总开关: {'开' if enabled else '关 —— 关闭时调度永不接管'}")
+    paused_until = str(auto.get("paused_until", "") or "").strip()
+    if paused_until:
+        state = "暂停生效中" if paused_until > now_text else "暂停已过期"
+        lines.append(f"- 暂停: {paused_until}（{state}）")
+    if str(auto.get("mode", "preset")) == "custom":
+        entries = [e for e in cfg.get("entries", []) if isinstance(e, dict)]
+        active = [e for e in entries if e.get("enabled", True)]
+        lines.append(f"- 模式: 自定义时刻表，共 {len(entries)} 条（启用 {len(active)} 条）")
+        for entry in entries[:10]:
+            mark = "" if entry.get("enabled", True) else "（停用）"
+            lines.append(f"  · {entry.get('time', '?')} 部队{entry.get('team_no', '?')} → {entry.get('map_code', '?')}{mark}")
+    else:
+        teams = "、".join(f"部队{t}" for t in auto.get("teams", [2, 3, 4]))
+        capitalist = "开" if auto.get("capitalist") else "关"
+        lines.append(f"- 模式: 攻略预设「{auto.get('preset', '小判')}」，开始 {auto.get('start_time', '08:00')}，"
+                     f"部队 {teams}，资本家模式 {capitalist}")
+    common = [c for c in cfg.get("common_plan", []) if isinstance(c, dict)]
+    if common:
+        rows = "、".join(
+            f"部队{c.get('team_no', '?')}→{c.get('map_code', '?')}{'（启用）' if c.get('enabled') else '（停用）'}"
+            for c in common
+        )
+        lines.append(f"- 常用安排（日课补派用）: {rows}")
+    lines.append(f"- 已记录的排班完成次数: {len(auto.get('last_runs', {}) or {})}")
+
+    records = {}
+    try:
+        raw_records = json.loads((Path(data_root) / "state" / "expeditions.json").read_text(encoding="utf-8"))
+        if isinstance(raw_records, dict):
+            records = raw_records
+    except (OSError, ValueError):
+        pass
+    lines.append("")
+    lines.append("派遣记录（判断队伍是否在外远征的依据）:")
+    if not records:
+        lines.append("- （无派遣记录，所有队伍视为空闲）")
+
+    def _sort_key(key):
+        text = str(key)
+        return (0, int(text)) if text.isdigit() else (1, text)
+
+    for key in sorted(records, key=_sort_key):
+        record = records[key]
+        if not isinstance(record, dict):
+            continue
+        label = f"部队{key}"
+        dispatched_at = record.get("dispatched_at")
+        map_code = record.get("map_code")
+        duration = record.get("duration_min")
+        try:
+            start_ts = time.mktime(time.strptime(str(dispatched_at), "%Y-%m-%d %H:%M:%S"))
+            end_ts = start_ts + int(duration) * 60
+            remaining = int((end_ts - now) / 60)
+            back = time.strftime("%m-%d %H:%M", time.localtime(end_ts))
+            if remaining > 0:
+                lines.append(f"- {label}: {map_code}，派出于 {dispatched_at}，预计 {back} 归来（还剩约 {remaining} 分钟）")
+            else:
+                lines.append(f"- {label}: {map_code}，派出于 {dispatched_at}，已到点归来（可再派）")
+        except (TypeError, ValueError):
+            lines.append(f"- {label}: 记录不完整（派出于 {dispatched_at}，地图 {map_code}，时长 {duration}），按已归来处理")
+    return "\n".join(lines) + "\n"
+
+
 def build_diagnostic_bundle(
     *,
     data_root: Path = DATA_ROOT,
@@ -140,6 +224,7 @@ def build_diagnostic_bundle(
     else:
         files.append(("launcher.log", "No launcher failure has been recorded.\n"))
     files.append(("recent-panel-logs.txt", _recent_panel_logs(log_dir / "maamaru_logs.db")))
+    files.append(("expedition-schedule.txt", _expedition_schedule_summary(data_root)))
     files.extend(_debug_logs(debug_dir))
 
     included = "\n".join(f"- {name}" for name, _ in files)
@@ -156,8 +241,8 @@ Included files:
 {included}
 
 Privacy boundary:
-- Includes text-only startup, recent task, and MaaFramework diagnostic logs.
-- Does not include configuration, API keys, chat history, screenshots, inventory/state data, or raw databases.
+- Includes text-only startup, recent task, and MaaFramework diagnostic logs, plus an expedition schedule digest (switches, times, map codes, return estimates).
+- Does not include full configuration files, API keys, chat history, screenshots, inventory data, or raw databases.
 - Local user paths and common credential fields are replaced before export.
 """
     files.insert(0, ("diagnostic-summary.txt", summary))

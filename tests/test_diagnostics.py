@@ -1,12 +1,60 @@
 import sqlite3
 import tempfile
+import time
 import unittest
 import zipfile
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
 
-from touken.diagnostics import build_diagnostic_bundle, create_diagnostic_bundle
+from touken.diagnostics import _expedition_schedule_summary, build_diagnostic_bundle, create_diagnostic_bundle
+
+
+class ExpeditionScheduleSummaryTests(unittest.TestCase):
+    def test_summary_covers_switches_and_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            (data / "config").mkdir(parents=True)
+            (data / "state").mkdir()
+            (data / "config" / "expedition.json").write_text(
+                '{"automation": {"enabled": true, "mode": "preset", "preset": "小判",'
+                ' "start_time": "08:00", "teams": [2, 3], "paused_until": "2099-01-01 00:00:00"},'
+                ' "common_plan": [{"team_no": 5, "map_code": "E2", "enabled": true}],'
+                ' "entries": []}',
+                encoding="utf-8",
+            )
+            (data / "state" / "expeditions.json").write_text(
+                '{"2": {"map_code": "D4", "dispatched_at": "2026-09-11 08:00:00", "duration_min": 120},'
+                ' "3": {"map_code": null, "dispatched_at": null, "duration_min": null}}',
+                encoding="utf-8",
+            )
+            now = time.mktime(time.strptime("2026-09-11 09:00:00", "%Y-%m-%d %H:%M:%S"))
+            text = _expedition_schedule_summary(data, now=now)
+            self.assertIn("自动排班总开关: 开", text)
+            self.assertIn("暂停生效中", text)
+            self.assertIn("攻略预设「小判」", text)
+            self.assertIn("部队5→E2（启用）", text)
+            self.assertIn("部队2: D4", text)
+            self.assertIn("还剩约 60 分钟", text)
+            self.assertIn("部队3: 记录不完整", text)
+
+    def test_summary_without_config_says_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = _expedition_schedule_summary(Path(tmp))
+            self.assertIn("未找到排班配置文件", text)
+            self.assertIn("自动排班总开关: 关", text)
+            self.assertIn("无派遣记录", text)
+
+    def test_bundle_includes_schedule_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data, logs, debug, program = DiagnosticBundleTests()._fixture(Path(tmp))
+            bundle = build_diagnostic_bundle(
+                data_root=data, log_dir=logs, debug_dir=debug,
+                bundle_root=program, version="9.9.9", frozen=True,
+            )
+            with zipfile.ZipFile(BytesIO(bundle.content)) as archive:
+                digest = archive.read("expedition-schedule.txt").decode("utf-8")
+            self.assertIn("远征排班状态摘要", digest)
 
 
 class DiagnosticBundleTests(unittest.TestCase):
