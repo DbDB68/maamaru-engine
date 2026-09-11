@@ -659,13 +659,19 @@ class DailyMixin:
                     time.sleep(2.0)
                     clean = 0
                     continue
-            # 刀剑男士申请修行的弹窗：去留是主人的决定，脚本不盲点
-            # （点错会把刀送出去 96 小时）。认出来就明说停手。
-            for phrase in ("想去修行", "修行申请", "修行的申请"):
-                if self.maa.ocr(phrase, roi_4to4(300, 150, 980, 570)):
-                    print(f"[扫地] ⚠️ 检测到修行申请弹窗（「{phrase}」）："
-                          "不替你决定去不去，停在这儿——手动点一下再重跑")
-                    return False
+            # 刀剑男士申请修行：点穿对话后弹「修行启程」确认窗（是否消耗道具
+            # 派遣 XX 修行）。点【取消】婉拒——弹窗自己写着随时能在强化/组织
+            # 界面再派，可逆；点确认才要烧三件道具送走 96 小时，不替主人决定。
+            # （2026-09-11 真机取帧：取消在左 (496,614)，确认在右，别记反。）
+            if self.maa.ocr("修行启程", roi_4to4(450, 40, 830, 110)):
+                cancel = self.maa.ocr("取消", roi_4to4(400, 560, 640, 670),
+                                      match_mode="exact")
+                self.maa.click(cancel if cancel else Point(496, 614))
+                print("[扫地] 有刀剑男士申请修行，点【取消】婉拒"
+                      "（想去的话到强化/组织界面手动派）")
+                time.sleep(2.0)
+                clean = 0
+                continue
             if self.maa.exists("目录.png", threshold=0.7):
                 clean += 1
                 if clean >= 2:

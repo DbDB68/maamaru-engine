@@ -3,7 +3,8 @@
 - 游戏开着但停在签到页/公告时，_ensure_game_started 以前当成"没开"，
   去桌面找图标找不到就误判「游戏没有启动」——现在认出来直接接管
 - 扫地新增：签到领奖（一轮只领一次，防灰按钮死循环）、关道具详情窗、
-  修行申请弹窗认出后停手明说（不替主人决定刀的去留，更不盲点）
+  「修行启程」申请窗点【取消】婉拒（可逆；确认才烧道具送刀 96 小时，
+  不替主人决定）
 """
 import unittest
 from unittest.mock import patch
@@ -42,8 +43,11 @@ class _SweepMaa:
             return Point(900, 600)
         if self.stage == "item_detail" and expected == "道具详情":
             return Point(640, 110)
-        if self.stage == "training_req" and expected == "想去修行":
-            return Point(640, 300)
+        if self.stage == "training_req":
+            if expected == "修行启程":
+                return Point(640, 75)
+            if expected == "取消" and match_mode == "exact":
+                return Point(496, 614)
         return None
 
     def ocr_all(self, roi):
@@ -56,6 +60,8 @@ class _SweepMaa:
             self.stage = "home"
         elif self.stage == "item_detail" and pos == (945, 105):
             self.stage = "home"
+        elif self.stage == "training_req" and pos == (496, 614):
+            self.stage = "home"  # 婉拒后回本丸
         return True
 
 
@@ -136,12 +142,14 @@ class PopupSweepNewBranchTests(unittest.TestCase):
         self.assertTrue(arrived)
         self.assertEqual(flow.maa.clicks, [(945, 105)])
 
-    def test_training_request_popup_stops_without_blind_clicks(self):
+    def test_training_request_popup_is_declined_with_cancel(self):
+        # 「修行启程」确认窗：取消在左、确认在右（2026-09-11 真机取帧）。
+        # 点【取消】婉拒可逆（随时能在强化/组织界面再派），绝不点确认烧道具。
         flow = _SweepFlow("training_req")
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=6)
-        self.assertFalse(arrived)
-        self.assertEqual(flow.maa.clicks, [])  # 一下都不许点
+        self.assertTrue(arrived)
+        self.assertEqual(flow.maa.clicks, [(496, 614)])
 
 
 if __name__ == "__main__":
