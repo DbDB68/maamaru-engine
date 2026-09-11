@@ -25,7 +25,8 @@ const deletingManual = ref(0)
 
 const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
-  'osaka.floor_completed': '大阪城完成一圈', 'edocastle.run_completed': '江户城完成一圈', 'sortie.completed': '出阵完成',
+  'network.recovered': '断线自动恢复',
+  'osaka.floor_completed': '大阪城完成一圈', 'edocastle.run_completed': '江户城完成一圈', 'hanafuda.run_completed': '秘宝之里完成一圈', 'sortie.completed': '出阵完成',
   'sortie.retreated_before_boss': '王点前撤退完成',
   'raid.round_completed': '联队战完成一圈', 'pumpkin.sortie_completed': '南瓜活动出阵完成',
   'pumpkin.board_completed': '南瓜活动完成一块板子', 'pumpkin.token_used': '南瓜活动使用更新令牌',
@@ -37,6 +38,13 @@ const eventNames: Record<string, string> = {
   'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
   'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
   'sword.obtained': '刀剑男士来本丸', 'naihanka.gains': '内番收工',
+  'dismantle.completed': '刀解完成', 'equipment.restored': '恢复刀装',
+  'ticket.refilled': '补充活动手形', 'yosari.ticket_refilled': '补充异去提灯',
+  'yosari.fragments': '记录异去碎片',
+}
+
+function hanafudaDifficulty(value: unknown) {
+  return ({ 1: '易', 2: '普', 3: '难', 4: '超难' } as Record<number, string>)[Number(value)] || '未指定'
 }
 
 function isWin(payload: any) {
@@ -60,6 +68,10 @@ function eventDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed') return p.selected_floor == null ? '未指定层数 · 完成 1 圈' : `${p.selected_floor}F · 完成 1 圈`
   if (item.event_type === 'edocastle.run_completed') return `带回 ${Number(p.keys || 0).toLocaleString()} 把钥匙`
+  if (item.event_type === 'hanafuda.run_completed') {
+    const tama = p.tama == null ? '玉数没读出来' : `带回 ${Number(p.tama).toLocaleString()} 个玉`
+    return `难度·${hanafudaDifficulty(p.difficulty)} · 部队${p.team_no ?? '未指定'} · ${tama}`
+  }
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
   if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
@@ -96,6 +108,18 @@ function eventDetail(item: any) {
     const head = p.source === 'diff' ? '数值比对发现' : '报告屏确认'
     return `${head}：${gains.map((g: any) => `【${g.name}】${g.stat}+1`).join('、')}`
   }
+  if (item.event_type === 'dismantle.completed') return p.sword ? `刀解【${p.sword}】` : '刀解结果已记录'
+  if (item.event_type === 'equipment.restored') return `恢复第 ${p.record_no ?? '？'} 套编队记录的刀装`
+  if (item.event_type === 'ticket.refilled') return `${p.source || '活动'} · ${p.ticket_price ? `使用 ${Number(p.ticket_price).toLocaleString()} 小判补充 1 枚` : '补充 1 枚'}`
+  if (item.event_type === 'yosari.ticket_refilled') return `${p.item || '归城提灯'}补充完成${Number.isFinite(Number(p.delta)) ? ` · 小判 ${Number(p.delta).toLocaleString()}` : ''}`
+  if (item.event_type === 'yosari.fragments') {
+    const gained = Object.values(p.gained || {}).reduce((sum: number, value: any) => sum + Number(value || 0), 0)
+    return gained ? `${p.map_no ?? '？'}图 · 本圈新增 ${gained} 枚碎片` : `${p.map_no ?? '？'}图 · 碎片数量已记录`
+  }
+  if (item.event_type === 'network.recovered') {
+    return p.mode === 'resumed' ? '断线后接回战斗，继续干活'
+      : p.mode === 'home' ? '断线重登后回到本丸，那一仗作废' : '断线后自动恢复'
+  }
   return '本丸记录'
 }
 function activityTitle(item: any) {
@@ -104,6 +128,7 @@ function activityTitle(item: any) {
   if (item.event_type === 'sortie.retreated_before_boss') return `王点前撤退 ${count} 次`
   if (item.event_type === 'osaka.floor_completed') return `大阪城完成 ${count} 圈`
   if (item.event_type === 'edocastle.run_completed') return `江户城完成 ${count} 圈`
+  if (item.event_type === 'hanafuda.run_completed') return `秘宝之里完成 ${count} 圈`
   if (item.event_type === 'raid.round_completed') return `联队战完成 ${count} 圈`
   if (item.event_type === 'practice.result') return `完成演练 ${count} 场`
   if (item.event_type === 'forge.collected') return `领取锻刀结果 ${count} 次`
@@ -130,6 +155,11 @@ function activityDetail(item: any) {
     const keys = items.reduce((total: number, entry: any) => total + Number(entry.payload?.keys || 0), 0)
     return `共带回 ${keys.toLocaleString()} 把钥匙`
   }
+  if (item.event_type === 'hanafuda.run_completed') {
+    const known = items.filter((entry: any) => entry.payload?.tama != null)
+    const tama = known.reduce((total: number, entry: any) => total + Number(entry.payload.tama || 0), 0)
+    return `难度·${hanafudaDifficulty(p.difficulty)} · 部队${p.team_no ?? '未指定'} · ${known.length === items.length ? `共带回 ${tama.toLocaleString()} 个玉` : `${known.length}/${items.length} 圈读到玉数，共 ${tama.toLocaleString()} 个`}`
+  }
   if (item.event_type === 'practice.result') {
     const wins = items.filter((entry: any) => isWin(entry.payload)).length
     const losses = items.filter((entry: any) => isLoss(entry.payload)).length
@@ -153,6 +183,7 @@ function instanceDetail(item: any) {
   const p = item.payload || {}
   if (item.event_type === 'osaka.floor_completed' && p.completed != null) return `第 ${p.completed} 圈 · ${p.selected_floor == null ? '未指定层数' : `${p.selected_floor}F`}`
   if (item.event_type === 'edocastle.run_completed') return `第 ${p.run_no ?? '？'} 圈 · ${Number(p.keys || 0).toLocaleString()} 把钥匙`
+  if (item.event_type === 'hanafuda.run_completed') return `第 ${p.run_no ?? '？'} 圈 · ${p.tama == null ? '玉数没读出来' : `${Number(p.tama).toLocaleString()} 个玉`}`
   if (item.event_type === 'pumpkin.sortie_completed' && p.sequence != null) return `第 ${p.sequence} 次出阵`
   if (item.event_type === 'forge.collected') {
     const parts = []
@@ -196,6 +227,7 @@ const timelineEvents = computed(() => {
 const systemEventTypes = new Set([
   'inventory.captured', 'inventory.peek', 'task_rewards.unconfirmed',
   'game_update.detected', 'game_update.recovered', 'resource.change',
+  'network.recovered',
 ])
 function activityGroupKey(item: any) {
   const p = item.payload || {}, day = shanghaiDate(Number(item.ts))
