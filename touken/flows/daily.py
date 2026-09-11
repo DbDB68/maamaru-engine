@@ -516,6 +516,13 @@ class DailyMixin:
                 if upd:
                     yield "[日课] 检测到游戏更新，选线路一更新..."
                     self.maa.click(upd)
+            # 游戏其实已经在跑、只是停在签到/公告等中间界面时，
+            # 死等本丸/登录页只会白等——认出来就交给登录流程接管
+            if i % 4 == 2:
+                hint = self._ingame_hint()
+                if hint:
+                    yield f"[日课] 游戏已在运行（{hint}，{i * 2 + 2}s），交给登录流程接管"
+                    return True
         yield "[日课] 等待游戏登录页超时；没有继续盲点"
         return False
 
@@ -530,6 +537,12 @@ class DailyMixin:
             return True
         if self.maa.exists("登录.png", threshold=0.7):
             yield "[日课] 游戏已在登录页，直接接管"
+            return True
+        # 游戏开着但停在签到页/公告等中间界面（issue#7 翻车现场）：
+        # 不是没开，是不认识——认出来直接接管，别再去桌面找图标
+        hint = self._ingame_hint()
+        if hint:
+            yield f"[日课] 游戏已在运行（{hint}），直接接管"
             return True
 
         if self._launch_game_via_adb():
@@ -557,6 +570,19 @@ class DailyMixin:
         self.maa.click(pt)
         return (yield from self._wait_for_game_entry())
 
+    def _ingame_hint(self):
+        """游戏明显在跑、但既不是本丸也不是登录页时，认出停在哪个已知界面。
+        返回界面描述（给人看的），认不出返回 None。调用前要有新截图。
+        只加「点了安全」的识别：这里只负责认，接管后的动作由登录流程和扫地决定。"""
+        # 启动后的签到日历：底部有「领取奖励」按钮（领过变灰字也在）
+        if self.maa.ocr("领取奖励", roi_4to4(750, 550, 1100, 670)):
+            return "签到页"
+        # 公告/登录礼物弹窗：右上 X 或「今日不再弹出」
+        for tpl in ("今日不再弹出.png", "通用_关闭.png"):
+            if self.maa.template_match(tpl, threshold=0.7):
+                return "公告/弹窗"
+        return None
+
     # ========== 登录后弹窗扫地 ==========
 
     def _popup_sweep(self, max_rounds: int = 30) -> bool:
@@ -569,6 +595,7 @@ class DailyMixin:
             是否到达本丸
         """
         clean = 0
+        claimed_signin = False  # 启动签到奖励每轮扫地最多领一次（领完按钮变灰，字还在，别空点死循环）
         for _ in range(max_rounds):
             self.maa.screenshot(force=True)
             acted = False
@@ -614,6 +641,31 @@ class DailyMixin:
                 self.maa.click(Point(993, 690))
                 time.sleep(1.0)
                 continue
+            # 道具详情窗（签到领奖后蹦的）：X 在 (945,105)，不是通用_关闭的样式
+            if self.maa.ocr("道具详情", roi_4to4(450, 80, 830, 140)):
+                print("[扫地] 关道具详情弹窗")
+                self.maa.click(Point(945, 105))
+                time.sleep(1.5)
+                clean = 0
+                continue
+            # 启动签到日历：领每日奖励。领完按钮变灰但字还在，所以一轮只领一次；
+            # 之后日历窗的 X 交给最上面的通用_关闭/今日不再弹出分支关
+            if not claimed_signin:
+                claim = self.maa.ocr("领取奖励", roi_4to4(750, 550, 1100, 670))
+                if claim:
+                    print("[扫地] 签到页，点领取奖励")
+                    self.maa.click(claim)
+                    claimed_signin = True
+                    time.sleep(2.0)
+                    clean = 0
+                    continue
+            # 刀剑男士申请修行的弹窗：去留是主人的决定，脚本不盲点
+            # （点错会把刀送出去 96 小时）。认出来就明说停手。
+            for phrase in ("想去修行", "修行申请", "修行的申请"):
+                if self.maa.ocr(phrase, roi_4to4(300, 150, 980, 570)):
+                    print(f"[扫地] ⚠️ 检测到修行申请弹窗（「{phrase}」）："
+                          "不替你决定去不去，停在这儿——手动点一下再重跑")
+                    return False
             if self.maa.exists("目录.png", threshold=0.7):
                 clean += 1
                 if clean >= 2:
