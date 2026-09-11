@@ -86,6 +86,25 @@ class EmulatorDiscoveryTests(unittest.TestCase):
                 original,
             )
 
+    def test_blank_address_is_refilled_even_when_paths_already_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            install = root / "MuMuPlayer"
+            adb, manager = self._fake_install(install)
+            config_path = root / "touken.json"
+            config_path.write_text(json.dumps({
+                "adb_path": str(adb),
+                "adb_address": "",
+                "emulator_manager": str(manager),
+            }), encoding="utf-8")
+
+            found = auto_configure_emulator(
+                config_path, extra_roots=[install], include_system=False)
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+            self.assertIsNotNone(found)
+            self.assertEqual(saved["adb_address"], "127.0.0.1:16384")
+
     def test_can_complete_manager_from_an_existing_adb_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

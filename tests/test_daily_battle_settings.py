@@ -98,6 +98,15 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(node["params"]["repair_threshold"], "heavy")
         self.assertEqual(node["params"]["repair_on_injury"], "stop")
 
+    def test_daily_sortie_catalog_has_no_forge_fields(self):
+        fields = server._workflow.NODE_REGISTRY["daily_sortie"]["params"]
+        keys = {field["key"] for field in fields}
+        self.assertNotIn("forge_times", keys)
+        self.assertFalse(keys.intersection({
+            "recipe_charcoal", "recipe_steel", "recipe_coolant",
+            "recipe_whetstone",
+        }))
+
 
 if __name__ == "__main__":
     unittest.main()

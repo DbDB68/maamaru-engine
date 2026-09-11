@@ -173,6 +173,19 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertEqual(field["default"], 3)
         self.assertEqual(field["max"], 12)
 
+    def test_daily_forge_recipe_reaches_daily_stream(self):
+        agent = FakeAgent()
+        params = {
+            "recipe_charcoal": "333", "recipe_steel": "444",
+            "recipe_coolant": "555", "recipe_whetstone": "666",
+        }
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value={}
+        ):
+            list(wrap(_build_daily)("config.json", params))
+        self.assertEqual(agent.daily_args["forge_recipe"],
+                         [333, 444, 555, 666])
+
     def test_daily_can_schedule_yosari(self):
         agent = FakeAgent()
         params = {"sortie_mode": "yosari", "team_no": "4",

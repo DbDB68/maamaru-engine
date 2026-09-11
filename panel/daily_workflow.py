@@ -3,6 +3,16 @@ import copy
 
 RECIPE_KEYS = ("recipe_charcoal", "recipe_steel", "recipe_coolant", "recipe_whetstone")
 
+DAILY_SORTIE_KEYS = {
+    "sortie_mode", "team_no", "raid_rounds", "raid_auto_refill",
+    "pumpkin_difficulty", "pumpkin_runs", "yosari_map_no", "yosari_runs",
+    "yosari_auto_refill", "osaka_runs", "osaka_select_floor",
+    "osaka_target_floor", "chapter", "map_no", "loops",
+    "retreat_before_boss", "auto_march", "formation_mode", "formation",
+    "repair_threshold", "repair_on_injury", "auto_equip", "rotate_captain",
+    "rotate_captain_margin",
+}
+
 
 def recipe_fields():
     """锻刀配方四个数字字段（配置页锻刀脚本和一键日课共用）"""
@@ -41,9 +51,16 @@ def make_template(settings, config, daily_steps):
             continue
         params = {}
         if step == "锻刀":
-            params = {"times": config.get("daily", {}).get("forge_times", 3)}
+            params = {
+                "times": daily.get(
+                    "forge_times", config.get("daily", {}).get("forge_times", 3)),
+            }
+            for key in RECIPE_KEYS:
+                if key in daily:
+                    params[key] = copy.deepcopy(daily[key])
         elif step == "出阵":
-            params = {k: copy.deepcopy(v) for k, v in daily.items() if k not in ("steps", "only", "after")}
+            params = {k: copy.deepcopy(v) for k, v in daily.items()
+                      if k in DAILY_SORTIE_KEYS}
             params.setdefault("sortie_mode", "none")
         nodes.append({"type": mapping[step], "params": params,
                       "on_error": "stop" if step == "登录" else "continue"})
@@ -108,7 +125,10 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
                            ("expedition", daily_expedition), ("snapshot", daily_snapshot),
                            ("dismantle", daily_dismantle), ("forge", daily_forge)):
         workflow.NODE_REGISTRY[name]["daily_run"] = callback
-    fields = [copy.deepcopy(f) for f in scripts["daily"]["params"] if f["key"] not in ("steps", "after")]
+    # 「日课出阵」只收出阵字段。锻刀次数/配方属于前面的「锻刀」积木，
+    # 复制整张日课表单会让无效字段混进出阵配置，既误导又无法执行。
+    fields = [copy.deepcopy(f) for f in scripts["daily"]["params"]
+              if f["key"] in DAILY_SORTIE_KEYS]
     fields.append({"key": "pumpkin_watch", "type": "text", "label": "南瓜目标刀剑",
                    "swords": True, "default": "", "placeholder": "多个名字用逗号分隔",
                    "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}})

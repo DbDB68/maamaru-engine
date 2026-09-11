@@ -59,6 +59,26 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(template["nodes"][2]["params"]["yosari_runs"], 8)
         self.assertEqual(template["after"], "shutdown")
 
+    def test_template_uses_saved_forge_values_without_leaking_them_into_sortie(self):
+        saved = {"params": {"daily": {
+            "steps": ["锻刀", "出阵"], "forge_times": 7,
+            "recipe_charcoal": 333, "recipe_steel": 444,
+            "recipe_coolant": 555, "recipe_whetstone": 666,
+            "sortie_mode": "sortie", "chapter": 2, "map_no": 3,
+        }}}
+        template = make_template(
+            saved, {"daily": {"forge_times": 5}}, server._DAILY_STEPS)
+        forge = next(n for n in template["nodes"] if n["type"] == "forge")
+        sortie = next(n for n in template["nodes"]
+                      if n["type"] == "daily_sortie")
+        self.assertEqual(forge["params"], {
+            "times": 7, "recipe_charcoal": 333, "recipe_steel": 444,
+            "recipe_coolant": 555, "recipe_whetstone": 666,
+        })
+        self.assertEqual(sortie["params"], {
+            "sortie_mode": "sortie", "chapter": 2, "map_no": 3,
+        })
+
     def test_legacy_last_logout_projects_without_writing_then_backs_up_on_save(self):
         path = self.root / "workflows.json"
         original = json.dumps({"presets": [{"id": "old", "name": "旧流程", "nodes": [

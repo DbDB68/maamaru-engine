@@ -51,7 +51,8 @@ class DailyMixin:
 
     def daily_stream(self, logout: bool = False, only=None, after: str = None,
                      sortie_override: dict = None, practice_override: dict = None,
-                     expedition_override: list = None, forge_times: int = None):
+                     expedition_override: list = None, forge_times: int = None,
+                     forge_recipe: list = None):
         """
         流式一键日课
 
@@ -69,6 +70,7 @@ class DailyMixin:
                   {"mode":"sortie","chapter":1,"map_no":1,"loops":2,"team_no":3}
             forge_times: 覆盖日课锻刀次数（面板传的）；None 时读配置
                   daily.forge_times，再缺省为 3
+            forge_recipe: 覆盖日课锻刀配方；None 时读配置 forge.recipe
 
         Yields:
             str: 执行状态消息
@@ -140,7 +142,8 @@ class DailyMixin:
                 expedition_override,
                 fallback_redispatch=plan.get("expedition_redispatch", "same"))),
             ("内番", lambda: self.naihanka_stream()),
-            ("锻刀", lambda: self.forge_stream(times=plan.get("forge_times", 3))),
+            ("锻刀", lambda: self.forge_stream(
+                times=plan.get("forge_times", 3), recipe=forge_recipe)),
             ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),

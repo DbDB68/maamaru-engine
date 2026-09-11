@@ -130,7 +130,14 @@ def _on_script_message(payload: dict):
 def _make_maa(config_path):
     """创建 MAAAdapter（优先读配置，fallback 到 test_daily.py 里的硬编码路径）"""
     from touken import MAAAdapter
-    cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    path = Path(config_path)
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    # 面板把地址留空表示恢复自动探测。真正到下一次任务启动时再探测，
+    # 这样说明和行为一致，也不会把一次临时探测结果冒充用户手填配置。
+    if not str(cfg.get("adb_address", "")).strip():
+        from touken.emulator_discovery import auto_configure_emulator
+        auto_configure_emulator(path)
+        cfg = json.loads(path.read_text(encoding="utf-8"))
     return MAAAdapter(
         adb_path=cfg.get("adb_path", _DEFAULT_ADB_PATH),
         adb_address=cfg.get("adb_address", _DEFAULT_ADB_ADDR),
@@ -462,7 +469,8 @@ def _build_daily(agent, config_path, params):
         only=steps, after=after, sortie_override=sortie_plan,
         practice_override=practice_plan or None,
         expedition_override=expedition_plan,
-        forge_times=_i(params, "forge_times", None))
+        forge_times=_i(params, "forge_times", None),
+        forge_recipe=recipe_from_params(params))
 
 
 def _build_daily_standalone(config_path, params):
@@ -627,7 +635,8 @@ def _build_forge_limited(agent, config_path, params):
         total=_i(params, "times", 50),
         recipe=recipe_from_params(params),
         watch_names=names,
-        stop_on_hit=_bool(params.get("stop_on_hit", True)))
+        stop_on_hit=_bool(params.get("stop_on_hit", True)),
+        capacity_action=str(params.get("capacity_action") or "stop"))
 
 
 def _build_repair(agent, config_path, params):
@@ -1069,7 +1078,15 @@ register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；�
                          "visibleWhen": {"key": "forge_limited", "is": "true"}},
                         {"key": "stop_on_hit", "type": "toggle",
                          "label": "锻出目标就收手", "default": True,
-                         "help": "开着：目标刀一出货立刻停，保住剩下的加速符。关着：锻满设定把数才停。",
+                         "help": "每发十连都会先揭榜确认；开着时目标刀一出货就停，保住剩下的加速符。关着则锻满设定把数。",
+                         "visibleWhen": {"key": "forge_limited", "is": "true"}},
+                        {"key": "capacity_action", "type": "select",
+                         "label": "刀位不足时",
+                         "options": [["stop", "停下等我（最安全）"],
+                                     ["dismantle", "按白名单刀解所需数量"],
+                                     ["sugar", "习合现有重刀后复查"]],
+                         "default": "stop",
+                         "help": "默认不会擅自动刀。刀解只尝试腾出下一发所缺的位置；习合只使用当前刀帐里的可用重刀，不会收取邮箱。处理后仍会重新读取刀位，不够或读不清都不会点火。",
                          "visibleWhen": {"key": "forge_limited", "is": "true"}}])
 register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过，其余按部队决定是否加速",
                 _wrap_inventory("手入", _build_repair),

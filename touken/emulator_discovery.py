@@ -195,7 +195,8 @@ def auto_configure_emulator(
 
     adb_value = str(config.get("adb_path", "")).strip()
     manager_value = str(config.get("emulator_manager", "")).strip()
-    if adb_value and manager_value:
+    address_value = str(config.get("adb_address", "")).strip()
+    if adb_value and manager_value and address_value:
         return None
 
     configured_roots: list[Path] = []

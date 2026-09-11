@@ -423,7 +423,8 @@ class SmithMixin:
 
     def limited_forge_stream(self, total: int = 50, recipe: list | None = None,
                              watch_names: list | None = None,
-                             stop_on_hit: bool = True):
+                             stop_on_hit: bool = True,
+                             capacity_action: str = "stop"):
         """
         限锻十连：十连锻刀+加速符瞬间出货，限锻活动期间集中赌刀专用。
 
@@ -432,6 +433,7 @@ class SmithMixin:
             recipe: 点火配方，None 读配置 forge.recipe
             watch_names: 目标刀名清单，出货命中报喜（中/日名都行，过名册校正）
             stop_on_hit: 命中目标立刻收手（保住剩下的加速符）
+            capacity_action: 刀位不足一发时 stop / dismantle / sugar
 
         Yields:
             str: 执行状态消息
@@ -440,6 +442,9 @@ class SmithMixin:
         total = max(10, min(int(total or 50), 200))
         batches = (total + 9) // 10
         watch_ids, watch_raw = self._resolve_watch_names(watch_names)
+        capacity_action = str(capacity_action or "stop")
+        if capacity_action not in {"stop", "dismantle", "sugar"}:
+            capacity_action = "stop"
 
         yield (f"[限锻] 目标 {batches * 10} 把（{batches} 发十连），"
                f"配方 {'/'.join(str(v) for v in recipe)}")
@@ -467,60 +472,108 @@ class SmithMixin:
                    f"{10 * batches}，差得远呢，收摊")
             return
 
-        if not self._enter_tenren():
-            yield "[限锻] ✗ 没有空闲炉能进十连（炉子都在烧？），收摊"
-            return
-        if not self._apply_recipe(recipe):
-            yield "[限锻] ✗ 配方没设上，收摊"
-            return
-        if not self._ensure_speedup():
-            yield "[限锻] ✗ 「使用加速符」勾不上，收摊（不勾就烧时间了，不干）"
-            return
-
         done = 0
         got = []           # 出货名单（认出来的才进，认不出不耽误锻）
-        pending_boards = 0  # 锻完但榜还没读的批数（动画攒着的那种）
         hit_names = []
 
         for batch in range(batches):
-            # 刀位守卫：十把直接进刀位，位子不够先去刀解腾
+            # 刀位是不可省略的点火门闩：读不出来就停，绝不能把 OCR 失败
+            # 当作“空间足够”。每发都从状况页重新读取，上一发的旧值不复用。
+            self.maa.screenshot(force=True)
             cap = self._read_capacity()
-            if cap and cap[1] - cap[0] < 10:
-                need = 10 - (cap[1] - cap[0]) + 5
-                yield f"[限锻] 刀位只剩 {cap[1] - cap[0]} 个，去刀解 {need} 把腾位置..."
-                freed = False
-                for msg in self.dismantle_stream(max_dismantle=need,
-                                                 _from_forge=True):
-                    yield msg
-                    if "分解完成" in msg:
-                        freed = True
-                if not freed:
-                    yield "[限锻] ✗ 刀解腾不出位置，收摊"
+            if cap is None:
+                yield "[限锻] ✗ 刀位数量读不出来，不敢点火，收摊"
+                break
+            free_slots = cap[1] - cap[0]
+            if free_slots < 10:
+                need = 10 - free_slots
+                if capacity_action == "stop":
+                    yield (f"[限锻] ✗ 刀位只剩 {free_slots} 个，一发需要 10 个；"
+                           "按设定停下，不自动处理刀剑")
                     break
-                if not self._back_to_status():
-                    yield "[限锻] ✗ 刀解完回不到锻刀状况，收摊"
-                    break
-                if not self._enter_tenren():
-                    yield "[限锻] ✗ 回不到十连配比页，收摊"
-                    break
-                if not self._apply_recipe(recipe) or not self._ensure_speedup():
-                    yield "[限锻] ✗ 回炉后配方/加速符状态不对，收摊"
-                    break
+                if capacity_action == "dismantle":
+                    yield (f"[限锻] 刀位只剩 {free_slots} 个，按白名单刀解 "
+                           f"{need} 把，只腾本发所需位置...")
+                    for msg in self.dismantle_stream(
+                            max_dismantle=need, _from_forge=True):
+                        yield msg
+                    if not self._back_to_status():
+                        yield "[限锻] ✗ 刀解后回不到锻刀状况，收摊"
+                        break
+                else:
+                    yield (f"[限锻] 刀位只剩 {free_slots} 个，按设定先习合现有重刀，"
+                           "完成后重新核对刀位...")
+                    if not hasattr(self, "_shugo_loop_stream"):
+                        yield "[限锻] ✗ 当前流程没有习合能力，收摊"
+                        break
+                    fed = yield from self._shugo_loop_stream(False)
+                    yield f"[限锻] 习合完成 {int(fed or 0)} 轮，返回锻刀复查"
+                    for nav_msg in self.navigate_to_stream("锻刀"):
+                        yield nav_msg
+                    if self.current_location != "锻刀":
+                        yield "[限锻] ✗ 习合后回不到锻刀状况，收摊"
+                        break
+                    time.sleep(1.0)
+                self.maa.screenshot(force=True)
                 cap = self._read_capacity()
+                if cap is None:
+                    yield "[限锻] ✗ 处理后仍读不出刀位，不敢点火，收摊"
+                    break
+                free_slots = cap[1] - cap[0]
+                if free_slots < 10:
+                    yield (f"[限锻] ✗ 处理后仍只有 {free_slots} 个空位，"
+                           "没有继续点火")
+                    break
+
+            if not self._enter_tenren():
+                yield "[限锻] ✗ 没有空闲炉能进十连（炉子都在烧？），收摊"
+                break
+            if not self._apply_recipe(recipe):
+                yield "[限锻] ✗ 配方没设上，收摊"
+                yield from self._leave_tenren(0, [])
+                break
+            if not self._ensure_speedup():
+                yield "[限锻] ✗ 「使用加速符」勾不上，收摊（不勾就烧时间了，不干）"
+                yield from self._leave_tenren(0, [])
+                break
 
             yield f"[限锻] 第 {batch + 1}/{batches} 发十连，点火！"
-            out = {"ok": False, "swords": []}
+            out = {"ok": False, "swords": [], "board_seen": False,
+                   "uncertain": False}
             for msg in self._tenren_batch(cap, out):
                 yield msg
+            batch_swords = list(out["swords"])
+            left_status = False
             if not out["ok"]:
-                yield "[限锻] ✗ 这一发没点成，收摊"
-                break
+                # 配比页重新出现但刀位结果没读出来时，点火结果未知。
+                # 只允许退出揭榜/复读刀位来确认，绝不再补点。
+                recovery = {"boards_seen": 0}
+                if out["uncertain"]:
+                    yield "[限锻] 点火结果暂时看不清，退出揭榜确认；不会重复点火"
+                    left_status = yield from self._leave_tenren(
+                        1, batch_swords, recovery)
+                    self.maa.screenshot(force=True)
+                    cap_after = self._read_capacity() if left_status else None
+                    out["ok"] = bool(
+                        recovery["boards_seen"] > 0
+                        or (cap_after and cap_after[0] == cap[0] + 10))
+                    out["board_seen"] = recovery["boards_seen"] > 0
+                if not out["ok"]:
+                    if not left_status:
+                        yield from self._leave_tenren(0, [])
+                    yield ("[限锻] ✗ 无法确认这一发是否点成，已停手；"
+                           "请看游戏现场和库存，绝不自动补点")
+                    break
+            if not left_status:
+                pending = 0 if out["board_seen"] else 1
+                recovery = {"boards_seen": 0}
+                left_status = yield from self._leave_tenren(
+                    pending, batch_swords, recovery)
+
             done += 1
-            swords = out["swords"]
+            swords = batch_swords
             if swords:
                 got.extend(swords)
-            else:
-                pending_boards += 1  # 榜没当场见着，收尾时补读
             if hasattr(self, "record_event"):
                 event_id = self.record_event(
                     "forge.tenren", batch=batch + 1, recipe=recipe,
@@ -541,27 +594,9 @@ class SmithMixin:
                 if stop_on_hit:
                     yield "[限锻] 目标到手，按设定收手"
                     break
-
-        # 收工退出：揭示动画可能攒着没播，一路快进+读榜直到回状况页
-        if pending_boards > 0 or done > 0:
-            yield "[限锻] 收刀退场（把攒着的揭示动画看完）..."
-            before = len(got)
-            for msg in self._leave_tenren(pending_boards, got):
-                yield msg
-            # 攒着播的榜也可能中目标——收尾补一轮喜报（推送晚到总比不到强）
-            late_hits = [s for s in got[before:]
-                         if self._watch_name_hit(s, watch_ids, watch_raw)]
-            if late_hits:
-                names = "、".join(f"【{s['name']}】" for s in late_hits)
-                hit_names.extend(s["name"] for s in late_hits)
-                yield f"[限锻] 🎉🎉🎉 补读喜报！收尾揭榜里有 {names}！"
-                try:
-                    from ..notify import notify
-                    # 标题必须 ASCII（http.client 按 latin-1 编码头，中文/emoji 会静默发不出去）
-                    notify(f"限锻出货：{names}！快去看",
-                           title="Limited Forge Hit!", tags="tada,sword")
-                except Exception:
-                    pass
+            if not left_status:
+                yield "[限锻] ✗ 这一发完成了，但没能安全回到锻刀状况，停止后续批次"
+                break
 
         names = "、".join(f"【{s}】" for s in hit_names)
         yield (f"[限锻] 收工：锻了 {done * 10} 把（{done} 发十连），"
@@ -668,10 +703,10 @@ class SmithMixin:
 
     def _tenren_batch(self, cap_before, out):
         """打一发十连的状态机：点火 → 快进动画 → 读榜 → 回配比页确认刀位 +10。
-        out 填 ok/swords。点火偶发吞键：刀位没变就补点，最多 2 次。"""
+        out 填 ok/swords。结果不明时只回报 uncertain，由上层退出揭榜确认；
+        加速符不可再生，这里绝不重复点火。"""
         self.maa.click(Point(*self._TENREN_FIRE))
         time.sleep(1.0)
-        retaps = 0
         stale = 0
         swords = None
         for _ in range(40):  # 约 60 秒上限
@@ -698,6 +733,7 @@ class SmithMixin:
                 self._dismiss_popup()
                 return
             if self._board_visible():
+                out["board_seen"] = True
                 swords = self._read_tenren_board()
                 if swords:
                     yield ("[限锻] 揭榜："
@@ -720,13 +756,8 @@ class SmithMixin:
                     return
                 stale += 1
                 if stale >= 3:
-                    if retaps >= 2:
-                        return
-                    retaps += 1
-                    stale = 0
-                    yield "[限锻] 点火好像被吞了，补点一下"
-                    self.maa.click(Point(*self._TENREN_FIRE))
-                    time.sleep(1.0)
+                    out["uncertain"] = True
+                    return
                 continue
             # 动画/过场：快进
             self.maa.click(Point(*self._REVEAL_SKIP))
@@ -738,13 +769,16 @@ class SmithMixin:
         self.maa.screenshot(force=True)
         return bool(self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)))
 
-    def _leave_tenren(self, pending_boards, got):
+    def _leave_tenren(self, pending_boards, got, result=None):
         """退出十连：攒着的揭示动画一路快进，补读没见过的榜，直到回状况页"""
+        result = result if isinstance(result, dict) else {}
+        result.setdefault("boards_seen", 0)
         for _ in range(10 + pending_boards * 6):
             self.maa.screenshot(force=True)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
-                return
+                return True
             if self._board_visible():
+                result["boards_seen"] += 1
                 swords = self._read_tenren_board()
                 if pending_boards > 0:
                     pending_boards -= 1
@@ -762,6 +796,7 @@ class SmithMixin:
             self.maa.click(Point(*self._REVEAL_SKIP))
             time.sleep(1.2)
         yield "[限锻] ⚠ 退出时动画没播完，直接回状况页超时了"
+        return False
 
     def _emit_tenren_costs(self, event_id, recipe=None):
         """一发十连的记账：四资源按配方×10 负扣 + 委托符 -9（十连优惠）+ 加速符 -10。

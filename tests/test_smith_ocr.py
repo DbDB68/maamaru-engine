@@ -172,7 +172,6 @@ class _ForgeHost(SmithMixin):
         return
         yield
 
-
 class ForgeAttemptBudgetTests(unittest.TestCase):
     def test_full_inventory_collects_still_leave_budget_to_ignite(self):
         host = _ForgeHost()
@@ -494,6 +493,11 @@ class _TenrenHost(SmithMixin):
         return
         yield
 
+    def _shugo_loop_stream(self, dry_run):
+        self.maa.cap -= 10
+        yield "炼糖完成"
+        return 1
+
 
 _BOARD1 = ["加州清光", "大和守安定", "加州清光", "陆奥守吉行", "加州清光",
            "加州清光", "小狐丸", "压切长谷部", "宗三左文字", "陆奥守吉行"]
@@ -545,18 +549,43 @@ class LimitedForgeTests(unittest.TestCase):
         self.assertEqual(maa.clicks, [])                   # 一发没点，白嫖动画都没看
         self.assertTrue(any("库存不够" in m for m in messages))
 
-    def test_full_slots_dismantle_rescue(self):
+    def test_unreadable_capacity_never_fires(self):
+        maa = _TenrenMaa(boards=[_BOARD1])
+        original = maa.ocr_all
+
+        def unread_capacity(roi):
+            x1, y1, _x2, _y2 = roi.to_list()
+            if 960 <= x1 <= 1100 and y1 <= 90:
+                return []
+            return original(roi)
+
+        maa.ocr_all = unread_capacity
+        _host, messages = self._run(maa, total=10)
+        self.assertEqual(maa.fired, 0)
+        self.assertTrue(any("刀位数量读不出来" in m for m in messages))
+
+    def test_capacity_short_defaults_to_stop(self):
         maa = _TenrenMaa(cap=196, boards=[_BOARD1])
         host, messages = self._run(maa, total=10)
-        self.assertGreaterEqual(host.dismantled, 10)       # 腾位刀解跑过
+        self.assertEqual(host.dismantled, 0)
+        self.assertEqual(maa.fired, 0)
+        self.assertTrue(any("不自动处理刀剑" in m for m in messages))
+
+    def test_full_slots_dismantle_rescue(self):
+        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
+        host, messages = self._run(
+            maa, total=10, capacity_action="dismantle")
+        self.assertEqual(host.dismantled, 6)               # 只腾本发缺的 6 格
         self.assertEqual(maa.fired, 1)
         self.assertTrue(any("刀位只剩" in m for m in messages))
 
-    def test_missed_fire_tap_is_retried(self):
+    def test_missed_fire_tap_is_not_retried(self):
         maa = _TenrenMaa(boards=[_BOARD1], swallow_first_fire=True)
         host, messages = self._run(maa, total=10)
-        self.assertEqual(maa.fired, 1)
-        self.assertTrue(any("补点" in m for m in messages))
+        self.assertEqual(maa.fired, 0)
+        self.assertEqual(
+            sum(1 for point in maa.clicks if point == SmithMixin._TENREN_FIRE), 1)
+        self.assertTrue(any("绝不自动补点" in m for m in messages))
 
     def test_deferred_reveal_read_at_exit(self):
         # 动画攒着：批量中没揭榜，退出时补读
@@ -566,11 +595,37 @@ class LimitedForgeTests(unittest.TestCase):
         self.assertEqual(maa.screen, "status")
         self.assertTrue(any("补读揭榜" in m and "小狐丸" in m for m in messages))
 
-    def test_deferred_hit_still_celebrated_at_exit(self):
-        # 攒着播的榜里中了目标：收尾补喜报（推送晚到总比不到强）
+    def test_deferred_reveal_with_lost_capacity_never_double_fires(self):
         maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
-        host, messages = self._run(maa, total=10, watch_names=["小狐丸"])
-        self.assertTrue(any("补读喜报" in m and "小狐丸" in m for m in messages))
+        original = maa.ocr_all
+
+        def lose_capacity_after_fire(roi):
+            x1, y1, _x2, _y2 = roi.to_list()
+            if maa.fired and 960 <= x1 <= 1100 and y1 <= 90:
+                return []
+            return original(roi)
+
+        maa.ocr_all = lose_capacity_after_fire
+        _host, messages = self._run(maa, total=10)
+        self.assertEqual(maa.fired, 1)
+        self.assertEqual(
+            sum(1 for point in maa.clicks if point == SmithMixin._TENREN_FIRE), 1)
+        self.assertTrue(any("不会重复点火" in m for m in messages))
+
+    def test_sugar_capacity_action_rechecks_then_fires(self):
+        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
+        _host, messages = self._run(
+            maa, total=10, capacity_action="sugar")
+        self.assertEqual(maa.fired, 1)
+        self.assertTrue(any("习合完成 1 轮" in m for m in messages))
+
+    def test_deferred_hit_still_celebrated_at_exit(self):
+        # 攒着播的榜里中了目标：本发退出揭榜后立刻收手，不得烧下一发
+        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        host, messages = self._run(maa, total=50, watch_names=["小狐丸"])
+        self.assertEqual(maa.fired, 1)
+        self.assertTrue(any("喜报" in m and "小狐丸" in m for m in messages))
+        self.assertTrue(any("按设定收手" in m for m in messages))
         self.assertTrue(any("目标命中" in m for m in messages))
 
 
@@ -580,6 +635,7 @@ class PanelLimitedFieldTests(unittest.TestCase):
         fields = {f["key"]: f for f in server.list_scripts()["forge"]["params"]}
         for key in ("forge_limited", "watch_names", "stop_on_hit"):
             self.assertIn(key, fields, f"forge 缺 {key}")
+        self.assertEqual(fields["capacity_action"]["default"], "stop")
         self.assertEqual(fields["watch"]["visibleWhen"],
                          {"key": "forge_limited", "is": "false"})
 
@@ -604,7 +660,8 @@ class PanelLimitedFieldTests(unittest.TestCase):
             "watch_names": "小狐丸, 山姥切国广", "stop_on_hit": True}))
         self.assertEqual(calls, [{"total": 50, "recipe": [950, 950, 950, 950],
                                   "watch_names": ["小狐丸", "山姥切国广"],
-                                  "stop_on_hit": True}])
+                                  "stop_on_hit": True,
+                                  "capacity_action": "stop"}])
 
         calls.clear()
         list(server._build_forge(_Agent(), None, {"times": "3"}))
