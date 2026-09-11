@@ -1,8 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from panel.server import (_build_daily, _build_osaka, _build_pumpkin, _build_raid,
-                          _wrap_inventory, list_scripts)
+from panel.server import (_build_daily, _build_edocastle, _build_osaka,
+                          _build_pumpkin, _build_raid, _wrap_inventory,
+                          list_scripts)
 
 # 面板实际注册的是包装器（开工/收工盘点）；FakeAgent 没有 status_snapshot_stream，
 # 正好验证“无快照能力自动跳过盘点”的兜底路径
@@ -12,6 +13,7 @@ wrap = lambda builder: _wrap_inventory("T", builder)
 class FakeAgent:
     def __init__(self):
         self.daily_args = None
+        self.edocastle_args = None
         self.pumpkin_args = None
         self.raid_args = None
         self.yosari_args = None
@@ -24,6 +26,10 @@ class FakeAgent:
     def pumpkin_stream(self, **kwargs):
         self.pumpkin_args = kwargs
         yield "pumpkin"
+
+    def edocastle_stream(self, **kwargs):
+        self.edocastle_args = kwargs
+        yield "edocastle"
 
     def raid_stream(self, **kwargs):
         self.raid_args = kwargs
@@ -42,9 +48,10 @@ class PumpkinPlanTests(unittest.TestCase):
     def test_edocastle_exposes_the_formation_choices_it_actually_uses(self):
         fields = list_scripts()["edocastle"]["params"]
         by_key = {field["key"]: field for field in fields}
-        self.assertEqual(by_key["max_runs"]["label"], "出阵次数")
+        self.assertNotIn("max_runs", by_key)
         self.assertEqual(by_key["use_koban_refill"]["label"], "是否补充手形")
-        self.assertNotIn("help", by_key["use_koban_refill"])
+        self.assertEqual(by_key["refill_run_limit"]["visibleWhen"],
+                         {"key": "use_koban_refill", "is": "true"})
         self.assertEqual(by_key["formation_mode"]["options"],
                          [["manual", "手动阵形"], ["auto", "自动阵形"]])
         # 阵形策略选项已拆：手动=固定点所选阵形，自动=游戏选、抓瞎时
@@ -52,6 +59,24 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertNotIn("formation_strategy", by_key)
         self.assertNotIn("visibleWhen", by_key["formation"])
         self.assertEqual(by_key["formation"]["options"][-1], ["逆行阵", "逆行阵"])
+
+    def test_edocastle_only_uses_a_run_limit_when_refill_is_enabled(self):
+        agent = FakeAgent()
+        list(_build_edocastle(agent, None, {
+            "team_no": "3", "max_runs": "99", "use_koban_refill": False,
+        }))
+        self.assertEqual(agent.edocastle_args["max_runs"], 0)
+
+        list(_build_edocastle(agent, None, {
+            "team_no": "3", "refill_run_limit": "8",
+            "use_koban_refill": True,
+        }))
+        self.assertEqual(agent.edocastle_args["max_runs"], 8)
+
+        list(_build_edocastle(agent, None, {
+            "team_no": "3", "max_runs": "7", "use_koban_refill": True,
+        }))
+        self.assertEqual(agent.edocastle_args["max_runs"], 7)
 
     def test_osaka_formation_mode_matches_the_sortie_panel_semantics(self):
         fields = list_scripts()["osaka"]["params"]

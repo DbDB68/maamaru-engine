@@ -51,7 +51,7 @@ class EdocastleMixin:
             team_no: 部队编号，默认读配置 edocastle.team_no
             use_koban_refill: 票尽时是否用小判补票（走游戏自己的补票弹窗：
                 出阵→确定补一张→再出阵），默认读配置 edocastle.use_koban_refill
-            max_runs: 最多跑几圈（0=票尽为止），默认读配置 edocastle.max_runs
+            max_runs: 内部安全上限；不补票时为 0（票尽为止），补票时必须为正数
             formation_mode: "manual"/"auto"，复用合战场阵型选择
             formation: 固定阵型名
             repair_threshold: 出阵前伤势停止线（light/medium/heavy），
@@ -69,7 +69,11 @@ class EdocastleMixin:
         if use_koban_refill is None:
             use_koban_refill = bool(cfg.get("use_koban_refill", False))
         if max_runs is None:
-            max_runs = int(cfg.get("max_runs", 0))
+            max_runs = (int(cfg.get(
+                "refill_run_limit", cfg.get("max_runs", 6)))
+                        if use_koban_refill else 0)
+        if use_koban_refill and max_runs <= 0:
+            max_runs = 6
         if repair_threshold is None:
             repair_threshold = str(cfg.get("repair_threshold", "heavy"))
         if auto_equip is None:

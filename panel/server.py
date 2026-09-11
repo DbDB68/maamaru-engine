@@ -200,6 +200,14 @@ def _run_count(params, default, *legacy_keys):
     return default
 
 
+def _refill_run_limit(params, default=6):
+    """补票任务必须有正数上限；兼容旧工作流里保存的 max_runs。"""
+    value = _i(params, "refill_run_limit", 0)
+    if value <= 0:
+        value = _i(params, "max_runs", 0)
+    return value if value > 0 else default
+
+
 def _march_and_injury_fields():
     """合战场与异去共享；阵形仅在脚本行军时显示。"""
     return [
@@ -536,22 +544,26 @@ def _build_pumpkin(agent, config_path, params):
 
 
 def _build_edocastle(agent, config_path, params):
-    runs = _run_count(params, 0, "max_runs")
+    refill = _bool(params.get("use_koban_refill", False))
+    # 不补票时由游戏弹窗自然收工，不需要玩家猜当天还剩几张票。
+    # 允许花小判后才要求一个正数上限，旧流程里的 max_runs=0 不得变成无限补票。
+    runs = _refill_run_limit(params) if refill else 0
     yield from agent.edocastle_stream(
         team_no=_i(params, "team_no", 3),
-        use_koban_refill=_bool(params.get("use_koban_refill", False)),
+        use_koban_refill=refill,
         max_runs=runs,
         formation_mode=params.get("formation_mode") or "manual",
         formation=params.get("formation") or "鱼鳞阵")
 
 
 def _build_hanafuda(agent, config_path, params):
-    runs = _run_count(params, 0, "max_runs")
+    refill = _bool(params.get("use_koban_refill", False))
+    runs = _refill_run_limit(params) if refill else 0
     yield from agent.hanafuda_stream(
         team_no=_i(params, "team_no", 3),
         difficulty=_i(params, "difficulty", 4),
         max_runs=runs,
-        auto_refill=_bool(params.get("use_koban_refill", False)))
+        auto_refill=refill)
 
 
 def _build_sortie(agent, config_path, params):
@@ -927,11 +939,14 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
 register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点、钥匙、王点一套带走",
                 _wrap_inventory("江户城", _build_edocastle),
                 params=[_team_field("3"),
-                        {"key": "max_runs", "type": "number", "label": "出阵次数",
-                         "default": 0, "min": 0, "max": 99,
-                         "help": "0 表示把当天通行令牌跑完为止。"},
                         {"key": "use_koban_refill", "type": "toggle",
-                          "label": "是否补充手形", "default": False},
+                         "label": "是否补充手形", "default": False,
+                         "help": "关闭时把当天已有手形跑完就收工，不需要填写次数。开启后才会使用小判。"},
+                        {"key": "refill_run_limit", "type": "number",
+                         "label": "本次最多出阵", "default": 6,
+                         "min": 1, "max": 99,
+                         "help": "仅在允许小判补充时出现，包含已有免费手形；达到上限就收工，防止无限补票。",
+                         "visibleWhen": {"key": "use_koban_refill", "is": "true"}},
                         *_formation_fields()])
 register_script("hanafuda", "秘宝之里", "花牌收集：挂上委托后图内全自动，令牌跑完收工",
                 _wrap_inventory("花札", _build_hanafuda),
@@ -940,12 +955,14 @@ register_script("hanafuda", "秘宝之里", "花牌收集：挂上委托后图�
                                      ["3", "难度·难"], ["4", "难度·超难"]],
                          "default": "4"},
                         _team_field("3"),
-                        {"key": "max_runs", "type": "number", "label": "出阵次数",
-                         "default": 0, "min": 0, "max": 99,
-                         "help": "0 表示把当天通行令牌跑完为止。图内全程游戏自动行军，脚本只盯异常。"},
                         {"key": "use_koban_refill", "type": "toggle",
                          "label": "是否补充通行令牌", "default": False,
-                         "help": "开启后令牌不足时自动用小判补充；关闭则令牌跑完收工。"}])
+                         "help": "关闭时把当天已有令牌跑完就收工；开启后才会使用小判。"},
+                        {"key": "refill_run_limit", "type": "number",
+                         "label": "本次最多出阵", "default": 6,
+                         "min": 1, "max": 99,
+                         "help": "仅在允许小判补充时出现，包含已有免费令牌；达到上限就收工，防止无限补票。",
+                         "visibleWhen": {"key": "use_koban_refill", "is": "true"}}])
 register_script("sortie", "合战场", "单跑合战场：这里的设置只对本次单跑生效，与一键日课/工作流互不影响",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
