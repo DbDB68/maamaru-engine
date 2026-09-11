@@ -430,7 +430,8 @@ def _build_daily(agent, config_path, params):
     yield from agent.daily_stream(
         only=steps, after=after, sortie_override=sortie_plan,
         practice_override=practice_plan or None,
-        expedition_override=expedition_plan)
+        expedition_override=expedition_plan,
+        forge_times=_i(params, "forge_times", None))
 
 
 def _build_daily_standalone(config_path, params):
@@ -703,6 +704,9 @@ register_script("daily", "一键日课", "",
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
                           "options": _DAILY_STEPS, "default": _DAILY_STEPS,
                            "help": "这里的出阵安排是日课专用配置，不会修改各玩法的单独配置。"},
+                        {"key": "forge_times", "type": "number", "label": "锻刀次数",
+                         "default": 3, "min": 1, "max": 12,
+                         "help": "日课点火的目标炉数。只使用空闲炉、不消耗加速符；炉位不够时实际次数会少于设定值。"},
                         {"key": "sortie_mode", "type": "select", "label": "出阵安排",
                          "options": [["none", "不出阵"],
                                      ["raid", "联队战"],
@@ -912,7 +916,7 @@ register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；�
                 _wrap_inventory("锻刀", _build_forge),
                 params=[{"key": "times", "type": "number", "label": "最多锻几炉",
                          "default": 3, "min": 1, "max": 12,
-                         "help": "日课目标是锻刀 3 次，但脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常本次只能锻 2 次；没必要为了返还委托符强行加速。"},
+                         "help": "脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常一次只能锻 2 炉；日课的锻刀次数在「一键日课」表单里改。"},
                         {"key": "watch", "type": "duration-list",
                          "label": "目标时长（命中时手机报喜，不添加则不盯）",
                          "default": ""}])

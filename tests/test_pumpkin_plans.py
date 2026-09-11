@@ -155,6 +155,24 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertIn("pumpkin", [value for value, _ in daily_modes["options"]])
         self.assertEqual(daily_modes["default"], "none")
 
+    def test_daily_forge_times_field_reaches_daily_stream(self):
+        agent = FakeAgent()
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value={}
+        ):
+            list(wrap(_build_daily)("config.json", {"forge_times": "5"}))
+        self.assertEqual(agent.daily_args["forge_times"], 5)
+        # 不填时不覆盖配置里的 daily.forge_times
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value={}
+        ):
+            list(wrap(_build_daily)("config.json", {}))
+        self.assertIsNone(agent.daily_args["forge_times"])
+        field = next(field for field in list_scripts()["daily"]["params"]
+                     if field.get("key") == "forge_times")
+        self.assertEqual(field["default"], 3)
+        self.assertEqual(field["max"], 12)
+
     def test_daily_can_schedule_yosari(self):
         agent = FakeAgent()
         params = {"sortie_mode": "yosari", "team_no": "4",

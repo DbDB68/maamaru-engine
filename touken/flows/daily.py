@@ -51,7 +51,7 @@ class DailyMixin:
 
     def daily_stream(self, logout: bool = False, only=None, after: str = None,
                      sortie_override: dict = None, practice_override: dict = None,
-                     expedition_override: list = None):
+                     expedition_override: list = None, forge_times: int = None):
         """
         流式一键日课
 
@@ -67,6 +67,8 @@ class DailyMixin:
             sortie_override: 覆盖出阵安排（面板传的），如
                   {"mode":"none"} / {"mode":"raid","rounds":3} /
                   {"mode":"sortie","chapter":1,"map_no":1,"loops":2,"team_no":3}
+            forge_times: 覆盖日课锻刀次数（面板传的）；None 时读配置
+                  daily.forge_times，再缺省为 3
 
         Yields:
             str: 执行状态消息
@@ -80,6 +82,9 @@ class DailyMixin:
         if practice_override:
             plan = dict(plan)
             plan["practice"] = dict(practice_override)
+        if forge_times is not None:
+            plan = dict(plan)
+            plan["forge_times"] = int(forge_times)
         report = []
         wanted = set(only) if only else None
 
