@@ -61,6 +61,15 @@ class HanafudaConfigTests(unittest.TestCase):
     def test_event_timeline_hides_hanafuda_off_season(self):
         self.assertEqual(SCRIPT_EVENT_MAP.get("hanafuda"), ["秘宝之里"])
 
+    def test_agent_mro_resolves_hanafuda_methods(self):
+        """Mixin 同名方法会被排前面的 mixin 盖掉（edocastle._enter_map_stream
+        曾截胡花札的入图流程）——组装后的 ToukenAgent 必须解析到花札版。"""
+        from touken.agent import ToukenAgent
+        for name in ("hanafuda_stream", "_enter_hanafuda_map_stream",
+                     "_watch_round_stream", "_save_hanafuda_shot"):
+            self.assertIs(getattr(ToukenAgent, name),
+                          getattr(HanafudaMixin, name), name)
+
 
 class HanafudaPanelTests(unittest.TestCase):
     def test_script_registered_with_expected_fields(self):
@@ -142,6 +151,9 @@ class _WatchHost(HanafudaMixin, BattleMixin):
     def _click_point(self, point):
         self.clicked.append(list(point))
 
+    def _find_deploy_button(self, cfg):
+        return (1200, 645) if self.maa.frame.get("deploy") else None
+
     def recover_network_stream(self):
         return self._net_result
         yield
@@ -157,27 +169,60 @@ def _watch(flow, cfg=_CFG, timeout_s=5.0):
             return msgs, stop.value
 
 
+_HUD = "剩余行动次数"
+_TITLE = "花札/ui秘宝之里.png"
+
+
 @patch("touken.flows.hanafuda.time.sleep", lambda *_a, **_k: None)
 class HanafudaWatchTests(unittest.TestCase):
     def test_round_ends_when_ui_title_returns(self):
         host = _WatchHost([
-            {"templates": set(), "ocr": set(), "texts": []},
-            {"templates": {"花札/ui秘宝之里.png"}, "ocr": set(), "texts": []},
+            {"templates": set(), "ocr": {_HUD}, "texts": []},      # 进图上膛
+            {"templates": set(), "ocr": {_HUD}, "texts": []},      # 跑图中
+            {"templates": {_TITLE}, "ocr": set(), "texts": [],
+             "deploy": True},                                      # 回主界面
         ])
         msgs, ok = _watch(host)
         self.assertTrue(ok)
         self.assertEqual(host.clicked, [])
 
+    def test_entry_splash_title_is_not_round_end(self):
+        """进图过场重播活动横幅：没见过地图 HUD 之前，ui_title 不算圈结束
+        （2026-09-11 真机翻车：过场帧 1.000 假命中，脚本差点在出发点收工）。"""
+        host = _WatchHost([
+            {"templates": {_TITLE}, "ocr": set(), "texts": [],
+             "deploy": True},                                      # 过场假横幅
+            {"templates": set(), "ocr": {_HUD}, "texts": []},      # 真进图
+            {"templates": {_TITLE}, "ocr": set(), "texts": [],
+             "deploy": True},                                      # 真回主界面
+        ])
+        msgs, ok = _watch(host)
+        self.assertTrue(ok)
+        self.assertTrue(any("进图了" in m for m in msgs))
+
+    def test_title_without_deploy_button_is_not_round_end(self):
+        """只有横幅、部队选择按钮不在 = 结算过场，不算回主界面。"""
+        host = _WatchHost([
+            {"templates": set(), "ocr": {_HUD}, "texts": []},
+            {"templates": {_TITLE}, "ocr": set(), "texts": []},    # 无 deploy
+            {"templates": {_TITLE}, "ocr": set(), "texts": [],
+             "deploy": True},
+        ])
+        msgs, ok = _watch(host)
+        self.assertTrue(ok)
+
     def test_bubble_tapped_only_with_hud_and_dialog_text(self):
         host = _WatchHost([
+            {"templates": set(), "ocr": {_HUD}, "texts": []},      # 进图上膛
             # 战斗画面：对话条有字（刀光剑影里的字幕）但 HUD 不在 → 不许点
             {"templates": set(), "ocr": set(), "texts": [("白刃战", None)]},
             # 地图 HUD 在 + 对话条有字 = 狐之助气泡 → 点掉
-            {"templates": set(), "ocr": {"剩余行动次数"},
+            {"templates": set(), "ocr": {_HUD},
              "texts": [("选择直接挑战BOSS或继续前进", None)]},
             # 气泡点完：HUD 在、对话条空了 → 不点
-            {"templates": set(), "ocr": {"剩余行动次数"}, "texts": []},
-            {"templates": {"花札/ui秘宝之里.png"}, "ocr": set(), "texts": []},
+            {"templates": set(), "ocr": {_HUD}, "texts": []},
+            {"templates": {_TITLE}, "ocr": set(), "texts": [],
+             "deploy": True},
         ])
         msgs, ok = _watch(host)
         self.assertTrue(ok)
@@ -198,6 +243,17 @@ class HanafudaWatchTests(unittest.TestCase):
         msgs, ok = _watch(host)
         self.assertFalse(ok)
         self.assertTrue(any("本丸" in m for m in msgs))
+
+    def test_never_entering_map_is_reported(self):
+        """确认出阵后迟迟见不到地图 HUD：如实报没进图，不装跑完。"""
+        host = _WatchHost([
+            {"templates": set(), "ocr": set(), "texts": []},
+        ])
+        with patch("touken.flows.hanafuda.time.monotonic",
+                   side_effect=[0, 0, 1, 95, 95, 95]):
+            msgs, ok = _watch(host, timeout_s=200.0)
+        self.assertFalse(ok)
+        self.assertTrue(any("没见到地图" in m for m in msgs))
 
     def test_watchdog_stops_when_stuck(self):
         host = _WatchHost([
@@ -246,7 +302,7 @@ class HanafudaEnterMapTests(unittest.TestCase):
 
     def test_auto_march_failure_blocks_departure(self):
         host = self._EnterHost(auto_march_ok=False)
-        gen = host._enter_map_stream(_CFG | {
+        gen = host._enter_hanafuda_map_stream(_CFG | {
             "team_ui_ocr": {"expected": "部队选择", "roi": [506, 1, 774, 77]},
         }, 3, [1082, 300], "heavy", False, False)
         msgs = list(gen)
@@ -255,7 +311,7 @@ class HanafudaEnterMapTests(unittest.TestCase):
 
     def test_happy_path_enters_map(self):
         host = self._EnterHost(auto_march_ok=True)
-        gen = host._enter_map_stream(_CFG | {
+        gen = host._enter_hanafuda_map_stream(_CFG | {
             "team_ui_ocr": {"expected": "部队选择", "roi": [506, 1, 774, 77]},
         }, 3, [1082, 300], "heavy", False, False)
         msgs = list(gen)

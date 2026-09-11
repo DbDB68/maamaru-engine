@@ -1375,7 +1375,7 @@
     },
     "confirm_button": {
       "template": "通用_确定.png",
-      "roi": [536, 565, 742, 637],
+      "roi": [480, 540, 800, 680],
       "target": [640, 627]
     },
     "map_hud_ocr": {

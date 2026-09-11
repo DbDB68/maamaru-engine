@@ -124,7 +124,7 @@ class HanafudaMixin:
             tama_before = self._read_tama_total(cfg)
             yield f"[花札] 🎴 第 {runs_done + 1} 圈开场（难度·{label}）"
 
-            entered, team_record_saved = yield from self._enter_map_stream(
+            entered, team_record_saved = yield from self._enter_hanafuda_map_stream(
                 cfg, team_no, card, repair_threshold, auto_equip,
                 team_record_saved, auto_refill=auto_refill)
             if not entered:
@@ -158,7 +158,7 @@ class HanafudaMixin:
 
     # ---------- 内部：入场 → 地图 ----------
 
-    def _enter_map_stream(self, cfg: dict, team_no: int, card_point: list,
+    def _enter_hanafuda_map_stream(self, cfg: dict, team_no: int, card_point: list,
                           repair_threshold: str, auto_equip: bool,
                           team_record_saved: bool,
                           auto_refill: bool = False):
@@ -209,7 +209,12 @@ class HanafudaMixin:
         """委托跑图监控：等一圈跑完回活动主界面，中途只处理异常。
 
         正常一圈（超难 7 场左右）约 6～8 分钟，超时上限给 25 分钟。
-        返回 True=一圈正常跑完（ui_title 地标重现）。
+        返回 True=一圈正常跑完（回到可操作的活动主界面）。
+
+        圈结束判定必须先「上膛」：进图过场会重播活动横幅（2026-09-11 真机
+        实测 ui_title 在过场帧 1.000 假命中，脚本差点在出发点直接宣布收工），
+        所以先见到地图 HUD（剩余行动次数）才承认 ui_title 算圈结束；
+        且要求部队选择按钮也在，防结算过场的横幅假命中。
         """
         hud = cfg.get("map_hud_ocr", {})
         hud_roi = roi_4to4(*hud["roi"]) if hud.get("roi") else None
@@ -218,19 +223,17 @@ class HanafudaMixin:
         bubble_tap = cfg.get("bubble_tap", [870, 394])
 
         deadline = time.monotonic() + max(1.0, float(timeout_s))
+        entry_deadline = time.monotonic() + 90.0
+        armed = False  # 见过地图 HUD 才承认圈结束
         last_heartbeat = time.monotonic()
         bubbles = 0
         while time.monotonic() < deadline:
             self.maa.screenshot(force=True)
 
-            # 圈结束：行动次数耗尽/首领打完，直接回活动主界面
-            if self.maa.template_match(cfg["ui_title"]["template"]):
-                return True
-
             # 重伤行军警告：永远点否。活动不碎刀，但警告一出说明局面
             # 超出脚本该管的范围，停手让人看
             if self._deny_heavy_injury_warning(cfg):
-                self._save_debug_shot(debug_dir, "heavy_injury_warning")
+                self._save_hanafuda_shot(debug_dir, "heavy_injury_warning")
                 yield ("[花札] 🛑 出现重伤行军警告，已点【否】；"
                        "先停下了，你去看一眼队伍")
                 return False
@@ -244,14 +247,31 @@ class HanafudaMixin:
                 yield "[花札] 断网恢复后落在本丸，本圈状态作废，安全收工"
                 return False
 
-            # 狐之助气泡：唯一会卡死委托的东西。判定=地图 HUD 在
-            # （排除战斗/结算页）且对话条区域有字
+            if not armed:
+                if hud_roi and self.maa.ocr(expected=hud["expected"], roi=hud_roi):
+                    armed = True
+                    yield "[花札] 进图了，委托跑图我盯着"
+                elif time.monotonic() > entry_deadline:
+                    self._save_hanafuda_shot(debug_dir, "entry_missing")
+                    yield ("[花札] ⚠️ 确认出阵后 90 秒还没见到地图，"
+                           "疑似没进图，停手留证（截图已存）")
+                    return False
+                time.sleep(0.9)
+                continue
+
+            # 圈结束：行动次数耗尽/首领打完回活动主界面（横幅+部队选择双保险）
+            if self.maa.template_match(cfg["ui_title"]["template"]) \
+                    and self._find_deploy_button(cfg):
+                return True
+
+            # 狐之助气泡：唯一会卡死委托的东西。已上膛=地图 HUD 刚出现过；
+            # 战斗/结算页 HUD 不在，自然不会误判
             if hud_roi and bubble_roi and self.maa.ocr(
                     expected=hud["expected"], roi=hud_roi):
                 if self.maa.ocr_all(bubble_roi):
                     bubbles += 1
                     if bubbles > 40:
-                        self._save_debug_shot(debug_dir, "bubble_stuck")
+                        self._save_hanafuda_shot(debug_dir, "bubble_stuck")
                         yield ("[花札] ⚠️ 气泡点了 40 下还没完，不像教学气泡，"
                                "停手留证（截图已存）")
                         return False
@@ -267,7 +287,7 @@ class HanafudaMixin:
                 yield f"[花札] 委托跑图中{detail}…"
             time.sleep(0.9)
 
-        self._save_debug_shot(debug_dir, "round_watchdog")
+        self._save_hanafuda_shot(debug_dir, "round_watchdog")
         yield (f"[花札] ⚠️ 一圈跑了 {int(timeout_s // 60)} 分钟还没回活动界面，"
                "疑似卡住，停手留证（截图已存）")
         return False
@@ -315,7 +335,7 @@ class HanafudaMixin:
         except Exception:
             return None
 
-    def _save_debug_shot(self, debug_dir: str | None, name: str):
+    def _save_hanafuda_shot(self, debug_dir: str | None, name: str):
         """异常现场存证：优先 debug_dir，否则用户数据目录 debug/。"""
         try:
             out = Path(debug_dir) if debug_dir else Path(self._root) / "debug"
