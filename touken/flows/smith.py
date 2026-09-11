@@ -9,6 +9,13 @@
      关掉，去刀解一把白名单腾出位置，再回来收
   3. 每日锻 3 次做日课
 
+限锻十连规矩（2026-09-11 真机科研，限锻赌刀专用，与日常锻刀截然相反）：
+  1. 状况页空闲炉行内「十连锻刀」→ 配比页十连模式，勾「使用加速符」
+  2. 一发十连 = 委托符 -9（十连优惠）+ 加速符 -10 + 配方×10 四资源，
+     瞬间完成，十把刀直接进刀位；加速符不可再生，跑前必须核库存
+  3. 每发的金色结算榜（5×2 卡牌）整版 OCR 认人，竖排刀名实测 10/10；
+     揭示动画有时攒着等离开页面才播，收尾退出时一路快进+读榜
+
 刀解规矩（白名单模式）：
   1. 只解白名单里的不稀有刀（任务奖励加速符），每天一把
   2. 保护（上锁）的刀界面里根本不显示，天然安全
@@ -396,6 +403,382 @@ class SmithMixin:
             if target - 90 <= secs <= target:
                 return shown
         return None
+
+    # ==================== 限锻十连（十连锻刀+加速符） ====================
+
+    _TENREN_ROW_BTN_X = 985       # 状况页空闲行右侧「十连锻刀」
+    _TENREN_FIRE = (1176, 615)    # 配比页（十连模式）右下「十连锻刀」
+    _SPEEDUP_BOX = (1193, 422)    # 配比页「使用加速符」勾选框
+    _SPEEDUP_PREVIEW_ROI = (1150, 390, 1278, 560)  # 勾选后预览变两个数（现值▼扣后）
+    _REVEAL_SKIP = (113, 78)      # 揭示动画左上角 » 快进
+    _BACK_BTN = (141, 87)         # 锻刀页返回
+    _BOARD_TAP = (640, 360)       # 结算榜点穿
+    _BOARD_NAME_ROI = (150, 40, 1240, 620)    # 卡牌区（避开左缘花字和底部积分条）
+    _BOARD_MARK_ROI = (880, 625, 1250, 705)   # 榜右下「显现积分」——榜的身份证
+    _CAPACITY_ROI = (960, 45, 1100, 85)       # 顶栏「所持刀剣 196 / 200」
+    # 状况页右侧栏库存（真机 OCR 定位：委托符数 y心364、加速符数 y心527；
+    # 加速符·极的数也记到账本正名「加速符」上）
+    _SIDE_COUNT_ROIS = (("委托符", (1140, 345, 1275, 385)),
+                        ("加速符", (1140, 508, 1275, 548)))
+
+    def limited_forge_stream(self, total: int = 50, recipe: list | None = None,
+                             watch_names: list | None = None,
+                             stop_on_hit: bool = True):
+        """
+        限锻十连：十连锻刀+加速符瞬间出货，限锻活动期间集中赌刀专用。
+
+        Args:
+            total: 要锻多少把（按十连取整，如 50=5 发；10~200）
+            recipe: 点火配方，None 读配置 forge.recipe
+            watch_names: 目标刀名清单，出货命中报喜（中/日名都行，过名册校正）
+            stop_on_hit: 命中目标立刻收手（保住剩下的加速符）
+
+        Yields:
+            str: 执行状态消息
+        """
+        recipe = self._forge_recipe(recipe)
+        total = max(10, min(int(total or 50), 200))
+        batches = (total + 9) // 10
+        watch_ids, watch_raw = self._resolve_watch_names(watch_names)
+
+        yield (f"[限锻] 目标 {batches * 10} 把（{batches} 发十连），"
+               f"配方 {'/'.join(str(v) for v in recipe)}")
+        yield (f"[限锻] 账单预告：委托符 {9 * batches} + 加速符 {10 * batches} "
+               f"+ 四资源各 {'/'.join(str(v * 10) for v in recipe)}")
+        if watch_raw:
+            yield f"[限锻] 🎯 目标刀剑：{'、'.join(watch_raw)}"
+
+        yield "[限锻] 正在导航到锻刀..."
+        for nav_msg in self.navigate_to_stream("锻刀"):
+            yield nav_msg
+        if self.current_location != "锻刀":
+            yield "[限锻] ✗ 到达锻刀失败"
+            return
+        time.sleep(1.0)
+
+        # 加速符不可再生：开跑前核库存，读不出来宁可不跑
+        counts = self._read_sidebar_counts()
+        if counts.get("委托符") is None or counts.get("加速符") is None:
+            yield "[限锻] ✗ 库存读不出来（委托符/加速符），不敢动手"
+            return
+        yield (f"[限锻] 库存：委托符 {counts['委托符']}、加速符 {counts['加速符']}")
+        if counts["委托符"] < 9 * batches or counts["加速符"] < 10 * batches:
+            yield (f"[限锻] ✗ 库存不够：需要委托符 {9 * batches}、加速符 "
+                   f"{10 * batches}，差得远呢，收摊")
+            return
+
+        if not self._enter_tenren():
+            yield "[限锻] ✗ 没有空闲炉能进十连（炉子都在烧？），收摊"
+            return
+        if not self._apply_recipe(recipe):
+            yield "[限锻] ✗ 配方没设上，收摊"
+            return
+        if not self._ensure_speedup():
+            yield "[限锻] ✗ 「使用加速符」勾不上，收摊（不勾就烧时间了，不干）"
+            return
+
+        done = 0
+        got = []           # 出货名单（认出来的才进，认不出不耽误锻）
+        pending_boards = 0  # 锻完但榜还没读的批数（动画攒着的那种）
+        hit_names = []
+
+        for batch in range(batches):
+            # 刀位守卫：十把直接进刀位，位子不够先去刀解腾
+            cap = self._read_capacity()
+            if cap and cap[1] - cap[0] < 10:
+                need = 10 - (cap[1] - cap[0]) + 5
+                yield f"[限锻] 刀位只剩 {cap[1] - cap[0]} 个，去刀解 {need} 把腾位置..."
+                freed = False
+                for msg in self.dismantle_stream(max_dismantle=need,
+                                                 _from_forge=True):
+                    yield msg
+                    if "分解完成" in msg:
+                        freed = True
+                if not freed:
+                    yield "[限锻] ✗ 刀解腾不出位置，收摊"
+                    break
+                if not self._back_to_status():
+                    yield "[限锻] ✗ 刀解完回不到锻刀状况，收摊"
+                    break
+                if not self._enter_tenren():
+                    yield "[限锻] ✗ 回不到十连配比页，收摊"
+                    break
+                if not self._apply_recipe(recipe) or not self._ensure_speedup():
+                    yield "[限锻] ✗ 回炉后配方/加速符状态不对，收摊"
+                    break
+                cap = self._read_capacity()
+
+            yield f"[限锻] 第 {batch + 1}/{batches} 发十连，点火！"
+            out = {"ok": False, "swords": []}
+            for msg in self._tenren_batch(cap, out):
+                yield msg
+            if not out["ok"]:
+                yield "[限锻] ✗ 这一发没点成，收摊"
+                break
+            done += 1
+            swords = out["swords"]
+            if swords:
+                got.extend(swords)
+            else:
+                pending_boards += 1  # 榜没当场见着，收尾时补读
+            if hasattr(self, "record_event"):
+                event_id = self.record_event(
+                    "forge.tenren", batch=batch + 1, recipe=recipe,
+                    swords=[s["name"] for s in swords])
+                self._emit_tenren_costs(event_id, recipe)
+            hits = [s for s in swords if self._watch_name_hit(s, watch_ids, watch_raw)]
+            if hits:
+                names = "、".join(f"【{s['name']}】" for s in hits)
+                hit_names.extend(s["name"] for s in hits)
+                yield f"[限锻] 🎉🎉🎉 喜报！第 {batch + 1} 发出了 {names}！"
+                try:
+                    from ..notify import notify
+                    # 标题必须 ASCII（http.client 按 latin-1 编码头，中文/emoji 会静默发不出去）
+                    notify(f"限锻出货：{names}！快去看",
+                           title="Limited Forge Hit!", tags="tada,sword")
+                except Exception:
+                    pass
+                if stop_on_hit:
+                    yield "[限锻] 目标到手，按设定收手"
+                    break
+
+        # 收工退出：揭示动画可能攒着没播，一路快进+读榜直到回状况页
+        if pending_boards > 0 or done > 0:
+            yield "[限锻] 收刀退场（把攒着的揭示动画看完）..."
+            before = len(got)
+            for msg in self._leave_tenren(pending_boards, got):
+                yield msg
+            # 攒着播的榜也可能中目标——收尾补一轮喜报（推送晚到总比不到强）
+            late_hits = [s for s in got[before:]
+                         if self._watch_name_hit(s, watch_ids, watch_raw)]
+            if late_hits:
+                names = "、".join(f"【{s['name']}】" for s in late_hits)
+                hit_names.extend(s["name"] for s in late_hits)
+                yield f"[限锻] 🎉🎉🎉 补读喜报！收尾揭榜里有 {names}！"
+                try:
+                    from ..notify import notify
+                    # 标题必须 ASCII（http.client 按 latin-1 编码头，中文/emoji 会静默发不出去）
+                    notify(f"限锻出货：{names}！快去看",
+                           title="Limited Forge Hit!", tags="tada,sword")
+                except Exception:
+                    pass
+
+        names = "、".join(f"【{s}】" for s in hit_names)
+        yield (f"[限锻] 收工：锻了 {done * 10} 把（{done} 发十连），"
+               f"认出 {len(got)} 把" + (f"，目标命中 {names}" if hit_names else ""))
+        for msg in self._capture_inventory(phase="forge"):
+            yield msg
+
+    @staticmethod
+    def _resolve_watch_names(watch_names):
+        """目标刀名清单 → (名册ID集合, 原文清单)。查不到名册的留原文硬匹配"""
+        ids, raw = set(), []
+        for w in watch_names or []:
+            w = str(w).strip()
+            if not w:
+                continue
+            raw.append(w)
+            found = sword_db.find_by_name(w)
+            if found:
+                ids.add(found[0])
+        return ids, raw
+
+    @staticmethod
+    def _watch_name_hit(sword, watch_ids, watch_raw):
+        return (sword.get("sword_id") in watch_ids
+                or sword.get("name") in watch_raw
+                or sword.get("name_jp") in watch_raw)
+
+    def _read_capacity(self):
+        """读顶栏「所持刀剣 196 / 200」，返回 (当前, 上限)；读不出 None"""
+        tokens = self.maa.ocr_all(roi_4to4(*self._CAPACITY_ROI))
+        m = re.search(r"(\d+)\s*/\s*(\d+)", "".join(str(t) for t, _ in tokens))
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    def _read_sidebar_counts(self):
+        """状况页右侧栏读委托符/加速符库存 → {"委托符": n, "加速符": n}（读不出为 None）"""
+        self.maa.screenshot(force=True)
+        counts = {}
+        for name, roi in self._SIDE_COUNT_ROIS:
+            tokens = self.maa.ocr_all(roi_4to4(*roi))
+            m = re.search(r"\d+", "".join(str(t) for t, _ in tokens))
+            counts[name] = int(m.group()) if m else None
+        return counts
+
+    def _enter_tenren(self) -> bool:
+        """状况页找空闲炉点「十连锻刀」进十连配比页。
+        十连模式的身份证是委托符预览上的「节省1枚！」标签（十连优惠）——
+        按钮本身的「十连锻刀」是竖排四字，OCR 实机会读成「十整刀」，不可靠"""
+        self.maa.screenshot(force=True)
+        for cy in _SLOT_CY:
+            tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            if "空闲" not in "".join(str(t) for t, _ in tokens):
+                continue
+            self.maa.click(Point(self._TENREN_ROW_BTN_X, cy))
+            time.sleep(2.5)
+            self.maa.screenshot(force=True)
+            if (self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110))
+                    and self.maa.ocr("节省", roi_4to4(1140, 200, 1278, 280))):
+                return True
+        return False
+
+    def _speedup_checked(self) -> bool:
+        """加速符勾没勾：预览框勾了是两个数（现值▼扣后），没勾只有一个。
+        按「纯数字 token」数，不 join 后再数——join 会把两个数黏成一个"""
+        tokens = self.maa.ocr_all(roi_4to4(*self._SPEEDUP_PREVIEW_ROI))
+        nums = [t for t, _ in tokens if re.fullmatch(r"\d+", str(t).strip())]
+        return len(nums) >= 2
+
+    def _ensure_speedup(self) -> bool:
+        """确保「使用加速符」勾上；勾不上返回 False"""
+        self.maa.screenshot(force=True)
+        if self._speedup_checked():
+            return True
+        self.maa.click(Point(*self._SPEEDUP_BOX))
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        return self._speedup_checked()
+
+    def _board_visible(self) -> bool:
+        """金色结算榜：右下「显现积分」在，且没有配比页标题（配比页右侧也有积分区）"""
+        return (bool(self.maa.ocr("显现积分", roi_4to4(*self._BOARD_MARK_ROI)))
+                and not self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
+
+    def _read_tenren_board(self):
+        """十连结算榜认人：整版 OCR + 名册严格匹配（竖排刀名实测 10/10）。
+        重复出货保留重复（抽到几把算几把），认不出的不硬猜。"""
+        swords = []
+        try:
+            for text, _pt in self.maa.ocr_all(roi_4to4(*self._BOARD_NAME_ROI)):
+                found = sword_db.find_by_name(text, fuzzy=False)
+                if found:
+                    sid, info = found
+                    swords.append({"sword_id": sid,
+                                   "name": info.get("name_zh") or info["name"],
+                                   "name_jp": info["name"]})
+        except Exception:
+            pass
+        return swords
+
+    def _dismiss_popup(self):
+        """关锻刀弹窗（刀位满氪金窗/素材不足窗同款关法）"""
+        pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
+        self.maa.click(pt if pt else Point(1062, 70))
+        time.sleep(1.5)
+
+    def _tenren_batch(self, cap_before, out):
+        """打一发十连的状态机：点火 → 快进动画 → 读榜 → 回配比页确认刀位 +10。
+        out 填 ok/swords。点火偶发吞键：刀位没变就补点，最多 2 次。"""
+        self.maa.click(Point(*self._TENREN_FIRE))
+        time.sleep(1.0)
+        retaps = 0
+        stale = 0
+        swords = None
+        for _ in range(40):  # 约 60 秒上限
+            time.sleep(1.2)
+            self.maa.screenshot(force=True)
+            # 限锻确认窗（issue#7 同款）：认出就点【是】继续
+            if self.maa.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
+                yes = self.maa.ocr("是", roi_4to4(400, 300, 880, 620),
+                                   match_mode="exact")
+                if yes:
+                    self.maa.click(yes)
+                    time.sleep(1.0)
+                continue
+            # 刀位满氪金窗：腾不出位置，这发算没点成
+            mid = "".join(str(t) for t, _ in
+                          self.maa.ocr_all(roi_4to4(200, 150, 1080, 550)))
+            if "刀位" in mid or "所持数" in mid or "购买详情" in mid:
+                yield "[限锻] 刀位满了，弹窗关掉落跑"
+                self._dismiss_popup()
+                return
+            # 素材/加速符不足窗：库存见底，同上
+            if "不足" in mid:
+                yield "[限锻] 弹了「不足」窗，库存见底，落跑"
+                self._dismiss_popup()
+                return
+            if self._board_visible():
+                swords = self._read_tenren_board()
+                if swords:
+                    yield ("[限锻] 揭榜："
+                           + "、".join(f"【{s['name']}】" for s in swords))
+                else:
+                    yield "[限锻] 揭榜（一个名字都没认出来，照记十把）"
+                self.maa.click(Point(*self._BOARD_TAP))
+                time.sleep(1.5)
+                continue
+            if self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
+                cap = self._read_capacity()
+                if cap_before and cap and cap[0] == cap_before[0] + 10:
+                    out["ok"] = True
+                    out["swords"] = swords or []
+                    return
+                if swords is not None:
+                    # 榜都见过了，刀位又读不出来——成了，别卡着
+                    out["ok"] = True
+                    out["swords"] = swords
+                    return
+                stale += 1
+                if stale >= 3:
+                    if retaps >= 2:
+                        return
+                    retaps += 1
+                    stale = 0
+                    yield "[限锻] 点火好像被吞了，补点一下"
+                    self.maa.click(Point(*self._TENREN_FIRE))
+                    time.sleep(1.0)
+                continue
+            # 动画/过场：快进
+            self.maa.click(Point(*self._REVEAL_SKIP))
+
+    def _back_to_status(self) -> bool:
+        """刀解页点回锻刀状况标签"""
+        self.maa.click(Point(26, 175))  # 左栏「锻刀」标签
+        time.sleep(2.5)
+        self.maa.screenshot(force=True)
+        return bool(self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)))
+
+    def _leave_tenren(self, pending_boards, got):
+        """退出十连：攒着的揭示动画一路快进，补读没见过的榜，直到回状况页"""
+        for _ in range(10 + pending_boards * 6):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
+                return
+            if self._board_visible():
+                swords = self._read_tenren_board()
+                if pending_boards > 0:
+                    pending_boards -= 1
+                    if swords:
+                        got.extend(swords)
+                        yield ("[限锻] 补读揭榜："
+                               + "、".join(f"【{s['name']}】" for s in swords))
+                self.maa.click(Point(*self._BOARD_TAP))
+                time.sleep(1.5)
+                continue
+            if self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
+                self.maa.click(Point(*self._BACK_BTN))
+                time.sleep(1.5)
+                continue
+            self.maa.click(Point(*self._REVEAL_SKIP))
+            time.sleep(1.2)
+        yield "[限锻] ⚠ 退出时动画没播完，直接回状况页超时了"
+
+    def _emit_tenren_costs(self, event_id, recipe=None):
+        """一发十连的记账：四资源按配方×10 负扣 + 委托符 -9（十连优惠）+ 加速符 -10。
+        成本全是真机实测的固定规则，attribution=confirmed / evidence=tenren_cost。"""
+        payload = {"source": "forge.tenren", "attribution": "confirmed",
+                   "evidence": "tenren_cost", "script": "forge10"}
+        if isinstance(event_id, int):
+            payload["source_event_id"] = event_id
+        costs = list(zip(_FORGE_RES, self._forge_recipe(recipe)))
+        costs += [("委托符", 0.9), ("加速符", 1.0)]
+        for name, per in costs:
+            amount = -int(round(per * 10))
+            if hasattr(self, "record_resource_change"):
+                self.record_resource_change(name, amount, **payload)
+            else:
+                self.record_event(
+                    "resource.change", resource=name, delta=amount, **payload)
 
     # ==================== 刀解 ====================
 

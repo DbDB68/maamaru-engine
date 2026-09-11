@@ -84,11 +84,12 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
         yield from agent._dismantle_step()
 
     def daily_forge(agent, params, config_path):
-        recipe = recipe_from_params(params)
-        if params.get("watch"):
+        # 十连限锻（烧加速符）和盯时长都走锻刀积木自己的 run，参数那边全认
+        if params.get("watch") or str(params.get("forge_limited")) == "true":
             yield from workflow.NODE_REGISTRY["forge"]["run"](agent, params, config_path)
         else:
-            yield from agent.forge_stream(times=int(params.get("times", 3)), recipe=recipe)
+            yield from agent.forge_stream(times=int(params.get("times", 3)),
+                                          recipe=recipe_from_params(params))
 
     def daily_sortie(agent, params, config_path):
         plan = plan_inputs(params)[2]

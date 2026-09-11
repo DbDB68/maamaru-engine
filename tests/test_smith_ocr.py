@@ -370,5 +370,247 @@ class PanelRecipeFieldTests(unittest.TestCase):
         self.assertIsNone(recipe_from_params({}))
 
 
+class _TenrenMaa:
+    """十连限锻现场（2026-09-11 真机流程）：状况页→十连配比页→点火→
+    揭示动画→金色结算榜→回配比页；deferred=True 时动画攒着等退出才播。"""
+
+    def __init__(self, cap=180, tokens=(858, 420), boards=(), deferred=False,
+                 swallow_first_fire=False):
+        self.screen = "status"
+        self.cap = cap
+        self.cap_max = 200
+        self.tokens = {"委托符": tokens[0], "加速符": tokens[1]}
+        self.boards = list(boards)
+        self.deferred = deferred
+        self.swallow_first_fire = swallow_first_fire
+        self.speedup = False
+        self.fired = 0
+        self.pending = 0          # 攒着没播的揭示动画（deferred 模式）
+        self.clicks = []
+
+    def screenshot(self, force=False):
+        pass
+
+    def click(self, pt):
+        x, y = pt.x, pt.y
+        self.clicks.append((x, y))
+        if self.screen == "status" and x == 985:            # 行内十连锻刀
+            self.screen = "recipe"
+        elif self.screen == "recipe" and (x, y) == (1176, 615):  # 点火
+            if self.swallow_first_fire:
+                self.swallow_first_fire = False
+                return
+            self.fired += 1
+            self.cap += 10
+            self.tokens["委托符"] -= 9
+            self.tokens["加速符"] -= 10
+            if self.deferred:
+                self.pending += 1
+                self.screen = "recipe"
+            else:
+                self.screen = "anim"
+        elif self.screen == "anim" and (x, y) == (113, 78):      # » 快进
+            self.screen = "board"
+        elif self.screen == "board" and (x, y) == (640, 360):    # 点穿结算榜
+            self.pending = max(0, self.pending - 1)
+            self.screen = "recipe"
+        elif (x, y) == (1193, 422):                              # 加速符勾选
+            self.speedup = not self.speedup
+        elif (x, y) == (141, 87):                                # 配比页返回
+            self.screen = "anim" if self.pending else "status"
+        elif (x, y) == (26, 175):                                # 左栏锻刀标签
+            self.screen = "status"
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        x1, y1, x2, y2 = roi.to_list()
+        if expected == "锻刀资源投入":
+            return Point(640, 70) if self.screen == "recipe" else None
+        if expected == "锻刀状况":
+            return Point(640, 70) if self.screen == "status" else None
+        if expected == "十连锻刀" and self.screen == "recipe":
+            return Point(1176, 615)
+        if expected == "节省" and self.screen == "recipe":
+            return Point(1215, 248)
+        if expected == "显现积分" and self.screen == "board" and y1 >= 600:
+            return Point(1000, 660)
+        return None
+
+    def ocr_all(self, roi):
+        x1, y1, x2, y2 = roi.to_list()
+        if self.screen == "status" and 100 <= x1 <= 200:         # 炉行状态
+            return [("空闲中", Point(300, (y1 + y2) // 2))]
+        if self.screen == "recipe" and 690 <= x1 <= 700:         # 配方行当前 700
+            return [("700", Point(800, 200))]
+        if 960 <= x1 <= 1100 and y1 <= 90:                       # 顶栏刀位
+            return [(f"{self.cap} / {self.cap_max}", Point(1020, 65))]
+        if self.screen == "status" and 1140 <= x1 and 300 < y1 < 400:
+            return [(str(self.tokens["委托符"]), Point(1200, 350))]
+        if self.screen == "status" and 1140 <= x1 and 400 < y1 < 520:
+            return [(str(self.tokens["加速符"]), Point(1200, 480))]
+        if self.screen == "recipe" and x1 >= 1100 and 380 < y1 < 560:
+            # 加速符预览：勾了两个数（现值▼扣后），没勾一个数
+            n = self.tokens["加速符"]
+            toks = [("使用", Point(1200, 415)), ("加速符", Point(1200, 445)),
+                    (str(n), Point(1200, 480))]
+            if self.speedup:
+                toks.append((str(n - 10), Point(1200, 520)))
+            return toks
+        if self.screen == "board" and y2 <= 640:                 # 结算榜刀名区
+            idx = min(self.fired, len(self.boards)) - 1
+            names = self.boards[idx] if self.boards and idx >= 0 else []
+            return [(n, Point(300, 200)) for n in names]
+        return []
+
+    def template_match(self, name, threshold=0.8):
+        return None
+
+
+class _TenrenHost(SmithMixin):
+    def __init__(self, maa):
+        self.maa = maa
+        self.current_location = None
+        self.config = {}
+        self.events = []
+        self.changes = []
+        self.dismantled = 0
+
+    def navigate_to_stream(self, loc):
+        self.current_location = loc
+        yield f"导航到{loc}"
+
+    def record_event(self, kind, **kw):
+        self.events.append((kind, kw))
+        return len(self.events)
+
+    def record_resource_change(self, name, delta, **kw):
+        self.changes.append((name, delta))
+
+    def dismantle_stream(self, max_dismantle=1, _from_forge=False, whitelist=None):
+        self.dismantled += max_dismantle
+        self.maa.cap -= max_dismantle
+        yield f"分解完成 {max_dismantle} 把"
+
+    def _capture_inventory(self, phase=""):
+        return
+        yield
+
+
+_BOARD1 = ["加州清光", "大和守安定", "加州清光", "陆奥守吉行", "加州清光",
+           "加州清光", "小狐丸", "压切长谷部", "宗三左文字", "陆奥守吉行"]
+_BOARD2 = ["歌仙兼定", "蜂须贺虎彻", "千子村正", "鹤丸国永", "蜂须贺虎彻",
+           "宗三左文字", "加州清光", "山姥切国广", "蜂须贺虎彻", "今剑"]
+
+
+class LimitedForgeTests(unittest.TestCase):
+    def _run(self, maa, **kw):
+        host = _TenrenHost(maa)
+        with patch("touken.flows.smith.time.sleep"):
+            messages = list(host.limited_forge_stream(**kw))
+        return host, messages
+
+    def test_two_batches_costs_and_names(self):
+        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(maa, total=20)
+        self.assertEqual(maa.fired, 2)
+        self.assertTrue(maa.speedup)                       # 加速符勾上了
+        self.assertEqual(maa.screen, "status")             # 收工回到状况页
+        # 每发：四资源各 -7000、委托符 -9、加速符 -10
+        self.assertEqual(host.changes.count(("委托符", -9)), 2)
+        self.assertEqual(host.changes.count(("加速符", -10)), 2)
+        self.assertEqual(host.changes.count(("木炭", -7000)), 2)
+        tenren_events = [kw for kind, kw in host.events if kind == "forge.tenren"]
+        self.assertEqual(len(tenren_events), 2)
+        self.assertIn("小狐丸", tenren_events[0]["swords"])
+        self.assertTrue(any("揭榜" in m and "小狐丸" in m for m in messages))
+        self.assertTrue(any("锻了 20 把" in m for m in messages))
+
+    def test_stop_on_hit(self):
+        # 目标小狐丸第一发就中，总共要 5 发也立刻收手
+        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(maa, total=50, watch_names=["小狐丸"])
+        self.assertEqual(maa.fired, 1)
+        self.assertTrue(any("喜报" in m and "小狐丸" in m for m in messages))
+        self.assertTrue(any("收手" in m for m in messages))
+
+    def test_watch_no_hit_runs_all(self):
+        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(maa, total=20, watch_names=["三日月宗近"])
+        self.assertEqual(maa.fired, 2)
+        self.assertFalse(any("喜报" in m for m in messages))
+
+    def test_preflight_insufficient_tokens(self):
+        maa = _TenrenMaa(tokens=(5, 3))
+        host, messages = self._run(maa, total=50)
+        self.assertEqual(maa.fired, 0)
+        self.assertEqual(maa.clicks, [])                   # 一发没点，白嫖动画都没看
+        self.assertTrue(any("库存不够" in m for m in messages))
+
+    def test_full_slots_dismantle_rescue(self):
+        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
+        host, messages = self._run(maa, total=10)
+        self.assertGreaterEqual(host.dismantled, 10)       # 腾位刀解跑过
+        self.assertEqual(maa.fired, 1)
+        self.assertTrue(any("刀位只剩" in m for m in messages))
+
+    def test_missed_fire_tap_is_retried(self):
+        maa = _TenrenMaa(boards=[_BOARD1], swallow_first_fire=True)
+        host, messages = self._run(maa, total=10)
+        self.assertEqual(maa.fired, 1)
+        self.assertTrue(any("补点" in m for m in messages))
+
+    def test_deferred_reveal_read_at_exit(self):
+        # 动画攒着：批量中没揭榜，退出时补读
+        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        host, messages = self._run(maa, total=10)
+        self.assertEqual(maa.fired, 1)
+        self.assertEqual(maa.screen, "status")
+        self.assertTrue(any("补读揭榜" in m and "小狐丸" in m for m in messages))
+
+    def test_deferred_hit_still_celebrated_at_exit(self):
+        # 攒着播的榜里中了目标：收尾补喜报（推送晚到总比不到强）
+        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        host, messages = self._run(maa, total=10, watch_names=["小狐丸"])
+        self.assertTrue(any("补读喜报" in m and "小狐丸" in m for m in messages))
+        self.assertTrue(any("目标命中" in m for m in messages))
+
+
+class PanelLimitedFieldTests(unittest.TestCase):
+    def test_forge_script_carries_limited_fields(self):
+        from panel import server
+        fields = {f["key"]: f for f in server.list_scripts()["forge"]["params"]}
+        for key in ("forge_limited", "watch_names", "stop_on_hit"):
+            self.assertIn(key, fields, f"forge 缺 {key}")
+        self.assertEqual(fields["watch"]["visibleWhen"],
+                         {"key": "forge_limited", "is": "false"})
+
+    def test_build_forge_routes_limited(self):
+        from panel import server
+
+        calls = []
+
+        class _Agent:
+            def limited_forge_stream(self, **kw):
+                calls.append(kw)
+                yield "ok"
+
+            def forge_stream(self, **kw):
+                calls.append({"normal": kw})
+                yield "ok"
+
+        list(server._build_forge(_Agent(), None, {
+            "forge_limited": "true", "times": "50",
+            "recipe_charcoal": 950, "recipe_steel": 950,
+            "recipe_coolant": 950, "recipe_whetstone": 950,
+            "watch_names": "小狐丸, 山姥切国广", "stop_on_hit": True}))
+        self.assertEqual(calls, [{"total": 50, "recipe": [950, 950, 950, 950],
+                                  "watch_names": ["小狐丸", "山姥切国广"],
+                                  "stop_on_hit": True}])
+
+        calls.clear()
+        list(server._build_forge(_Agent(), None, {"times": "3"}))
+        self.assertEqual(calls, [{"normal": {"times": 3, "watch": [],
+                                             "recipe": None}}])
+
+
 if __name__ == "__main__":
     unittest.main()

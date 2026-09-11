@@ -601,6 +601,9 @@ def _build_sakura(agent, config_path, params):
 
 
 def _build_forge(agent, config_path, params):
+    if str(params.get("forge_limited")) == "true":
+        yield from _build_forge_limited(agent, config_path, params)
+        return
     watch_raw = params.get("watch") or ""
     if isinstance(watch_raw, list):
         # Agent 网关传的是数组 ["03:20:00", ...]
@@ -611,6 +614,20 @@ def _build_forge(agent, config_path, params):
     yield from agent.forge_stream(
         times=_i(params, "times", 3), watch=watch,
         recipe=recipe_from_params(params))
+
+
+def _build_forge_limited(agent, config_path, params):
+    """十连限锻：times 字段此时是总把数（按十连取整），watch_names 是目标刀名"""
+    names_raw = params.get("watch_names") or ""
+    if isinstance(names_raw, list):
+        names = [str(w).strip() for w in names_raw if str(w).strip()]
+    else:
+        names = [w.strip() for w in re.split(r"[，,、;；\s]+", str(names_raw)) if w.strip()]
+    yield from agent.limited_forge_stream(
+        total=_i(params, "times", 50),
+        recipe=recipe_from_params(params),
+        watch_names=names,
+        stop_on_hit=_bool(params.get("stop_on_hit", True)))
 
 
 def _build_repair(agent, config_path, params):
@@ -1030,15 +1047,30 @@ def _map_select_field():
 register_script("dispatch", "派遣远征", "立刻派一支部队去指定远征图",
                 _wrap_inventory("派遣", _build_dispatch),
                 params=[_team_field("2"), _map_select_field()], hidden=True)
-register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；不使用加速符",
+register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；普通锻刀不使用加速符，十连限锻才烧",
                 _wrap_inventory("锻刀", _build_forge),
-                params=[{"key": "times", "type": "number", "label": "最多锻几炉",
-                         "default": 3, "min": 1, "max": 12,
-                         "help": "脚本只使用当前空闲炉，绝不会消耗加速符。默认两炉的账号通常一次只能锻 2 炉；日课的锻刀次数在「一键日课」表单里改。"},
+                params=[{"key": "times", "type": "number", "label": "锻刀数量",
+                         "default": 3, "min": 1, "max": 200,
+                         "help": "普通锻刀：目标炉数，只使用空闲炉、不消耗加速符，炉位不够时实际次数会少于设定值。十连限锻：要锻的总把数，按十连取整（50=5发十连，不足10把按一发算）。"},
+                        {"key": "forge_limited", "type": "select", "label": "锻刀方式",
+                         "options": [["false", "普通锻刀（等炉子，不烧加速符）"],
+                                     ["true", "十连限锻（瞬间出货，烧加速符）"]],
+                         "default": "false",
+                         "help": "十连限锻是限锻活动期间冲目标刀用的：每发十连=9委托符+10加速符+配方×10的四资源，十把刀直接进刀位。加速符不可再生，下手前看好库存。"},
                         *recipe_fields(),
                         {"key": "watch", "type": "duration-list",
                          "label": "目标时长（命中时手机报喜，不添加则不盯）",
-                         "default": ""}])
+                         "default": "",
+                         "visibleWhen": {"key": "forge_limited", "is": "false"}},
+                        {"key": "watch_names", "type": "text",
+                         "label": "目标刀剑（锻出就手机报喜）",
+                         "swords": True, "default": "",
+                         "placeholder": "多个名字用逗号分隔",
+                         "visibleWhen": {"key": "forge_limited", "is": "true"}},
+                        {"key": "stop_on_hit", "type": "toggle",
+                         "label": "锻出目标就收手", "default": True,
+                         "help": "开着：目标刀一出货立刻停，保住剩下的加速符。关着：锻满设定把数才停。",
+                         "visibleWhen": {"key": "forge_limited", "is": "true"}}])
 register_script("repair", "手入", "单独扫描受伤刀剑；黑名单跳过，其余按部队决定是否加速",
                 _wrap_inventory("手入", _build_repair),
                 params=[{"key": "dry_run", "type": "select",
