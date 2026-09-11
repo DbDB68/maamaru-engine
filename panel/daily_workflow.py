@@ -85,6 +85,6 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
                    "swords": True, "default": "", "placeholder": "多个名字用逗号分隔",
                    "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}})
     workflow.register_node({"type": "daily_sortie", "label": "日课出阵",
-        "desc": "按日课的地图和次数出阵；战斗设置沿用对应玩法的配置。也可以选择不出阵。",
+        "desc": "按日课的地图和次数出阵；行军、阵形和伤势处理由本节点自己的设置决定，与「配置」页无关。也可以选择不出阵。",
         "category": "battle", "params": fields, "run": daily_sortie,
         "detail": [*workflow.NODE_REGISTRY["sortie"].get("detail", []), sortie_status], "template_only": True})

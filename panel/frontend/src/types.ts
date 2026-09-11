@@ -13,9 +13,12 @@ export interface HonmaruNote { id: string; body: string; created_at: number; upd
 export interface HonmaruHomeData { schema_version: number; profile: Partial<HonmaruProfile>; notes: HonmaruNote[] }
 
 export interface VisibilityRule {
-  key: string
+  key?: string
   is?: string
   not?: string
+  is_any?: string[]
+  all?: VisibilityRule[]
+  any?: VisibilityRule[]
 }
 
 export interface ParamField {

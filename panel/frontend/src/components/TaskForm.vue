@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import ParamField from './ParamField.vue'
 import PaperCard from './PaperCard.vue'
 import type { ParamField as Field, ScriptInfo, ScriptParams } from '../types'
+import { matchesRule } from '../visibility'
 
 const props = defineProps<{
   scriptKey: string
@@ -23,12 +24,7 @@ const emit = defineEmits<{
 const visibleFields = computed(() => props.info.params.filter(isVisible))
 
 function isVisible(field: Field) {
-  const rule = field.visibleWhen
-  if (!rule) return true
-  const current = String(props.modelValue[rule.key] ?? '')
-  if (rule.is !== undefined) return current === String(rule.is)
-  if (rule.not !== undefined) return current !== String(rule.not)
-  return true
+  return matchesRule(field.visibleWhen, key => props.modelValue[key])
 }
 
 function update(key: string, value: unknown) {

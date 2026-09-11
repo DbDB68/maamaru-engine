@@ -143,7 +143,9 @@ class DailyWorkflowTests(unittest.TestCase):
             messages = list(workflow.run_workflow("fake.json", [_node("signin")], lambda _: agent, after="sleep"))
         self.assertLess(messages.index("已记录成绩单"), messages.index("【工作流】成绩单已记录，准备休眠电脑"))
 
-    def test_daily_sortie_keeps_map_counts_and_inherited_battle_settings(self):
+    def test_daily_sortie_uses_own_battle_settings_not_config_page(self):
+        # issue#7：日课与「配置」页彻底切割。配置页的值不再继承；
+        # 战斗行为只认日课节点自己的参数，缺键回落硬默认。
         agent = _FakeAgent()
         agent._sortie_step = Mock(return_value=iter(["✓"]))
         with patch.object(server, "_load_panel_settings", return_value={"params": {
@@ -153,7 +155,18 @@ class DailyWorkflowTests(unittest.TestCase):
                 "team_no": "2", "yosari_runs": 6})], agent=agent, daily_mode=True)
         plan = agent._sortie_step.call_args.args[0]["sortie"]
         self.assertEqual((plan["team_no"], plan["loops"]), (2, 6))
-        self.assertEqual((plan["formation"], plan["repair_on_injury"]), ("横队阵", "return"))
+        # 配置页存的 横队阵/return 不再漏进日课
+        self.assertEqual((plan["formation"], plan["repair_on_injury"]), ("鱼鳞阵", "continue"))
+
+        agent2 = _FakeAgent()
+        agent2._sortie_step = Mock(return_value=iter(["✓"]))
+        with patch("panel.scheduler.load_config", return_value={"common_plan": []}):
+            self.run_plan([_node("daily_sortie", params={"sortie_mode": "yosari",
+                "formation": "横队阵", "repair_on_injury": "repair_stop"})],
+                agent=agent2, daily_mode=True)
+        plan2 = agent2._sortie_step.call_args.args[0]["sortie"]
+        self.assertEqual((plan2["formation"], plan2["repair_on_injury"]),
+                         ("横队阵", "repair_stop"))
 
     def test_no_sortie_is_reported_as_planned_skip(self):
         agent = _FakeAgent()

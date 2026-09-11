@@ -177,13 +177,11 @@ class PumpkinPlanTests(unittest.TestCase):
         agent = FakeAgent()
         params = {"sortie_mode": "yosari", "team_no": "4",
                   "yosari_map_no": "3", "yosari_runs": "8",
-                  "yosari_auto_refill": True}
-        saved = {"params": {"yosari": {"auto_march": False,
-                                          "repair_threshold": "medium",
-                                          "rotate_captain": True,
-                                          "rotate_captain_margin": "5"}}}
+                  "yosari_auto_refill": True,
+                  "auto_march": False, "repair_threshold": "medium",
+                  "rotate_captain": True, "rotate_captain_margin": "5"}
         with patch("panel.server._make_agent", return_value=agent), patch(
-            "panel.server._load_panel_settings", return_value=saved
+            "panel.server._load_panel_settings", return_value={}
         ):
             list(wrap(_build_daily)("config.json", params))
         plan = agent.daily_args["sortie_override"]
@@ -197,15 +195,30 @@ class PumpkinPlanTests(unittest.TestCase):
         self.assertTrue(plan["rotate_captain"])
         self.assertEqual(plan["rotate_captain_margin"], 5)
 
+    def test_daily_battle_settings_ignore_config_page(self):
+        # issue#7 切割：配置页存的值不再漏进日课，缺键回落硬默认
+        agent = FakeAgent()
+        params = {"sortie_mode": "yosari"}
+        saved = {"params": {"yosari": {"auto_march": False,
+                                          "repair_threshold": "medium",
+                                          "rotate_captain": True}}}
+        with patch("panel.server._make_agent", return_value=agent), patch(
+            "panel.server._load_panel_settings", return_value=saved
+        ):
+            list(wrap(_build_daily)("config.json", params))
+        plan = agent.daily_args["sortie_override"]
+        self.assertTrue(plan["auto_march"])            # 硬默认，不是配置页的 False
+        self.assertEqual(plan["repair_threshold"], "light")
+        self.assertFalse(plan["rotate_captain"])
+
     def test_daily_sortie_can_retreat_before_boss(self):
         agent = FakeAgent()
         params = {"sortie_mode": "sortie", "chapter": "5", "map_no": "4",
-                  "loops": "3", "team_no": "2", "retreat_before_boss": True}
-        saved = {"params": {"sortie": {"auto_march": False,
-                                          "rotate_captain": True,
-                                          "rotate_captain_margin": "20"}}}
+                  "loops": "3", "team_no": "2", "retreat_before_boss": True,
+                  "auto_march": False, "rotate_captain": True,
+                  "rotate_captain_margin": "20"}
         with patch("panel.server._make_agent", return_value=agent), patch(
-            "panel.server._load_panel_settings", return_value=saved
+            "panel.server._load_panel_settings", return_value={}
         ):
             list(wrap(_build_daily)("config.json", params))
 
@@ -218,17 +231,15 @@ class PumpkinPlanTests(unittest.TestCase):
                      if field.get("key") == "retreat_before_boss")
         self.assertEqual(field["visibleWhen"], {"key": "sortie_mode", "is": "sortie"})
 
-    def test_daily_can_schedule_osaka_with_shared_battle_strategy(self):
+    def test_daily_can_schedule_osaka_with_own_battle_strategy(self):
         agent = FakeAgent()
         params = {"sortie_mode": "osaka", "team_no": "4",
                   "osaka_runs": "15", "osaka_select_floor": True,
-                  "osaka_target_floor": "88"}
-        saved = {"params": {"osaka": {"formation_mode": "auto",
-                                          "repair_threshold": "medium",
-                                          "repair_on_injury": "repair_stop",
-                                          "auto_equip": False}}}
+                  "osaka_target_floor": "88",
+                  "formation_mode": "auto", "repair_threshold": "medium",
+                  "repair_on_injury": "repair_stop", "auto_equip": False}
         with patch("panel.server._make_agent", return_value=agent), patch(
-            "panel.server._load_panel_settings", return_value=saved
+            "panel.server._load_panel_settings", return_value={}
         ):
             list(wrap(_build_daily)("config.json", params))
         plan = agent.daily_args["sortie_override"]

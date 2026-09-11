@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ParamField, ScriptInfo, ScriptParams } from '../types'
+import { matchesRule } from '../visibility'
 
 const props = defineProps<{
   info: ScriptInfo
@@ -13,10 +14,7 @@ const emit = defineEmits<{ run: []; stop: []; configure: [] }>()
 
 function visible(field: ParamField) {
   if (field.type === 'note') return false
-  const rule = field.visibleWhen
-  if (!rule) return true
-  const current = String(props.params[rule.key] ?? '')
-  return rule.is !== undefined ? current === String(rule.is) : current !== String(rule.not)
+  return matchesRule(field.visibleWhen, key => props.params[key])
 }
 
 function display(field: ParamField) {

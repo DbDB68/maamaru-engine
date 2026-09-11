@@ -332,6 +332,43 @@ def _wrap_inventory(tag: str, runner, inventory=False):
     return _fn
 
 
+_DAILY_BATTLE_KEYS = {
+    "yosari": ("auto_march", "formation_mode", "formation", "repair_threshold",
+               "repair_on_injury", "auto_equip", "rotate_captain",
+               "rotate_captain_margin"),
+    "sortie": ("auto_march", "formation_mode", "formation", "repair_threshold",
+               "repair_on_injury", "auto_equip", "rotate_captain",
+               "rotate_captain_margin", "retreat_before_boss"),
+    "osaka": ("formation_mode", "formation", "repair_threshold",
+              "repair_on_injury", "auto_equip"),
+}
+
+
+def _migrate_daily_battle_settings():
+    """一次性快照迁移：一键日课的战斗行为字段过去读「配置」页对应玩法
+    （issue#7：日课没安排修刀却自动修刀，病根就在这层继承）。本版起彻底
+    切割——把当前出阵模式在配置页的值拷进日课参数里缺席的键，保住老用户
+    现状；之后配置页怎么改都不再影响日课/工作流。键是各模式共享的，所以
+    天然幂等：用户改过的值（键已存在）永远不会被覆盖，无需迁移标记。"""
+    settings = _load_panel_settings()
+    params = settings.get("params")
+    if not isinstance(params, dict):
+        return
+    daily = params.get("daily")
+    if not isinstance(daily, dict):
+        return
+    source = params.get(daily.get("sortie_mode") or "", {})
+    if not isinstance(source, dict):
+        return
+    changed = False
+    for key in _DAILY_BATTLE_KEYS.get(daily.get("sortie_mode"), ()):
+        if key not in daily and key in source:
+            daily[key] = source[key]
+            changed = True
+    if changed:
+        _save_panel_settings(settings)
+
+
 def _daily_plan_inputs(params):
     # 面板传 steps，Agent 网关传 only，都认
     steps = params.get("steps") or params.get("only") or None   # 空列表=全跑
@@ -351,54 +388,47 @@ def _daily_plan_inputs(params):
                        "watch_names": _sword_names(params.get("pumpkin_watch")),
                        "max_skips": _i(params, "pumpkin_runs", 4)}
     elif mode == "yosari":
-        saved_yosari = (_load_panel_settings().get("params", {}).get("yosari", {}) or {})
         sortie_plan = {"mode": "yosari",
                        "map_no": _i(params, "yosari_map_no", 1),
                        "team_no": _i(params, "team_no", 3),
                        "loops": _i(params, "yosari_runs", 1),
                        "auto_refill": _bool(params.get("yosari_auto_refill", False)),
-                       "auto_march": _bool(saved_yosari.get("auto_march", True)),
-                       "formation_mode": saved_yosari.get("formation_mode") or "manual",
-                       "formation": saved_yosari.get("formation") or "鱼鳞阵",
-                       "repair_threshold": saved_yosari.get("repair_threshold") or "light",
-                       "repair_on_injury": saved_yosari.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(saved_yosari.get("auto_equip", True)),
-                       "rotate_captain": _bool(saved_yosari.get("rotate_captain", False)),
-                       "rotate_captain_margin": _i(
-                           saved_yosari, "rotate_captain_margin", 10)}
+                       "auto_march": _bool(params.get("auto_march", True)),
+                       "formation_mode": params.get("formation_mode") or "manual",
+                       "formation": params.get("formation") or "鱼鳞阵",
+                       "repair_threshold": params.get("repair_threshold") or "light",
+                       "repair_on_injury": params.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(params.get("auto_equip", True)),
+                       "rotate_captain": _bool(params.get("rotate_captain", False)),
+                       "rotate_captain_margin": _i(params, "rotate_captain_margin", 10)}
     elif mode == "sortie":
-        # 地图、队伍、圈数由一键日课决定；战斗行为统一沿用「出阵」配置页。
-        saved_sortie = (_load_panel_settings().get("params", {}).get("sortie", {}) or {})
+        # 战斗行为全由日课自己的参数决定，与「配置」页彻底切割
+        # （老用户的配置页现状由 _migrate_daily_battle_settings 快照进日课参数）
         sortie_plan = {"mode": "sortie",
                        "chapter": _i(params, "chapter", 1),
                        "map_no": _i(params, "map_no", 1),
                        "loops": _i(params, "loops", 1),
                        "team_no": _i(params, "team_no", 3),
-                       "auto_march": _bool(saved_sortie.get("auto_march", True)),
-                       "formation_mode": saved_sortie.get("formation_mode") or "manual",
-                       "formation": saved_sortie.get("formation") or "鱼鳞阵",
-                       "repair_threshold": saved_sortie.get("repair_threshold") or "light",
-                       "repair_on_injury": saved_sortie.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(saved_sortie.get("auto_equip", True)),
-                       "retreat_before_boss": _bool(params.get(
-                           "retreat_before_boss",
-                           saved_sortie.get("retreat_before_boss", False))),
-                       "rotate_captain": _bool(saved_sortie.get("rotate_captain", False)),
-                       "rotate_captain_margin": _i(
-                           saved_sortie, "rotate_captain_margin", 10)}
+                       "auto_march": _bool(params.get("auto_march", True)),
+                       "formation_mode": params.get("formation_mode") or "manual",
+                       "formation": params.get("formation") or "鱼鳞阵",
+                       "repair_threshold": params.get("repair_threshold") or "light",
+                       "repair_on_injury": params.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(params.get("auto_equip", True)),
+                       "retreat_before_boss": _bool(params.get("retreat_before_boss", False)),
+                       "rotate_captain": _bool(params.get("rotate_captain", False)),
+                       "rotate_captain_margin": _i(params, "rotate_captain_margin", 10)}
     elif mode == "osaka":
-        # 楼层、部队和圈数由日课决定；阵形、伤势与刀装恢复沿用独立大阪城配置。
-        saved_osaka = (_load_panel_settings().get("params", {}).get("osaka", {}) or {})
         sortie_plan = {"mode": "osaka",
                        "team_no": _i(params, "team_no", 3),
                        "loops": _i(params, "osaka_runs", 1),
                        "select_floor": _bool(params.get("osaka_select_floor", False)),
                        "target_floor": _i(params, "osaka_target_floor", 81),
-                       "formation_mode": saved_osaka.get("formation_mode") or "manual",
-                       "formation": saved_osaka.get("formation") or "鱼鳞阵",
-                       "repair_threshold": saved_osaka.get("repair_threshold") or "light",
-                       "repair_on_injury": saved_osaka.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(saved_osaka.get("auto_equip", True))}
+                       "formation_mode": params.get("formation_mode") or "manual",
+                       "formation": params.get("formation") or "鱼鳞阵",
+                       "repair_threshold": params.get("repair_threshold") or "light",
+                       "repair_on_injury": params.get("repair_on_injury") or "continue",
+                       "auto_equip": _bool(params.get("auto_equip", True))}
     else:
         sortie_plan = {"mode": "none"}
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
@@ -724,7 +754,7 @@ register_script("daily", "一键日课", "",
                                      ["osaka", "大阪城挖地"],
                                      ["sortie", "合战场推图"]],
                          "default": "none",
-                         "help": "自动行军、阵形和伤势处理沿用单独配置的战斗策略。"},
+                         "help": "行军、阵形、伤势处理由下方的日课专属字段决定；「配置」页只是单跑该玩法时的设置，两边互不影响。"},
                         {"key": "team_no", "type": "select", "label": "出阵部队",
                          "options": _TEAM_OPTIONS, "default": "3",
                          "visibleWhen": {"key": "sortie_mode", "not": "none"}},
@@ -778,6 +808,69 @@ register_script("daily", "一键日课", "",
                          "label": "王点前撤退", "default": False,
                          "help": "关闭自动行军后生效：下一步将进入王点时主动返回本丸，适合反复进图练级。小地图无法确认时会继续行军。",
                          "visibleWhen": {"key": "sortie_mode", "is": "sortie"}},
+                        # ── 战斗行为：日课自管，与「配置」页彻底切割 ──
+                        # （issue#7：日课没安排修刀却自动修——旧设计从配置页继承
+                        # 伤势设置，太绕。升级时 _migrate_daily_battle_settings
+                        # 会把配置页现状快照进来，之后两边互不影响。）
+                        {"key": "auto_march", "type": "toggle",
+                         "label": "是否使用自动行军", "default": True,
+                         "visibleWhen": {"key": "sortie_mode",
+                                         "is_any": ["yosari", "sortie"]}},
+                        {"key": "formation_mode", "type": "select",
+                         "label": "阵形选择方式",
+                         "options": [["manual", "手动阵形"],
+                                     ["auto", "自动阵形"]],
+                         "default": "manual",
+                         "visibleWhen": {"any": [
+                             {"key": "sortie_mode", "is": "osaka"},
+                             {"all": [{"key": "sortie_mode",
+                                       "is_any": ["yosari", "sortie"]},
+                                      {"key": "auto_march", "is": "false"}]}]}},
+                        {"key": "formation", "type": "select",
+                         "label": "固定或识别失败时的兜底阵形",
+                         "options": [[name, name] for name in
+                                     ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
+                         "default": "鱼鳞阵",
+                         "visibleWhen": {"any": [
+                             {"key": "sortie_mode", "is": "osaka"},
+                             {"all": [{"key": "sortie_mode",
+                                       "is_any": ["yosari", "sortie"]},
+                                      {"key": "auto_march", "is": "false"}]}]}},
+                        {"key": "repair_threshold", "type": "select",
+                         "label": "伤势停止条件",
+                         "options": [["light", "轻伤时停止"],
+                                     ["medium", "中伤时停止"],
+                                     ["heavy", "重伤时停止"]],
+                         "default": "light",
+                         "visibleWhen": {"key": "sortie_mode",
+                                         "is_any": ["yosari", "sortie", "osaka"]}},
+                        {"key": "repair_on_injury", "type": "select",
+                         "label": "停止后的处理",
+                         "options": [["continue", "手入加速后继续剩余圈数"],
+                                     ["repair_stop", "手入后停止任务"],
+                                     ["stop", "停止任务，不进行手入"]],
+                         "default": "continue",
+                         "visibleWhen": {"key": "sortie_mode",
+                                         "is_any": ["yosari", "sortie", "osaka"]}},
+                        {"key": "auto_equip", "type": "toggle",
+                         "label": "是否自动补充刀装", "default": True,
+                         "help": "任务首次出阵前将当前部队保存到记录一；出现刀装未满提示时，自动用记录一补齐并重新检查伤势。",
+                         "visibleWhen": {"key": "sortie_mode",
+                                         "is_any": ["yosari", "sortie", "osaka"]}},
+                        {"key": "rotate_captain", "type": "toggle",
+                         "label": "自动换队长", "default": False,
+                         "help": "出阵前读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）。",
+                         "visibleWhen": {"key": "sortie_mode",
+                                         "is_any": ["yosari", "sortie"]}},
+                        {"key": "rotate_captain_margin", "type": "select",
+                         "label": "换队长阈值",
+                         "options": [["5", "相差 5 点"], ["10", "相差 10 点"],
+                                     ["20", "相差 20 点"]],
+                         "default": "10",
+                         "help": "全队最低疲劳比当前队长低到这个差值时才换，避免差距很小时频繁调整。",
+                         "visibleWhen": {"all": [
+                             {"key": "sortie_mode", "is_any": ["yosari", "sortie"]},
+                             {"key": "rotate_captain", "is": True}]}},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
                                      ["logout", "退出游戏"],
@@ -824,7 +917,7 @@ register_script("hanafuda", "秘宝之里", "花牌收集：挂上委托后图�
                         {"key": "use_koban_refill", "type": "toggle",
                          "label": "是否补充通行令牌", "default": False,
                          "help": "开启后令牌不足时自动用小判补充；关闭则令牌跑完收工。"}])
-register_script("sortie", "合战场", "普通合战场：选择章节和小图出阵",
+register_script("sortie", "合战场", "单跑合战场：这里的设置只对本次单跑生效，与一键日课/工作流互不影响",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
                          "options": [[str(i), f"{i}章"] for i in range(1, 9)], "default": "1"},
@@ -837,7 +930,7 @@ register_script("sortie", "合战场", "普通合战场：选择章节和小图�
                          "label": "王点前撤退", "default": False,
                          "help": "脚本手动行军时，看小地图算步数：距王点一步就主动返回本丸，反复进图练级。认不出地图时会照常行军，不会乱撤。需要安装 opencv。",
                          "visibleWhen": {"key": "auto_march", "is": "false"}}])
-register_script("yosari", "异去", "",
+register_script("yosari", "异去", "单跑异去：这里的设置只对本次单跑生效，与一键日课/工作流互不影响",
                 _wrap_inventory("异去", _build_yosari),
                 params=[{"key": "chapter", "type": "select", "label": "章节",
                          "options": [["1", "1章"]], "default": "1",
@@ -849,7 +942,7 @@ register_script("yosari", "异去", "",
                         _ticket_refill_field(),
                         *_march_and_injury_fields(),
                         ])
-register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动行军，也不会消耗手形",
+register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动行军，也不会消耗手形。这里的设置只对单跑生效，与一键日课/工作流互不影响",
                 _wrap_inventory("挖地", _build_osaka),
                 params=[_team_field("3"),
                         {**_run_count_field(), "label": "出阵次数"},
@@ -1067,6 +1160,7 @@ async def _startup():
         # 因此这里不初始化；账本、规划与手动录入 API 仍照常可用。
         return
 
+    _migrate_daily_battle_settings()
     _start_broadcast()
     runner = get_runner()
     runner.set_message_callback(_on_script_message)

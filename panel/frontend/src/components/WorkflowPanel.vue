@@ -7,6 +7,7 @@ import PixelControl from './PixelControl.vue'
 import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset, WorkflowIdentity } from '../types'
+import { matchesRule } from '../visibility'
 
 const props = withDefaults(defineProps<{ embedded?: boolean; running?: boolean; current?: string | null; stopping?: boolean; busy?: boolean; runningWorkflow?: WorkflowIdentity | null; dailyEntry?: number; presetJump?: { id: string; tick: number } | null; active?: boolean }>(), { embedded: false, running: false, current: null, stopping: false, busy: false, runningWorkflow: null, dailyEntry: 0, presetJump: null, active: true })
 const emit = defineEmits<{ started: [identity: WorkflowIdentity]; saved: [preset: WorkflowPreset]; stop: []; office: [] }>()
@@ -85,12 +86,7 @@ function description(type: string) {
   return descriptions[type] ?? defOf(type)?.desc ?? ''
 }
 function isVisible(field: Field, node: WorkflowNode) {
-  const rule = field.visibleWhen
-  if (!rule) return true
-  const current = String(valueFor(node, rule.key))
-  if (rule.is !== undefined) return current === String(rule.is)
-  if (rule.not !== undefined) return current !== String(rule.not)
-  return true
+  return matchesRule(field.visibleWhen, key => valueFor(node, key))
 }
 function summary(node: WorkflowNode) {
   const fields = (defOf(node.type)?.params || []).filter(field => field.type !== 'note' && isVisible(field, node))
