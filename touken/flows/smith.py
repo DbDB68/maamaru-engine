@@ -270,11 +270,22 @@ class SmithMixin:
             return False
         self.maa.click(Point(1146, 608))  # 锻刀（默认700×4，不勾加速符）
         # 点火后回状况界面有过场，没等到就当作没点成（防连锁误操作）
-        for _ in range(10):
+        for _ in range(12):
             time.sleep(1.5)
             self.maa.screenshot(force=True)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 return True
+            # 限锻期间拦一道确认窗：「当前的资源数无法增加显现积分。
+            # 是否进行锻刀？」（issue#7 用户现场）。窗不关，状况页回不来，
+            # 后面的刀解/合成也全被它挡死——认出就点【是】继续锻。
+            # 「今日不再提醒」勾选框不动，那是用户自己的偏好。
+            if self.maa.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
+                yes = self.maa.ocr("是", roi_4to4(400, 300, 880, 620),
+                                   match_mode="exact")
+                if yes:
+                    self.maa.click(yes)
+                    time.sleep(1.0)
+                    continue
         return False
 
     def _forge_recipe(self) -> list:

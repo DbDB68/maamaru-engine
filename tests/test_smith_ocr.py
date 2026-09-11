@@ -184,5 +184,55 @@ class ForgeAttemptBudgetTests(unittest.TestCase):
         self.assertTrue(any("点了 3 炉" in m for m in messages))
 
 
+class _LimitedForgeMaa:
+    """限锻确认窗现场（issue#7）：点火后先弹「是否进行锻刀？」，
+    点【是】才回状况页；不限锻时状况页直接出现"""
+
+    def __init__(self, popup):
+        self.popup = popup
+        self.clicked = []
+
+    def screenshot(self, force=False):
+        pass
+
+    def click(self, pt):
+        self.clicked.append((pt.x, pt.y))
+        if (pt.x, pt.y) == (660, 380):  # 【是】
+            self.popup = False
+
+    def ocr(self, expected, roi, match_mode="exact"):
+        if expected == "锻刀资源投入":
+            return Point(640, 70)
+        if expected == "锻刀状况":
+            return None if self.popup else Point(640, 70)
+        if self.popup and expected == "是否进行锻刀":
+            return Point(640, 300)
+        if self.popup and expected == "是" and match_mode == "exact":
+            return Point(660, 380)
+        return None
+
+
+class StartForgeLimitedCampaignTests(unittest.TestCase):
+    def test_popup_is_confirmed_with_yes(self):
+        flow = SmithMixin()
+        flow.maa = _LimitedForgeMaa(popup=True)
+
+        with patch("touken.flows.smith.time.sleep"):
+            ok = flow._start_forge(205)
+
+        self.assertTrue(ok)
+        self.assertEqual(flow.maa.clicked, [(850, 205), (1146, 608), (660, 380)])
+
+    def test_no_popup_unchanged(self):
+        flow = SmithMixin()
+        flow.maa = _LimitedForgeMaa(popup=False)
+
+        with patch("touken.flows.smith.time.sleep"):
+            ok = flow._start_forge(205)
+
+        self.assertTrue(ok)
+        self.assertEqual(flow.maa.clicked, [(850, 205), (1146, 608)])
+
+
 if __name__ == "__main__":
     unittest.main()
