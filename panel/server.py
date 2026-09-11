@@ -942,7 +942,7 @@ register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点�
                          "label": "是否补充手形", "default": False,
                          "help": "关闭时，现有手形不够完成设定次数便提前收工；开启后才会使用小判补充。"},
                         *_formation_fields()])
-register_script("hanafuda", "秘宝之里", "花牌收集：挂上委托后图内全自动，令牌跑完收工",
+register_script("hanafuda", "秘宝之里", "花牌收集：按设定次数出阵，令牌不足时安全收工",
                 _wrap_inventory("花札", _build_hanafuda),
                 params=[{"key": "difficulty", "type": "select", "label": "打哪个难度",
                          "options": [["1", "难度·易"], ["2", "难度·普"],
