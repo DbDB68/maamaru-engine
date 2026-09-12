@@ -28,6 +28,9 @@ _archive/
 # WorkBuddy
 .workbuddy/
 
+# Mimosa 本地 Agent 审查记录
+.mimosa/
+
 # 个人笔记（游戏机制、早期 prompt，不公开）
 *玩法说明书*.docx
 *.docx
