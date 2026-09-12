@@ -384,5 +384,161 @@ class OldDataCompatTests(unittest.TestCase):
                          completed["payload"]["sequence"])
 
 
+class LoopRecordPairingTests(unittest.TestCase):
+    """成绩单逐圈事实：run_summary.loop_records 的配对与兜底口径。
+
+    老数据没有 loop_started 也照常出明细；没有结束事件的出发必须
+    「结果未知」，绝不假定成功；耗时只认这一圈自己的出发/结束事实，
+    整个任务的耗时（比如混了异去和锻刀的 workflow）不许冒充圈速。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TelemetryStore(Path(self.tmp.name) / "telemetry.db")
+        self.env = patch.dict(os.environ, {"MAAMARU_RUN_ID": "run-1",
+                                           "MAAMARU_SCRIPT": "workflow"})
+        self.env.start()
+        self.store.start_run("run-1", "workflow", started_at=time.time() - 600)
+
+    def tearDown(self):
+        self.env.stop()
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _summary(self):
+        self.store.finish_run("run-1", "completed")
+        return self.store.run_summary("run-1")
+
+    def test_paired_loop_carries_full_facts(self):
+        # 验收样本同构：异去 1-4，出发 85 秒后完成，委托行军没观察掉落
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 4,
+                                 "team_no": 2, "sequence": 1, "attempt": 1,
+                                 "march_mode": "delegated"})
+        time.sleep(0.05)
+        self.store.record_event(
+            "sortie.completed",
+            {"mode": "yosari", "chapter": 1, "map_no": 4, "team_no": 2,
+             "sequence": 1, "attempt": 1, "outcome": "completed",
+             "duration_seconds": 84.3, "march_mode": "delegated",
+             "battle_count": 3, "drop_observation": "not_observed",
+             "drops_recognized": 0,
+             "drop_observation_reason": "auto_march_skips_obtain_animation"})
+        records = self._summary()["loop_records"]
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["mode"], "yosari")
+        self.assertEqual((record["chapter"], record["map_no"]), (1, 4))
+        self.assertEqual((record["sequence"], record["attempt"]), (1, 1))
+        self.assertEqual(record["end_type"], "sortie.completed")
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["duration_seconds"], 84.3)
+        self.assertEqual(record["battle_count"], 3)
+        self.assertEqual(record["march_mode"], "delegated")
+        self.assertEqual(record["drop_observation"], "not_observed")
+        self.assertEqual(record["drop_observation_reason"],
+                         "auto_march_skips_obtain_animation")
+        self.assertIsNotNone(record["started_at"])
+        self.assertIsNotNone(record["ended_at"])
+
+    def test_unclosed_started_is_unknown_never_success(self):
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 4,
+                                 "sequence": 2, "attempt": 1,
+                                 "march_mode": "script"})
+        records = self._summary()["loop_records"]
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertIsNone(record["end_type"])
+        self.assertEqual(record["outcome"], "unknown")
+        self.assertIsNone(record["duration_seconds"])
+        self.assertIsNone(record["ended_at"])
+        self.assertEqual(record["march_mode"], "script")
+
+    def test_interrupted_and_retry_pair_by_attempt(self):
+        # 同 sequence 第 1 次出发中断，第 2 次出发完成：两条事实各归各的
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 4,
+                                 "sequence": 1, "attempt": 1,
+                                 "march_mode": "delegated"})
+        time.sleep(0.01)
+        self.store.record_event(
+            "sortie.interrupted",
+            {"mode": "yosari", "chapter": 1, "map_no": 4, "sequence": 1,
+             "attempt": 1, "outcome": "interrupted",
+             "interrupt_reason": "auto_march_stopped",
+             "duration_seconds": 122.0, "march_mode": "delegated",
+             "battle_count": 2, "drop_observation": "not_observed"})
+        time.sleep(0.01)
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 4,
+                                 "sequence": 1, "attempt": 2,
+                                 "march_mode": "delegated"})
+        time.sleep(0.01)
+        self.store.record_event(
+            "sortie.completed",
+            {"mode": "yosari", "chapter": 1, "map_no": 4, "sequence": 1,
+             "attempt": 2, "outcome": "completed",
+             "duration_seconds": 90.0, "march_mode": "delegated",
+             "battle_count": 3, "drop_observation": "confirmed_none"})
+        records = self._summary()["loop_records"]
+        self.assertEqual([r["attempt"] for r in records], [1, 2])
+        self.assertEqual([r["outcome"] for r in records],
+                         ["interrupted", "completed"])
+        self.assertEqual([r["duration_seconds"] for r in records],
+                         [122.0, 90.0])
+        self.assertEqual(records[0]["interrupt_reason"], "auto_march_stopped")
+
+    def test_start_facts_survive_partial_end_payload(self):
+        # 结束事件缺 team_no / march_mode 时，出发事实里的已知信息不丢；
+        # 双方都有的字段以结束事实为准
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 4,
+                                 "team_no": 2, "sequence": 1, "attempt": 1,
+                                 "march_mode": "delegated"})
+        time.sleep(0.01)
+        self.store.record_event(
+            "sortie.completed",
+            {"mode": "yosari", "chapter": 1, "map_no": 4, "sequence": 1,
+             "attempt": 1, "outcome": "completed",
+             "duration_seconds": 90.0, "battle_count": 3,
+             "drop_observation": "confirmed_none"})
+        record = self._summary()["loop_records"][0]
+        self.assertEqual(record["team_no"], 2)          # 出发事实补位
+        self.assertEqual(record["march_mode"], "delegated")  # 出发事实补位
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["duration_seconds"], 90.0)
+        self.assertEqual(record["battle_count"], 3)
+
+    def test_old_style_end_without_started_still_records(self):
+        # 旧版 payload 没有出发事件/attempt/outcome：明细照出，attempt 实话
+        self.store.record_event("sortie.completed",
+                                {"mode": "sortie", "chapter": 5, "map_no": 4,
+                                 "team_no": 3, "sequence": 1})
+        records = self._summary()["loop_records"]
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["end_type"], "sortie.completed")
+        self.assertEqual(record["outcome"], "completed")  # 完成事件兜底口径
+        self.assertIsNone(record["attempt"])
+        self.assertIsNone(record["duration_seconds"])
+        self.assertIsNone(record["drop_observation"])
+
+    def test_duration_falls_back_to_start_end_interval(self):
+        # 结束事件没带 duration_seconds（老版本）：用本圈出发→结束的时间差
+        self.store.record_event("sortie.loop_started",
+                                {"mode": "yosari", "chapter": 1, "map_no": 2,
+                                 "sequence": 1, "attempt": 1})
+        time.sleep(0.06)
+        self.store.record_event(
+            "sortie.completed",
+            {"mode": "yosari", "chapter": 1, "map_no": 2, "sequence": 1,
+             "attempt": 1, "outcome": "completed"})
+        record = self._summary()["loop_records"][0]
+        self.assertIsNotNone(record["duration_seconds"])
+        self.assertGreaterEqual(record["duration_seconds"], 0.05)
+        self.assertLess(record["duration_seconds"], 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -226,6 +226,62 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["loops"], 2)
         self.assertEqual(result["average_loop_seconds"], 300)
 
+    def test_mixed_gameplay_run_pace_marked_not_unified(self):
+        # 混合 workflow（异去+秘宝之里）：任务级平均混入玩法切换时间，
+        # 必须标记成"非统一口径"，前端不许把它当圈速展示
+        self.store.start_run("run-mix", "workflow", started_at=100)
+        conn = self.store._conn()
+        samples = [
+            (160, "sortie.completed",
+             {"mode": "yosari", "chapter": 1, "map_no": 4, "sequence": 1,
+              "outcome": "completed"}),
+            (400, "hanafuda.run_completed", {"run_no": 1, "tama": 307}),
+        ]
+        for ts, kind, payload in samples:
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'run-mix', 'workflow', ?, ?)",
+                (ts, kind, __import__('json').dumps(payload)))
+        conn.commit()
+        self.store.finish_run("run-mix", "completed", ended_at=420)
+        result = self.store.run_summary("run-mix")
+        self.assertFalse(result["loop_pace_unified"])
+        # 逐圈配对只管出阵圈；秘宝之里那圈走它自己的事件展示
+        self.assertEqual(len(result["loop_records"]), 1)
+
+    def test_same_run_crossing_maps_not_unified(self):
+        # 同是异去，但一圈 1-4 一圈 2-1：相邻间隔跨图，也不算统一口径
+        self.store.start_run("run-cross", "workflow", started_at=100)
+        conn = self.store._conn()
+        for ts, map_no in ((160, 4), (400, 1)):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'run-cross', 'workflow', 'sortie.completed', ?)",
+                (ts, __import__('json').dumps(
+                    {"mode": "yosari", "chapter": 1, "map_no": map_no,
+                     "sequence": 1, "outcome": "completed"})))
+        conn.commit()
+        self.store.finish_run("run-cross", "completed", ended_at=420)
+        self.assertFalse(
+            self.store.run_summary("run-cross")["loop_pace_unified"])
+
+    def test_single_map_run_pace_stays_unified(self):
+        # 同一玩法、同一张图（中断不算圈）：圈速口径统一，照常显示
+        self.store.start_run("run-same", "sortie", started_at=100)
+        conn = self.store._conn()
+        for ts, seq in ((160, 1), (460, 2)):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'run-same', 'sortie', 'sortie.completed', ?)",
+                (ts, __import__('json').dumps(
+                    {"mode": "yosari", "chapter": 1, "map_no": 4,
+                     "sequence": seq, "outcome": "completed"})))
+        conn.commit()
+        self.store.finish_run("run-same", "completed", ended_at=480)
+        result = self.store.run_summary("run-same")
+        self.assertTrue(result["loop_pace_unified"])
+        self.assertEqual(result["average_loop_seconds"], 300)
+
     def test_run_summary_does_not_count_empty_repair_visit(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         self.store.record_event("osaka.floor_completed", {"selected_floor": 88})

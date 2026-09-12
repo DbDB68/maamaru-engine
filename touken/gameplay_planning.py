@@ -26,6 +26,29 @@ def load_gameplay_card(name="异去"):
     return card if isinstance(card, dict) else {}
 
 
+def _adjacent_interval_samples(ordered_events, map_no):
+    """旧口径兜底：同 run、同图、sequence 相邻的两个完成事件的时间差。
+
+    只在没有精确计时样本时使用；事件 payload 没有 duration_seconds
+    （老版本落库）时这是唯一的圈速来源。
+    """
+    samples, previous = [], {}
+    for event in ordered_events:
+        data = event.get("payload", {})
+        if data.get("mode") != "yosari" or not event.get("run_id"):
+            continue
+        old = previous.get(event["run_id"])
+        if old:
+            old_data = old["payload"]
+            seconds = event["ts"] - old["ts"]
+            if (data.get("map_no") == old_data.get("map_no") == map_no
+                    and data.get("sequence", 0) == old_data.get("sequence", 0) + 1
+                    and 0 < seconds <= 1800):
+                samples.append(seconds)
+        previous[event["run_id"]] = event
+    return samples
+
+
 def estimate(store, values, now=None):
     now = now or datetime.now(TZ)
     def number(key, default, minimum, maximum, integer=False):
@@ -64,25 +87,35 @@ def estimate(store, values, now=None):
     daily_free = max(0, int(card.get("daily_free_runs") or 0))
     free = number("free_runs", 0, 0, 1000000, True) if free_override not in (None, "") else current_free + full_days * daily_free
 
-    previous, samples = {}, []
+    previous, samples = [], []
+    precise = []
     events = store.recent_events(limit=1000, event_type="sortie.completed", from_ts=now.timestamp()-14*86400)
-    for event in sorted(events, key=lambda e: e["ts"]):
+    ordered = sorted(events, key=lambda e: e["ts"])
+    for event in ordered:
         data = event.get("payload", {})
         if data.get("mode") != "yosari" or not event.get("run_id"):
             continue
-        old = previous.get(event["run_id"])
-        if old:
-            old_data = old["payload"]
-            seconds = event["ts"] - old["ts"]
-            if (data.get("map_no") == old_data.get("map_no") == map_no
-                    and data.get("sequence", 0) == old_data.get("sequence", 0) + 1
-                    and 0 < seconds <= 1800):
-                samples.append(seconds)
-        previous[event["run_id"]] = event
+        # 精确圈速：这一圈自带的出发→结束计时。只认同一张图、正常完成、
+        # 正数且不超长（1800 秒可信帽与旧近似口径一致）的样本；
+        # interrupted/unknown/其他地图一概不进中位数。
+        if (data.get("map_no") == map_no
+                and data.get("outcome", "completed") == "completed"
+                and isinstance(data.get("duration_seconds"), (int, float))
+                and not isinstance(data.get("duration_seconds"), bool)
+                and 0 < data["duration_seconds"] <= 1800):
+            precise.append(float(data["duration_seconds"]))
+    if precise:
+        # 精确样本与旧的相邻间隔近似不同源，绝不混进同一个中位数；
+        # 有精确样本时旧的近似口径整体让位。
+        samples = precise
+        speed_basis = "近 14 天同图精确计时中位数"
+    else:
+        samples = _adjacent_interval_samples(ordered, map_no)
+        speed_basis = "近 14 天连续圈实测中位数"
     manual = values.get("minutes_per_run")
     speed = number("minutes_per_run", 1, 0.01, 180) * 60 if manual not in (None, "") else (statistics.median(samples) if samples else None)
     result = {"campaign": campaign, "sample_count": len(samples), "seconds_per_run": speed,
-              "speed_source": "手填估计" if manual not in (None, "") else "近 14 天连续圈实测中位数",
+              "speed_source": "手填估计" if manual not in (None, "") else speed_basis,
               "runs": None, "cost": None, "hours": None, "can_finish": None,
               "remaining_hours": remaining / 3600,
               "deadline": end.strftime("%Y-%m-%dT%H:%M"), "price": price,

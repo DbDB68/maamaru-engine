@@ -54,6 +54,112 @@ def _loads(value: str | None, fallback):
         return fallback
 
 
+# 一圈出阵的结束事件类型 → 兜底结局（payload 没写 outcome 的老数据用）
+SORTIE_LOOP_END_OUTCOMES = {
+    "sortie.completed": "completed",
+    "sortie.retreated_before_boss": "retreated_before_boss",
+    "sortie.interrupted": "interrupted",
+}
+
+
+def _loop_pace_key(event_type: str, payload: dict):
+    """圈事件的计时口径标识：同一玩法、同一张图才算同一口径。
+
+    混合 workflow（异去+秘宝之里+锻刀…）的相邻完成事件间隔会把玩法
+    切换时间摊进"平均圈速"，那种平均值不许再当统一圈速展示。
+    """
+    if event_type == "osaka.floor_completed":
+        return ("osaka",)
+    if event_type in ("sortie.completed", "sortie.retreated_before_boss"):
+        return ("sortie", payload.get("mode"), payload.get("chapter"),
+                payload.get("map_no"))
+    if event_type == "raid.round_completed":
+        return ("raid", payload.get("difficulty"))
+    if event_type == "edocastle.run_completed":
+        return ("edocastle", payload.get("difficulty"))
+    if event_type == "hanafuda.run_completed":
+        return ("hanafuda", payload.get("difficulty"))
+    return (event_type,)
+
+
+def pair_loop_records(events: list[dict]) -> list[dict]:
+    """把 sortie.loop_started 和它的结束事件配成一条条逐圈事实。
+
+    配对键 = (mode, chapter, map_no, sequence, attempt)：同 sequence 的
+    重试靠 attempt 区分。没有结束事件的出发如实记「结果未知」
+    (end_type=None)，绝不假定成功。老数据只有完成事件、没有出发事件的，
+    照常出一条明细，attempt 记 None。一圈的耗时只认这一圈自己的两个
+    事实：优先结束事件 payload 的 duration_seconds，缺了才用
+    出发→结束的时间差；绝不拿整个任务的耗时当成圈的耗时。
+    """
+
+    def _key(payload: dict):
+        return (payload.get("mode"), payload.get("chapter"),
+                payload.get("map_no"), payload.get("sequence"),
+                payload.get("attempt"))
+
+    def _record(start: dict | None, end: dict | None) -> dict:
+        end_payload = (end or {}).get("payload") or {}
+        start_payload = (start or {}).get("payload") or {}
+        payload = {**start_payload, **end_payload}  # 结束事实覆盖出发事实
+        end_type = (end or {}).get("event_type")
+        if end_type:
+            outcome = payload.get("outcome") or SORTIE_LOOP_END_OUTCOMES[end_type]
+        else:
+            outcome = "unknown"  # 出发了但没等到结束事件
+        duration = None
+        if end is not None:
+            value = end_payload.get("duration_seconds")
+            if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                    and 0 < value:
+                duration = round(float(value), 1)
+            elif start is not None:
+                duration = round(end["ts"] - start["ts"], 1)
+        battle_count = payload.get("battle_count")
+        if isinstance(battle_count, bool) or not isinstance(battle_count, int) \
+                or battle_count < 0:
+            battle_count = None
+        drops = payload.get("drops_recognized")
+        if isinstance(drops, bool) or not isinstance(drops, int) or drops < 0:
+            drops = None
+        return {
+            "mode": payload.get("mode"),
+            "chapter": payload.get("chapter"),
+            "map_no": payload.get("map_no"),
+            "team_no": payload.get("team_no"),
+            "sequence": payload.get("sequence"),
+            "attempt": payload.get("attempt"),
+            "end_type": end_type,
+            "outcome": outcome,
+            "interrupt_reason": payload.get("interrupt_reason"),
+            "duration_seconds": duration,
+            "battle_count": battle_count,
+            "battle_count_note": payload.get("battle_count_note"),
+            "march_mode": payload.get("march_mode"),
+            "drop_observation": payload.get("drop_observation"),
+            "drops_recognized": drops,
+            "drop_observation_reason": payload.get("drop_observation_reason"),
+            "started_at": start["ts"] if start else None,
+            "ended_at": end["ts"] if end else None,
+        }
+
+    open_starts: dict[tuple, list[dict]] = {}
+    records: list[dict] = []
+    for event in events:
+        event_type = event.get("event_type")
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        if event_type == "sortie.loop_started":
+            open_starts.setdefault(_key(payload), []).append(event)
+        elif event_type in SORTIE_LOOP_END_OUTCOMES:
+            bucket = open_starts.get(_key(payload))
+            start = bucket.pop(0) if bucket else None
+            records.append(_record(start, event))
+    for bucket in open_starts.values():  # 没闭合的出发：结果未知
+        records.extend(_record(start, None) for start in bucket)
+    records.sort(key=lambda r: (r.get("ended_at") or r.get("started_at") or 0))
+    return records
+
+
 class TelemetryStore:
     """Small WAL-backed event store safe for panel and worker processes."""
 
@@ -1238,6 +1344,8 @@ class TelemetryStore:
             "edocastle.run_completed", "hanafuda.run_completed",
         }]
         osaka = [e for e in loop_events if e["event_type"] == "osaka.floor_completed"]
+        pace_keys = {_loop_pace_key(e["event_type"], e["payload"])
+                     for e in loop_events}
         intervals = [b["ts"] - a["ts"] for a, b in zip(loop_events, loop_events[1:])
                      if b["ts"] > a["ts"]]
         average = sum(intervals) / len(intervals) if intervals else None
@@ -1314,6 +1422,10 @@ class TelemetryStore:
             "after_snapshot_source": (after["payload"].get("source") if after
                                       else ("auto_science" if koban_science else None)),
             "koban_session": koban_science,
+            # 逐圈事实：loop_started × 结束事件配对（含未闭合 → 结果未知）
+            "loop_records": pair_loop_records(events),
+            # 圈速口径统一（同玩法同图）才允许把 average_loop_seconds 当圈速展示
+            "loop_pace_unified": len(pace_keys) <= 1,
         }
 
     def recent_run_summaries(self, limit: int = 20, script: str | None = None,

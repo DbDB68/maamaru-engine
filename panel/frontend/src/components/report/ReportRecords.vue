@@ -27,7 +27,7 @@ const eventNames: Record<string, string> = {
   'game_update.detected': '发现游戏更新', 'game_update.recovered': '游戏更新后恢复',
   'network.recovered': '断线自动恢复',
   'osaka.floor_completed': '大阪城完成一圈', 'edocastle.run_completed': '江户城完成一圈', 'hanafuda.run_completed': '秘宝之里完成一圈', 'sortie.completed': '出阵完成',
-  'sortie.retreated_before_boss': '王点前撤退完成',
+  'sortie.retreated_before_boss': '王点前撤退完成', 'sortie.interrupted': '出阵中断',
   'raid.round_completed': '联队战完成一圈', 'pumpkin.sortie_completed': '南瓜活动出阵完成',
   'pumpkin.board_completed': '南瓜活动完成一块板子', 'pumpkin.token_used': '南瓜活动使用更新令牌',
   'repair.queued': '刀剑进入手入', 'repair.skipped': '跳过手入', 'repair.session_completed': '手入完成',
@@ -74,6 +74,7 @@ function eventDetail(item: any) {
   }
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
+  if (item.event_type === 'sortie.interrupted') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 中断（${interruptReasonLabel(p.interrupt_reason)}）`
   if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
   if (item.event_type === 'pumpkin.sortie_completed') return `第 ${p.sequence ?? '？'} 次出阵`
   if (item.event_type === 'pumpkin.board_completed') return `完成第 ${p.sequence ?? '？'} 块板子`
@@ -201,10 +202,66 @@ function instanceDetail(item: any) {
   return eventDetail(item)
 }
 
+// ---- 逐圈事实：服务端已把 loop_started 和结束事件配好对 ----
+const sortieEventTypes = new Set(['sortie.loop_started', 'sortie.completed', 'sortie.retreated_before_boss', 'sortie.interrupted'])
+function runLoopRecords(run: any) {
+  return Array.isArray(run?.loop_records) ? run.loop_records : []
+}
+const loopModeNames: Record<string, string> = { yosari: '异去', sortie: '合战场' }
+const interruptReasonNames: Record<string, string> = {
+  auto_march_stopped: '自动行军停止', heavy_injury_warning: '重伤行军警告',
+  field_injury_threshold: '伤势达到手入阈值', monitor_timeout: '监控超时',
+  heavy_injury_denied_return_failed: '重伤点否后没能返回本丸',
+  auto_march_stopped_return_failed: '自动行军停止后没能返回本丸',
+  field_injury_return_failed: '伤势返回本丸失败',
+}
+function interruptReasonLabel(reason: unknown) {
+  const key = String(reason || '')
+  return interruptReasonNames[key] || (key ? `原因 ${key}` : '原因未记录')
+}
+const dropReasonNames: Record<string, string> = {
+  auto_march_skips_obtain_animation: '委托行军跳过获得动画',
+  observation_lost: '观察中断', recognizer_error: '认人流程异常',
+}
+function loopOutcomeLabel(loop: any) {
+  if (loop.end_type === 'sortie.completed') return '完成'
+  if (loop.end_type === 'sortie.retreated_before_boss') return '王点前撤退'
+  if (loop.end_type === 'sortie.interrupted') return '中断'
+  return '结果未知'
+}
+function loopSeconds(seconds: unknown) {
+  const value = Number(seconds)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  const total = Math.round(value)  // 先舍入再拆：59.6 是 1分00秒，不是 0分00秒
+  return `${Math.floor(total / 60)}分${String(total % 60).padStart(2, '0')}秒`
+}
+function loopHeadline(loop: any) {
+  const place = `${loopModeNames[loop.mode] || loop.mode || '出阵'} ${loop.chapter}-${loop.map_no}`
+  const no = loop.sequence == null ? '' : ` · 第 ${loop.sequence} 圈`
+  const retry = Number(loop.attempt) > 1 ? ` · 第 ${Number(loop.attempt)} 次出发` : ''
+  return `${place}${no}${retry}`
+}
+function loopDetail(loop: any) {
+  const parts = [loopOutcomeLabel(loop)]
+  const seconds = loopSeconds(loop.duration_seconds)
+  parts.push(seconds ? `耗时 ${seconds}` : '耗时没读出来')
+  parts.push(loop.battle_count != null ? `${loop.battle_count} 场战斗` : '战斗数没读出来')
+  if (loop.march_mode === 'delegated') parts.push('委托行军')
+  else if (loop.march_mode === 'script') parts.push('脚本行军')
+  if (loop.end_type === 'sortie.interrupted' && loop.interrupt_reason) parts.push(interruptReasonLabel(loop.interrupt_reason))
+  if (loop.drop_observation === 'recognized') parts.push(loop.drops_recognized ? `掉落已识别 ${loop.drops_recognized} 把` : '掉落已识别')
+  else if (loop.drop_observation === 'confirmed_none') parts.push('确认无掉落')
+  else if (loop.drop_observation === 'not_observed') parts.push(`未观察掉落（${dropReasonNames[loop.drop_observation_reason] || '原因未记录'}）`)
+  else parts.push('未观察掉落（没有观察数据）')
+  return parts.join(' · ')
+}
+
 const timelineEvents = computed(() => {
   const visible: any[] = []
   const repairs = new Map<string, any>()
-  const hidden = new Set(['team_record.saved', 'inventory.peek', 'osaka.koban_session'])
+  // loop_started 是逐圈事实的起点标记，成绩单按配对后的逐圈明细展示，
+  // 绝不裸奔成「本丸记录」；结束事件照常单独可见（跨日游离行用）。
+  const hidden = new Set(['team_record.saved', 'inventory.peek', 'osaka.koban_session', 'sortie.loop_started'])
   for (const item of props.events) {
     if (hidden.has(item.event_type)) continue
     if (!item.event_type.startsWith('repair.')) {
@@ -316,6 +373,8 @@ function runActivities(run: any) {
   const startDay = shanghaiDate(Number(run.started_at))
   return groupedActivityEvents.value.filter(item => (
     item.run_id && item.run_id === run.run_id && shanghaiDate(Number(item.ts)) === startDay
+    // 逐圈明细已接管出阵圈事件的展示，任务卡里不再重复列一遍
+    && !(runLoopRecords(run).length && sortieEventTypes.has(item.event_type))
   ))
 }
 function runRepairTotal(run: any) {
@@ -420,12 +479,13 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
         <template #marker="slotProps"><span class="record-marker" :class="slotProps.item.kind">{{ slotProps.item.kind === 'run' ? '🦊' : slotProps.item.kind === 'manual' ? '你' : '·' }}</span></template>
         <template #content="slotProps">
           <details v-if="slotProps.item.kind === 'run'" :id="`run-${slotProps.item.run.run_id}`" :key="recordKey(slotProps.item)" class="record-run" :class="{ 'record-run-highlight': slotProps.item.run.run_id === highlightRunId }" :open="slotProps.item.run.run_id === highlightRunId">
-            <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ runStatusLabel(slotProps.item.run) }} · {{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
+            <summary><span><b>{{ runTitle(slotProps.item.run) }}</b><small>{{ runStatusLabel(slotProps.item.run) }} · {{ elapsedTime(runElapsedSeconds(slotProps.item.run)) }}<template v-if="slotProps.item.run.average_loop_seconds && slotProps.item.run.loop_pace_unified !== false"> · {{ loopTime(slotProps.item.run.average_loop_seconds) }}</template></small></span><em>{{ attributedStats(slotProps.item.run) || deltaStats(slotProps.item.run) || '查看详情' }}</em></summary>
             <div class="run-evidence">
               <p v-if="Number(slotProps.item.run.loops) > 0 && !hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
               <div v-if="hasUpkeep(slotProps.item.run)" class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(slotProps.item.run)">🩹 手入 <b>{{ runRepairTotal(slotProps.item.run) }}</b> 振</span><span v-if="runSpeedupTotal(slotProps.item.run)">⚡ 加速符 <b>{{ runSpeedupTotal(slotProps.item.run) }}</b> 枚</span><span v-if="runEquipmentTotal(slotProps.item.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(slotProps.item.run) }}</b> 次</span></div>
               <p v-if="attributedStats(slotProps.item.run)" class="run-delta"><small>🦊 已确认收支</small>{{ attributedStats(slotProps.item.run) }}</p>
               <p v-if="deltaStats(slotProps.item.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(slotProps.item.run) }}<span v-if="kobanPerHourLabel(slotProps.item.run)">· 小判约 {{ kobanPerHourLabel(slotProps.item.run) }} / 小时</span><span v-if="kobanPerFloorLabel(slotProps.item.run)">· 平均每层 {{ kobanPerFloorLabel(slotProps.item.run) }}</span></p>
+              <div v-if="runLoopRecords(slotProps.item.run).length" class="run-activities run-loops"><p v-for="(loop, index) in runLoopRecords(slotProps.item.run)" :key="`loop-${index}`"><time>{{ recordTime(loop.ended_at || loop.started_at || 0) }}</time><span><b>{{ loopHeadline(loop) }}</b><small>{{ loopDetail(loop) }}</small></span></p></div>
               <div v-if="runActivities(slotProps.item.run).length" class="run-activities"><p v-for="item in runActivities(slotProps.item.run)" :key="item.id"><time>{{ recordTime(item.ts) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
               <p v-else-if="!attributedStats(slotProps.item.run) && !deltaStats(slotProps.item.run)" class="run-upkeep-quiet">这次任务没有额外成绩明细。</p>
               <div v-if="!slotProps.item.run.has_resource_comparison && canAttachInventory(slotProps.item.run)" class="run-inventory-missing"><small>收工盘点没有完成；仅可用挂机结束后、没有其他操作的库存快照补盘。</small><button type="button" class="secondary" :disabled="attachingRun === slotProps.item.run.run_id" @click="attachInventory(slotProps.item.run)">{{ attachingRun === slotProps.item.run.run_id ? '正在补盘……' : '补上最近盘点' }}</button><em v-if="inventoryNotice[slotProps.item.run.run_id]">{{ inventoryNotice[slotProps.item.run.run_id] }}</em></div>
