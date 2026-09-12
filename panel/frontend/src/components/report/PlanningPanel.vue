@@ -7,11 +7,6 @@ import { resourceNames } from './reportModel'
 const goalResources = resourceNames.filter(name => name !== '甲州金')
 // 异去碎片清单由服务端途径卡给出（数据卡没收录就是空，不硬编）
 const fragmentNames = computed(() => Object.keys(planning.value?.fragments || {}))
-watch(() => form.value.kind, (kind) => {
-  if (kind === 'fragment' && !form.value.fragment) {
-    form.value.fragment = fragmentNames.value[0] || ''
-  }
-})
 import EventTimeline from './EventTimeline.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
@@ -32,6 +27,11 @@ const customGoals = computed(() => (planning.value?.goals || []).filter(goal => 
 const formOpen = ref(false)
 const saving = ref(false)
 const form = ref({ kind: 'resource' as 'resource' | 'fragment', goal_mode: 'amount_target' as 'amount_target' | 'deadline_target', resource: '小判', fragment: '', target: 100000, deadline: '', note: '' })
+watch(() => form.value.kind, (kind) => {
+  if (kind === 'fragment' && !form.value.fragment) {
+    form.value.fragment = fragmentNames.value[0] || ''
+  }
+})
 
 function applyTimingFallback(report: PlanningReport, runs: any[]) {
   // 兼容已经启动、暂时不能为了热加载而重启的旧后端。
@@ -214,6 +214,7 @@ function goalAction(goal: PlanningGoalAdvice) {
 
 const estimateSaving = ref('')
 const abacusGoalSaving = ref('')
+const tamaTargetSaving = ref('')
 
 async function saveEstimate(event: string, value: number) {
   if (!Number.isFinite(value) || value <= 0) {
@@ -261,6 +262,21 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
     await scrollToElement('.planning-success')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { abacusGoalSaving.value = '' }
+}
+
+async function saveTamaTarget(abacus: EventAbacus, target: number) {
+  if (!Number.isInteger(target) || target <= 0 || target > 10_000_000) {
+    error.value = '玉目标请填 1 到 10,000,000 之间的整数。'
+    return
+  }
+  tamaTargetSaving.value = abacus.event
+  error.value = ''
+  try {
+    await api.saveEventTamaTarget(abacus.event, target)
+    await load()
+    goalNotice.value = `「${abacus.event}」这期要拿 ${fmt(target)} 玉，记下了。`
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '玉目标保存失败' }
+  finally { tamaTargetSaving.value = '' }
 }
 
 async function gameplayGoalSaved() {
@@ -453,8 +469,10 @@ onMounted(load)
       :error="timelineError"
       :estimate-saving="estimateSaving"
       :goal-saving="abacusGoalSaving"
+      :tama-target-saving="tamaTargetSaving"
       :activity-paces="activityPaces"
       @save-estimate="saveEstimate"
+      @save-tama-target="saveTamaTarget"
       @add-goal="goalFromAbacus"
       @add-stock-goal="goalFromStockTarget"
     />

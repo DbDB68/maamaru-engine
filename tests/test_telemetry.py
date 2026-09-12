@@ -558,6 +558,23 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual([row["level"] for row in response["snapshot"]["swords"]],
                          [99, 1])
 
+    def test_event_tama_target_api_saves_to_user_status_dir(self):
+        from panel.server import api_save_event_tama_target
+
+        class _Req:
+            async def json(self):
+                return {"event": "秘宝之里", "target": 80000}
+
+        status_dir = Path(self.temp.name) / "status"
+        status_dir.mkdir()
+        with patch("panel.server.STATUS_DIR", status_dir):
+            response = asyncio.run(api_save_event_tama_target(_Req()))
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["target"], 80000)
+        saved = (status_dir / "events_meta.local.json").read_text(encoding="utf-8")
+        self.assertIn('"tama_target": 80000', saved)
+
     def test_manual_session_api_roundtrip_keeps_own_contract(self):
         from panel.server import (api_add_manual_session, api_manual_sessions,
                                   api_update_manual_session)

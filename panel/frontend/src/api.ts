@@ -120,6 +120,9 @@ export const api = {
   saveEventEstimate: (event: string, keysPerRun: number) => request<{ ok: boolean }>('/api/planning/event-estimate', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, keys_per_run: keysPerRun }),
   }),
+  saveEventTamaTarget: (event: string, target: number) => request<{ ok: boolean; target: number; period: string }>('/api/planning/event-tama-target', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, target }),
+  }),
   addEventGoal: (event: string, target?: number) => request<EventGoalResult>('/api/planning/event-goals', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, ...(target == null ? {} : { target }) }),
   }),

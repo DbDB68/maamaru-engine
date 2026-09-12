@@ -10,6 +10,7 @@ const props = defineProps<{
   error?: string
   estimateSaving?: string
   goalSaving?: string
+  tamaTargetSaving?: string
   activityPaces?: Record<string, ActivityPace[]>
 }>()
 
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   (event: 'save-estimate', name: string, value: number): void
   (event: 'add-goal', abacus: EventAbacus): void
   (event: 'add-stock-goal', abacus: EventAbacus, target: number): void
+  (event: 'save-tama-target', abacus: EventAbacus, target: number): void
 }>()
 
 const estimateInputs = ref<Record<string, string>>({})
@@ -34,6 +36,7 @@ onBeforeUnmount(() => window.clearInterval(clockTimer))
 watch(() => props.abacuses, (items) => {
   for (const item of items) {
     if (item.keys_per_run != null) estimateInputs.value[item.event] = String(item.keys_per_run)
+    if (item.tama_target != null) targetInputs.value[item.event] = String(item.tama_target)
   }
 }, { immediate: true })
 
@@ -206,6 +209,17 @@ function submitStockGoal(entry: EventTimelineEntry) {
   if (abacus) emit('add-stock-goal', abacus, Number(targetInputs.value[entry.name]))
 }
 
+function submitTamaTarget(entry: EventTimelineEntry) {
+  const abacus = abacusFor(entry)
+  if (abacus) emit('save-tama-target', abacus, Number(targetInputs.value[entry.name]))
+}
+
+function tamaProgress(entry: EventTimelineEntry) {
+  const target = entry.budget?.tama_target
+  if (!target) return 0
+  return Math.min(100, Math.max(0, Number(entry.budget?.tama_current || 0) / target * 100))
+}
+
 function budgetText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget) return ''
@@ -282,9 +296,18 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 </template>
               </section>
 
-              <section v-if="group.key === 'ongoing' && entry.budget?.tama_current != null" class="event-tama-current">
-                <span><small>本期所持</small><b>{{ fmt(entry.budget.tama_current) }} 玉</b></span>
-                <p>{{ entry.budget.tama_observed_at ? `${observedTime(entry.budget.tama_observed_at)} 收工后读到` : '最近一次收工后读到' }}</p>
+              <section v-if="group.key === 'ongoing' && entry.budget?.mechanics === 'hanafuda'" class="event-tama-plan">
+                <header>
+                  <span><small>本期所持</small><b>{{ entry.budget.tama_current == null ? '待第一次读数' : `${fmt(entry.budget.tama_current)} 玉` }}</b></span>
+                  <span v-if="entry.budget.tama_target"><small>本期目标</small><b>{{ fmt(entry.budget.tama_target) }} 玉</b></span>
+                </header>
+                <div v-if="entry.budget.tama_target" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
+                <p v-if="entry.budget.tama_target && entry.budget.tama_remaining != null">{{ entry.budget.tama_remaining ? `离目标还差 ${fmt(entry.budget.tama_remaining)} 玉` : '目标已经拿到啦 🎉' }}</p>
+                <p v-else-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
+                <form @submit.prevent="submitTamaTarget(entry)">
+                  <label>{{ entry.budget.tama_target ? '修改目标' : '这期想拿到多少玉？' }}<input v-model="targetInputs[entry.name]" type="number" min="1" max="10000000" step="1" placeholder="例如 100,000"></label>
+                  <button type="submit" class="primary" :disabled="tamaTargetSaving === entry.name">{{ tamaTargetSaving === entry.name ? '保存中……' : entry.budget.tama_target ? '保存修改' : '记下目标' }}</button>
+                </form>
               </section>
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
@@ -416,11 +439,18 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-range { flex: none; color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .event-mobile-moment { display: none; }
 .event-summary { margin: 9px 0 0; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
-.event-tama-current { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-top: 11px; padding: 10px 12px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-left: 4px solid #5b813f; border-radius: 8px; }
-.event-tama-current span { display: grid; gap: 1px; }
-.event-tama-current small { color: #426b36; font-size: 10px; font-weight: 700; }
-.event-tama-current b { font-size: 20px; font-variant-numeric: tabular-nums; }
-.event-tama-current p { margin: 0; color: var(--ink-dim); font-size: 11px; }
+.event-tama-plan { display: grid; gap: 9px; margin-top: 11px; padding: 11px 12px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-left: 4px solid #5b813f; border-radius: 8px; }
+.event-tama-plan > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
+.event-tama-plan > header span { display: grid; gap: 1px; }
+.event-tama-plan > header span:last-child { text-align: right; }
+.event-tama-plan small { color: #426b36; font-size: 10px; font-weight: 700; }
+.event-tama-plan b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.event-tama-plan > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
+.tama-progress { height: 6px; overflow: hidden; background: color-mix(in srgb, var(--paper-line) 70%, transparent); border-radius: 999px; }
+.tama-progress i { display: block; height: 100%; background: #5b813f; border-radius: inherit; transition: width .25s ease; }
+.event-tama-plan form { display: flex; align-items: end; gap: 8px; padding-top: 2px; }
+.event-tama-plan label { display: grid; flex: 1 1 auto; gap: 4px; color: var(--ink-dim); font-size: 11px; }
+.event-tama-plan input { width: min(220px, 100%); background: var(--paper-card); }
 .event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
 .event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-pace-calculator > header > span { display: grid; gap: 1px; }
@@ -507,7 +537,10 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .is-ongoing .event-mobile-moment { color: #4d7137; }
   .timeline-event-card { padding: 12px; }
   .event-budget, .event-estimate { align-items: stretch; flex-direction: column; }
-  .event-tama-current { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .event-tama-plan > header { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .event-tama-plan > header span:last-child { text-align: left; }
+  .event-tama-plan form { align-items: stretch; flex-direction: column; }
+  .event-tama-plan input, .event-tama-plan button { width: 100%; max-width: none; }
   .event-pace-calculator > header { align-items: flex-start; flex-direction: column; gap: 7px; }
   .event-pace-calculator > header > span:last-child { text-align: left; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }

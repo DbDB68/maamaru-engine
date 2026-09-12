@@ -410,6 +410,18 @@ class GetPlanningTests(unittest.TestCase):
         self.assertIsNone(abacus["sufficient"])
         self.assertIsNone(abacus["shortfall"])
 
+    def test_hanafuda_tama_target_reaches_current_period_abacus(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            advisor.save_event_tama_target(root, "秘宝之里", 80000)
+            planning = advisor.get_planning(
+                _FakeStore(), root / "goals.json",
+                now=datetime.fromisoformat("2026-09-12T12:00:00+08:00"))
+        hanafuda = next(item for item in planning["events"]
+                        if item["event"] == "秘宝之里")
+        self.assertEqual(hanafuda["mechanics"], "hanafuda")
+        self.assertEqual(hanafuda["tama_target"], 80000)
+
     def test_activity_budget_delays_amount_target_without_becoming_income(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "goals.json"
@@ -966,6 +978,21 @@ class EventCardStorageTests(unittest.TestCase):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", 0)
         with self.assertRaises(ValueError):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", "不是数")
+
+    def test_save_hanafuda_tama_target_is_period_scoped(self):
+        saved = advisor.save_event_tama_target(self.dir, "秘宝之里", 100000)
+        self.assertEqual(saved["target"], 100000)
+        cards = advisor.load_event_cards(self.dir)
+        self.assertEqual(cards["秘宝之里"]["tama_target"], 100000)
+        self.assertEqual(cards["秘宝之里"]["tama_target_period"],
+                         "秘宝之里@2026-09-10")
+
+    def test_save_hanafuda_tama_target_rejects_bad_input(self):
+        for target in (0, 10_000_001, 1.5, "不是数"):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                advisor.save_event_tama_target(self.dir, "秘宝之里", target)
+        with self.assertRaises(ValueError):
+            advisor.save_event_tama_target(self.dir, "江户城潜入调查", 100000)
 
 
 class WindowImpactTests(unittest.TestCase):

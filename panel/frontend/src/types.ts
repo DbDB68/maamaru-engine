@@ -357,6 +357,7 @@ export interface EventsCalendar {
 
 export interface EventAbacus {
   event: string
+  mechanics?: string | null
   goal_mode?: 'budget' | 'stock_target'
   goal_resource?: string
   start_date: string | null
@@ -384,6 +385,8 @@ export interface EventAbacus {
   yield_sessions?: number | null
   tama_current?: number | null
   tama_observed_at?: number | null
+  tama_target?: number | null
+  tama_remaining?: number | null
   message: string
 }
 
@@ -409,8 +412,11 @@ export interface EventTimelineBudget {
   runs_needed?: number | null
   free_runs?: number | null
   keys_obtained?: number | null
+  mechanics?: string | null
   tama_current?: number | null
   tama_observed_at?: number | null
+  tama_target?: number | null
+  tama_remaining?: number | null
   message: string
 }
 

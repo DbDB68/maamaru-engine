@@ -994,11 +994,21 @@ def get_planning(store, goals_path: Path, *,
     koban_now = current.get("小判")
     for abacus in abacuses:
         card = cards.get(abacus.get("event")) or {}
+        abacus["mechanics"] = card.get("mechanics")
         if card.get("mechanics") == "hanafuda":
+            from .event_history import period_key
+            target = card.get("tama_target")
+            if (card.get("tama_target_period") == period_key(
+                    abacus["event"], card)
+                    and isinstance(target, (int, float)) and target > 0):
+                abacus["tama_target"] = int(target)
             tama = latest_hanafuda_tama(store, card)
             if tama:
                 abacus["tama_current"] = tama["current"]
                 abacus["tama_observed_at"] = tama["observed_at"]
+                if abacus.get("tama_target"):
+                    abacus["tama_remaining"] = max(
+                        0, abacus["tama_target"] - tama["current"])
         if abacus.get("goal_mode") == "stock_target":
             abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
             abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
@@ -1096,6 +1106,37 @@ def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
     path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
                     encoding="utf-8")
     return cards[event]
+
+
+def save_event_tama_target(status_dir: Path, event: str, target) -> dict:
+    """保存本期秘宝之里的玉目标；期次变化后不会沿用旧目标。"""
+    cards = load_event_cards(status_dir)
+    card = cards.get(event)
+    if not card or card.get("mechanics") != "hanafuda":
+        raise ValueError(f"「{event}」不是可以设置玉目标的活动")
+    if isinstance(target, bool):
+        raise ValueError("玉目标得是整数")
+    try:
+        value = int(target)
+    except (TypeError, ValueError):
+        raise ValueError("玉目标得是整数")
+    if ((isinstance(target, float) and not target.is_integer())
+            or (isinstance(target, str)
+                and not target.strip().isdigit())
+            or not 1 <= value <= 10_000_000):
+        raise ValueError("玉目标得是 1 到 10,000,000 之间的整数")
+    path = Path(status_dir) / EVENTS_META_LOCAL
+    try:
+        local = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        local = {}
+    from .event_history import period_key
+    local.setdefault(event, {})["tama_target"] = value
+    local[event]["tama_target_period"] = period_key(event, card)
+    path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+    return {"event": event, "target": value,
+            "period": local[event]["tama_target_period"]}
 
 
 # 一圈钥匙的合理上限：实测 9~37 把，OCR 读岔会产生 10157 这种垃圾值

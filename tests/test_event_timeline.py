@@ -125,10 +125,15 @@ class EntryContentTests(unittest.TestCase):
         cards = {"秘宝之里": _card(
             start_at="2026-08-25T10:00:00+08:00",
             end_at="2026-09-05T05:00:00+08:00")}
-        abacuses = [_abacus("秘宝之里", tama_current=12345,
+        abacuses = [_abacus("秘宝之里", mechanics="hanafuda",
+                            tama_current=12345, tama_target=100000,
+                            tama_remaining=87655,
                             tama_observed_at=NOW.timestamp())]
         entry = event_timeline.build_timeline(cards, abacuses, [], now=NOW)["ongoing"][0]
+        self.assertEqual(entry["budget"]["mechanics"], "hanafuda")
         self.assertEqual(entry["budget"]["tama_current"], 12345)
+        self.assertEqual(entry["budget"]["tama_target"], 100000)
+        self.assertEqual(entry["budget"]["tama_remaining"], 87655)
         self.assertEqual(entry["budget"]["tama_observed_at"], NOW.timestamp())
 
     def test_event_appears_once_with_both_ends(self):
