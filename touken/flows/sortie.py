@@ -187,6 +187,7 @@ class SortieMixin:
         map_page_ready = False
         record_saved = False
         self._map_miss_count = 0
+        loop_attempts = {}  # 圈序号 → 已出发次数（中断后重试同一圈会再 +1）
         # 蹲点模式（MAAMARU_YOSARI_WATCH=1）：异去行军每一帧存盘，
         # 事后翻碎片掉落画面长什么样。只服务异去，正常跑不开。
         watch_dir = self._yosari_watch_dir(cfg_key)
@@ -444,12 +445,37 @@ class SortieMixin:
                 if not confirmed:
                     return
 
+            # ========== 7.5 一圈的开始边界：确认全部通过、部队真正出发 ==========
+            # 从这里到回本的耗时是纯游戏流程耗时，第一圈也有精确起点。
+            loop_started_at = time.time()
+            battles_this_loop = 0
+            battle_result_visible = False
+            drops_this_loop = []
+            loop_march_mode = "delegated" if delegated_march else "script"
+            self._drop_watch_failed = False
+            attempt = loop_attempts.get(loop_no, 0) + 1
+            loop_attempts[loop_no] = attempt
+            if hasattr(self, "record_event"):
+                self.record_event(
+                    "sortie.loop_started", mode=cfg_key, chapter=chapter,
+                    map_no=map_no, team_no=team_no, sequence=loop_no,
+                    attempt=attempt, march_mode=loop_march_mode)
+
+            def end_loop(event_type, outcome, reason=None):
+                self._record_sortie_loop_end(
+                    event_type, outcome=outcome, reason=reason,
+                    cfg_key=cfg_key, chapter=chapter, map_no=map_no,
+                    team_no=team_no, loop_no=loop_no, attempt=attempt,
+                    started_at=loop_started_at, battles=battles_this_loop,
+                    march_mode=loop_march_mode, drops=drops_this_loop)
+
             yield f"[出阵] 🐎 部队{team_no}出发！行军监控开着呢，我全程盯着"
 
             # ========== 8. 行军监控：打完自动回本丸 / 中断则返回本丸 ==========
             march_done = False
             interrupted = False
             retreated = False
+            interrupt_reason = None
             # 王点航位推算状态：(上次认出的距王点步数, 此后盲走的步数)。
             # None = 还没有可信读数。每圈出阵重置。
             boss_track = None
@@ -461,13 +487,27 @@ class SortieMixin:
                     watch_seq += 1
                     self._dump_watch_frame(watch_dir, loop_no, watch_seq)
 
+                # 战斗计数锚点：结算页「戦闘結果」每场战斗必现且停留 ≥2 帧
+                # （2026-09-05 异去委托行军 148 帧运行实录，9 场全中、场间空窗
+                # ≥6 帧）。出现沿计一场、消失后重新武装，同一画面重复帧不重数。
+                # 必须放在任何可能点掉结算页的动作之前。
+                if self.maa.template_match("battle/ui战斗结果.png"):
+                    if not battle_result_visible:
+                        battles_this_loop += 1
+                    battle_result_visible = True
+                else:
+                    battle_result_visible = False
+
                 if self._deny_heavy_injury_warning(cfg):
                     yield "[出阵] 🛑 出现重伤行军警告，已点【否】，准备返回本丸"
                     self.maa.screenshot(force=True)
                     if not self._return_home_from_march(cfg):
+                        end_loop("sortie.interrupted", "unknown",
+                                 reason="heavy_injury_denied_return_failed")
                         yield "[出阵] 点否后找不到返回本丸按钮，已停止点击"
                         return
                     interrupted = True
+                    interrupt_reason = "heavy_injury_warning"
                     break
 
                 # 异去一圈结束后回到四张小图页，不会回本丸。
@@ -492,9 +532,12 @@ class SortieMixin:
                         detail = f"（检测到{field_injury}）" if field_injury else ""
                         yield f"[出阵] ⚠️ 游戏自动行军已经停止{detail}，准备安全返回本丸"
                         if not self._return_home_from_march(cfg):
+                            end_loop("sortie.interrupted", "unknown",
+                                     reason="auto_march_stopped_return_failed")
                             yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
                             return
                         interrupted = True
+                        interrupt_reason = "auto_march_stopped"
                         break
                     self._click_point(cfg["skip_tap"])
                     time.sleep(0.8)
@@ -528,9 +571,12 @@ class SortieMixin:
                             field_injury, repair_threshold):
                         yield f"[出阵] 🩹 局内检测到{field_injury}，已达到手入阈值，不再继续行军"
                         if not self._return_home_from_march(cfg):
+                            end_loop("sortie.interrupted", "unknown",
+                                     reason="field_injury_return_failed")
                             yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
                             return
                         interrupted = True
+                        interrupt_reason = "field_injury_threshold"
                         break
                     # 王点前撤退（仅合战场 + 脚本手动行军）：决策屏右上小地图
                     # 永远干净完整，距王点 1 步 = 下一脚就是王点，撤。
@@ -547,6 +593,8 @@ class SortieMixin:
                             if boss_dist == 1:
                                 yield "[出阵] 🏳️ 小地图看明白了：下一脚就是王点，按约定撤退回本丸"
                                 if not self._return_home_from_march(cfg):
+                                    end_loop("sortie.interrupted", "unknown",
+                                             reason="retreat_return_failed")
                                     yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
                                     return
                                 retreated = True
@@ -558,6 +606,8 @@ class SortieMixin:
                                            "此后只走了 1 步——航位推算下一脚就是王点，按约定撤退。"
                                            "要是估错了（岔路骰子搞事）算我的，map_miss 里有现场")
                                     if not self._return_home_from_march(cfg):
+                                        end_loop("sortie.interrupted", "unknown",
+                                                 reason="retreat_return_failed")
                                         yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
                                         return
                                     retreated = True
@@ -579,6 +629,7 @@ class SortieMixin:
                 if dropped:
                     if drop_credit != dropped["sword_id"]:
                         drop_credit = dropped["sword_id"]
+                        drops_this_loop.append(dropped["sword_id"])
                         yield f"[出阵] 🎉 刀剑男士【{dropped['name']}】来本丸了！"
                         if hasattr(self, "record_event"):
                             self.record_event(
@@ -599,10 +650,7 @@ class SortieMixin:
                 else:
                     yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
                     self.current_location = "本丸"
-                if hasattr(self, "record_event"):
-                    self.record_event(
-                        "sortie.completed", mode=cfg_key, chapter=chapter,
-                        map_no=map_no, team_no=team_no, sequence=loop_no)
+                end_loop("sortie.completed", "completed")
                 repair_attempts = 0
                 if cfg_key == "yosari":
                     inv = self._read_yosari_fragments(cfg)
@@ -629,24 +677,81 @@ class SortieMixin:
             elif interrupted:
                 yield "[出阵] ⚠️ 行军因伤势中断，已返回本丸；重新检查轻/中/重伤"
                 self.current_location = "本丸"
+                end_loop("sortie.interrupted", "interrupted",
+                         reason=interrupt_reason)
                 continue
             elif retreated:
                 # 王点前主动撤退算完成一圈（练级打法），回满状态接着进下一圈
                 yield f"[出阵] ✓ 第 {loop_no} 圈王点前撤退完成，已回本丸"
                 self.current_location = "本丸"
-                if hasattr(self, "record_event"):
-                    self.record_event(
-                        "sortie.retreated_before_boss", mode=cfg_key,
-                        chapter=chapter, map_no=map_no, team_no=team_no,
-                        sequence=loop_no)
+                end_loop("sortie.retreated_before_boss", "retreated_before_boss")
                 repair_attempts = 0
                 loop_no += 1
             else:
+                end_loop("sortie.interrupted", "unknown",
+                         reason="monitor_timeout")
                 yield "[出阵] ⚠️ 行军监控超过安全上限，强制停，你去看看卡哪了"
                 return
 
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
+
+    def _record_sortie_loop_end(self, event_type, *, outcome, reason=None,
+                                cfg_key, chapter, map_no, team_no, loop_no,
+                                attempt, started_at, battles, march_mode,
+                                drops):
+        """一圈出阵的结束事实。只写真实可证的状态，不可知的字段给 null/说明。
+
+        掉落可观察状态（drop_observation）：
+          recognized     —— 本圈真的认到掉落（drops 非空）
+          not_observed   —— 观察不成立：委托自动行军游戏跳过获得动画 /
+                            观察中断（结局未知）/ 认人流程内部异常
+          confirmed_none —— 脚本手动行军且全程逐帧盯屏、认人流程无异常，
+                            确实没有掉落出现（可进掉率分母）
+        not_observed 既不是「掉了」也不是「没掉」，统计掉率时必须剔除。
+        """
+        if not hasattr(self, "record_event"):
+            return
+        duration = round(time.time() - started_at, 1) if started_at else None
+        drop_reason = None
+        if drops:
+            drop_observation = "recognized"
+        elif march_mode == "delegated":
+            drop_observation = "not_observed"
+            drop_reason = "auto_march_skips_obtain_animation"
+        elif outcome == "unknown":
+            drop_observation = "not_observed"
+            drop_reason = "observation_lost"
+        elif getattr(self, "_drop_watch_failed", False):
+            drop_observation = "not_observed"
+            drop_reason = "recognizer_error"
+        else:
+            drop_observation = "confirmed_none"
+        battle_count = battles
+        battle_note = None
+        # 打完王点才算正常完成一圈，王点战必有结算页；正常完成却 0 场
+        # 只可能是锚点失明——宁可 unknown 也不拿 0 污染时间/掉落矩阵
+        if outcome == "completed" and battle_count == 0:
+            battle_count = None
+            battle_note = "completed without any battle result page; anchor presumed blind"
+        payload = {
+            "mode": cfg_key, "chapter": chapter, "map_no": map_no,
+            "team_no": team_no, "sequence": loop_no, "attempt": attempt,
+            "outcome": outcome,
+            "duration_seconds": duration,
+            "march_mode": march_mode,
+            "battle_count": battle_count,
+            "battle_count_basis": "battle_result_page_edges",
+            "drop_observation": drop_observation,
+            "drops_recognized": len(drops),
+        }
+        if reason:
+            payload["interrupt_reason"] = reason
+        if drop_reason:
+            payload["drop_observation_reason"] = drop_reason
+        if battle_note:
+            payload["battle_count_note"] = battle_note
+        self.record_event(event_type, **payload)
 
     # 掉落获得画面的识别点位（1280x720，真机截图校准）
     _OBTAIN_BADGE_ROI = (1105, 40, 1170, 160)   # 右侧立牌的红底「刀派」徽（稀有款）
@@ -730,7 +835,8 @@ class SortieMixin:
                     continue
                 return None
         except Exception:
-            pass
+            # 认人流程翻车 = 这段行军掉落观察不可信，本圈不许 confirmed_none
+            self._drop_watch_failed = True
         return None
 
     def _dismiss_yosari_milestone(self, cfg: dict) -> bool:

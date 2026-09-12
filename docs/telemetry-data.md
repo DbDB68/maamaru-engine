@@ -1,4 +1,4 @@
-# 结构化运行数据（Schema v7）
+# 结构化运行数据（Schema v9）
 
 这套数据用于前端统计和后续智能建议。调用方不得解析中文运行日志；日志只给人看，
 稳定机器字段统一来自 `%LOCALAPPDATA%/Maamaru*/logs/telemetry.db` 和以下 API。
@@ -70,7 +70,10 @@
 - `team_record.saved`、`equipment.restored`
 - `injury_warning.denied`
 - `practice.result`
-- `sortie.completed`、`raid.round_completed`
+- `sortie.loop_started`、`sortie.completed`、`sortie.retreated_before_boss`、`sortie.interrupted`（逐圈事实，见下文「每圈出阵事实」）
+- `sword.obtained`（掉落认人成功；经 `run_id` + payload `sequence` 关联到圈）
+- `yosari.fragments`（异去一圈末的碎片库存读数与差分）、`yosari.milestone_claimed`
+- `raid.round_completed`
 - `pumpkin.sortie_completed`、`pumpkin.board_completed`、`pumpkin.token_used`、`pumpkin.sword_obtained`
 - `forge.started`、`forge.collected`
 - `expedition.dispatched`、`expedition.settled`
@@ -83,6 +86,51 @@
 新增事件应使用 `领域.过去式动作`，payload 只放数据，不放展示文案。轻量的玩法事件和
 审神者报备长期保留，用于跨月、跨年的成绩单；体积较大的 OCR 观察明细默认保留 90 天。
 当前状态 JSON 仍保留原有接口，便于旧前端渐进迁移。
+
+## 每圈出阵事实（sortie 逐圈事件，2026-09 扩展）
+
+出阵/异去的每一圈是一条可长期积累的事实，作为地图时间与掉落矩阵的底座。
+一圈的生命周期：`sortie.loop_started`（开始边界）→ 恰好一个结束事件
+（`sortie.completed` / `sortie.retreated_before_boss` / `sortie.interrupted`）。
+只记录真实可证的状态；证明不了的字段写 `null` 并给原因，绝不拿任务结束状态
+冒充出阵结果，也绝不按地图固定节点数猜战斗数。
+
+共用 payload 字段（`loop_started` 只有前 8 个）：
+
+```json
+{"mode": "sortie|yosari", "chapter": 5, "map_no": 4, "team_no": 3,
+ "sequence": 2, "attempt": 1, "march_mode": "script|delegated",
+ "outcome": "completed|retreated_before_boss|interrupted|unknown",
+ "duration_seconds": 301.5,
+ "battle_count": 4, "battle_count_basis": "battle_result_page_edges",
+ "drop_observation": "confirmed_none", "drops_recognized": 0,
+ "interrupt_reason": "auto_march_stopped",
+ "drop_observation_reason": "auto_march_skips_obtain_animation",
+ "battle_count_note": "..."}
+```
+
+- `sequence`：第几圈；`attempt`：该圈的第几次出发（中断后原圈重试会 +1，
+  同一 `sequence` 可能出现 `interrupted` + `completed` 多条，按 `attempt` 区分）。
+- `duration_seconds`：从确认全部通过、部队真正出发，到回本丸/回异去小图页的
+  纯游戏流程耗时，第一圈也有精确起点；`loop_started` 的 `ts` 是同一边界，
+  供跨事件连接（取代旧的「相邻 completed 写库时间差」近似，旧近似仍兼容）。
+- `outcome`：`completed`（正常打完王点）/ `retreated_before_boss`（王点前撤退，
+  事件类型为 `sortie.retreated_before_boss`）/ `interrupted`（伤势中断且已确认
+  安全回本丸）/ `unknown`（监控超时或返回本丸失败，队伍最终状态未被见证）。
+- `battle_count`：结算页「戦闘結果」模板（`battle/ui战斗结果.png`）出现沿计数，
+  消失后重新武装，同一画面重复帧不重数；锚点经 2026-09-05 异去委托行军 148 帧
+  运行实录校准（9 场全中、场间空窗 ≥6 帧）。**正常完成却数到 0 场 = 锚点失明
+  （王点战必有结算页），此时写 `null` + `battle_count_note`，不写 0**。
+  中断/撤退圈 0 场是合法真值，照常记录。
+- `drop_observation`：`recognized`（本圈认到掉落，`drops_recognized` 给数量，
+  明细在 `sword.obtained`）；`confirmed_none`（脚本手动行军且全程逐帧盯屏、
+  认人流程无异常，确实没掉，**可进掉率分母**）；`not_observed`（观察不成立，
+  **不进掉率分母**），原因见 `drop_observation_reason`：
+  `auto_march_skips_obtain_animation`（委托自动行军游戏自己跳过获得动画）/
+  `observation_lost`（结局未知）/ `recognizer_error`（认人流程内部异常）。
+- `sortie.interrupted` 不算完成圈，不进 `run_summary` 的 loops 和圈速分母。
+- 资源不摊到单圈：整轮库存差值、途中 `inventory.peek`、地图随机资源点仍归整轮
+  任务，逐圈事件不带资源字段。
 
 ## 手动活动（manual-sessions）
 
