@@ -163,6 +163,13 @@ function paceSampleDate(timestamp: number) {
   }).format(new Date(timestamp * 1000))
 }
 
+function observedTime(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Shanghai',
+  }).format(new Date(timestamp * 1000))
+}
+
 function supportsTokenLearning(entry: EventTimelineEntry) {
   return Boolean(abacusFor(entry)?.keys_total)
 }
@@ -273,6 +280,11 @@ function candidateRange(candidate: EventTimelineCandidate) {
                   <p v-if="entry.summary.koban_spent != null">{{ entry.summary.koban_spent > 0 ? `补票花了 ${fmt(entry.summary.koban_spent)} 小判` : '白票全程够用，一个小判没花' }}</p>
                   <small>本期数据已归档，下期复刻狐之助会参考。</small>
                 </template>
+              </section>
+
+              <section v-if="group.key === 'ongoing' && entry.budget?.tama_current != null" class="event-tama-current">
+                <span><small>本期所持</small><b>{{ fmt(entry.budget.tama_current) }} 玉</b></span>
+                <p>{{ entry.budget.tama_observed_at ? `${observedTime(entry.budget.tama_observed_at)} 收工后读到` : '最近一次收工后读到' }}</p>
               </section>
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
@@ -404,6 +416,11 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-range { flex: none; color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .event-mobile-moment { display: none; }
 .event-summary { margin: 9px 0 0; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
+.event-tama-current { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-top: 11px; padding: 10px 12px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-left: 4px solid #5b813f; border-radius: 8px; }
+.event-tama-current span { display: grid; gap: 1px; }
+.event-tama-current small { color: #426b36; font-size: 10px; font-weight: 700; }
+.event-tama-current b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.event-tama-current p { margin: 0; color: var(--ink-dim); font-size: 11px; }
 .event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
 .event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-pace-calculator > header > span { display: grid; gap: 1px; }
@@ -490,6 +507,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .is-ongoing .event-mobile-moment { color: #4d7137; }
   .timeline-event-card { padding: 12px; }
   .event-budget, .event-estimate { align-items: stretch; flex-direction: column; }
+  .event-tama-current { align-items: flex-start; flex-direction: column; gap: 4px; }
   .event-pace-calculator > header { align-items: flex-start; flex-direction: column; gap: 7px; }
   .event-pace-calculator > header > span:last-child { text-align: left; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }

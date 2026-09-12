@@ -382,6 +382,8 @@ export interface EventAbacus {
   shortfall: number | null
   yield_per_floor?: number | null
   yield_sessions?: number | null
+  tama_current?: number | null
+  tama_observed_at?: number | null
   message: string
 }
 
@@ -407,7 +409,41 @@ export interface EventTimelineBudget {
   runs_needed?: number | null
   free_runs?: number | null
   keys_obtained?: number | null
+  tama_current?: number | null
+  tama_observed_at?: number | null
   message: string
+}
+
+// ---- 所持刀剑（/api/data/sword-inventory/latest） ----
+
+export interface SwordInventoryRow {
+  sword_id: string
+  name_zh: string
+  level: number | null
+  tou_level: number | null
+  survival: number | null
+  survival_max: number | null
+  fatigue: number | null
+  fatigue_max: number | null
+  stats: Record<string, number | boolean>
+  kiwame_date: string | null
+  locked: boolean | null
+  page_no: number | null
+}
+
+export interface SwordInventorySnapshot {
+  id: number
+  captured_at: number
+  owned: number | null
+  capacity: number | null
+  sword_count: number
+  missing: number | null
+  swords: SwordInventoryRow[]
+}
+
+export interface SwordInventoryResponse {
+  schema_version: number
+  snapshot: SwordInventorySnapshot | null
 }
 
 export interface EventTimelineEntry {

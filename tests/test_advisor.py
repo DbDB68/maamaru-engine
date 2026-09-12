@@ -756,6 +756,37 @@ class EventAbacusTests(unittest.TestCase):
         self.assertEqual(abacus["message"], "按本丸实测圈速安排挂机时间。")
         self.assertIsNone(abacus["koban_cost"])
 
+    def test_hanafuda_current_tama_stays_inside_event_window(self):
+        card = {"start_at": "2026-09-10T10:00:00+08:00",
+                "end_at": "2026-09-24T05:00:00+08:00"}
+        events = [
+            {"ts": datetime.fromisoformat("2026-09-12T12:00:00+08:00").timestamp(),
+             "payload": {"tama_total": 12345}},
+            {"ts": datetime.fromisoformat("2026-08-12T12:00:00+08:00").timestamp(),
+             "payload": {"tama_total": 99999}},
+        ]
+
+        class _Store:
+            def recent_events(self, limit=100, event_type=None):
+                self.requested = event_type
+                return events
+
+        store = _Store()
+        result = advisor.latest_hanafuda_tama(store, card)
+        self.assertEqual(store.requested, "hanafuda.run_completed")
+        self.assertEqual(result["current"], 12345)
+
+    def test_hanafuda_current_tama_ignores_legacy_delta_only_event(self):
+        card = {"start_date": "2026-09-10", "end_date": "2026-09-24"}
+
+        class _Store:
+            def recent_events(self, limit=100, event_type=None):
+                return [{"ts": datetime.fromisoformat(
+                    "2026-09-12T12:00:00+08:00").timestamp(),
+                         "payload": {"tama": 744}}]
+
+        self.assertIsNone(advisor.latest_hanafuda_tama(_Store(), card))
+
     def test_no_keys_data_means_learning(self):
         abacus = advisor.event_abacus("江户城潜入调查", _edo_card(),
                                       measured=None, today=self.TODAY)

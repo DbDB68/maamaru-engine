@@ -993,6 +993,12 @@ def get_planning(store, goals_path: Path, *,
     # 预算 vs 家底的判定也在服务端做：前端只展示，不许自己拼目标数字
     koban_now = current.get("小判")
     for abacus in abacuses:
+        card = cards.get(abacus.get("event")) or {}
+        if card.get("mechanics") == "hanafuda":
+            tama = latest_hanafuda_tama(store, card)
+            if tama:
+                abacus["tama_current"] = tama["current"]
+                abacus["tama_observed_at"] = tama["observed_at"]
         if abacus.get("goal_mode") == "stock_target":
             abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
             abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
@@ -1206,6 +1212,27 @@ def _card_window(card: dict):
     except ValueError:
         pass
     return None, None, False
+
+
+def latest_hanafuda_tama(store, card: dict) -> dict | None:
+    """取本期秘宝之里最近一次读到的活动总玉数，绝不串到复刻活动。"""
+    start_dt, end_dt, _ = _card_window(card)
+    start_ts = start_dt.timestamp() if start_dt else None
+    end_ts = end_dt.timestamp() if end_dt else None
+    for event in store.recent_events(
+            limit=100, event_type="hanafuda.run_completed"):
+        ts = event.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        if start_ts is not None and ts < start_ts:
+            continue
+        if end_ts is not None and ts > end_ts:
+            continue
+        payload = event.get("payload")
+        total = payload.get("tama_total") if isinstance(payload, dict) else None
+        if isinstance(total, (int, float)) and total >= 0:
+            return {"current": int(total), "observed_at": float(ts)}
+    return None
 
 
 def _count_free_tickets(card: dict, start_dt: datetime, end_dt: datetime) -> int:

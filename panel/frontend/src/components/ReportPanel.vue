@@ -8,6 +8,7 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
+import SwordInventoryPanel from './report/SwordInventoryPanel.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
@@ -16,7 +17,7 @@ const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning' }
 
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>(props.initialSection === 'planning' ? 'planning' : 'report')
-const view = ref<'chart' | 'records'>(props.initialSection === 'records' ? 'records' : 'chart')
+const view = ref<'chart' | 'records' | 'swords'>(props.initialSection === 'records' ? 'records' : 'chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
 const planning = ref<PlanningReport | null>(null)
@@ -76,6 +77,7 @@ const honmaruItems = [
 const viewItems = [
   { value: 'chart', label: '概览' },
   { value: 'records', label: '全部记录' },
+  { value: 'swords', label: '所持刀剑' },
 ]
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 
@@ -686,7 +688,7 @@ function selectRecordDate(date: string) {
   void loadRecordDay(date)
 }
 
-function switchView(nextView: 'chart' | 'records') {
+function switchView(nextView: 'chart' | 'records' | 'swords') {
   recordHighlightRunId.value = ''
   view.value = nextView
   if (nextView !== 'records') return
@@ -1151,7 +1153,7 @@ onMounted(async () => {
       <p v-if="error" class="report-error">{{ error }}</p>
 
       <div v-if="honmaruTab === 'report'" class="report-context-toolbar">
-        <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="成绩单视图" @update:model-value="switchView($event as 'chart' | 'records')" />
+        <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records' | 'swords')" />
         <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
       </div>
       <template v-if="honmaruTab === 'report'">
@@ -1315,6 +1317,7 @@ onMounted(async () => {
       </template>
 
       <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      <SwordInventoryPanel v-if="view === 'swords'" />
       </template>
 
       <template v-else>

@@ -156,15 +156,22 @@ class HanafudaMixin:
                 if hasattr(self, "record_event"):
                     self.record_event("hanafuda.run_completed",
                                       run_no=runs_done, team_no=team_no,
-                                      difficulty=difficulty, tama=delta)
+                                      difficulty=difficulty, tama=delta,
+                                      tama_total=tama_after)
                 yield (f"[花札] ✓ 第 {runs_done} 圈收工，本圈玉 {delta:+d} "
                        f"（活动累计 {tama_after} 个）")
             else:
                 if hasattr(self, "record_event"):
-                    self.record_event("hanafuda.run_completed",
-                                      run_no=runs_done, team_no=team_no,
-                                      difficulty=difficulty)
-                yield f"[花札] ✓ 第 {runs_done} 圈收工（玉数没读出来，不碍事）"
+                    payload = {"run_no": runs_done, "team_no": team_no,
+                               "difficulty": difficulty}
+                    if tama_after is not None:
+                        payload["tama_total"] = tama_after
+                    self.record_event("hanafuda.run_completed", **payload)
+                if tama_after is not None:
+                    yield (f"[花札] ✓ 第 {runs_done} 圈收工，本圈增量没读出来 "
+                           f"（活动累计 {tama_after} 个）")
+                else:
+                    yield f"[花札] ✓ 第 {runs_done} 圈收工（玉数没读出来，不碍事）"
 
         yield f"[花札] 收工，跑了 {runs_done} 圈，合计带回 {total_tama} 个玉"
 

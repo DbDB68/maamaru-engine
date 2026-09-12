@@ -153,6 +153,8 @@ def _entry(name: str, card: dict, abacus: dict | None,
             "runs_needed": abacus.get("runs_needed"),
             "free_runs": abacus.get("free_runs"),
             "keys_obtained": abacus.get("keys_obtained"),
+            "tama_current": abacus.get("tama_current"),
+            "tama_observed_at": abacus.get("tama_observed_at"),
             "message": abacus.get("message") or "",
         }
     return entry

@@ -543,6 +543,21 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(events["items"][0]["payload"]["name"], "测试刀")
         self.assertEqual(observations["items"][0]["expected"], "确定")
 
+    def test_latest_sword_inventory_api_keeps_duplicate_copies(self):
+        from panel.server import api_latest_sword_inventory
+
+        self.store.save_sword_snapshot([
+            {"sword_id": "album_039", "name_zh": "前田藤四郎", "level": 99},
+            {"sword_id": "album_039", "name_zh": "前田藤四郎", "level": 1},
+        ], owned=2, capacity=300, missing=0, captured_at=100)
+        with patch("touken.telemetry._store", self.store):
+            response = asyncio.run(api_latest_sword_inventory())
+
+        self.assertEqual(response["schema_version"], TELEMETRY_SCHEMA_VERSION)
+        self.assertEqual(response["snapshot"]["owned"], 2)
+        self.assertEqual([row["level"] for row in response["snapshot"]["swords"]],
+                         [99, 1])
+
     def test_manual_session_api_roundtrip_keeps_own_contract(self):
         from panel.server import (api_add_manual_session, api_manual_sessions,
                                   api_update_manual_session)

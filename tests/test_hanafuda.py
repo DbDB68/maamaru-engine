@@ -121,6 +121,60 @@ class HanafudaPanelTests(unittest.TestCase):
         self.assertEqual(agent.hanafuda_args["rotate_captain_margin"], 10)
 
 
+class HanafudaTelemetryTests(unittest.TestCase):
+    def test_completed_run_records_current_total_tama(self):
+        class _Maa:
+            def screenshot(self, force=False):
+                return None
+
+            def template_match(self, template):
+                return template if template == "title.png" else None
+
+        class _Host(HanafudaMixin):
+            def __init__(self):
+                self.maa = _Maa()
+                self.current_location = "出阵"
+                self.events = []
+                self.tama = iter([100, 777])
+                self.config = {
+                    "team_select": {"teams": {"3": [0, 0]}},
+                    "hanafuda": {
+                        "team_no": 3, "difficulty": 4, "max_runs": 1,
+                        "ui_title": {"template": "title.png"},
+                        "activity_entry": {"template": "entry.png"},
+                        "difficulty_cards": {"4": [0, 0]},
+                    },
+                }
+
+            def navigate_to_stream(self, target):
+                return iter(())
+
+            def set_progress(self, value):
+                pass
+
+            def _read_tama_total(self, cfg):
+                return next(self.tama)
+
+            def _enter_hanafuda_map_stream(self, *args, **kwargs):
+                if False:
+                    yield None
+                return True, True
+
+            def _watch_round_stream(self, *args, **kwargs):
+                if False:
+                    yield None
+                return True
+
+            def record_event(self, event_type, **payload):
+                self.events.append((event_type, payload))
+
+        host = _Host()
+        list(host.hanafuda_stream(max_runs=1))
+        self.assertEqual(host.events[0][0], "hanafuda.run_completed")
+        self.assertEqual(host.events[0][1]["tama"], 677)
+        self.assertEqual(host.events[0][1]["tama_total"], 777)
+
+
 class _WatchMaa:
     """按帧出题的识别假人：每帧给出模板集/OCR 命中集/对话条文字。"""
 

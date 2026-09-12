@@ -2174,6 +2174,17 @@ async def api_data_events(limit: int = 100, event_type: str = "",
     }
 
 
+@app.get("/api/data/sword-inventory/latest")
+async def api_latest_sword_inventory():
+    """最近一份所持刀剑盘点；逐把保留，同名刀不会合并。"""
+    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    store = get_telemetry_store()
+    snapshots = store.recent_sword_snapshots(limit=1)
+    latest = (store.sword_snapshot_detail(snapshots[0]["id"])
+              if snapshots else None)
+    return {"schema_version": TELEMETRY_SCHEMA_VERSION, "snapshot": latest}
+
+
 @app.get("/api/data/runs")
 async def api_data_runs(limit: int = 20, script: str = "",
                         before_started_at: float | None = None,

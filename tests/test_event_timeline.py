@@ -121,6 +121,16 @@ class EntryContentTests(unittest.TestCase):
         self.assertEqual(entry["budget"]["shortfall"], 30600)
         self.assertFalse(entry["budget"]["sufficient"])
 
+    def test_current_tama_is_forwarded_to_activity_card(self):
+        cards = {"秘宝之里": _card(
+            start_at="2026-08-25T10:00:00+08:00",
+            end_at="2026-09-05T05:00:00+08:00")}
+        abacuses = [_abacus("秘宝之里", tama_current=12345,
+                            tama_observed_at=NOW.timestamp())]
+        entry = event_timeline.build_timeline(cards, abacuses, [], now=NOW)["ongoing"][0]
+        self.assertEqual(entry["budget"]["tama_current"], 12345)
+        self.assertEqual(entry["budget"]["tama_observed_at"], NOW.timestamp())
+
     def test_event_appears_once_with_both_ends(self):
         # 规则：一场活动只出现一次，开始和结束写在同一张卡上
         cards = {"单场": _card(start_at="2026-08-25T10:00:00+08:00",
