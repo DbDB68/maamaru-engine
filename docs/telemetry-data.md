@@ -71,7 +71,9 @@
 - `injury_warning.denied`
 - `practice.result`
 - `sortie.loop_started`、`sortie.completed`、`sortie.retreated_before_boss`、`sortie.interrupted`（逐圈事实，见下文「每圈出阵事实」）
-- `sword.obtained`（掉落认人成功；经 `run_id` + payload `sequence` 关联到圈）
+- `sword.obtained`（掉落认人成功；经 `run_id` + payload `sequence` + `attempt`
+  关联到具体一圈的某次出发。2026-09 之前的旧事件没有 `attempt`，消费时按
+  「归属未知」处理，不得猜成某次尝试）
 - `yosari.fragments`（异去一圈末的碎片库存读数与差分）、`yosari.milestone_claimed`
 - `raid.round_completed`
 - `pumpkin.sortie_completed`、`pumpkin.board_completed`、`pumpkin.token_used`、`pumpkin.sword_obtained`
@@ -90,10 +92,13 @@
 ## 每圈出阵事实（sortie 逐圈事件，2026-09 扩展）
 
 出阵/异去的每一圈是一条可长期积累的事实，作为地图时间与掉落矩阵的底座。
-一圈的生命周期：`sortie.loop_started`（开始边界）→ 恰好一个结束事件
+一圈以 `sortie.loop_started` 为开始边界；正常生命周期随后恰好有一个结束事件
 （`sortie.completed` / `sortie.retreated_before_boss` / `sortie.interrupted`）。
-只记录真实可证的状态；证明不了的字段写 `null` 并给原因，绝不拿任务结束状态
-冒充出阵结果，也绝不按地图固定节点数猜战斗数。
+**但 `loop_started` 允许没有结束事件**：面板手动停止和看门狗会直接终止子进程，
+未闭合的 `loop_started` 表示进程被外部终止、崩溃或脚本来不及见证结局；
+消费者必须把它当「结果未知」，不得为了闭合编造 outcome，也不得把任务结束
+状态冒充出阵结果。只记录真实可证的状态；证明不了的字段写 `null` 并给原因，
+也绝不按地图固定节点数猜战斗数。
 
 共用 payload 字段（`loop_started` 只有前 8 个）：
 
@@ -112,8 +117,10 @@
 - `sequence`：第几圈；`attempt`：该圈的第几次出发（中断后原圈重试会 +1，
   同一 `sequence` 可能出现 `interrupted` + `completed` 多条，按 `attempt` 区分）。
 - `duration_seconds`：从确认全部通过、部队真正出发，到回本丸/回异去小图页的
-  纯游戏流程耗时，第一圈也有精确起点；`loop_started` 的 `ts` 是同一边界，
-  供跨事件连接（取代旧的「相邻 completed 写库时间差」近似，旧近似仍兼容）。
+  纯游戏流程耗时，第一圈也有精确起点；`loop_started` 的 `ts` 是同一边界。
+  这些精确数据**为后续替换旧近似提供底座**：当前 `gameplay_planning` 的圈速和
+  `run_summary` 的 `average_loop_seconds` 仍按相邻完成事件的写库时间戳估算，
+  消费方尚未切换。
 - `outcome`：`completed`（正常打完王点）/ `retreated_before_boss`（王点前撤退，
   事件类型为 `sortie.retreated_before_boss`）/ `interrupted`（伤势中断且已确认
   安全回本丸）/ `unknown`（监控超时或返回本丸失败，队伍最终状态未被见证）。

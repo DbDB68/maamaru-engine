@@ -39,6 +39,10 @@ class _FrameMaa:
     def ocr(self, expected, roi=None, match_mode="contains"):
         if expected == "自动行军停止" and "march_stop" in self.frame:
             return Point(1, 1)
+        if expected == "新的刀剑男士" and "banner" in self.frame:
+            return Point(640, 370)
+        if expected == "刀派" and "badge" in self.frame:
+            return Point(1135, 100)
         return None
 
     def ocr_all(self, roi, image=None):
@@ -51,7 +55,8 @@ class _FrameMaa:
 class _LoopHost(SortieMixin):
     """能把 _map_sortie_stream 开进行军监控主循环的最小宿主。"""
 
-    def __init__(self, frames, *, drop_id=None, injuries=()):
+    def __init__(self, frames, *, drop_id=None, injuries=(),
+                 production_drop_reader=False):
         self.config = {
             "sortie": {
                 "decide_button": {"template": "decide.png"},
@@ -69,6 +74,7 @@ class _LoopHost(SortieMixin):
         self.events = []
         self._drop_id = drop_id
         self._injuries = list(injuries)
+        self._production_drop_reader = production_drop_reader
 
     def record_event(self, event_type, **payload):
         self.events.append({"ts": time.time(), "event_type": event_type,
@@ -115,6 +121,8 @@ class _LoopHost(SortieMixin):
         return Point(1100, 600) if "march" in self.maa.frame else None
 
     def _read_drop_sword(self):
+        if self._production_drop_reader:
+            return super()._read_drop_sword()
         if self._drop_id is not None and "drop" in self.maa.frame:
             return {"sword_id": self._drop_id,
                     "name": "厚藤四郎", "name_jp": "厚藤四郎"}
@@ -264,6 +272,42 @@ class LoopFactTests(unittest.TestCase):
         self.assertEqual(payload["drop_observation"], "not_observed")
         self.assertEqual(payload["drop_observation_reason"],
                          "observation_lost")
+
+    def test_result_edge_consumed_inside_drop_reader_still_counted(self):
+        # 回归：生产版 _read_drop_sword 内部会 screenshot(force=True) 取新帧。
+        # 第二场战斗的结算页若在掉落观察内部被取到，也绝不能绕过计数。
+        # 帧剧本：结算1 →（外层计数）→ 掉落观察内部吃掉 横幅帧 + 结算2 → 空帧
+        frames = (PRE
+                  + [{"result"}]            # 外层看见第 1 场结算页
+                  + [{"banner"}, {"result"}]  # 掉落观察耐心模式内部取帧
+                  + [{}] * 8                # 耐心模式耗尽 10 次尝试
+                  + [{"home"}])
+        host = _LoopHost(frames, production_drop_reader=True)
+        _run(host, auto_march=False, max_loops=1)
+        payload = host.by_type("sortie.completed")[0]["payload"]
+        self.assertEqual(payload["battle_count"], 2)
+
+    def test_drop_belongs_to_the_attempt_that_saw_it(self):
+        # attempt 1 认了掉落后中伤中断，attempt 2 同 sequence 重试完成：
+        # 刀必须明确挂在 attempt 1 上，completed 的 attempt 2 是 confirmed_none
+        frames = (PRE
+                  + [{"drop"}, {"march"}]
+                  + PRE
+                  + [{"result", "march"}, {}, {"home"}])
+        host = _LoopHost(frames, drop_id=130,
+                         injuries=[None, "中伤", None])
+        _run(host, auto_march=False, max_loops=1)
+
+        obtained = host.by_type("sword.obtained")
+        self.assertEqual(len(obtained), 1)
+        self.assertEqual(obtained[0]["payload"]["sequence"], 1)
+        self.assertEqual(obtained[0]["payload"]["attempt"], 1)
+        interrupted = host.by_type("sortie.interrupted")[0]["payload"]
+        self.assertEqual(interrupted["attempt"], 1)
+        self.assertEqual(interrupted["drop_observation"], "recognized")
+        completed = host.by_type("sortie.completed")[0]["payload"]
+        self.assertEqual(completed["attempt"], 2)
+        self.assertEqual(completed["drop_observation"], "confirmed_none")
 
 
 class OldDataCompatTests(unittest.TestCase):

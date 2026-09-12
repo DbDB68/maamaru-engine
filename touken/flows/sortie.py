@@ -448,8 +448,9 @@ class SortieMixin:
             # ========== 7.5 一圈的开始边界：确认全部通过、部队真正出发 ==========
             # 从这里到回本的耗时是纯游戏流程耗时，第一圈也有精确起点。
             loop_started_at = time.time()
-            battles_this_loop = 0
-            battle_result_visible = False
+            # 战斗结算观察是实例级状态：掉落识别、返回本丸等内部取到的新帧
+            # 也走同一个入口计数，不允许任何帧绕过（见 _watch_battle_frame）
+            self._battle_watch = {"battles": 0, "visible": False}
             drops_this_loop = []
             loop_march_mode = "delegated" if delegated_march else "script"
             self._drop_watch_failed = False
@@ -466,7 +467,8 @@ class SortieMixin:
                     event_type, outcome=outcome, reason=reason,
                     cfg_key=cfg_key, chapter=chapter, map_no=map_no,
                     team_no=team_no, loop_no=loop_no, attempt=attempt,
-                    started_at=loop_started_at, battles=battles_this_loop,
+                    started_at=loop_started_at,
+                    battles=self._battle_watch["battles"],
                     march_mode=loop_march_mode, drops=drops_this_loop)
 
             yield f"[出阵] 🐎 部队{team_no}出发！行军监控开着呢，我全程盯着"
@@ -487,16 +489,9 @@ class SortieMixin:
                     watch_seq += 1
                     self._dump_watch_frame(watch_dir, loop_no, watch_seq)
 
-                # 战斗计数锚点：结算页「戦闘結果」每场战斗必现且停留 ≥2 帧
-                # （2026-09-05 异去委托行军 148 帧运行实录，9 场全中、场间空窗
-                # ≥6 帧）。出现沿计一场、消失后重新武装，同一画面重复帧不重数。
+                # 战斗计数：每张新帧统一过 _watch_battle_frame，
                 # 必须放在任何可能点掉结算页的动作之前。
-                if self.maa.template_match("battle/ui战斗结果.png"):
-                    if not battle_result_visible:
-                        battles_this_loop += 1
-                    battle_result_visible = True
-                else:
-                    battle_result_visible = False
+                self._watch_battle_frame()
 
                 if self._deny_heavy_injury_warning(cfg):
                     yield "[出阵] 🛑 出现重伤行军警告，已点【否】，准备返回本丸"
@@ -635,7 +630,8 @@ class SortieMixin:
                             self.record_event(
                                 "sword.obtained", **dropped,
                                 source="sortie.drop", chapter=chapter,
-                                map_no=map_no, sequence=loop_no)
+                                map_no=map_no, sequence=loop_no,
+                                attempt=attempt)
                 else:
                     drop_credit = None
 
@@ -696,6 +692,25 @@ class SortieMixin:
         yield f"[出阵] ✓ 全部 {max_loops} 圈跑完，部队{team_no}辛苦啦，收工！"
         return
 
+    def _watch_battle_frame(self):
+        """行军期间每张实际运行帧的统一战斗结算观察入口。
+
+        锚点：结算页「戦闘結果」每场战斗必现且停留 ≥2 帧（2026-09-05 异去
+        委托行军 148 帧运行实录，9 场全中、场间空窗 ≥6 帧）。出现沿计一场、
+        消失后重新武装，同一画面重复帧不重数。掉落识别、返回本丸等流程
+        内部取到的新帧也必须过这里，不允许任何帧绕过计数。
+        未处于行军监控（self._battle_watch 为 None）时直接返回。
+        """
+        watch = getattr(self, "_battle_watch", None)
+        if watch is None:
+            return
+        if self.maa.template_match("battle/ui战斗结果.png"):
+            if not watch["visible"]:
+                watch["battles"] += 1
+            watch["visible"] = True
+        else:
+            watch["visible"] = False
+
     def _record_sortie_loop_end(self, event_type, *, outcome, reason=None,
                                 cfg_key, chapter, map_no, team_no, loop_no,
                                 attempt, started_at, battles, march_mode,
@@ -752,6 +767,7 @@ class SortieMixin:
         if battle_note:
             payload["battle_count_note"] = battle_note
         self.record_event(event_type, **payload)
+        self._battle_watch = None  # 本圈观察关闭，下一圈出发时重新武装
 
     # 掉落获得画面的识别点位（1280x720，真机截图校准）
     _OBTAIN_BADGE_ROI = (1105, 40, 1170, 160)   # 右侧立牌的红底「刀派」徽（稀有款）
@@ -783,6 +799,11 @@ class SortieMixin:
         名字走名册严格匹配（关模糊兜底）。认不到返回 None。
         """
         try:
+            def _grab():
+                # 内部取的每一张新帧也是行军观察帧，必须过战斗计数入口
+                self.maa.screenshot(force=True)
+                self._watch_battle_frame()
+
             patient = False
             for attempt in range(10):  # 耐心模式覆盖横幅→名牌约 5 秒，余量翻倍
                 tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
@@ -812,7 +833,7 @@ class SortieMixin:
                                     "name": info.get("name_zh") or info["name"],
                                     "name_jp": info["name"]}
                     time.sleep(0.8)  # 名牌在但名字没匹配上（OCR 花了），重读
-                    self.maa.screenshot(force=True)
+                    _grab()
                     continue
                 # 名牌区空空：横幅在 = 掉刀预告，转耐心模式等获得画面到位
                 if not patient and self.maa.ocr(
@@ -821,17 +842,17 @@ class SortieMixin:
                     patient = True
                 if patient:
                     time.sleep(0.8)
-                    self.maa.screenshot(force=True)
+                    _grab()
                     continue
                 # 没横幅：有立牌=获得画面，等对话框滑入重读；
                 # 没立牌先给一拍（对话框可能还在路上），第二拍还空就不是获得画面
                 if self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
                     time.sleep(0.8)
-                    self.maa.screenshot(force=True)
+                    _grab()
                     continue
                 if attempt == 0:
                     time.sleep(0.6)
-                    self.maa.screenshot(force=True)
+                    _grab()
                     continue
                 return None
         except Exception:
@@ -1096,6 +1117,7 @@ class SortieMixin:
         stop_btn = None
         for _ in range(6):
             self.maa.screenshot(force=True)
+            self._watch_battle_frame()  # 停止横幅下的结算页也算行军观察帧
             stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
             if stop_btn:
                 break
