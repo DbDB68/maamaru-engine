@@ -387,6 +387,13 @@ export interface EventAbacus {
   tama_observed_at?: number | null
   tama_target?: number | null
   tama_remaining?: number | null
+  tama_per_loop?: number | null
+  tama_samples?: number | null
+  seconds_per_loop?: number | null
+  estimated_seconds?: number | null
+  seconds_to_end?: number | null
+  can_finish?: boolean | null
+  free_tickets_remaining?: number | null
   message: string
 }
 
@@ -417,6 +424,13 @@ export interface EventTimelineBudget {
   tama_observed_at?: number | null
   tama_target?: number | null
   tama_remaining?: number | null
+  tama_per_loop?: number | null
+  tama_samples?: number | null
+  seconds_per_loop?: number | null
+  estimated_seconds?: number | null
+  seconds_to_end?: number | null
+  can_finish?: boolean | null
+  free_tickets_remaining?: number | null
   message: string
 }
 

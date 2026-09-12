@@ -210,6 +210,22 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(result["play_duration_seconds"], 160)
         self.assertEqual(result["average_loop_seconds"], 100)
 
+    def test_run_summary_counts_hanafuda_settlements_as_loops(self):
+        self.store.start_run("hana-1", "workflow", started_at=100)
+        conn = self.store._conn()
+        for ts, run_no, tama in ((160, 1, 307), (460, 2, 666)):
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, 'hana-1', 'workflow', 'hanafuda.run_completed', ?)",
+                (ts, __import__('json').dumps({"run_no": run_no, "tama": tama})),
+            )
+        conn.commit()
+        self.store.finish_run("hana-1", "completed", ended_at=480)
+
+        result = self.store.run_summary("hana-1")
+        self.assertEqual(result["loops"], 2)
+        self.assertEqual(result["average_loop_seconds"], 300)
+
     def test_run_summary_does_not_count_empty_repair_visit(self):
         self.store.start_run("run-1", "osaka", started_at=100)
         self.store.record_event("osaka.floor_completed", {"selected_floor": 88})
@@ -557,23 +573,6 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(response["snapshot"]["owned"], 2)
         self.assertEqual([row["level"] for row in response["snapshot"]["swords"]],
                          [99, 1])
-
-    def test_event_tama_target_api_saves_to_user_status_dir(self):
-        from panel.server import api_save_event_tama_target
-
-        class _Req:
-            async def json(self):
-                return {"event": "秘宝之里", "target": 80000}
-
-        status_dir = Path(self.temp.name) / "status"
-        status_dir.mkdir()
-        with patch("panel.server.STATUS_DIR", status_dir):
-            response = asyncio.run(api_save_event_tama_target(_Req()))
-
-        self.assertTrue(response["ok"])
-        self.assertEqual(response["target"], 80000)
-        saved = (status_dir / "events_meta.local.json").read_text(encoding="utf-8")
-        self.assertIn('"tama_target": 80000', saved)
 
     def test_manual_session_api_roundtrip_keeps_own_contract(self):
         from panel.server import (api_add_manual_session, api_manual_sessions,

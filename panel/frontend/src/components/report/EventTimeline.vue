@@ -10,7 +10,6 @@ const props = defineProps<{
   error?: string
   estimateSaving?: string
   goalSaving?: string
-  tamaTargetSaving?: string
   activityPaces?: Record<string, ActivityPace[]>
 }>()
 
@@ -18,7 +17,6 @@ const emit = defineEmits<{
   (event: 'save-estimate', name: string, value: number): void
   (event: 'add-goal', abacus: EventAbacus): void
   (event: 'add-stock-goal', abacus: EventAbacus, target: number): void
-  (event: 'save-tama-target', abacus: EventAbacus, target: number): void
 }>()
 
 const estimateInputs = ref<Record<string, string>>({})
@@ -36,7 +34,6 @@ onBeforeUnmount(() => window.clearInterval(clockTimer))
 watch(() => props.abacuses, (items) => {
   for (const item of items) {
     if (item.keys_per_run != null) estimateInputs.value[item.event] = String(item.keys_per_run)
-    if (item.tama_target != null) targetInputs.value[item.event] = String(item.tama_target)
   }
 }, { immediate: true })
 
@@ -188,6 +185,11 @@ function experienceLabel(entry: EventTimelineEntry) {
 function eventSummary(entry: EventTimelineEntry) {
   const abacus = abacusFor(entry)
   if (!abacus) return entry.note
+  if (abacus.mechanics === 'hanafuda') {
+    if (abacus.tama_current == null) return `目标最高档 ${fmt(abacus.tama_target || 300000)} 玉`
+    if (!abacus.tama_remaining) return '最高档已经拿到啦 🎉'
+    return `已攒 ${fmt(abacus.tama_current)} 玉，离最高档还差 ${fmt(abacus.tama_remaining)} 玉`
+  }
   if (abacus.runs_needed != null) {
     const ticketNote = entry.budget?.koban_cost === 0 ? ' · 免费手形够目标' : ''
     if (abacus.keys_obtained) {
@@ -209,15 +211,44 @@ function submitStockGoal(entry: EventTimelineEntry) {
   if (abacus) emit('add-stock-goal', abacus, Number(targetInputs.value[entry.name]))
 }
 
-function submitTamaTarget(entry: EventTimelineEntry) {
-  const abacus = abacusFor(entry)
-  if (abacus) emit('save-tama-target', abacus, Number(targetInputs.value[entry.name]))
-}
-
 function tamaProgress(entry: EventTimelineEntry) {
   const target = entry.budget?.tama_target
   if (!target) return 0
   return Math.min(100, Math.max(0, Number(entry.budget?.tama_current || 0) / target * 100))
+}
+
+function tamaEstimateText(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (!budget) return ''
+  if (budget.runs_needed == null) {
+    return budget.tama_samples
+      ? `已记 ${fmt(budget.tama_samples)} 圈，样本还不够稳，再完成几圈后可估算。`
+      : '平均每圈带多少玉还没数过，再完成几圈后可估算。'
+  }
+  if (budget.runs_needed === 0) return ''
+  const time = budget.estimated_seconds != null ? `，挂机约 ${paceDuration(budget.estimated_seconds)}` : ''
+  return `按本期 ${fmt(budget.tama_samples)} 圈实测平均每圈约 ${fmt(budget.tama_per_loop)} 玉，还要打约 ${fmt(budget.runs_needed)} 圈${time}。`
+}
+
+function tamaTimeText(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (!budget || budget.can_finish == null || budget.estimated_seconds == null) return ''
+  const secondsToEnd = budget.seconds_to_end ?? 0
+  if (!budget.can_finish) return `离收摊只剩 ${paceDuration(secondsToEnd)}，照现在的圈速，即使全天挂机也来不及。`
+  const daysLeft = secondsToEnd / 86400
+  const dailySeconds = daysLeft > 0 ? budget.estimated_seconds / daysLeft : budget.estimated_seconds
+  return `离收摊还有 ${paceDuration(secondsToEnd)}，按现在的效率，平均每天要留约 ${paceDuration(dailySeconds)}。`
+}
+
+function tamaTicketText(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (!budget || budget.runs_needed === 0 || budget.free_tickets_remaining == null) return ''
+  const base = `到收摊白票还能领 ${fmt(budget.free_tickets_remaining)} 张`
+  if (budget.paid_tickets == null) return `${base}（手上现存的没算进来）。`
+  if (budget.paid_tickets > 0) {
+    return `${base}；手头现有令牌还没读，先按 0 张保守算，最多再补 ${fmt(budget.paid_tickets)} 张 ≈ ${fmt(budget.koban_cost)} 小判。`
+  }
+  return `${base}，只算这些白票也已够，不用花小判。`
 }
 
 function budgetText(entry: EventTimelineEntry) {
@@ -298,16 +329,16 @@ function candidateRange(candidate: EventTimelineCandidate) {
 
               <section v-if="group.key === 'ongoing' && entry.budget?.mechanics === 'hanafuda'" class="event-tama-plan">
                 <header>
-                  <span><small>本期所持</small><b>{{ entry.budget.tama_current == null ? '待第一次读数' : `${fmt(entry.budget.tama_current)} 玉` }}</b></span>
-                  <span v-if="entry.budget.tama_target"><small>本期目标</small><b>{{ fmt(entry.budget.tama_target) }} 玉</b></span>
+                  <span><small>当前累计</small><b>{{ entry.budget.tama_current == null ? '待第一圈记账' : `${fmt(entry.budget.tama_current)} 玉` }}</b></span>
+                  <span><small>最高档目标</small><b>{{ fmt(entry.budget.tama_target || 300000) }} 玉</b></span>
                 </header>
-                <div v-if="entry.budget.tama_target" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
-                <p v-if="entry.budget.tama_target && entry.budget.tama_remaining != null">{{ entry.budget.tama_remaining ? `离目标还差 ${fmt(entry.budget.tama_remaining)} 玉` : '目标已经拿到啦 🎉' }}</p>
-                <p v-else-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
-                <form @submit.prevent="submitTamaTarget(entry)">
-                  <label>{{ entry.budget.tama_target ? '修改目标' : '这期想拿到多少玉？' }}<input v-model="targetInputs[entry.name]" type="number" min="1" max="10000000" step="1" placeholder="例如 100,000"></label>
-                  <button type="submit" class="primary" :disabled="tamaTargetSaving === entry.name">{{ tamaTargetSaving === entry.name ? '保存中……' : entry.budget.tama_target ? '保存修改' : '记下目标' }}</button>
-                </form>
+                <div v-if="entry.budget.tama_current != null" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
+                <p v-if="entry.budget.tama_remaining === 0">最高档已经拿到啦 🎉 剩下的手形想刷就刷。</p>
+                <p v-else-if="entry.budget.tama_current != null">离最高档还差 {{ fmt(entry.budget.tama_remaining) }} 玉。</p>
+                <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
+                <p v-if="tamaTimeText(entry)">{{ tamaTimeText(entry) }}</p>
+                <p v-if="tamaTicketText(entry)">{{ tamaTicketText(entry) }}</p>
+                <p v-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
               </section>
 
               <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
@@ -326,7 +357,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p>{{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 实测 {{ fmt(paceFor(entry)!.loops) }} 圈 · {{ selectedPaceWindow(entry) === 'event' ? '只算时间，手形另算' : '连续挂机，不预留收尾时间' }}</p>
               </section>
 
-              <div v-if="entry.budget && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
+              <div v-if="entry.budget && entry.budget.mechanics !== 'hanafuda' && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
                   <small>{{ entry.budget.sufficient === true || entry.budget.koban_cost === 0 ? '活动预算' : '预算缺口' }}</small>
                   <b>{{ budgetHeadline(entry) }}</b>
@@ -446,11 +477,9 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-tama-plan small { color: #426b36; font-size: 10px; font-weight: 700; }
 .event-tama-plan b { font-size: 18px; font-variant-numeric: tabular-nums; }
 .event-tama-plan > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
+.event-tama-plan .tama-action { color: var(--ink); font-size: 12px; font-weight: 600; }
 .tama-progress { height: 6px; overflow: hidden; background: color-mix(in srgb, var(--paper-line) 70%, transparent); border-radius: 999px; }
 .tama-progress i { display: block; height: 100%; background: #5b813f; border-radius: inherit; transition: width .25s ease; }
-.event-tama-plan form { display: flex; align-items: end; gap: 8px; padding-top: 2px; }
-.event-tama-plan label { display: grid; flex: 1 1 auto; gap: 4px; color: var(--ink-dim); font-size: 11px; }
-.event-tama-plan input { width: min(220px, 100%); background: var(--paper-card); }
 .event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
 .event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-pace-calculator > header > span { display: grid; gap: 1px; }
@@ -539,8 +568,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .event-budget, .event-estimate { align-items: stretch; flex-direction: column; }
   .event-tama-plan > header { align-items: flex-start; flex-direction: column; gap: 7px; }
   .event-tama-plan > header span:last-child { text-align: left; }
-  .event-tama-plan form { align-items: stretch; flex-direction: column; }
-  .event-tama-plan input, .event-tama-plan button { width: 100%; max-width: none; }
   .event-pace-calculator > header { align-items: flex-start; flex-direction: column; gap: 7px; }
   .event-pace-calculator > header > span:last-child { text-align: left; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }

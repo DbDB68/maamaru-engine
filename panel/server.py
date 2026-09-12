@@ -2672,19 +2672,6 @@ async def api_save_event_estimate(request: Request):
     return {"ok": True, "card": card}
 
 
-@app.post("/api/planning/event-tama-target")
-async def api_save_event_tama_target(request: Request):
-    """保存本期秘宝之里的目标玉数。"""
-    body = await request.json()
-    from touken import advisor
-    try:
-        result = advisor.save_event_tama_target(
-            STATUS_DIR, str(body.get("event") or ""), body.get("target"))
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
-    return {"ok": True, **result}
-
-
 @app.post("/api/planning/event-goals")
 async def api_add_event_goal(request: Request):
     """把活动准备立成目标。预算和活动截止时间都由服务端知识卡决定。"""

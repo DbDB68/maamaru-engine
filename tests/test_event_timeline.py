@@ -126,15 +126,29 @@ class EntryContentTests(unittest.TestCase):
             start_at="2026-08-25T10:00:00+08:00",
             end_at="2026-09-05T05:00:00+08:00")}
         abacuses = [_abacus("秘宝之里", mechanics="hanafuda",
-                            tama_current=12345, tama_target=100000,
-                            tama_remaining=87655,
-                            tama_observed_at=NOW.timestamp())]
+                            tama_current=12345, tama_target=300000,
+                            tama_remaining=287655,
+                            tama_observed_at=NOW.timestamp(),
+                            tama_per_loop=684.7, tama_samples=6,
+                            runs_needed=420, seconds_per_loop=312,
+                            estimated_seconds=131040,
+                            seconds_to_end=982800, can_finish=True,
+                            free_tickets_remaining=66)]
         entry = event_timeline.build_timeline(cards, abacuses, [], now=NOW)["ongoing"][0]
-        self.assertEqual(entry["budget"]["mechanics"], "hanafuda")
-        self.assertEqual(entry["budget"]["tama_current"], 12345)
-        self.assertEqual(entry["budget"]["tama_target"], 100000)
-        self.assertEqual(entry["budget"]["tama_remaining"], 87655)
-        self.assertEqual(entry["budget"]["tama_observed_at"], NOW.timestamp())
+        budget = entry["budget"]
+        self.assertEqual(budget["mechanics"], "hanafuda")
+        self.assertEqual(budget["tama_current"], 12345)
+        self.assertEqual(budget["tama_target"], 300000)
+        self.assertEqual(budget["tama_remaining"], 287655)
+        self.assertEqual(budget["tama_observed_at"], NOW.timestamp())
+        self.assertEqual(budget["tama_per_loop"], 684.7)
+        self.assertEqual(budget["tama_samples"], 6)
+        self.assertEqual(budget["runs_needed"], 420)
+        self.assertEqual(budget["seconds_per_loop"], 312)
+        self.assertEqual(budget["estimated_seconds"], 131040)
+        self.assertEqual(budget["seconds_to_end"], 982800)
+        self.assertTrue(budget["can_finish"])
+        self.assertEqual(budget["free_tickets_remaining"], 66)
 
     def test_event_appears_once_with_both_ends(self):
         # 规则：一场活动只出现一次，开始和结束写在同一张卡上

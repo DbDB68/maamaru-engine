@@ -410,17 +410,17 @@ class GetPlanningTests(unittest.TestCase):
         self.assertIsNone(abacus["sufficient"])
         self.assertIsNone(abacus["shortfall"])
 
-    def test_hanafuda_tama_target_reaches_current_period_abacus(self):
+    def test_hanafuda_target_is_fixed_at_top_tier(self):
+        # 目标只此一档（最高档 300,000 玉），玩家没有填写路径
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            advisor.save_event_tama_target(root, "秘宝之里", 80000)
             planning = advisor.get_planning(
                 _FakeStore(), root / "goals.json",
                 now=datetime.fromisoformat("2026-09-12T12:00:00+08:00"))
         hanafuda = next(item for item in planning["events"]
                         if item["event"] == "秘宝之里")
         self.assertEqual(hanafuda["mechanics"], "hanafuda")
-        self.assertEqual(hanafuda["tama_target"], 80000)
+        self.assertEqual(hanafuda["tama_target"], 300000)
 
     def test_activity_budget_delays_amount_target_without_becoming_income(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -878,6 +878,184 @@ class EventAbacusTests(unittest.TestCase):
         self.assertEqual(abacus["keys_source"], "measured")
 
 
+def _hanafuda_ts(text: str) -> float:
+    """「09-12 18:41」→ 2026-09-12 18:41:00（上海时区）的时间戳。"""
+    return datetime.fromisoformat(
+        f"2026-{text}:00+08:00").timestamp()
+
+
+class HanafudaPlanTests(unittest.TestCase):
+    """秘宝之里行动规划：目标固定 300000 玉，账全由本期实测算。"""
+
+    CARD = {"mechanics": "hanafuda",
+            "start_at": "2026-09-10T10:00:00+08:00",
+            "end_at": "2026-09-24T05:00:00+08:00",
+            "ticket_price": 300,
+            "ticket_cap": 6,
+            "refill_hours": [5, 17],
+            "refill_amount": 3}
+
+    @staticmethod
+    def _store(events: list) -> object:
+        class _Store:
+            def recent_events(self, limit=100, event_type=None):
+                if event_type == "hanafuda.run_completed":
+                    return list(events)
+                return []
+        return _Store()
+
+    def _plan(self, events, now="09-12 20:00", card=None):
+        return advisor.hanafuda_plan(
+            self._store(events), card or self.CARD,
+            now_dt=datetime.fromisoformat(f"2026-{now}:00+08:00"))
+
+    def test_full_plan_from_this_period_samples(self):
+        # 六圈实测：场均 684.7 玉、圈速 313 秒；now=09-12 20:00
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666, "tama_total": 7995}},
+            {"ts": _hanafuda_ts("09-12 18:56"), "payload": {"tama": 773, "tama_total": 8768}},
+            {"ts": _hanafuda_ts("09-12 19:02"), "payload": {"tama": 863, "tama_total": 9631}},
+            {"ts": _hanafuda_ts("09-12 19:07"), "payload": {"tama": 833, "tama_total": 10464}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["tama_target"], 300000)
+        self.assertEqual(plan["tama_current"], 10464)
+        self.assertEqual(plan["tama_remaining"], 289536)
+        self.assertEqual(plan["tama_samples"], 6)
+        self.assertEqual(plan["tama_per_loop"], 684.7)
+        self.assertEqual(plan["runs_needed"], 423)
+        self.assertEqual(plan["seconds_per_loop"], 312)
+        self.assertEqual(plan["estimated_seconds"], 423 * 312)
+        self.assertTrue(plan["can_finish"])
+        # 09-13 5:00 起、09-23 17:00 止共 22 个回票点 × 每次 3 张
+        self.assertEqual(plan["free_tickets_remaining"], 66)
+        self.assertEqual(plan["paid_tickets"], 357)
+        self.assertEqual(plan["koban_cost"], 357 * 300)
+
+    def test_too_few_samples_means_no_estimate(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["tama_samples"], 2)
+        self.assertIsNone(plan["tama_per_loop"])
+        self.assertIsNone(plan["runs_needed"])
+        self.assertIsNone(plan["paid_tickets"])
+        self.assertIsNone(plan["koban_cost"])
+        # 当前累计和白票账跟圈数估算互不牵连，该给的还是给
+        self.assertEqual(plan["tama_current"], 7329)
+        self.assertEqual(plan["free_tickets_remaining"], 66)
+
+    def test_bad_delta_samples_never_enter_the_average(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 0, "tama_total": 100}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 50000, "tama_total": 200}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 300, "tama_total": 500}},
+            {"ts": _hanafuda_ts("09-12 18:56"), "payload": {"tama": 600, "tama_total": 1100}},
+            {"ts": _hanafuda_ts("09-12 19:01"), "payload": {"tama": 600, "tama_total": 1700}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["tama_samples"], 3)
+        self.assertEqual(plan["tama_per_loop"], 500)
+
+    def test_out_of_window_totals_are_ignored(self):
+        events = [
+            {"ts": _hanafuda_ts("09-08 12:00"), "payload": {"tama": 500, "tama_total": 999999}},
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666, "tama_total": 7995}},
+            {"ts": _hanafuda_ts("09-12 18:56"), "payload": {"tama": 773, "tama_total": 8768}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["tama_current"], 8768)
+        self.assertEqual(plan["tama_samples"], 4)
+
+    def test_target_reached_means_no_more_runs_or_tickets(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 900, "tama_total": 299900}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 300, "tama_total": 300200}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 300, "tama_total": 300500}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["tama_remaining"], 0)
+        self.assertEqual(plan["runs_needed"], 0)
+        self.assertEqual(plan["paid_tickets"], 0)
+        self.assertEqual(plan["koban_cost"], 0)
+        self.assertIsNone(plan["estimated_seconds"])
+
+    def test_current_total_missing_means_no_estimate(self):
+        # 增量有样本但活动累计一次都没读到：差多少都不知道，不硬算
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666}},
+        ]
+        plan = self._plan(events)
+        self.assertIsNone(plan["tama_current"])
+        self.assertEqual(plan["tama_samples"], 3)
+        self.assertIsNotNone(plan["tama_per_loop"])
+        self.assertIsNone(plan["runs_needed"])
+        self.assertIsNone(plan["paid_tickets"])
+
+    def test_free_tickets_only_count_future_refill_points(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666, "tama_total": 7995}},
+            {"ts": _hanafuda_ts("09-12 18:56"), "payload": {"tama": 773, "tama_total": 8768}},
+        ]
+        # 收摊前最后一张白票（09-23 17:00）也发完之后的晚上：一张都领不到了
+        plan = self._plan(events, now="09-23 18:00")
+        self.assertEqual(plan["free_tickets_remaining"], 0)
+        # 活动还没开场：开场所持一手 + 全程回票点（09-10 17:00 起共 27 个）
+        plan = self._plan(events, now="09-09 12:00")
+        self.assertEqual(plan["free_tickets_remaining"], 3 + 27 * 3)
+
+    def test_free_tickets_cover_the_rest_means_no_koban(self):
+        # 离最高档只差 1,000 玉：再打 2 圈就够，白票远用不完，不用花小判
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 900, "tama_total": 297500}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 700, "tama_total": 298200}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 800, "tama_total": 299000}},
+        ]
+        plan = self._plan(events)
+        self.assertEqual(plan["runs_needed"], 2)
+        self.assertEqual(plan["free_tickets_remaining"], 66)
+        self.assertEqual(plan["paid_tickets"], 0)
+        self.assertEqual(plan["koban_cost"], 0)
+        self.assertTrue(plan["can_finish"])
+
+    def test_time_verdict_turns_negative_near_closing(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666, "tama_total": 7995}},
+            {"ts": _hanafuda_ts("09-12 18:56"), "payload": {"tama": 773, "tama_total": 8768}},
+        ]
+        # 收摊前还剩 9 小时（09-23 20:00 → 09-24 5:00），
+        # 场均 603 玉 → 还要 483 圈 × 300 秒 ≈ 40 小时，怎么都来不及
+        plan = self._plan(events, now="09-23 20:00")
+        self.assertEqual(plan["seconds_to_end"], 9 * 3600)
+        self.assertFalse(plan["can_finish"])
+
+    def test_card_without_ticket_rules_skips_ticket_account(self):
+        card = dict(self.CARD)
+        del card["refill_amount"]
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 666, "tama_total": 7329}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 666, "tama_total": 7995}},
+        ]
+        plan = self._plan(events, card=card)
+        self.assertIsNone(plan["free_tickets_remaining"])
+        self.assertIsNone(plan["paid_tickets"])
+        self.assertIsNone(plan["koban_cost"])
+        self.assertEqual(plan["runs_needed"], 535)
+
+
 class MeasuredKeysTests(unittest.TestCase):
     def test_averages_payload_keys(self):
         class _Store:
@@ -978,21 +1156,6 @@ class EventCardStorageTests(unittest.TestCase):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", 0)
         with self.assertRaises(ValueError):
             advisor.save_key_estimate(self.dir, "江户城潜入调查", "不是数")
-
-    def test_save_hanafuda_tama_target_is_period_scoped(self):
-        saved = advisor.save_event_tama_target(self.dir, "秘宝之里", 100000)
-        self.assertEqual(saved["target"], 100000)
-        cards = advisor.load_event_cards(self.dir)
-        self.assertEqual(cards["秘宝之里"]["tama_target"], 100000)
-        self.assertEqual(cards["秘宝之里"]["tama_target_period"],
-                         "秘宝之里@2026-09-10")
-
-    def test_save_hanafuda_tama_target_rejects_bad_input(self):
-        for target in (0, 10_000_001, 1.5, "不是数"):
-            with self.subTest(target=target), self.assertRaises(ValueError):
-                advisor.save_event_tama_target(self.dir, "秘宝之里", target)
-        with self.assertRaises(ValueError):
-            advisor.save_event_tama_target(self.dir, "江户城潜入调查", 100000)
 
 
 class WindowImpactTests(unittest.TestCase):

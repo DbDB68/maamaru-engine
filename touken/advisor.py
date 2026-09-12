@@ -996,19 +996,7 @@ def get_planning(store, goals_path: Path, *,
         card = cards.get(abacus.get("event")) or {}
         abacus["mechanics"] = card.get("mechanics")
         if card.get("mechanics") == "hanafuda":
-            from .event_history import period_key
-            target = card.get("tama_target")
-            if (card.get("tama_target_period") == period_key(
-                    abacus["event"], card)
-                    and isinstance(target, (int, float)) and target > 0):
-                abacus["tama_target"] = int(target)
-            tama = latest_hanafuda_tama(store, card)
-            if tama:
-                abacus["tama_current"] = tama["current"]
-                abacus["tama_observed_at"] = tama["observed_at"]
-                if abacus.get("tama_target"):
-                    abacus["tama_remaining"] = max(
-                        0, abacus["tama_target"] - tama["current"])
+            abacus.update(hanafuda_plan(store, card, now_dt=now_dt))
         if abacus.get("goal_mode") == "stock_target":
             abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
             abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
@@ -1106,37 +1094,6 @@ def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
     path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
                     encoding="utf-8")
     return cards[event]
-
-
-def save_event_tama_target(status_dir: Path, event: str, target) -> dict:
-    """保存本期秘宝之里的玉目标；期次变化后不会沿用旧目标。"""
-    cards = load_event_cards(status_dir)
-    card = cards.get(event)
-    if not card or card.get("mechanics") != "hanafuda":
-        raise ValueError(f"「{event}」不是可以设置玉目标的活动")
-    if isinstance(target, bool):
-        raise ValueError("玉目标得是整数")
-    try:
-        value = int(target)
-    except (TypeError, ValueError):
-        raise ValueError("玉目标得是整数")
-    if ((isinstance(target, float) and not target.is_integer())
-            or (isinstance(target, str)
-                and not target.strip().isdigit())
-            or not 1 <= value <= 10_000_000):
-        raise ValueError("玉目标得是 1 到 10,000,000 之间的整数")
-    path = Path(status_dir) / EVENTS_META_LOCAL
-    try:
-        local = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        local = {}
-    from .event_history import period_key
-    local.setdefault(event, {})["tama_target"] = value
-    local[event]["tama_target_period"] = period_key(event, card)
-    path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
-    return {"event": event, "target": value,
-            "period": local[event]["tama_target_period"]}
 
 
 # 一圈钥匙的合理上限：实测 9~37 把，OCR 读岔会产生 10157 这种垃圾值
@@ -1256,10 +1213,31 @@ def _card_window(card: dict):
 
 
 def latest_hanafuda_tama(store, card: dict) -> dict | None:
-    """取本期秘宝之里最近一次读到的活动总玉数，绝不串到复刻活动。"""
+    """取本期秘宝之里最近一次读到的活动总玉数，绝不串到复刻活动。
+
+    按事件时间戳取最新，不依赖 store 返回顺序。
+    """
+    latest = None
+    for ts, payload in _hanafuda_period_events(store, card):
+        total = payload.get("tama_total")
+        if isinstance(total, (int, float)) and total >= 0:
+            latest = {"current": int(total), "observed_at": ts}
+    return latest
+
+
+def _hanafuda_window_ts(card: dict) -> tuple[float | None, float | None,
+                                             datetime | None, datetime | None]:
+    """花札卡的活动窗口 → (start_ts, end_ts, start_dt, end_dt)。"""
     start_dt, end_dt, _ = _card_window(card)
-    start_ts = start_dt.timestamp() if start_dt else None
-    end_ts = end_dt.timestamp() if end_dt else None
+    return ((start_dt.timestamp() if start_dt else None),
+            (end_dt.timestamp() if end_dt else None),
+            start_dt, end_dt)
+
+
+def _hanafuda_period_events(store, card: dict) -> list[tuple[float, dict]]:
+    """本期窗口内的花札圈记录，按时间升序。只此一条数据源。"""
+    start_ts, end_ts, _, _ = _hanafuda_window_ts(card)
+    events = []
     for event in store.recent_events(
             limit=100, event_type="hanafuda.run_completed"):
         ts = event.get("ts")
@@ -1270,10 +1248,116 @@ def latest_hanafuda_tama(store, card: dict) -> dict | None:
         if end_ts is not None and ts > end_ts:
             continue
         payload = event.get("payload")
-        total = payload.get("tama_total") if isinstance(payload, dict) else None
-        if isinstance(total, (int, float)) and total >= 0:
-            return {"current": int(total), "observed_at": float(ts)}
-    return None
+        events.append((float(ts), payload if isinstance(payload, dict) else {}))
+    events.sort(key=lambda item: item[0])
+    return events
+
+
+# 秘宝之里最高档奖励固定 300,000 玉：目标只此一档，不给玩家填
+HANAFUDA_TAMA_TARGET = 300_000
+# 一圈玉增量的可信范围：超难实测一圈约 300~1,000 玉；OCR 读岔会出 0 或
+# 巨大值，超出 10 倍余量的样本不进均值
+HANAFUDA_TAMA_LOOP_CAP = 10_000
+# 一圈时长的可信上限：图内监控 25 分钟就超时收圈，间隔再长多半是隔天再跑
+HANAFUDA_LOOP_SECONDS_CAP = 1800
+# 样本下限：达不到就老实说“再完成几圈后可估算”，绝不拿一两个样本外推
+HANAFUDA_TAMA_MIN_SAMPLES = 3
+HANAFUDA_PACE_MIN_SAMPLES = 2
+
+
+def hanafuda_plan(store, card: dict, *, now_dt: datetime) -> dict:
+    """秘宝之里行动规划：固定冲最高档 300,000 玉，账全由本期实测算。
+
+    数据源只有 hanafuda.run_completed 一条事件流，三件事同源、互不重复
+    计数：tama_total 取最近一次读到的活动累计（现状）；tama 增量算场均
+    玉（速率）；相邻圈记录的间隔算圈速（速率）。剩余圈数 = 剩余玉 ÷
+    场均玉，剩余时间 = 圈数 × 圈速，补票 = 圈数 − 未来白票。
+    """
+    _, _, start_dt, end_dt = _hanafuda_window_ts(card)
+    events = _hanafuda_period_events(store, card)
+    deltas = [float(payload["tama"]) for _, payload in events
+              if isinstance(payload.get("tama"), (int, float))
+              and 0 < payload["tama"] <= HANAFUDA_TAMA_LOOP_CAP]
+    intervals = [later - earlier
+                 for (earlier, _), (later, _) in zip(events, events[1:])
+                 if 0 < later - earlier <= HANAFUDA_LOOP_SECONDS_CAP]
+    tama = latest_hanafuda_tama(store, card)
+    plan = {
+        "tama_target": HANAFUDA_TAMA_TARGET,
+        "tama_current": tama["current"] if tama else None,
+        "tama_observed_at": tama["observed_at"] if tama else None,
+        "tama_remaining": (max(0, HANAFUDA_TAMA_TARGET - tama["current"])
+                           if tama else None),
+        "tama_per_loop": None,
+        "tama_samples": len(deltas),
+        "runs_needed": None,
+        "seconds_per_loop": None,
+        "estimated_seconds": None,
+        "seconds_to_end": None,
+        "can_finish": None,
+        "free_tickets_remaining": None,
+        "paid_tickets": None,
+        "koban_cost": None,
+    }
+    if end_dt is not None:
+        plan["seconds_to_end"] = max(
+            0, int(end_dt.timestamp() - now_dt.timestamp()))
+    if len(deltas) >= HANAFUDA_TAMA_MIN_SAMPLES:
+        plan["tama_per_loop"] = round(sum(deltas) / len(deltas), 1)
+    if len(intervals) >= HANAFUDA_PACE_MIN_SAMPLES:
+        plan["seconds_per_loop"] = round(sum(intervals) / len(intervals))
+    if end_dt is not None:
+        plan["free_tickets_remaining"] = _remaining_free_tickets(
+            card, start_dt, end_dt, now_dt)
+    if plan["tama_per_loop"] is None or plan["tama_current"] is None:
+        return plan  # 样本不够，或当前累计还没读到——不硬算
+    import math
+    remaining = max(0, HANAFUDA_TAMA_TARGET - plan["tama_current"])
+    plan["runs_needed"] = math.ceil(
+        remaining / plan["tama_per_loop"]) if remaining else 0
+    if plan["runs_needed"] and plan["seconds_per_loop"]:
+        plan["estimated_seconds"] = (plan["runs_needed"]
+                                     * plan["seconds_per_loop"])
+        if plan["seconds_to_end"] is not None:
+            plan["can_finish"] = (plan["estimated_seconds"]
+                                  <= plan["seconds_to_end"])
+    free = plan["free_tickets_remaining"]
+    if free is not None:
+        plan["paid_tickets"] = max(0, plan["runs_needed"] - free)
+        plan["koban_cost"] = (plan["paid_tickets"]
+                              * int(card.get("ticket_price") or 0))
+    return plan
+
+
+def _remaining_free_tickets(card: dict, start_dt: datetime | None,
+                            end_dt: datetime, now_dt: datetime) -> int | None:
+    """从现在到收摊还能免费领多少张通行手形（回票点 × 每次回票数）。
+
+    回满制：每个回票点把手形回到可出阵的水平，按“每张都及时用掉”估算。
+    手上现存的票脚本读不到，不计入；活动还没开场时只算开场所持的一手。
+    卡里没写回票规则（refill_amount）就返回 None，让前端别展示。
+    """
+    refill_amount = card.get("refill_amount")
+    if refill_amount is None:
+        return None
+    refill_amount = int(refill_amount)
+    hours = card.get("refill_hours") or [5, 17]
+    count = 0
+    day = (start_dt or now_dt).date() - timedelta(days=1)
+    while day <= end_dt.date():
+        for hour in hours:
+            refill = (datetime.combine(day, datetime.min.time(), tzinfo=_TZ)
+                      + timedelta(hours=hour))
+            if start_dt is not None and refill <= start_dt:
+                continue
+            if refill <= now_dt or refill >= end_dt:
+                continue
+            count += 1
+        day += timedelta(days=1)
+    free = count * refill_amount
+    if start_dt is not None and now_dt < start_dt:
+        free += refill_amount  # 开场所持的一手
+    return free
 
 
 def _count_free_tickets(card: dict, start_dt: datetime, end_dt: datetime) -> int:

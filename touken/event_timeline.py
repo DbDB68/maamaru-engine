@@ -158,6 +158,13 @@ def _entry(name: str, card: dict, abacus: dict | None,
             "tama_observed_at": abacus.get("tama_observed_at"),
             "tama_target": abacus.get("tama_target"),
             "tama_remaining": abacus.get("tama_remaining"),
+            "tama_per_loop": abacus.get("tama_per_loop"),
+            "tama_samples": abacus.get("tama_samples"),
+            "seconds_per_loop": abacus.get("seconds_per_loop"),
+            "estimated_seconds": abacus.get("estimated_seconds"),
+            "seconds_to_end": abacus.get("seconds_to_end"),
+            "can_finish": abacus.get("can_finish"),
+            "free_tickets_remaining": abacus.get("free_tickets_remaining"),
             "message": abacus.get("message") or "",
         }
     return entry
