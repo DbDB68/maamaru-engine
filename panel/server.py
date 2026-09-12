@@ -206,18 +206,28 @@ def _positive_run_count(params, default, *legacy_keys):
     return value if value > 0 else default
 
 
-def _march_and_injury_fields():
-    """合战场与异去共享；阵形仅在脚本行军时显示。"""
+def _captain_rotation_fields(*, daily_inherits: bool = False):
+    """部队选择页可共用的换队长设置。"""
+    help_text = "出阵前读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）。"
+    if daily_inherits:
+        help_text += "一键日课沿用此开关。"
     return [
         {"key": "rotate_captain", "type": "toggle", "label": "自动换队长",
          "default": False,
-         "help": "出阵前读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）。一键日课沿用此开关。"},
+         "help": help_text},
         {"key": "rotate_captain_margin", "type": "select", "label": "换队长阈值",
          "options": [["5", "相差 5 点"], ["10", "相差 10 点"],
                      ["20", "相差 20 点"]],
          "default": "10",
          "help": "全队最低疲劳比当前队长低到这个差值时才换，避免差距很小时频繁调整。",
          "visibleWhen": {"key": "rotate_captain", "is": True}},
+    ]
+
+
+def _march_and_injury_fields():
+    """合战场与异去共享；阵形仅在脚本行军时显示。"""
+    return [
+        *_captain_rotation_fields(daily_inherits=True),
         {"key": "auto_march", "type": "toggle", "label": "是否使用自动行军",
          "default": True},
         {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
@@ -561,7 +571,9 @@ def _build_hanafuda(agent, config_path, params):
         team_no=_i(params, "team_no", 3),
         difficulty=_i(params, "difficulty", 4),
         max_runs=runs,
-        auto_refill=refill)
+        auto_refill=refill,
+        rotate_captain=_bool(params.get("rotate_captain", False)),
+        rotate_captain_margin=_i(params, "rotate_captain_margin", 10))
 
 
 def _build_sortie(agent, config_path, params):
@@ -956,7 +968,8 @@ register_script("hanafuda", "秘宝之里", "花牌收集：按设定次数出�
                         _run_count_field(default=6),
                         {"key": "use_koban_refill", "type": "toggle",
                          "label": "是否补充通行令牌", "default": False,
-                         "help": "关闭时，现有令牌不够完成设定次数便提前收工；开启后才会使用小判补充。"}])
+                         "help": "关闭时，现有令牌不够完成设定次数便提前收工；开启后才会使用小判补充。"},
+                        *_captain_rotation_fields()])
 register_script("sortie", "合战场", "单跑合战场：这里的设置只对本次单跑生效，与一键日课/工作流互不影响",
                 _wrap_inventory("出阵", _build_sortie),
                 params=[{"key": "chapter", "type": "select", "label": "章节",

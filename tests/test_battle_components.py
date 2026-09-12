@@ -826,6 +826,7 @@ class _SafeDepartHost(BattleMixin):
         self.saved_record = False
         self.restored = False
         self.events = []
+        self.steps = []
 
     def record_event(self, event_type, **payload):
         self.events.append((event_type, payload))
@@ -837,10 +838,16 @@ class _SafeDepartHost(BattleMixin):
             attribution="confirmed", **payload)
 
     def _pick_team(self, team_no):
+        self.steps.append("pick")
         return True
 
     def _team_injury_status(self, cfg):
+        self.steps.append("injury")
         return self._injury
+
+    def _rotate_captain_here(self, margin=10):
+        self.steps.append(f"rotate:{margin}")
+        yield "[换队长] done"
 
     def _click_depart(self, cfg):
         return True
@@ -1004,6 +1011,14 @@ class SafeDepartChainTests(unittest.TestCase):
     def test_clean_pass_returns_ok(self):
         msgs, result = _drain_chain(_SafeDepartHost())
         self.assertEqual(result, (True, False))
+
+    def test_captain_rotation_runs_after_team_pick_before_injury_check(self):
+        host = _SafeDepartHost()
+        msgs, result = _drain_chain(
+            host, rotate_captain=True, rotate_captain_margin=20)
+        self.assertEqual(result, (True, False))
+        self.assertEqual(host.steps[:3], ["pick", "rotate:20", "injury"])
+        self.assertIn("[换队长] done", msgs)
 
     def test_refill_popup_declined_cancels_and_stops(self):
         """票尽弹窗 + 不补票：点取消收工，不碰确定。"""

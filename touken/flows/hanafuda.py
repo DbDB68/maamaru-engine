@@ -45,6 +45,8 @@ class HanafudaMixin:
         difficulty: int = None,
         max_runs: int = None,
         auto_refill: bool = None,
+        rotate_captain: bool = None,
+        rotate_captain_margin: int = None,
         debug_dir: str = None,
         **kwargs,
     ):
@@ -57,6 +59,8 @@ class HanafudaMixin:
             max_runs: 本次最多跑几圈，必须为正数
             auto_refill: 票尽时是否用小判补票（走游戏自己的补票弹窗），
                 默认读配置 hanafuda.use_koban_refill
+            rotate_captain: 每圈出阵前是否把疲劳最低的队员换到队长位
+            rotate_captain_margin: 最低疲劳与现队长相差多少才换
         """
         cfg = self.config.get("hanafuda", {})
         if not cfg:
@@ -73,6 +77,10 @@ class HanafudaMixin:
             max_runs = int(cfg.get("max_runs", cfg.get("refill_run_limit", 6)))
         if max_runs <= 0:
             max_runs = 6
+        if rotate_captain is None:
+            rotate_captain = bool(cfg.get("rotate_captain", False))
+        if rotate_captain_margin is None:
+            rotate_captain_margin = int(cfg.get("rotate_captain_margin", 10))
         repair_threshold = str(cfg.get("repair_threshold", "heavy"))
         auto_equip = bool(cfg.get("auto_equip", False))
 
@@ -128,7 +136,9 @@ class HanafudaMixin:
 
             entered, team_record_saved = yield from self._enter_hanafuda_map_stream(
                 cfg, team_no, card, repair_threshold, auto_equip,
-                team_record_saved, auto_refill=auto_refill)
+                team_record_saved, auto_refill=auto_refill,
+                rotate_captain=rotate_captain,
+                rotate_captain_margin=rotate_captain_margin)
             if not entered:
                 yield "[花札] 没能进图，安全收工"
                 break
@@ -163,7 +173,9 @@ class HanafudaMixin:
     def _enter_hanafuda_map_stream(self, cfg: dict, team_no: int, card_point: list,
                           repair_threshold: str, auto_equip: bool,
                           team_record_saved: bool,
-                          auto_refill: bool = False):
+                          auto_refill: bool = False,
+                          rotate_captain: bool = False,
+                          rotate_captain_margin: int = 10):
         """点难度块→部队选择→挂委托→通用安全出阵链→令牌确认，直到进图。
 
         选队、伤势检查、刀装处理、重伤拦截全部走 BattleMixin 的
@@ -194,7 +206,9 @@ class HanafudaMixin:
             repair_threshold=repair_threshold,
             auto_equip=auto_equip,
             team_record_saved=team_record_saved,
-            auto_refill=auto_refill)
+            auto_refill=auto_refill,
+            rotate_captain=rotate_captain,
+            rotate_captain_margin=rotate_captain_margin)
         if not ok:
             return False, team_record_saved
 

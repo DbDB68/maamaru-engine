@@ -145,6 +145,21 @@ class UnverifiedTests(unittest.TestCase):
         tl = event_timeline.build_timeline(cards, [], anns, now=NOW)
         self.assertEqual(tl["unverified"], [])
 
+    def test_candidate_full_name_matching_short_card_is_verified(self):
+        cards = {"秘宝之里": _card(
+            start_at="2026-09-10T10:00:00+08:00",
+            end_at="2026-09-24T05:00:00+08:00")}
+        anns = [{"title": "9月10日更新公告", "url": "u1",
+                 "schedule_candidates": [{
+                     "section": "1", "name": "秘宝之里~花牌收集~",
+                     "start_at": "2026-09-10T10:00:00+08:00",
+                     "end_at": "2026-09-24T05:00:00+08:00"}]}]
+        now = datetime(2026, 9, 12, 10, 0, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], anns, now=now)
+        self.assertEqual([item["name"] for item in tl["ongoing"]],
+                         ["秘宝之里"])
+        self.assertEqual(tl["unverified"], [])
+
     def test_unknown_candidate_stays_unverified(self):
         anns = [{"title": "8月27日更新公告", "url": "u1",
                  "schedule_candidates": [

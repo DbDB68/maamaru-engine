@@ -65,6 +65,7 @@ function collectActivityPaces(runs: any[], manualSessions: ManualSession[]) {
     { event: '大阪城', script: 'osaka' },
     { event: '联队战', script: 'raid' },
     { event: '江户城潜入调查', script: 'edocastle' },
+    { event: '秘宝之里', script: 'hanafuda' },
   ]
   const result: Record<string, ActivityPace[]> = {}
   for (const definition of definitions) {

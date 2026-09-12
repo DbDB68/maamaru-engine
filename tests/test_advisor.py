@@ -747,6 +747,15 @@ def _edo_card(**overrides):
 class EventAbacusTests(unittest.TestCase):
     TODAY = date(2026, 8, 25)
 
+    def test_hanafuda_uses_its_time_planning_message(self):
+        card = {"mechanics": "hanafuda",
+                "start_date": "2026-09-10", "end_date": "2026-09-24",
+                "planning_message": "按本丸实测圈速安排挂机时间。"}
+        abacus = advisor.event_abacus("秘宝之里", card, measured=None,
+                                      today=date(2026, 9, 12))
+        self.assertEqual(abacus["message"], "按本丸实测圈速安排挂机时间。")
+        self.assertIsNone(abacus["koban_cost"])
+
     def test_no_keys_data_means_learning(self):
         abacus = advisor.event_abacus("江户城潜入调查", _edo_card(),
                                       measured=None, today=self.TODAY)

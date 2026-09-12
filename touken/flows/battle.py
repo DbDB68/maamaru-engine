@@ -451,7 +451,9 @@ class BattleMixin:
                             repair_threshold: str = "light",
                             auto_equip: bool = False,
                             team_record_saved: bool = False,
-                            auto_refill: bool = False):
+                            auto_refill: bool = False,
+                            rotate_captain: bool = False,
+                            rotate_captain_margin: int = 10):
         """通用安全出阵链：部队选择页已打开之后调用，串起——
 
         选择部队 → 出阵前伤势检查 → （可选）保存记录一 → 即刻出阵 →
@@ -474,6 +476,13 @@ class BattleMixin:
         # 启动时检查过部队坐标。_pick_team 只负责按坐标点两次，本身无法
         # 观察游戏是否真的选中；不要把它的返回值冒充真机选队验证。
         self._pick_team(team_no)
+        if rotate_captain:
+            try:
+                yield from self._rotate_captain_here(rotate_captain_margin)
+            except Exception as exc:
+                # 换队长只调站位，不可绕过后续伤势/刀装安全检查；OCR
+                # 临时失手也不应把整次活动伪装成失败。
+                yield f"{tag} 自动换队长翻车（不影响出阵）: {exc}"
         self.maa.screenshot(force=True)
         injury = self._team_injury_status(cfg)
         if injury and self._injury_reaches_threshold(

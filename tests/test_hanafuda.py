@@ -77,7 +77,8 @@ class HanafudaPanelTests(unittest.TestCase):
         info = list_scripts()["hanafuda"]
         keys = [field.get("key") for field in info["params"]]
         self.assertEqual(keys, ["difficulty", "team_no", "runs",
-                                "use_koban_refill"])
+                                "use_koban_refill", "rotate_captain",
+                                "rotate_captain_margin"])
         self.assertEqual(info["params"][2]["min"], 1)
         self.assertNotIn("help", info["params"][2])
         difficulty = info["params"][0]
@@ -99,11 +100,15 @@ class HanafudaPanelTests(unittest.TestCase):
             list(_wrap_inventory("花札", _build_hanafuda)(
                 "config.json", {"difficulty": "2", "team_no": "4",
                                 "runs": "5",
-                                "use_koban_refill": True}))
+                                "use_koban_refill": True,
+                                "rotate_captain": True,
+                                "rotate_captain_margin": "20"}))
         self.assertEqual(agent.hanafuda_args["difficulty"], 2)
         self.assertEqual(agent.hanafuda_args["team_no"], 4)
         self.assertEqual(agent.hanafuda_args["max_runs"], 5)
         self.assertTrue(agent.hanafuda_args["auto_refill"])
+        self.assertTrue(agent.hanafuda_args["rotate_captain"])
+        self.assertEqual(agent.hanafuda_args["rotate_captain_margin"], 20)
 
         agent.hanafuda_args = None
         with patch("panel.server._make_agent", return_value=agent):
@@ -112,6 +117,8 @@ class HanafudaPanelTests(unittest.TestCase):
                                 "max_runs": "0", "use_koban_refill": False}))
         self.assertEqual(agent.hanafuda_args["max_runs"], 6)
         self.assertFalse(agent.hanafuda_args["auto_refill"])
+        self.assertFalse(agent.hanafuda_args["rotate_captain"])
+        self.assertEqual(agent.hanafuda_args["rotate_captain_margin"], 10)
 
 
 class _WatchMaa:
@@ -289,6 +296,7 @@ class HanafudaEnterMapTests(unittest.TestCase):
             self.clicked = []
             self._auto_march_ok = auto_march_ok
             self.safe_depart_called = False
+            self.safe_depart_kwargs = None
             self._root = tempfile.mkdtemp()
 
         def _click_point(self, point):
@@ -305,6 +313,7 @@ class HanafudaEnterMapTests(unittest.TestCase):
 
         def _safe_depart_stream(self, *a, **k):
             self.safe_depart_called = True
+            self.safe_depart_kwargs = k
             return True, False
             yield
 
@@ -324,9 +333,12 @@ class HanafudaEnterMapTests(unittest.TestCase):
         host = self._EnterHost(auto_march_ok=True)
         gen = host._enter_hanafuda_map_stream(_CFG | {
             "team_ui_ocr": {"expected": "部队选择", "roi": [506, 1, 774, 77]},
-        }, 3, [1082, 300], "heavy", False, False)
+        }, 3, [1082, 300], "heavy", False, False,
+           rotate_captain=True, rotate_captain_margin=20)
         msgs = list(gen)
         self.assertTrue(host.safe_depart_called)
+        self.assertTrue(host.safe_depart_kwargs["rotate_captain"])
+        self.assertEqual(host.safe_depart_kwargs["rotate_captain_margin"], 20)
         self.assertFalse(any("没挂上" in m for m in msgs))
 
 

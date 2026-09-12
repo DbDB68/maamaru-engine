@@ -93,6 +93,14 @@ def _norm_event_name(value) -> str:
     return re.sub(r"[\s~～]+", "", str(value or ""))
 
 
+def _event_names_match(left, right) -> bool:
+    """同系列活动的短名与公告全名视为同一场。"""
+    left_norm = _norm_event_name(left)
+    right_norm = _norm_event_name(right)
+    return bool(left_norm and right_norm
+                and (left_norm in right_norm or right_norm in left_norm))
+
+
 def _card_window(card: dict):
     """卡片 → (start_dt, end_dt 不含, precise)。
     只有日期的卡：开始日 00:00 起、结束日全天算进行中（到次日 00:00）。
@@ -219,7 +227,9 @@ def build_timeline(cards: dict, abacuses: list[dict],
         for cand in ann.get("schedule_candidates") or []:
             if not _is_plannable_candidate(cand):
                 continue
-            if cand.get("name") and cand["name"] in (cards or {}):
+            if cand.get("name") and any(
+                    _event_names_match(cand["name"], card_name)
+                    for card_name in (cards or {})):
                 continue  # 已有正式卡，不重复进待确认
             end_dt = _parse_dt(cand.get("end_at"))
             if end_dt is not None and end_dt <= now:
@@ -270,12 +280,9 @@ def hidden_event_scripts(cards: dict, announcements: list[dict],
                 return True
         # 公告候选的名字常带前后缀或波浪号（「战术强化训练 ~南瓜大作战~」），
         # 归一化后按包含关系对，不做精确相等
-        target = _norm_event_name(name)
         for ann in announcements or []:
             for cand in ann.get("schedule_candidates") or []:
-                cand_name = _norm_event_name(cand.get("name"))
-                if not cand_name or not (cand_name in target
-                                         or target in cand_name):
+                if not _event_names_match(cand.get("name"), name):
                     continue
                 start_dt = _parse_dt(cand.get("start_at"))
                 end_dt = _parse_dt(cand.get("end_at"))

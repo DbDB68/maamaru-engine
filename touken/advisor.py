@@ -1292,6 +1292,11 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
             "实测换算还要挖多少层。")
         return abacus
 
+    if card.get("mechanics") not in (None, "edocastle"):
+        abacus["message"] = (card.get("planning_message")
+                              or "这张活动卡还缺数据，回头补。")
+        return abacus
+
     if measured:
         keys_per_run = measured["per_run"]
         source = measured.get("source") or "measured"
