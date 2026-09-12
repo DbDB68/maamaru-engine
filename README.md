@@ -10,7 +10,7 @@
 
 我玩刀剑乱舞九年了，现在还是想玩，只是不想再亲自点完每一轮重复操作，也不想继续手拉 Excel 才知道资源从哪来、花到哪去。所以我做了まあ丸：需要时替我照看本丸，不连接游戏时也能安静地做一间账房。
 
-**[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v0.6.1 更新内容](docs/releases/v0.6.1.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
+**[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v0.7.1 更新内容](docs/releases/v0.7.1.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
 
 ## 欢迎回到我的本丸
 
