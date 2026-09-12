@@ -6,13 +6,17 @@ from touken.flows.sugar import SugarMixin
 
 class Game:
     """Two same-name bodies: first needs two feeds, second needs one."""
-    def __init__(self, timeout=False):
+    def __init__(self, timeout=False, popup=None):
         self.state = "list"
         self.remaining = [2, 1]
         self.body = 0
         self.picks = 0
         self.feeds = 0
         self.timeout = timeout
+        # popup: None 不捣乱 / "late" 第一记习合开始被吞、补点才弹确认 /
+        #        "once" 蹦一次怪弹窗、有关闭X / "stuck" 关不掉
+        self.popup = popup
+        self.popup_seen = False
 
     def screenshot(self, **kwargs):
         pass
@@ -20,6 +24,10 @@ class Game:
     def template_match(self, name, *args, **kwargs):
         if name == "习合.png":
             return "tab"
+        if name == "通用_关闭.png":
+            if self.state == "weird" and self.popup == "once":
+                return "closeX"
+            return None
         if name == "选择png.png" and self.state == "list" and self.body < 2:
             return "body"
         if name == "一键选择.png" and self.state == "materials" and self.remaining[self.body]:
@@ -36,13 +44,24 @@ class Game:
     def click(self, target):
         if target == "tab":
             return
+        if target == "closeX":
+            if self.popup == "once":
+                self.state = "materials"  # X 关掉弹窗，露出底下的素材界面
+            return
         if target == "body":
             self.picks += 1
             self.state = "materials"
         elif target == "select":
             self.state = "selected"
         elif target == "go":
-            self.state = "confirm"
+            if self.popup and not self.popup_seen:
+                self.popup_seen = True
+                if self.popup == "late":
+                    pass  # 第一记被吞：还停在素材界面，弹窗没来
+                else:
+                    self.state = "weird"
+            else:
+                self.state = "confirm"
         elif self.state == "confirm":
             self.remaining[self.body] -= 1
             self.feeds += 1
@@ -53,8 +72,8 @@ class Game:
 
 
 class Flow(SugarMixin):
-    def __init__(self, timeout=False):
-        self.maa = Game(timeout)
+    def __init__(self, timeout=False, popup=None):
+        self.maa = Game(timeout, popup)
         self.current_location = "强化"
 
     def navigate_to_stream(self, target):
@@ -73,11 +92,9 @@ class SugarFlowTests(unittest.TestCase):
     @patch("touken.flows.sugar.time.sleep")
     def test_animation_timeout_does_not_count_success(self, sleep):
         flow = Flow(timeout=True)
-        messages = []
-        with self.assertRaisesRegex(RuntimeError, "超时"):
-            for message in flow._shugo_loop_stream(False):
-                messages.append(message)
+        messages = list(flow._shugo_loop_stream(False))
         self.assertFalse(any("完成第" in message for message in messages))
+        self.assertIn("收工：炼了 0 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
     def test_dry_run_does_not_feed(self, sleep):
@@ -102,6 +119,32 @@ class SugarFlowTests(unittest.TestCase):
             if flow.maa.state == "list":
                 flow.maa.body = 0
         flow.maa.click = click
-        with self.assertRaisesRegex(RuntimeError, "持续没有进展"):
-            list(flow._shugo_loop_stream(False))
+        messages = list(flow._shugo_loop_stream(False))
         self.assertEqual(flow.maa.picks, 3)
+        self.assertFalse(any("完成第" in message for message in messages))
+        self.assertIn("收工：炼了 0 轮", messages[-1])
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_swallowed_tap_recovers_by_reclicking(self, sleep):
+        flow = Flow(popup="late")
+        messages = list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.feeds, 3)
+        self.assertNotIn("没等到确认弹窗", "".join(messages))
+        self.assertNotIn("没反应", "".join(messages))
+        self.assertIn("收工：炼了 3 轮", messages[-1])
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_unexpected_popup_is_closed_and_run_continues(self, sleep):
+        flow = Flow(popup="once")
+        messages = list(flow._shugo_loop_stream(False))
+        self.assertIn("没等到确认弹窗", "".join(messages))
+        self.assertEqual(flow.maa.feeds, 1)
+        self.assertIn("收工：炼了 1 轮", messages[-1])
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_stuck_popup_ends_loop_without_crash(self, sleep):
+        flow = Flow(popup="stuck")
+        messages = list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.feeds, 0)
+        self.assertIn("没等到确认弹窗", "".join(messages))
+        self.assertIn("收工：炼了 0 轮", messages[-1])

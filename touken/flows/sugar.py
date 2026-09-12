@@ -199,7 +199,8 @@ class SugarMixin:
         stalled = 0
         while True:
             if stalled >= _MAX_NO_PROGRESS:
-                raise RuntimeError("炼糖：持续没有进展，连续 3 次返回重选仍未完成习合，停止操作")
+                yield "[炼糖·习合] 连续 3 次重选都没能完成习合，本轮先收工"
+                break
             self.maa.screenshot(force=True)
             if not in_materials:
                 # 游戏隐藏无法习合的本体；始终选择当前第一行，不按刀名排除。
@@ -212,7 +213,16 @@ class SugarMixin:
                 time.sleep(2.0)
                 self.maa.screenshot(force=True)
                 if not self._sugar_materials_visible():
-                    raise RuntimeError("炼糖：未能确认素材界面，停止操作")
+                    # 可能被突然蹦出的弹窗挡了：能关就关，再确认一次
+                    self._sugar_close_popup()
+                    time.sleep(1.0)
+                    self.maa.screenshot(force=True)
+                    if not self._sugar_materials_visible():
+                        yield "[炼糖·习合] 点了选择但没进素材界面，返回重选"
+                        self.maa.click(Point(141, 25))
+                        time.sleep(1.5)
+                        stalled += 1
+                        continue
                 in_materials = True
                 if dry_run:
                     yield "[炼糖·习合] （演习）已进入第一行本体的素材界面，不动手"
@@ -238,10 +248,33 @@ class SugarMixin:
                 stalled += 1
                 continue
             self.maa.click(go)
-            time.sleep(2.0)
-            self.maa.screenshot(force=True)
-            if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
-                raise RuntimeError("炼糖：未能确认习合弹窗，停止操作")
+            # 确认弹窗偶尔慢半拍，或这一记点击被选人动画吞掉（2026-09-12 实测
+            # 翻车点：弹窗没蹦出来，素材界面顶着"习合确认不在"被误判翻车）。
+            # 连看三轮：没弹窗但蓝钮还亮着就补点，补出弹窗为止。
+            confirmed = False
+            for _ in range(3):
+                time.sleep(2.0)
+                self.maa.screenshot(force=True)
+                if self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
+                    confirmed = True
+                    break
+                again = self.maa.template_match("习合开始.png", threshold=0.7)
+                if again:
+                    self.maa.click(again)
+            if not confirmed:
+                self.maa.screenshot(force=True)
+                if self.maa.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)):
+                    # 还坐在素材界面上：弹窗压根没来，直接返回重选这个本体
+                    yield "[炼糖·习合] 习合开始点了没反应（弹窗没蹦出来），返回重选"
+                else:
+                    # 蹦了别的窗（不是习合确认）：不替玩家按确认，能关就关
+                    yield "[炼糖·习合] 没等到确认弹窗，关掉可能的弹窗后重选"
+                    self._sugar_close_popup()
+                self.maa.click(Point(141, 25))
+                time.sleep(1.5)
+                in_materials = False
+                stalled += 1
+                continue
             self.maa.click(Point(785, 630))
 
             for _ in range(12):
@@ -251,7 +284,8 @@ class SugarMixin:
                     break
                 self.maa.click(Point(290, 550))
             else:
-                raise RuntimeError("炼糖：习合后返回素材界面超时，未计入成功次数")
+                yield "[炼糖·习合] 习合后一直回不到素材界面，本轮收工（这轮没计入成功）"
+                break
             stalled = 0
             successes += 1
             yield f"[炼糖·习合] 完成第 {successes} 轮习合"
@@ -259,6 +293,18 @@ class SugarMixin:
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
         return successes
+
+    def _sugar_close_popup(self):
+        """挡路的弹窗能认出 X 就点 X；认不出就点弹窗左下的取消位
+        （实机校准 (497,628)，这游戏的弹窗规矩左钮=取消/关闭这类反义动作，
+        确认类的右钮绝对不碰）。都没关掉就留给后续步骤自己判断。"""
+        self.maa.screenshot(force=True)
+        x = self.maa.template_match("通用_关闭.png", threshold=0.7)
+        if x:
+            self.maa.click(x)
+        else:
+            self.maa.click(Point(497, 628))
+        time.sleep(1.0)
 
     def _sugar_materials_visible(self):
         # 文字可同时识别亮/灰按钮，不能用亮按钮判断满级后的返回状态。
