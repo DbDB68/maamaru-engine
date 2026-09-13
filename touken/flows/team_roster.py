@@ -1,0 +1,703 @@
+# -*- coding: utf-8 -*-
+"""编队页只读点名：走进部队编成页，逐部队逐槽读当前队伍事实。
+
+issue #7「智能编队」第 1 步工单（牛老师终版口径 + 返工单）：
+  - 只读：导航 + 切部队标签；禁止成员卡、替换、装备等危险点击，禁止 swipe/drag；
+  - 切队正面确认：点标签后读行首"N之M"位置标签核对队号，确认不了该队
+    observation_status=failed、slots=[]，绝不张冠李戴；
+  - 伤势分类比分数选最佳（最佳+区分度+同源已证明类别），不吃配置顺序抢答；
+  - 六槽固定输出，slot_status=occupied/empty/unknown；任一字段失败只降级本字段；
+  - 事件 team_roster.observed（ts 由 telemetry 补，payload 不带 observed_at），
+    顶层 observation_status=complete/partial/failed；
+  - 空位必须有正面证据：卡面近纯白（真机 30 槽校准）才算空槽形态，
+    整页失明或证据不足 → unknown，绝不静默判空；
+  - 伤势：章命中 → heavy/medium/light（配置中文键统一映射成英文枚举）；
+    章未命中必须用生存 x/x 正面证明满血才判 none，否则 unknown——
+    "章没匹配到"绝不是"无伤"；
+  - 名字：本链路专用匹配（精确命中或唯一包含候选），禁用模糊兜底；
+  - 极化=分层单向证明：白樱花同源模板可靠命中 → kiwame；花数证据只在
+    确认刀种（名册刀种，其次徽章字符）下匹配且分数达标才成立，
+    全局最高分模板是别的刀种 → 刀种冲突，花数证据作废记 unknown；
+    髭切/膝丸动态涨花例外 → ambiguous；低分 → unknown；"没匹配到"绝不反推 normal；
+  - 碰瓷语义：太刀+极化+中伤三项都确认 → tactical_roles 记碰瓷候选；
+  - kiwame_date 实际是显现日期（获得日期），本流程禁止用于极化判断；
+  - 属性上限 wiki 数据本版不抓，stat_exceeds_normal_cap 留给后续补强票。
+
+页面坐标（1280x720，与 sakura.py 编队页同布局，真机校准）：
+  部队标签一~五 (154/274/394/516/638, 91)；
+  六行行心 y [160, 258, 357, 455, 553, 652]；
+  每槽卡面：花形徽章（左上，刀种字符+花瓣数）、名字（徽章下方）、
+  刀剑/乱舞/生存/疲劳 标签值堆（x≈288-430；相对行心 -36/-5/+17/+37）、
+  伤势章（卡面右上）、白樱花（极化标记，卡面右上角、会被伤势章遮挡）。
+
+模板来源说明：
+  - 编队极化樱花.png：编队页运行帧（Maamaru-Dev/debug/research/tap_638_91.png
+    部队五帧 (255,113)）同源裁剪，52×52；
+  - 刀种/ 花数模板：仓库既有版本资源（e739867 随版本发布入库），
+    非本链路同源帧重裁；可用性经真机帧校准（见 tests 真帧校准用例）。
+"""
+
+import re
+from pathlib import Path
+
+from .. import sword_db
+from ..maa_adapter import roi_4to4, Point
+
+_TEAM_TAB = {1: (154, 91), 2: (274, 91), 3: (394, 91), 4: (516, 91), 5: (638, 91)}
+_ROW_CY = [160, 258, 357, 455, 553, 652]
+
+# 每槽读取 ROI（相对行心 cy 的偏移，1280x720）
+_NAME_ROI = (68, 5, 270, 38)        # 名字（标签右侧空隙 64~76，首字不掐头）
+_LEVEL_ROI = (348, -42, 412, -18)   # "刀剑 n 级" 数值（避开标签与右侧生存面板）
+_SURVIVAL_ROI = (288, 6, 420, 28)   # "生存 x/x"（真机帧行带 +11..+24）
+_FATIGUE_ROI = (290, 28, 425, 52)   # "疲劳 n/100"
+_BADGE_ROI = (62, -50, 140, 20)     # 左上花形徽章（避开槽位标签；刀种字符+花瓣）
+_INJURY_ROI = (165, -50, 315, 15)   # 卡面右上伤势章
+_LABEL_ROI = (20, -48, 72, 46)      # 行首位置标签（兼容一队金色高亮与灰色标签）
+_CN_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5}
+_TEAM_NAME = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
+_SAKURA_ROI = (240, -50, 330, 15)   # 卡面右上白樱花（极化标记）
+
+# 卡面占用判据区域（立绘位置）：真机 30 槽校准（2026-09-13，Maamaru-Dev
+# debug/research 五帧）——占位 std≥51.1 / dark≥0.075，空位 std≤9.6 / dark=0
+# 且亮度≥252；阈值取中间并留余量
+_CARD_REGION = (150, -45, 290, 30)
+_CARD_BLANK_MEAN = 230.0
+_CARD_BLANK_STD = 25.0
+_CARD_BLANK_DARK = 0.02
+
+_FATIGUE_PAIR = re.compile(r"(\d{1,3})\s*/\s*(\d{1,3})")
+
+# 伤势配置中文键 → 事件英文稳定枚举（配置键以 touken_config 为准）
+_INJURY_ENUM = {"重伤": "heavy", "中伤": "medium", "轻伤": "light"}
+
+# 刀种规范化：名册/游戏 UI 用日文汉字，事件统一简体枚举
+_TYPE_NORMALIZE = {"槍": "枪", "剣": "剑", "脇差": "胁差"}
+
+# 徽章字符 → 刀种枚举（游戏 UI 章为日文汉字，兼容简体）
+_BADGE_TYPE_OF = {"短": "短刀", "打": "打刀", "太": "太刀", "大": "大太刀",
+                  "枪": "枪", "槍": "枪", "薙": "薙刀", "剑": "剑", "剣": "剑",
+                  "胁": "胁差", "脇": "胁差"}
+
+# 徽章读取置信阈值：真帧校准（占位槽 0.72~0.98 / 空位 ≤0.54 / 噪声 0.66）
+_BADGE_THRESHOLD = 0.7
+
+# 编队页伤势章阈值：章面在此页持续脉动，真章单帧匹配分实测 0.67~0.92
+# （Maamaru-Dev/debug/research 探针 2026-09-13），横跨出阵页的 0.88 阈值；
+# 伪章（重伤模板蹭中伤卡等）实测 ≤0.65、battle 页记录 0.704，0.75 取中间。
+_ROSTER_STAMP_THRESHOLD = 0.75
+# 最佳类别与次高分的最小区分度：动画章可能互相蹭分，拉不开就 unknown
+_ROSTER_STAMP_MARGIN = 0.08
+# 编队页同源已证明的伤势类别（事件枚举空间）：五帧 30 槽实测只有中伤样本；
+# 重伤/轻伤等采到编队页运行帧后再解禁，出阵页模板不得降阈值硬判
+_FORMATION_PROVEN_INJURIES = frozenset({"medium"})
+_SAKURA_THRESHOLD = 0.9
+_SAKURA_TEMPLATE = "编队极化樱花.png"
+
+_FLOWER_OF = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6}
+
+# 花数证据白名单：只有编队页真机运行帧里实测达标（确认刀种下过滤匹配
+# ≥阈值）的刀种×花数组合才可产出 flowers 证据；其余组合一律 unknown，
+# 采到对应运行帧再逐步解禁——旧模板非编队页同源，不硬凑 21 张全开。
+# 依据 2026-09-13 五帧 30 槽实测（tests 真帧校准用例守着这份清单）。
+_PROVEN_FLOWER_COMBOS = frozenset({
+    ("短刀", 2),   # T2 小夜左文字（极化短）
+    ("打刀", 2),   # T1 压切长谷部（普打）
+    ("打刀", 3),   # T3 加州清光、T5 丰前江/山姥切长义（极化打）
+    ("胁差", 3),   # T3 物吉贞宗（极化胁）
+    ("太刀", 4),   # T4 烛台切光忠（极太）
+    ("太刀", 5),   # T4 莺丸（极太五花）、T3 道誉一文字（普太五花）
+    ("枪", 3),     # T5 人间无骨（普枪）
+})
+
+# 普通形态会动态涨花的例外刀：花数>名册基线不能证明极化
+# （髭切/膝丸随特阶段涨花，名册静态 rarity 都是 2）
+_DYNAMIC_FLOWER_EXCEPTIONS = frozenset({
+    "touken_107_higekiri", "touken_112_hizamaru"})
+
+
+def _norm_type(type_name: str):
+    """刀种枚举规范化：槍→枪、剣→剑、脇差→胁差，其余原样。"""
+    if not type_name:
+        return None
+    return _TYPE_NORMALIZE.get(type_name, type_name)
+
+
+def _parse_fatigue_tokens(tokens, y_min=None, y_max=None):
+    """疲劳 = 疲劳行带（按 token 实际 y）内分母恰为 100 的配对。
+
+    双保险：只认落在行带 [y_min, y_max] 里的 token（生存行的
+    100/100 哪怕分母恰为 100 也进不了疲劳行带），行带内再按 y 取
+    最靠下的——完全不依赖 OCR 返回顺序。
+    """
+    best = None
+    for text, pt in tokens or []:
+        y = getattr(pt, "y", 0) or 0
+        if y_min is not None and y < y_min:
+            continue
+        if y_max is not None and y > y_max:
+            continue
+        for cur, mx in _FATIGUE_PAIR.findall(text or ""):
+            if int(mx) == 100 and (best is None or y >= best[0]):
+                best = (y, int(cur))
+    return best[1] if best else None
+
+
+def _parse_survival_tokens(tokens):
+    """生存 = y 位置最靠下的 x/x 配对 → (survival, survival_max)。
+
+    生存行在疲劳行上方一行，ROI 收窄后互不越界；按坐标取数不吃
+    OCR 返回顺序。当前值>上限视为读坏（OCR 粘连），不进事实。
+    """
+    best = None
+    for text, pt in tokens or []:
+        y = getattr(pt, "y", 0) or 0
+        for cur, mx in _FATIGUE_PAIR.findall(text or ""):
+            cur, mx = int(cur), int(mx)
+            if cur <= mx and (best is None or y >= best[0]):
+                best = (y, cur, mx)
+    return (best[1], best[2]) if best else (None, None)
+
+
+def _parse_level(text: str):
+    m = re.search(r"(\d{1,3})", text or "")
+    return int(m.group()) if m else None
+
+
+def _match_name(raw: str):
+    """编队点名专用认人：精确命中，或唯一包含候选；多候选一律拒认。
+
+    刻意不用 find_by_name(fuzzy=True)——它的包含匹配按字典序取第一个，
+    "藤四郎"这类泛称会错认成第一个同名后缀刀；点名认错比认不出更糟。
+    Returns: sword 目录 id 或 None（unrecognized）
+    """
+    target = sword_db._normalize(raw or "")
+    if len(target) < 2:
+        return None
+    chars = sword_db.all_swords()
+    # 1. 精确（日文或中文名全等）
+    for sid, info in chars.items():
+        if sword_db._normalize(info["name"]) == target \
+                or sword_db._normalize(info.get("name_zh", "")) == target:
+            return sid
+    # 2. 唯一包含候选（OCR 掐头/多读字）；两个及以上候选 → 拒认
+    hit = None
+    for sid, info in chars.items():
+        name = sword_db._normalize(info["name"])
+        if len(name) >= 2 and (target in name or name in target):
+            if hit is not None:
+                return None
+            hit = sid
+    return hit
+
+
+def _shift(roi, cy):
+    x0, y0, x1, y1 = roi
+    return (x0, y0 + cy, x1, y1 + cy)
+
+
+def _tactical_roles(sword_type, kiwame_status, injury):
+    """碰瓷语义：太刀+极化+中伤三项都确认 → 碰瓷候选。
+
+    供以后智能编队消费；heavy 永远安全硬拦截、medium 不被通用
+    "受伤排除"提前吞掉是消费方的安全约束，本流程只落事实不编队。
+    """
+    if sword_type == "太刀" and kiwame_status == "kiwame" and injury == "medium":
+        return ["medium_injury_kiwame_tachi"]
+    return []
+
+
+class TeamRosterMixin:
+    """编队页只读点名。依赖宿主类的 navigate_to_stream、maa、config、record_event。"""
+
+    def team_roster_stream(self, teams=None):
+        """流式只读点名：逐部队切标签读六槽，落 team_roster.observed 事实。
+
+        Args:
+            teams: 要点名的部队号列表，默认 [1, 2, 3, 4, 5]。
+
+        Yields:
+            str: 执行状态消息
+        """
+        import time
+        team_list = list(teams) if teams else [1, 2, 3, 4, 5]
+        yield "[点名] 正在进入编队页…"
+        for nav_msg in self.navigate_to_stream("编队"):
+            yield nav_msg
+        if self.current_location != "编队":
+            if hasattr(self, "record_event"):
+                self.record_event("team_roster.observed", team_no=None,
+                                  slots=[], observation_status="failed",
+                                  fail_reason="未到达编队页",
+                                  source="formation_page")
+            yield "[点名] 到达编队失败"
+            return
+
+        for team_no in team_list:
+            if team_no not in _TEAM_TAB:
+                yield f"[点名] 部队{team_no}不认识（只支持 1~5），跳过"
+                continue
+            # 切队正面确认：位置标签（"N之一"金匾）必须显示请求的队号，
+            # 首尾两行都核对；点击被吞/延迟一拍都不算数——确认不了宁可
+            # failed，绝不把上一队的成员记到这一队。
+            label_seen = None
+            confirmed = False
+            for attempt in (1, 2, 3):
+                yield f"[点名] 部队{team_no}：切标签（第 {attempt}/3 次）…"
+                self.maa.click(Point(*_TEAM_TAB[team_no]))
+                time.sleep(1.2)
+                self.maa.screenshot(force=True)
+                label_seen = (self._read_row_label(_ROW_CY[0]),
+                              self._read_row_label(_ROW_CY[5]))
+                if label_seen == (team_no, team_no):
+                    confirmed = True
+                    break
+            if not confirmed:
+                seen = "、".join(sorted(
+                    {_TEAM_NAME.get(n, "未知") for n in label_seen}))
+                if hasattr(self, "record_event"):
+                    self.record_event("team_roster.observed", team_no=team_no,
+                                      slots=[], observation_status="failed",
+                                      fail_reason=f"队伍标签显示{seen}，切队未确认",
+                                      source="formation_page")
+                yield (f"[点名] 部队{team_no}：标签停在{seen}队，"
+                       "切队未确认，该队不落事实")
+                continue
+            yield f"[点名] 部队{team_no}：标签确认，读六槽…"
+            slots = self._read_team_page()
+            if hasattr(self, "record_event"):
+                self.record_event("team_roster.observed",
+                                  team_no=team_no, slots=slots,
+                                  observation_status=self._observation_status(slots),
+                                  source="formation_page")
+            occupied = sum(1 for s in slots if s["slot_status"] == "occupied")
+            unknown = sum(1 for s in slots if s["slot_status"] == "unknown")
+            kiwame = sum(1 for s in slots if s.get("kiwame_status") == "kiwame")
+            yield (f"[点名] 部队{team_no}：{occupied} 振在队"
+                   f"（极化 {kiwame}），{unknown} 槽存疑，事实已落账")
+        yield "[点名] 点名完成，全程只读未动队伍"
+
+    @staticmethod
+    def _observation_status(slots):
+        """顶层观测质量：任一槽 unknown 或有未读字段 → partial，否则 complete。"""
+        for s in slots:
+            if s["slot_status"] == "unknown" or s["unknown_fields"]:
+                return "partial"
+        return "complete"
+
+    # ---------- 单部队 ----------
+
+    def _read_team_page(self):
+        """当前帧读六槽。Returns: [slot dict × 6]（六槽固定输出）。
+
+        伤势章在编队页持续脉动（真机探针：真章单帧匹配分 0.67~0.92
+        随机摆动）——阈值用编队页校准值 0.75，对章没命中且未满血的
+        占用槽最多补采两帧、间隔 0.6s，任一帧命中即取枚举；只重试
+        伤势通道，其他字段仍以首帧为准。
+        """
+        stamps = self._roster_injury_stamps()
+        slots = [self._read_roster_slot(slot, cy, stamps)
+                 for slot, cy in enumerate(_ROW_CY, start=1)]
+        if stamps and any(s["slot_status"] == "occupied" and s["injury"] is None
+                          for s in slots):
+            import time
+            for _attempt in range(2):
+                time.sleep(0.6)
+                self.maa.screenshot(force=True)
+                for s in slots:
+                    if s["slot_status"] == "occupied" and s["injury"] is None:
+                        cy = _ROW_CY[s["slot"] - 1]
+                        hit = self._read_slot_injury(
+                            cy, stamps, s["survival"], s["survival_max"])
+                        if hit is not None:
+                            s["injury"] = hit
+                if all(s["injury"] is not None
+                       for s in slots if s["slot_status"] == "occupied"):
+                    break
+            for s in slots:
+                if s["injury"] is not None:
+                    s["unknown_fields"] = [f for f in s["unknown_fields"]
+                                           if f != "injury"]
+                    # 碰瓷角色依赖伤势枚举，补中后要重算
+                    s["tactical_roles"] = _tactical_roles(
+                        s["sword_type"], s["kiwame_status"], s["injury"])
+        return slots
+
+    def _read_roster_slot(self, slot, cy, stamps):
+        """读单个槽位：空位（正面证据）/ 占用（逐字段降级）/ 未知。"""
+        name_raw = self._roster_ocr_text(_shift(_NAME_ROI, cy))
+        level = _parse_level(self._roster_ocr_text(_shift(_LEVEL_ROI, cy)))
+        fatigue = _parse_fatigue_tokens(
+            self._roster_ocr_tokens(_shift(_FATIGUE_ROI, cy)),
+            y_min=cy + 28, y_max=cy + 55)
+        survival, survival_max = _parse_survival_tokens(
+            self._roster_ocr_tokens(_shift(_SURVIVAL_ROI, cy)))
+        badge = self._read_badge_char(cy)
+        injury = self._read_slot_injury(cy, stamps, survival, survival_max)
+        blank = self._card_blank(cy)
+
+        # 内容证据任一：名字/数值/徽章字符/伤势章（可靠花数在占用分支里才算）
+        has_content = any(v is not None for v in
+                          (name_raw, level, fatigue, survival,
+                           badge["type_raw"], injury))
+
+        # 空位：卡面近纯白（真机校准的空槽形态）且无任何内容证据；
+        # 纯白卡面上花数模板不可能可靠命中，花数证据只在占用分支产生
+        if blank and not has_content:
+            return {"slot": slot, "slot_status": "empty", "name_raw": None,
+                    "name": None, "name_status": None,
+                    "sword_catalog_id": None, "sword_type": None,
+                    "rarity_base": None, "level": None, "fatigue": None,
+                    "survival": None, "survival_max": None, "injury": None,
+                    "badge": badge, "kiwame_status": None,
+                    "kiwame_evidence": [], "tactical_roles": [],
+                    "unknown_fields": []}
+
+        # 名字 → 名册校正（失败只降级名字字段）
+        sid = _match_name(name_raw) if name_raw else None
+        if sid:
+            info = sword_db.all_swords()[sid]
+            name = info.get("name_zh") or info["name"]
+            name_status = "recognized"
+        else:
+            info, name = {}, None
+            name_status = "unrecognized" if name_raw else None
+
+        # 卡面有形但没有任何读得动的内容（整页失明/证据不足），
+        # 或卡面纯白却有内容证据（矛盾）：都 → unknown，绝不硬判空位
+        if (blank and has_content) or (not blank and not has_content):
+            return {"slot": slot, "slot_status": "unknown", "name_raw": name_raw,
+                    "name": name, "name_status": name_status,
+                    "sword_catalog_id": sid, "sword_type": None,
+                    "rarity_base": None, "level": level, "fatigue": fatigue,
+                    "survival": survival, "survival_max": survival_max,
+                    "injury": injury, "badge": badge, "kiwame_status": "unknown",
+                    "kiwame_evidence": [], "tactical_roles": [],
+                    "unknown_fields": _unknown_fields(
+                        name_status, sid, None, level, fatigue, survival,
+                        injury, badge, True)}
+
+        # 有内容但身份/数值全读不出：unknown（不猜，不硬判空位也不硬判占用）
+        if name_status != "recognized" and level is None \
+                and fatigue is None and survival is None:
+            return {"slot": slot, "slot_status": "unknown", "name_raw": name_raw,
+                    "name": name, "name_status": name_status,
+                    "sword_catalog_id": sid, "sword_type": None,
+                    "rarity_base": None, "level": None, "fatigue": None,
+                    "survival": None, "survival_max": None,
+                    "injury": injury, "badge": badge, "kiwame_status": "unknown",
+                    "kiwame_evidence": [], "tactical_roles": [],
+                    "unknown_fields": _unknown_fields(
+                        name_status, sid, None, None, None, None,
+                        injury, badge, True)}
+
+        # 占用：名册身份 + 数值逐字段降级
+        rarity_base = info.get("rarity") if sid else None
+        sword_type = _norm_type(info.get("type")) if sid else None
+        badge = self._match_slot_flowers(cy, badge, sword_type)
+        kiwame_status, kiwame_evidence = self._kiwame_conclusion(
+            sid, rarity_base, badge, injury, sakura_hit=self._sakura_hit(cy))
+        return {"slot": slot, "slot_status": "occupied", "name_raw": name_raw,
+                "name": name, "name_status": name_status,
+                "sword_catalog_id": sid, "sword_type": sword_type,
+                "rarity_base": rarity_base, "level": level, "fatigue": fatigue,
+                "survival": survival, "survival_max": survival_max,
+                "injury": injury, "badge": badge,
+                "kiwame_status": kiwame_status,
+                "kiwame_evidence": kiwame_evidence,
+                "tactical_roles": _tactical_roles(sword_type, kiwame_status, injury),
+                "unknown_fields": _unknown_fields(
+                    name_status, sid, sword_type, level, fatigue, survival,
+                    injury, badge, kiwame_status == "unknown")}
+
+    # ---------- 伤势 / 白樱花 ----------
+
+    def _roster_injury_stamps(self):
+        """伤势章模板（沿用出阵配置的同一组章；键为中文 重伤/中伤/轻伤）。"""
+        return self.config.get("sortie", {}).get("injury_stamps", {})
+
+    def _read_slot_injury(self, cy, stamps, survival, survival_max):
+        """伤势：三类章各取真实分，比分数选最佳，不吃配置顺序抢答。
+
+        - 最高分且 ≥ 编队页校准阈值才入围；
+        - 与次高分差距不足（脉动动画章会互相蹭分）→ unknown；
+        - 编队页真帧未证明的类别（当前只有中伤有样本）→ unknown，
+          绝不出阵页阈值硬判；
+        - 全部未命中：生存==上限且两个数字可靠读出 → none（正面无伤），
+          否则 unknown——"章没匹配到"绝不直接当无伤。
+        """
+        img = self.maa.screenshot()
+        if img is not None and stamps:
+            scores = {}
+            for key, stamp in stamps.items():
+                tpl = stamp.get("template") if isinstance(stamp, dict) else None
+                if not tpl:
+                    continue
+                enum = _INJURY_ENUM.get(key, key)
+                scores[enum] = self.maa.template_match_score(
+                    tpl, roi=roi_4to4(*_shift(_INJURY_ROI, cy)))
+            ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+            if ranked and ranked[0][1] >= _ROSTER_STAMP_THRESHOLD:
+                top_enum, top_score = ranked[0]
+                second = ranked[1][1] if len(ranked) > 1 else 0.0
+                if (top_enum in _FORMATION_PROVEN_INJURIES
+                        and top_score - second >= _ROSTER_STAMP_MARGIN):
+                    return top_enum
+        # 章未命中：生存==上限且两个数字都可靠读出 → 正面无伤
+        if (survival is not None and survival_max is not None
+                and survival == survival_max):
+            return "none"
+        return None
+
+    def _sakura_hit(self, cy):
+        """白樱花（极化标记）编队页同源模板命中检测。"""
+        return bool(self.maa.template_match(
+            _SAKURA_TEMPLATE, roi=roi_4to4(*_shift(_SAKURA_ROI, cy)),
+            threshold=_SAKURA_THRESHOLD))
+
+    # ---------- 卡面占用（空位正面证据） ----------
+
+    def _card_blank(self, cy):
+        """卡面立绘区是否近纯白（真机校准的空槽形态）。
+
+        占位卡有立绘纹理（真机 30 槽 std≥51.1），空位卡是纯白纸面
+        （std≤9.6、亮度≥252）；截图失明/黑帧不满足"亮且平"，
+        返回 False → 走 unknown，绝不判空。
+        """
+        import cv2
+        img = self.maa.screenshot()
+        if img is None:
+            return False
+        x0, y0, x1, y1 = _shift(_CARD_REGION, cy)
+        card = img[y0:y1, x0:x1]
+        if card.size == 0:
+            return False
+        gray = cv2.cvtColor(card, cv2.COLOR_BGR2GRAY)
+        return (gray.mean() >= _CARD_BLANK_MEAN
+                and gray.std() < _CARD_BLANK_STD
+                and (gray < 150).mean() < _CARD_BLANK_DARK)
+
+    # ---------- 徽章双通道 ----------
+
+    def _read_badge_char(self, cy):
+        """徽章字符通道：OCR 认刀种字符 → 规范化刀种枚举。
+
+        Returns:
+            {"type_raw": 原始字符或 None, "type": 刀种枚举或 None,
+             "flowers": None, "score": None, "threshold": 阈值,
+             "top_type": None, "top_score": None, "conclusion": "char_only"}
+            花数通道由 _match_slot_flowers 在确认刀种后补齐。
+        """
+        img = self.maa.screenshot()
+        type_raw = None
+        if img is not None:
+            for text, _pt in self.maa.ocr_all(
+                    roi_4to4(*_shift(_BADGE_ROI, cy)), img) or []:
+                for ch in _BADGE_TYPE_OF:
+                    if ch in text:
+                        type_raw = ch
+                        break
+                if type_raw:
+                    break
+        return {"type_raw": type_raw, "type": _BADGE_TYPE_OF.get(type_raw),
+                "flowers": None, "score": None, "threshold": _BADGE_THRESHOLD,
+                "top_type": None, "top_score": None, "conclusion": "char_only"}
+
+    def _flower_templates(self):
+        """花数徽章模板 [(路径, 花数, 刀种枚举)]，进程内缓存。
+
+        模板来自仓库既有版本资源（文件名自带刀种，如 五花太刀.png），
+        刀种统一规范化后供"确认刀种过滤"用。
+        """
+        cached = getattr(self, "_flower_template_cache", None)
+        if cached is not None:
+            return cached
+        base = Path(getattr(self.maa, "resource_dir", "resource/base"))
+        folder = base / "image" / "刀种"
+        templates = []
+        for path in sorted(folder.glob("*.png")):
+            m = re.match(r"([一二三四五六])花(.+)", path.stem)
+            if m:
+                templates.append((path, _FLOWER_OF[m.group(1)],
+                                  _norm_type(m.group(2))))
+        self._flower_template_cache = templates
+        return templates
+
+    def _match_slot_flowers(self, cy, badge, sword_type):
+        """花瓣数量通道：在确认刀种的模板子集里匹配当前花数。
+
+        刀种一致性（返工单第五条）：
+          - 徽章字符刀种与名册刀种不一致 → 花数证据作废（type_conflict）；
+          - 有确认刀种（名册优先，其次徽章字符）→ 只在该刀种的模板里
+            匹配；全局最高分模板若是别的刀种且分数达标 → 刀种冲突作废；
+          - 没有确认刀种（名字没认出+字符没读到）→ 不产生花数证据
+            （no_confirmed_type），只留全局诊断分数。
+        """
+        import cv2
+        import numpy as np
+        char_type = badge["type"]
+        if sword_type and char_type and sword_type != char_type:
+            # 徽章字符与名册刀种不一致：花数证据不可参与极化结论
+            badge["conclusion"] = "type_conflict"
+            badge["top_type"] = char_type
+            return badge
+        confirmed_type = sword_type or char_type
+        img = self.maa.screenshot()
+        if img is None or not self._flower_templates():
+            badge["conclusion"] = "low_score"
+            return badge
+        x0, y0, x1, y1 = _shift(_BADGE_ROI, cy)
+        region = img[y0:y1, x0:x1]
+        if region.size == 0:
+            badge["conclusion"] = "low_score"
+            return badge
+        best = {"flowers": None, "score": 0.0, "type": None}
+        top = {"flowers": None, "score": 0.0, "type": None}
+        for path, flowers, tpl_type in self._flower_templates():
+            raw = np.fromfile(str(path), dtype=np.uint8)
+            tpl = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+            if tpl is None:
+                continue
+            for scale in (0.9, 1.0, 1.1, 1.2, 1.3, 1.4):
+                t = cv2.resize(tpl, None, fx=scale, fy=scale)
+                if t.shape[0] > region.shape[0] or t.shape[1] > region.shape[1]:
+                    continue
+                res = cv2.matchTemplate(region, t, cv2.TM_CCOEFF_NORMED)
+                _mn, mx, _mnl, _mxl = cv2.minMaxLoc(res)
+                if mx > top["score"]:
+                    top.update(flowers=flowers, score=mx, type=tpl_type)
+                if (confirmed_type is None or tpl_type == confirmed_type) \
+                        and mx > best["score"]:
+                    best.update(flowers=flowers, score=mx, type=tpl_type)
+        badge["top_type"] = top["type"]
+        badge["top_score"] = round(top["score"], 3)
+        if confirmed_type is None:
+            badge["conclusion"] = "no_confirmed_type"
+            return badge
+        if top["type"] is not None and top["type"] != confirmed_type \
+                and top["score"] >= _BADGE_THRESHOLD \
+                and top["score"] > best["score"]:
+            # 全局最高分模板是另一个刀种：刀种冲突，花数证据作废
+            badge.update(flowers=None, score=round(top["score"], 3),
+                         conclusion="type_conflict")
+            return badge
+        if best["type"] == confirmed_type and best["score"] >= _BADGE_THRESHOLD:
+            if (confirmed_type, best["flowers"]) not in _PROVEN_FLOWER_COMBOS:
+                # 该刀种×花数组合没有编队页真帧达标记录：不出证据
+                badge["score"] = round(best["score"], 3)
+                badge["conclusion"] = "unproven_combo"
+                return badge
+            badge.update(flowers=best["flowers"], score=round(best["score"], 3),
+                         conclusion="recognized")
+        else:
+            badge["score"] = round(best["score"], 3)
+            badge["conclusion"] = "low_score"
+        return badge
+
+    # ---------- 极化结论（分层单向证明） ----------
+
+    def _kiwame_conclusion(self, sid, rarity_base, badge, injury, sakura_hit):
+        """极化结论：证据数组 + 单向结论，冲突 → unknown。
+
+        Returns:
+            (kiwame_status ∈ kiwame/normal/unknown, kiwame_evidence 数组)
+            数组每项 {type, raw_value, score, threshold, conclusion}，
+            保留每条证据的实测原值供以后审计。
+        """
+        evidence = []
+        if badge["conclusion"] == "type_conflict":
+            # 刀种冲突：花数证据不可参与极化结论
+            evidence.append({"type": "flower_type_conflict",
+                             "raw_value": f"冲突刀种={badge['top_type']}",
+                             "score": badge["score"],
+                             "threshold": _BADGE_THRESHOLD,
+                             "conclusion": "unknown"})
+        elif rarity_base is not None and badge["flowers"] is not None:
+            # 徽章证据：确认刀种下的花数 vs 名册基线
+            if sid in _DYNAMIC_FLOWER_EXCEPTIONS:
+                # 髭切/膝丸普通形态随特阶段涨花：徽章花数不区分极化
+                conclusion = "ambiguous_dynamic_flowers"
+            elif badge["flowers"] > rarity_base:
+                conclusion = "kiwame"
+            elif badge["flowers"] == rarity_base:
+                # normal 需正面、无遮挡且达标的徽章证据，不接受"没匹配到"
+                conclusion = "normal"
+            else:
+                conclusion = "flowers_below_base"
+            evidence.append({"type": "badge_flowers_vs_base",
+                             "raw_value": f"花数{badge['flowers']}/基线{rarity_base}",
+                             "score": badge["score"],
+                             "threshold": badge["threshold"],
+                             "conclusion": conclusion})
+        if sakura_hit:
+            # 白樱花（极化标记）可靠命中：直接证明 kiwame；
+            # 未命中不产生证据（可能被章遮挡或可见性波动，不反推 normal）
+            evidence.append({"type": "sakura_template",
+                             "raw_value": "白樱花",
+                             "score": None,
+                             "threshold": _SAKURA_THRESHOLD,
+                             "conclusion": "kiwame"})
+
+        # 单向结论：白樱花命中优先；徽章花数差其次；冲突/不足 → unknown
+        conclusions = {e["conclusion"] for e in evidence}
+        if "kiwame" in conclusions and "normal" in conclusions:
+            return "unknown", evidence  # 白樱花与徽章花数冲突
+        if "kiwame" in conclusions:
+            return "kiwame", evidence
+        if "normal" in conclusions:
+            return "normal", evidence
+        return "unknown", evidence
+
+    # ---------- 位置标签（切队正面确认） ----------
+
+    def _read_row_label(self, cy):
+        """读行首位置标签（竖排"N之M"金匾），返回队伍号 1~5 或 None。"""
+        tokens = self._roster_ocr_tokens(_shift(_LABEL_ROI, cy))
+        chars = "".join(t for t, _pt in sorted(
+            tokens, key=lambda tp: getattr(tp[1], "y", 0) or 0))
+        m = re.search(r"[一二三四五]", chars)
+        return _CN_NUM.get(m.group()) if m else None
+
+    # ---------- 小工具 ----------
+
+    def _roster_ocr_text(self, roi):
+        """本链路专用 OCR 入口：按 f9f13b2 先例改名，防 login 的 _ocr_text 截胡。"""
+        text = "".join(t for t, _pt in self._roster_ocr_tokens(roi)).strip()
+        return text or None
+
+    def _roster_ocr_tokens(self, roi):
+        """本链路专用 OCR token 入口（保留坐标，供按 y 位置取数）。"""
+        img = self.maa.screenshot()
+        if img is None:
+            return []
+        return self.maa.ocr_all(roi_4to4(*roi), img) or []
+
+
+def _unknown_fields(name_status, sid, sword_type, level, fatigue, survival,
+                    injury, badge, kiwame_unknown):
+    """列出该槽没读出来的字段；unknown 槽位（全静默）则列全部。"""
+    if kiwame_unknown and name_status is None and sid is None \
+            and sword_type is None and level is None and fatigue is None \
+            and survival is None and injury is None \
+            and badge["type"] is None and badge["flowers"] is None:
+        return ["name", "sword_catalog_id", "sword_type", "rarity_base",
+                "level", "fatigue", "survival", "injury", "badge.type",
+                "badge.flowers", "kiwame_status"]
+    fields = []
+    if name_status != "recognized":
+        fields.extend(["name", "sword_catalog_id", "sword_type", "rarity_base"])
+    if level is None:
+        fields.append("level")
+    if fatigue is None:
+        fields.append("fatigue")
+    if survival is None:
+        fields.append("survival")
+    if injury is None:
+        fields.append("injury")
+    if badge["type"] is None:
+        fields.append("badge.type")
+    if badge["flowers"] is None:
+        fields.append("badge.flowers")
+    if kiwame_unknown:
+        fields.append("kiwame_status")
+    return fields

@@ -761,6 +761,42 @@ class MAAAdapter:
             print(f"[MAA 错误] 模板匹配异常: {exc}")
             return None
 
+    def template_match_score(self, template: str, roi: Optional[Region] = None,
+                             threshold: float = 0.5) -> float:
+        """模板匹配只取分数（编队页伤势章"比分数选最佳"分类用）。
+
+        以较低阈值获取候选的真实分；未识别出结果或超时返回 0.0，
+        调用方自行做阈值与区分度判定。
+        """
+        image = self.screenshot()
+        if image is None:
+            return 0.0
+        roi_tuple = roi.to_tuple() if roi else (0, 0, 0, 0)
+        try:
+            tm_job = self._wait_job(
+                self.tasker.post_recognition(
+                    JRecognitionType.TemplateMatch,
+                    JTemplateMatch(
+                        template=[template],
+                        roi=roi_tuple,
+                        threshold=[threshold]
+                    ),
+                    image,
+                ),
+                timeout=self.RECOGNIZE_TIMEOUT, label=f"模板分数 {template}")
+            if tm_job is None:
+                self._note_recognize_timeout()
+                return 0.0
+            self._maa_timeouts = 0
+            tm_detail = tm_job.get()
+            tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
+            if tm_reco is None or not tm_reco.best_result:
+                return 0.0
+            return float(tm_reco.best_result.score)
+        except Exception as exc:
+            print(f"[MAA 错误] 模板分数异常: {exc}")
+            return 0.0
+
     def exists(self, template: str, roi: Optional[Region] = None,
                threshold: float = 0.7) -> bool:
         """判断模板是否存在"""
