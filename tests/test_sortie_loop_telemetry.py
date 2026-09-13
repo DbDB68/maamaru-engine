@@ -23,6 +23,9 @@ class _FrameMaa:
     def __init__(self, frames):
         self.frames = list(frames)
         self.frame = set()
+        # 帧标记 → 名牌 token：{"plate": ("太刀", "乱码丼")} 表示该帧
+        # 左下名牌区 OCR 出这些文字（配合 _read_drop_sword 的真实认人）
+        self.plate_tokens_by_marker = {}
 
     def screenshot(self, force=False):
         if force and self.frames:
@@ -46,6 +49,9 @@ class _FrameMaa:
         return None
 
     def ocr_all(self, roi, image=None):
+        for marker, tokens in self.plate_tokens_by_marker.items():
+            if marker in self.frame:
+                return [(t, (10, 500)) for t in tokens]
         return []
 
     def click(self, point):
@@ -124,12 +130,41 @@ class _LoopHost(SortieMixin):
         if self._production_drop_reader:
             return super()._read_drop_sword()
         if self._drop_id is not None and "drop" in self.maa.frame:
-            return {"sword_id": self._drop_id,
-                    "name": "厚藤四郎", "name_jp": "厚藤四郎"}
-        return None
+            return {"status": "recognized",
+                    "sword": {"sword_id": self._drop_id,
+                              "name": "厚藤四郎", "name_jp": "厚藤四郎"}}
+        return {"status": "none", "sword": None}
 
     def _return_home_from_march(self, cfg):
         return True
+
+    # ---- 异去（cfg_key="yosari"）生产链路的宿主桩：只在该路径被走到 ----
+
+    def _enter_yosari(self, cfg):
+        return True
+
+    def _dismiss_yosari_milestone(self, cfg):
+        return False
+
+    def wait_landmark_skipping(self, **kwargs):
+        return True
+
+    def _confirm_yosari_departure(self, cfg, auto_refill=False,
+                                  refill_attempted=False):
+        yield from ()
+        return True
+
+    def _yosari_round_done(self, cfg):
+        return False
+
+    def _read_yosari_fragments(self, cfg):
+        return None
+
+    def _save_team_record(self, cfg, record_no=1):
+        return True
+
+    def _restore_equipment_from_warning(self, cfg, record_no=1):
+        return None
 
     def by_type(self, event_type):
         return [e for e in self.events if e["event_type"] == event_type]
@@ -308,6 +343,147 @@ class LoopFactTests(unittest.TestCase):
         completed = host.by_type("sortie.completed")[0]["payload"]
         self.assertEqual(completed["attempt"], 2)
         self.assertEqual(completed["drop_observation"], "confirmed_none")
+
+
+class DropHonestyTests(unittest.TestCase):
+    """工单 P1：掉刀证据 vs 无证据必须分家。
+
+    认不出名字的掉刀圈落 not_observed(recognizer_error)，绝不落
+    confirmed_none；后续拍认出名字照常 recognized；失败状态每圈重置，
+    不许泄漏到下一圈。帧剧本全走真实 _read_drop_sword。
+    """
+
+    def _run_frames(self, frames, **kwargs):
+        kwargs.setdefault("auto_march", False)
+        kwargs.setdefault("max_loops", 1)
+        host = _LoopHost(
+            frames,
+            production_drop_reader=kwargs.pop("production_drop_reader", True))
+        logs = _run(host, **kwargs)
+        return host, logs
+
+    def _completed(self, host):
+        return host.by_type("sortie.completed")[0]["payload"]
+
+    def test_no_evidence_stays_confirmed_none(self):
+        # 普通画面没有横幅/立牌/名牌证据：无掉落照实记 confirmed_none
+        host, _ = self._run_frames(PRE + [{"result", "march"}, {}, {"home"}])
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "confirmed_none")
+        self.assertNotIn("drop_observation_reason", payload)
+        self.assertEqual(host.by_type("sword.obtained"), [])
+
+    def test_banner_with_garbled_plate_is_not_observed(self):
+        # 横幅在（确知掉刀）但名牌拍数耗尽仍没认出：
+        # 必须 not_observed(recognizer_error)，绝不许落 confirmed_none
+        host, _ = self._run_frames(
+            PRE + [{"result", "march"}, {}] + [{"banner"}] * 9 + [{"home"}])
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "not_observed")
+        self.assertEqual(payload["drop_observation_reason"], "recognizer_error")
+        self.assertEqual(host.by_type("sword.obtained"), [])
+
+    def test_type_prefix_evidence_without_banner_also_downgrades(self):
+        # 名牌读出刀种前缀但名字乱码、且没有横幅：同样是有证据认不出，
+        # 同样降级——不能漏掉这条证据路径
+        host = _LoopHost(
+            PRE + [{"result", "march"}, {}] + [{"plate"}] * 9 + [{"home"}],
+            production_drop_reader=True)
+        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        _run(host, auto_march=False, max_loops=1)
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "not_observed")
+        self.assertEqual(payload["drop_observation_reason"], "recognizer_error")
+        self.assertEqual(host.by_type("sword.obtained"), [])
+
+    def test_transient_failure_then_success_stays_recognized(self):
+        # 前几拍名牌读花（刀种在、名字乱码），后续拍认出大和守安定：
+        # 正常 recognized + 一条掉落事实，不因短暂 OCR 失败降级
+        host = _LoopHost(
+            PRE + [{"result", "march"}, {}]
+            + [{"plate"}] * 3 + [{"plate_ok"}] * 3 + [{"home"}],
+            production_drop_reader=True)
+        host.maa.plate_tokens_by_marker = {
+            "plate": ("太刀", "乱码丼"),
+            "plate_ok": ("打刀", "大和守安定"),
+        }
+        _run(host, auto_march=False, max_loops=1)
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "recognized")
+        obtained = host.by_type("sword.obtained")
+        self.assertEqual(len(obtained), 1)
+        self.assertEqual(obtained[0]["payload"]["name"], "大和守安定")
+
+    def test_recognized_then_unrecognized_leaves_both_facts(self):
+        # 同一圈先认出一振（大和守安定），随后另一振明确掉落但没认出：
+        # 圈总结保持 recognized（事实优先），但第二振的独立事实必须留下——
+        # 一条 sword.obtained 和一条 sword.drop_unrecognized 同时存在
+        host = _LoopHost(
+            PRE + [{"result", "march"}, {}]
+            + [{"plate_ok"}] * 3 + [{"banner"}] * 9 + [{"home"}],
+            production_drop_reader=True)
+        host.maa.plate_tokens_by_marker = {
+            "plate_ok": ("打刀", "大和守安定"),
+        }
+        _run(host, auto_march=False, max_loops=1)
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "recognized")
+        obtained = host.by_type("sword.obtained")
+        self.assertEqual(len(obtained), 1)
+        self.assertEqual(obtained[0]["payload"]["name"], "大和守安定")
+        facts = host.by_type("sword.drop_unrecognized")
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["payload"], {
+            "source": "sortie.drop", "mode": "sortie", "chapter": 1,
+            "map_no": 1, "sequence": 1, "attempt": 1})
+
+    def test_yosari_production_path_emits_mode(self):
+        # 异去生产链路（yosari_stream）真实产出的未识别事实必须带
+        # mode="yosari"，否则成绩单会把异去掉刀错标成合战场——
+        # 不能只靠手工构造前端测试数据做验收
+        host = _LoopHost(
+            PRE + [{"result", "march"}, {}] + [{"plate"}] * 9 + [{"home"}],
+            production_drop_reader=True)
+        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        host.config["yosari"] = host.config["sortie"]
+        host.config["map_select"]["异去"] = {"chapters": {"1": [10, 10]},
+                                             "maps": {"4": [20, 20]}}
+        with patch("touken.flows.sortie.time.sleep"), \
+             patch("touken.flows.sortie.find_deploy_button",
+                   return_value=Point(1, 1)):
+            list(host.yosari_stream(map_no=4, auto_march=False, max_loops=1))
+        facts = host.by_type("sword.drop_unrecognized")
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0]["payload"], {
+            "source": "sortie.drop", "mode": "yosari", "chapter": 1,
+            "map_no": 4, "sequence": 1, "attempt": 1})
+
+    def test_recognizer_exception_is_not_observed(self):
+        # 认人流程自身抛异常：同样 not_observed(recognizer_error)
+        host = _LoopHost(
+            PRE + [{"result", "march"}, {}, {"plate"}, {"home"}],
+            production_drop_reader=True)
+        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        with patch("touken.flows.sortie.sword_db.find_by_name",
+                   side_effect=RuntimeError("recognizer boom")):
+            _run(host, auto_march=False, max_loops=1)
+        payload = self._completed(host)
+        self.assertEqual(payload["drop_observation"], "not_observed")
+        self.assertEqual(payload["drop_observation_reason"], "recognizer_error")
+
+    def test_failure_does_not_leak_into_next_loop(self):
+        # 第 1 圈掉刀证据认不出（降级），第 2 圈全程无证据：
+        # 圈边界必须重置失败状态，第 2 圈照常 confirmed_none
+        host, _ = self._run_frames(
+            PRE + [{"result", "march"}, {}] + [{"banner"}] * 9 + [{"home"}]
+            + PRE + [{"result", "march"}, {}, {"home"}],
+            max_loops=2)
+        first, second = (host.by_type("sortie.completed")[0]["payload"],
+                         host.by_type("sortie.completed")[1]["payload"])
+        self.assertEqual(first["drop_observation"], "not_observed")
+        self.assertEqual(first["drop_observation_reason"], "recognizer_error")
+        self.assertEqual(second["drop_observation"], "confirmed_none")
+        self.assertNotIn("drop_observation_reason", second)
 
 
 class OldDataCompatTests(unittest.TestCase):

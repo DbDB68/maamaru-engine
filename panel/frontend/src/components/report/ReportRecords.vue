@@ -41,6 +41,7 @@ const eventNames: Record<string, string> = {
   'dismantle.completed': '刀解完成', 'equipment.restored': '恢复刀装',
   'ticket.refilled': '补充活动手形', 'yosari.ticket_refilled': '补充异去提灯',
   'yosari.fragments': '记录异去碎片', 'sword_inventory.completed': '刀帐盘点完成',
+  'sword.drop_unrecognized': '有一振刀剑没认出来',
 }
 
 function hanafudaDifficulty(value: unknown) {
@@ -75,6 +76,12 @@ function eventDetail(item: any) {
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
   if (item.event_type === 'sortie.interrupted') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 中断（${interruptReasonLabel(p.interrupt_reason)}）`
+  if (item.event_type === 'sword.drop_unrecognized') {
+    const where = p.source === 'osaka.drop'
+      ? `${p.floor ?? '？'}F · 大阪城挖地`
+      : `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 第 ${p.sequence ?? '？'} 圈${Number(p.attempt) > 1 ? ` · 第 ${p.attempt} 次出发` : ''}`
+    return `${where} · 确认有掉落，但名字没读出来`
+  }
   if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
   if (item.event_type === 'pumpkin.sortie_completed') return `第 ${p.sequence ?? '？'} 次出阵`
   if (item.event_type === 'pumpkin.board_completed') return `完成第 ${p.sequence ?? '？'} 块板子`
@@ -143,6 +150,10 @@ function activityTitle(item: any) {
   if (item.event_type === 'task_rewards.claimed') return `领取任务奖励 ${count} 类`
   if (item.event_type === 'task_rewards.none') return `检查任务奖励 ${count} 类`
   if (item.event_type === 'sword.obtained') return `刀剑男士来本丸 ${count} 位`
+  if (item.event_type === 'sword.drop_unrecognized') {
+    // 只报"没认出来"这件事本身，绝不混进获得刀剑的数量里
+    return count > 1 ? `有 ${count} 振刀剑没认出来` : '有一振刀剑没认出来'
+  }
   if (item.event_type === 'naihanka.gains') return `内番收工 ${count} 次`
   if (item.event_type === 'repair.summary') return repairCount(item.payload) ? `手入 ${repairCount(item.payload)} 振` : '检查手入名单'
   if (item.event_type === 'equipment.restored') return `恢复刀装 ${count} 次`

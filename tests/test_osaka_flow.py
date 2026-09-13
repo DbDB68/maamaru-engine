@@ -35,6 +35,12 @@ class OsakaFlow(OsakaMixin):
         self.wait_march_result = None   # _wait_for_osaka_march 的返回值
         self.find_march_seq = []        # _find_osaka_march 的剧本，耗尽后恒 None
         self.formation_visible = False
+        self.drop_evidence_without_name = False  # 掉刀证据在但名字没认出
+        self.events = []
+
+    def record_event(self, event_type, **payload):
+        self.events.append({"event_type": event_type,
+                            "payload": dict(payload)})
 
     # ---- 进场阶段：全部直通 ----
     def recover_game_update_stream(self):
@@ -94,13 +100,41 @@ class OsakaFlow(OsakaMixin):
         return "fixed"
 
     def _read_drop_sword(self):
-        return None
+        if self.drop_evidence_without_name:
+            return {"status": "unrecognized", "sword": None}
+        return {"status": "none", "sword": None}
 
     def _click_point(self, point):
         pass
 
     def quick_peek(self, tag=None, force=False):
         pass
+
+
+class UnrecognizedDropFactTests(unittest.TestCase):
+    """掉刀证据在、名字没认出：挖地没有圈事件可承载 drop_observation，
+    必须留下可查询的结构化事实 sword.drop_unrecognized，绝不静默消失。"""
+
+    def test_unrecognized_drop_recorded_once_per_screen(self):
+        flow = OsakaFlow(floor_done_seq=[])
+        flow.drop_evidence_without_name = True
+        msgs = run_flow(flow, max_floors=1)
+
+        facts = [e for e in flow.events
+                 if e["event_type"] == "sword.drop_unrecognized"]
+        self.assertEqual(len(facts), 1)   # 巡逻反复读到同一画面只记一次
+        self.assertEqual(facts[0]["payload"],
+                         {"source": "osaka.drop", "floor": 81})
+        self.assertEqual([e for e in flow.events
+                          if e["event_type"] == "sword.obtained"], [])
+        # 空巡逻兜底照常收场，事实落账不影响任务收尾语义
+        self.assertTrue(any("连续 300 次" in m for m in msgs))
+
+    def test_no_evidence_leaves_no_fact(self):
+        flow = OsakaFlow(floor_done_seq=[])
+        msgs = run_flow(flow, max_floors=1)
+        self.assertEqual([e for e in flow.events
+                          if e["event_type"] == "sword.drop_unrecognized"], [])
 
 
 def run_flow(flow, max_floors=90):

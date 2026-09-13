@@ -620,8 +620,9 @@ class SortieMixin:
 
                 # 掉落获得画面：左下对话框名牌认人（画面等戳不自动翻页；
                 # 自动行军时游戏自己跳过获得动画，认不到正常）
-                dropped = self._read_drop_sword()
-                if dropped:
+                drop_result = self._read_drop_sword()
+                if drop_result["status"] == "recognized":
+                    dropped = drop_result["sword"]
                     if drop_credit != dropped["sword_id"]:
                         drop_credit = dropped["sword_id"]
                         drops_this_loop.append(dropped["sword_id"])
@@ -632,6 +633,20 @@ class SortieMixin:
                                 source="sortie.drop", chapter=chapter,
                                 map_no=map_no, sequence=loop_no,
                                 attempt=attempt)
+                elif drop_result["status"] == "unrecognized":
+                    # 掉刀证据在、名字没认出（认人器已置观察降级旗）：
+                    # 本圈绝不落 confirmed_none；之前拍认出过名字的圈
+                    # 不受影响（有掉落事实优先）。同大阪城一样留一条
+                    # 结构化事实——圈总结是 recognized 也不能吞掉
+                    # "另一振没认出来"，刀名绝不当唯一身份。
+                    if drop_credit != "unrecognized":
+                        drop_credit = "unrecognized"
+                        if hasattr(self, "record_event"):
+                            self.record_event(
+                                "sword.drop_unrecognized",
+                                source="sortie.drop", mode=cfg_key,
+                                chapter=chapter, map_no=map_no,
+                                sequence=loop_no, attempt=attempt)
                 else:
                     drop_credit = None
 
@@ -796,14 +811,32 @@ class SortieMixin:
         不拖慢正常行军圈。
         名牌的「刀种+名字」组合只有获得画面有；结果页成员栏裸名没有刀种
         前缀，天然拒认（2026-08-24 假博多事故的根治）。认错比认不到糟，
-        名字走名册严格匹配（关模糊兜底）。认不到返回 None。
+        名字走名册严格匹配（关模糊兜底）。
+
+        返回三态（调用方必须区分，绝不能把"没看到"和"看到但没认出"都
+        当成无掉落）：
+          {"status": "recognized",   "sword": {...}}  名字认出
+          {"status": "unrecognized", "sword": None}   见过横幅/刀种/立牌等
+                掉刀证据但名字没认出，或认人流程自身异常。返回该状态时
+                本方法已置 _drop_watch_failed：本圈观察不可信，不许落
+                confirmed_none；后续拍若认出名字，掉落事实照常优先
+          {"status": "none",         "sword": None}   全程没有任何掉刀证据
         """
+
+        def _recognized(found):
+            sid, info = found
+            return {"status": "recognized",
+                    "sword": {"sword_id": sid,
+                              "name": info.get("name_zh") or info["name"],
+                              "name_jp": info["name"]}}
+
         try:
             def _grab():
                 # 内部取的每一张新帧也是行军观察帧，必须过战斗计数入口
                 self.maa.screenshot(force=True)
                 self._watch_battle_frame()
 
+            evidence = False  # 见过横幅/刀种前缀/立牌徽章 = 确知掉刀
             patient = False
             for attempt in range(10):  # 耐心模式覆盖横幅→名牌约 5 秒，余量翻倍
                 tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
@@ -814,13 +847,11 @@ class SortieMixin:
                         saw_prefix = True
                         found = sword_db.find_by_name(m.group(2), fuzzy=False)
                         if found:
-                            sid, info = found
-                            return {"sword_id": sid,
-                                    "name": info.get("name_zh") or info["name"],
-                                    "name_jp": info["name"]}
+                            return _recognized(found)
                     elif text.strip() in self._SWORD_TYPES:
                         saw_prefix = True
                 if saw_prefix:
+                    evidence = True
                     # 刀种和名字被 OCR 拆成两条：有刀种在场，裸名也认
                     # （结果页成员栏没有刀种前缀，进不来这个分支）
                     for text, _pt in tokens:
@@ -828,10 +859,7 @@ class SortieMixin:
                             continue
                         found = sword_db.find_by_name(text.strip(), fuzzy=False)
                         if found:
-                            sid, info = found
-                            return {"sword_id": sid,
-                                    "name": info.get("name_zh") or info["name"],
-                                    "name_jp": info["name"]}
+                            return _recognized(found)
                     time.sleep(0.8)  # 名牌在但名字没匹配上（OCR 花了），重读
                     _grab()
                     continue
@@ -839,6 +867,7 @@ class SortieMixin:
                 if not patient and self.maa.ocr(
                         self._OBTAIN_BANNER_TEXT,
                         roi_4to4(*self._OBTAIN_BANNER_ROI)):
+                    evidence = True
                     patient = True
                 if patient:
                     time.sleep(0.8)
@@ -847,6 +876,7 @@ class SortieMixin:
                 # 没横幅：有立牌=获得画面，等对话框滑入重读；
                 # 没立牌先给一拍（对话框可能还在路上），第二拍还空就不是获得画面
                 if self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
+                    evidence = True
                     time.sleep(0.8)
                     _grab()
                     continue
@@ -854,11 +884,17 @@ class SortieMixin:
                     time.sleep(0.6)
                     _grab()
                     continue
-                return None
+                return {"status": "none", "sword": None}
         except Exception:
             # 认人流程翻车 = 这段行军掉落观察不可信，本圈不许 confirmed_none
             self._drop_watch_failed = True
-        return None
+            return {"status": "unrecognized", "sword": None}
+        # 耐心拍数耗尽：见过掉刀证据就得承认"有掉刀但没认出名字"，
+        # 绝不许假装没看见（那会把真实掉落记成"确认无掉落"）
+        if evidence:
+            self._drop_watch_failed = True
+            return {"status": "unrecognized", "sword": None}
+        return {"status": "none", "sword": None}
 
     def _dismiss_yosari_milestone(self, cfg: dict) -> bool:
         """收掉异去累计圈数里程碑弹窗（500/800/1100 圈送火车切）。

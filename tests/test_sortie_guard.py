@@ -115,24 +115,29 @@ class _PlateMaa:
 
 
 class DropSwordRecognitionTests(unittest.TestCase):
+    """认人合约三态：recognized / unrecognized（见过掉刀证据但没认出）/
+    none（全程无掉刀证据）。"没看到"和"看到但没认出"绝不允许都返回 None。"""
+
     def test_plate_with_type_prefix_matches(self):
         # 名牌整条读出「短刀 毛利藤四郎」，刀种前缀+名册严格匹配接住
         flow = SortieMixin()
         flow.maa = _PlateMaa([("短刀 毛利藤四郎", Point(100, 660))])
 
-        sword = flow._read_drop_sword()
+        result = flow._read_drop_sword()
 
-        self.assertEqual(sword["name"], "毛利藤四郎")
-        self.assertEqual(sword["sword_id"], "touken_142_mouri_toushirou")
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "毛利藤四郎")
+        self.assertEqual(result["sword"]["sword_id"], "touken_142_mouri_toushirou")
 
     def test_plate_higher_layout_also_matches(self):
         # 不带立牌布局名牌偏上（2026-08-24 连拍：打刀 大和守安定），宽 ROI 罩住
         flow = SortieMixin()
         flow.maa = _PlateMaa([("打刀 大和守安定", Point(180, 530))], badge=False)
 
-        sword = flow._read_drop_sword()
+        result = flow._read_drop_sword()
 
-        self.assertEqual(sword["name"], "大和守安定")
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "大和守安定")
 
     def test_split_type_and_name_tokens(self):
         # OCR 把刀种和名字拆成两条：有刀种在场，裸名也认
@@ -141,9 +146,10 @@ class DropSwordRecognitionTests(unittest.TestCase):
             [("打刀", Point(60, 530)), ("大和守安定", Point(180, 530))],
             badge=False)
 
-        sword = flow._read_drop_sword()
+        result = flow._read_drop_sword()
 
-        self.assertEqual(sword["name"], "大和守安定")
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "大和守安定")
 
     def test_dialog_late_gets_retried(self):
         # 对话框晚半拍滑入：第一拍名牌区空、立牌在，重读后认到
@@ -152,36 +158,47 @@ class DropSwordRecognitionTests(unittest.TestCase):
             [[], [("短刀 毛利藤四郎", Point(100, 660))]], badge=True)
 
         with patch("touken.flows.sortie.time.sleep"):
-            sword = flow._read_drop_sword()
+            result = flow._read_drop_sword()
 
-        self.assertEqual(sword["name"], "毛利藤四郎")
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "毛利藤四郎")
 
-    def test_garbage_and_school_name_never_match(self):
-        # 「刀派」「粟田口」（右边刀派立牌）不是刀名，严格匹配不许乱认
+    def test_garbled_plate_with_badge_is_unrecognized_not_none(self):
+        # 「刀派」「粟田口」（右边刀派立牌）不是刀名，严格匹配不许乱认；
+        # 但立牌徽章=确知掉刀：必须返回 unrecognized，绝不能装没看见
         flow = SortieMixin()
         flow.maa = _PlateMaa([("刀派", Point(1, 1)), ("粟田口", Point(2, 2))])
 
         with patch("touken.flows.sortie.time.sleep"):
-            self.assertIsNone(flow._read_drop_sword())
+            result = flow._read_drop_sword()
+
+        self.assertEqual(result["status"], "unrecognized")
+        self.assertTrue(flow._drop_watch_failed)
 
     def test_bare_name_on_obtain_screen_never_match(self):
-        # 获得画面上名牌只读出裸名（没刀种前缀）也拒认：认错比认不到糟
+        # 获得画面上名牌只读出裸名（没刀种前缀）也拒认：认错比认不到糟；
+        # 立牌在场=掉刀证据，落 unrecognized
         flow = SortieMixin()
         flow.maa = _PlateMaa([("大和守安定", Point(180, 530))], badge=True)
 
         with patch("touken.flows.sortie.time.sleep"):
-            self.assertIsNone(flow._read_drop_sword())
+            result = flow._read_drop_sword()
+
+        self.assertEqual(result["status"], "unrecognized")
 
     def test_result_screen_roster_card_is_not_a_drop(self):
         # 2026-08-24 事故：战斗结果页底部成员栏卡片落进名牌区，
-        # 「之六 博多藤四郎」被逐圈误记成掉落。裸名没有刀种前缀就必须拒认。
+        # 「之六 博多藤四郎」被逐圈误记成掉落。裸名没有刀种前缀就必须拒认；
+        # 没立牌没横幅=没有掉刀证据，返回 none
         flow = SortieMixin()
         flow.maa = _PlateMaa(
             [("之六", Point(40, 660)), ("博多藤四郎", Point(150, 660))],
             badge=False)
 
         with patch("touken.flows.sortie.time.sleep"):
-            self.assertIsNone(flow._read_drop_sword())
+            result = flow._read_drop_sword()
+
+        self.assertEqual(result["status"], "none")
 
     def test_banner_waits_for_late_plate(self):
         # 掉刀预告横幅在、名牌还在转场动画里（裸立绘阶段名牌区全空）：
@@ -192,21 +209,55 @@ class DropSwordRecognitionTests(unittest.TestCase):
             badge=False, banner=True)
 
         with patch("touken.flows.sortie.time.sleep"):
-            sword = flow._read_drop_sword()
+            result = flow._read_drop_sword()
 
-        self.assertIsNotNone(sword)
-        self.assertEqual(sword["name"], "蜂须贺虎彻")
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "蜂须贺虎彻")
         self.assertEqual(flow.maa.calls, 4)  # 空拍全熬过来了
 
-    def test_banner_but_plate_never_reads_gives_up_none(self):
-        # 横幅在但名牌死活读不出来（极端情况）：耐心也有上限，认不到返回 None
+    def test_transient_failure_does_not_downgrade_later_success(self):
+        # 前几拍名牌读花（刀种在场、名字乱码），后续拍认出：
+        # 正常 recognized，绝不能因为之前短暂 OCR 失败而降级
+        flow = SortieMixin()
+        flow.maa = _PlateMaa(
+            [[("太刀", Point(60, 530)), ("乱码丼", Point(180, 530))],
+             [("打刀 大和守安定", Point(180, 530))]],
+            badge=False)
+
+        with patch("touken.flows.sortie.time.sleep"):
+            result = flow._read_drop_sword()
+
+        self.assertEqual(result["status"], "recognized")
+        self.assertEqual(result["sword"]["name"], "大和守安定")
+
+    def test_banner_but_plate_never_reads_is_unrecognized(self):
+        # P1 主修：横幅在=确知掉刀，名牌死活读不出来时必须落
+        # unrecognized（上游据此记 not_observed/recognizer_error），
+        # 绝不能静默返回 none 让真实掉落变成"确认无掉落"
         flow = SortieMixin()
         flow.maa = _PlateMaa([[]], badge=False, banner=True)
 
         with patch("touken.flows.sortie.time.sleep"):
-            self.assertIsNone(flow._read_drop_sword())
+            result = flow._read_drop_sword()
 
+        self.assertEqual(result["status"], "unrecognized")
+        self.assertTrue(flow._drop_watch_failed)
         self.assertEqual(flow.maa.calls, 10)  # 耐心上限 10 拍
+
+    def test_recognizer_exception_is_unrecognized(self):
+        # 认人流程自身翻车：同样落 unrecognized + 观察降级旗，诚实交底
+        flow = SortieMixin()
+        flow.maa = _PlateMaa(
+            [[("太刀", Point(60, 530)), ("乱码丼", Point(180, 530))]],
+            badge=False)
+
+        with patch("touken.flows.sortie.time.sleep"), \
+             patch("touken.flows.sortie.sword_db.find_by_name",
+                   side_effect=RuntimeError("recognizer boom")):
+            result = flow._read_drop_sword()
+
+        self.assertEqual(result["status"], "unrecognized")
+        self.assertTrue(flow._drop_watch_failed)
 
     def test_no_banner_no_badge_exits_fast(self):
         # 没横幅没立牌的普通画面（结果页/状态页）：两拍内快速退场，不拖慢行军圈
@@ -214,8 +265,9 @@ class DropSwordRecognitionTests(unittest.TestCase):
         flow.maa = _PlateMaa([[]], badge=False, banner=False)
 
         with patch("touken.flows.sortie.time.sleep"):
-            self.assertIsNone(flow._read_drop_sword())
+            result = flow._read_drop_sword()
 
+        self.assertEqual(result["status"], "none")
         self.assertEqual(flow.maa.calls, 2)  # 一拍宽限 + 一拍确认，就撤
 
 

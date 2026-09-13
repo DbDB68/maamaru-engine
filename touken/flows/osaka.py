@@ -449,8 +449,9 @@ class OsakaMixin:
 
             # 掉落获得画面：左下对话框名牌认人（挖地没有自动行军，
             # 获得画面一定会等戳，跟合战场共用 _read_drop_sword）
-            dropped = self._read_drop_sword()
-            if dropped:
+            drop_result = self._read_drop_sword()
+            if drop_result["status"] == "recognized":
+                dropped = drop_result["sword"]
                 if drop_credit != dropped["sword_id"]:
                     drop_credit = dropped["sword_id"]
                     yield f"[挖地] 🎉 刀剑男士【{dropped['name']}】来本丸了！"
@@ -463,6 +464,18 @@ class OsakaMixin:
                         self.record_event(
                             "sword.obtained", **dropped, source="osaka.drop",
                             floor=floor)
+            elif drop_result["status"] == "unrecognized":
+                # 明确看见掉刀证据但名字没认出：留一条可查询的结构化事实，
+                # 绝不静默消失、更不许算成"没掉"（挖地没有圈事件可承载
+                # drop_observation，只能靠这条事件本身）
+                if drop_credit != "unrecognized":
+                    drop_credit = "unrecognized"
+                    if hasattr(self, "record_event"):
+                        floor = next((f for f in (select_floor, target_floor)
+                                      if isinstance(f, int) and not isinstance(f, bool)),
+                                     None)
+                        self.record_event("sword.drop_unrecognized",
+                                          source="osaka.drop", floor=floor)
             else:
                 drop_credit = None
 
