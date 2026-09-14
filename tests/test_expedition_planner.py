@@ -1,0 +1,561 @@
+# -*- coding: utf-8 -*-
+"""可解释远征纸面规划器 v1 · 契约测试（expedition_planner）。
+
+钉死的规矩：
+- E2（元寇防垒）三硬条件：总等级 260、至少一把枪、至少三振，分别不足都不可行；
+- 修行/手入剔除具体刀；受伤（含重伤）不剔除，只如实展示；
+- 近侍只扣本人一振：多号机按多重集容量（2 振-1=1 可用、1 振-1=0）、
+  普通/极化同位刀不连坐；身份不清 → needs_confirmation，不封家族也不伪判安全；
+- same_team_exclusion_key 只管同队互斥，不参与近侍判定；
+- 默认保一支队在家；显式 allow_all_teams_away 才五队全出且带醒目警告；
+- 樱吹雪阈值 50（49 不算）；大成功只给定性，不编概率；
+- 默认目标 加速符>小判>最缺基础资源，调用方可覆盖；
+- 规则不完整的图只给 rule_incomplete；事实缺失整卷降级。
+"""
+import tempfile
+import unittest
+from pathlib import Path
+
+from touken.expedition_planner import (SAKURA_FATIGUE_MIN, load_maps,
+                                       most_lacking_base_resource,
+                                       normalize_goals, plan_expeditions)
+from touken.honmaru_profile import build_honmaru_profile
+from touken.telemetry import TelemetryStore
+
+HASEBE = "touken_118_heshikiri_hasebe"
+YARI = "touken_065_tonbokiri"        # 蜻蛉切（枪）
+MIKA = "touken_003_mikazuki"         # 三日月宗近（太刀）
+KOGI = "touken_005_kogitsunemaru"    # 小狐丸（太刀）
+MAEDA = "touken_029_maeda"           # 前田藤四郎（短刀）
+
+NOW = 1000  # 盘点 ts=100、roster ts=150，都在 24h 内，不触发陈旧警告
+INVENTORY = {"木炭": 500, "玉钢": 800, "冷却材": 60, "砥石": 900}
+
+
+def _store() -> TelemetryStore:
+    return TelemetryStore(Path(tempfile.mkdtemp()) / "telemetry.db")
+
+
+def _row(catalog_id, name, **kw):
+    row = {"sword_id": catalog_id, "name_zh": name, "level": 99,
+           "tou_level": 1, "survival": 50, "survival_max": 50,
+           "fatigue": 100, "fatigue_max": 100, "stats": {"打击": 55},
+           "kiwame_date": None, "locked": 1, "page_no": 1}
+    row.update(kw)
+    return row
+
+
+def _slot(slot, catalog_id=MIKA, name="三日月宗近", slot_status="occupied",
+          **kw):
+    base = {"slot": slot, "slot_status": slot_status, "name_raw": name,
+            "name": name, "name_status": "recognized",
+            "sword_catalog_id": catalog_id, "sword_type": "太刀",
+            "level": 99, "fatigue": 100, "survival": 50, "survival_max": 50,
+            "injury": "none", "kiwame_status": "normal", "unknown_fields": []}
+    base.update(kw)
+    return base
+
+
+def _profile(store, rows, rosters, captured_at=100):
+    store.save_sword_snapshot(rows, owned=len(rows), capacity=300, missing=0,
+                              captured_at=captured_at,
+                              source="owned_inventory")
+    for team_no, slots in rosters.items():
+        store.record_event("team_roster.observed", {
+            "team_no": team_no, "slots": slots,
+            "observation_status": "complete", "source": "formation_page"})
+        store._conn().execute(
+            "UPDATE events SET ts = ? WHERE id = (SELECT MAX(id) FROM events)",
+            (captured_at + 50,))
+        store._conn().commit()
+    return build_honmaru_profile(store)
+
+
+def _rules(total=10, min_members=None, required=None, completeness="complete"):
+    return {"total_level": total, "min_members": min_members,
+            "required_types": required, "completeness": completeness,
+            "unknown_aspects": ([] if completeness == "complete"
+                                else ["min_members", "required_types"]),
+            "server": "cn", "source": "测试规则", "verified_at": "2026-09-15"}
+
+
+def _map(name, rules, duration=60, **yields):
+    m = {"era": 9, "slot": 1, "name": name, "duration_min": duration,
+         "exp_saniwa": 0, "exp_sword": 0, "木炭": 0, "玉钢": 0, "冷却材": 0,
+         "砥石": 0, "委托符": 0, "加速符": 0, "小判": 0, "rules": rules}
+    m.update(yields)
+    return m
+
+
+def _facts(attendant=None, training=None, repair=None):
+    return {"attendant": attendant, "training": training or [],
+            "repair": repair or []}
+
+
+def _plan(profile, maps, facts, **kw):
+    kw.setdefault("now", NOW)
+    kw.setdefault("inventory", INVENTORY)
+    return plan_expeditions(profile, maps=maps, member_facts=facts, **kw)
+
+
+def _e2_team(store, levels=(99, 99, 99), types=("枪", "太刀", "打刀")):
+    """一支满足 E2 的队（默认）：枪+太刀+打刀各一振，等级可调。"""
+    catalogs = {"枪": (YARI, "蜻蛉切"), "太刀": (MIKA, "三日月宗近"),
+                "打刀": (HASEBE, "压切长谷部")}
+    rows, slots = [], []
+    for i, (lv, tp) in enumerate(zip(levels, types), start=1):
+        cid, cname = catalogs[tp]
+        rows.append(_row(cid, cname, level=lv))
+        slots.append(_slot(i, catalog_id=cid, name=cname, sword_type=tp,
+                           level=lv))
+    rows.append(_row(KOGI, "小狐丸"))  # 近侍候补（不在队里）
+    return rows, slots
+
+
+class MapEligibilityTests(unittest.TestCase):
+    """工单第七节第一条：E2 三条件分别不足都不可行，全满足才可行。"""
+
+    def _run(self, levels=(99, 99, 99), types=("枪", "太刀", "打刀")):
+        store = _store()
+        rows, slots = _e2_team(store, levels, types)
+        profile = _profile(store, rows, {2: slots})
+        maps = {"E2": load_maps()["E2"]}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        return _plan(profile, maps, facts, allow_all_teams_away=True)
+
+    def test_e2_all_conditions_met_is_executable(self):
+        result = self._run()  # 99×3=297 ≥ 260，枪 1 振，3 振
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["map_code"], "E2")
+        self.assertEqual(assignment["confidence"], "executable")
+        self.assertEqual(result["plan"]["confidence"], "executable")
+        why = "；".join(assignment["why_eligible"])
+        self.assertIn("297", why)
+        self.assertIn("枪", why)
+        self.assertIn("3 振", why)
+
+    def test_e2_total_level_short_is_infeasible(self):
+        result = self._run(levels=(80, 80, 80))  # 240 < 260
+        self.assertEqual(result["plan"]["assignments"], [])
+        reasons = "；".join(result["infeasible"][0]["reasons"])
+        self.assertIn("240", reasons)
+        self.assertIn("260", reasons)
+
+    def test_e2_without_yari_is_infeasible(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row("touken_007_ishikirimaru", "石切丸")]
+        slots = [_slot(1), _slot(2, catalog_id=KOGI, name="小狐丸"),
+                 _slot(3, catalog_id="touken_007_ishikirimaru", name="石切丸")]
+        profile = _profile(store, rows, {2: slots})
+        maps = {"E2": load_maps()["E2"]}
+        result = _plan(profile, maps, _facts(), allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("枪", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_e2_too_few_members_is_infeasible(self):
+        store = _store()
+        rows, slots = _e2_team(store, (99, 99), ("枪", "太刀"))
+        slots = slots[:2]
+        rows = rows[:2] + [_row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {2: slots})
+        maps = {"E2": load_maps()["E2"]}
+        result = _plan(profile, maps, _facts(), allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("最低 3 振", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_e2_type_requirement_is_at_least_not_fixed_lineup(self):
+        # 四振队（枪+三把其他）同样可行：「至少包含」不是固定阵容
+        store = _store()
+        rows, slots = _e2_team(store)
+        rows.insert(1, _row(MAEDA, "前田藤四郎"))
+        slots.append(_slot(4, catalog_id=MAEDA, name="前田藤四郎",
+                           sword_type="短刀"))
+        profile = _profile(store, rows, {2: slots})
+        maps = {"E2": load_maps()["E2"]}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"][0]["confidence"],
+                         "executable")
+
+
+class AvailabilityTests(unittest.TestCase):
+    """工单第七节第二条：修行/手入剔除，受伤不剔除。"""
+
+    def _profile_one_team(self, store, injury="none"):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        slots = [_slot(1, injury=injury)]
+        return _profile(store, rows, {1: slots})
+
+    def test_training_member_blocks_team(self):
+        store = _store()
+        profile = self._profile_one_team(store)
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"},
+                       training=[{"sword_catalog_id": MIKA, "form": "normal"}])
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("修行中", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_repair_member_blocks_team(self):
+        store = _store()
+        profile = self._profile_one_team(store)
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"},
+                       repair=[{"sword_catalog_id": MIKA, "form": "normal"}])
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("手入中", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_heavy_injury_does_not_block_but_is_shown(self):
+        store = _store()
+        profile = self._profile_one_team(store, injury="heavy")
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "executable")
+        self.assertIn("重伤", assignment["injury_note"])
+        self.assertIn("不影响远征资格", assignment["injury_note"])
+
+
+class AttendantTests(unittest.TestCase):
+    """工单第七节第三条：近侍只扣本人一振，多重集容量，不连坐。"""
+
+    def _hasebe_pool(self, store, kiwame_copies, normal_copies):
+        rows = [_row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")
+                for _ in range(kiwame_copies)]
+        rows += [_row(HASEBE, "压切长谷部") for _ in range(normal_copies)]
+        rows.append(_row(KOGI, "小狐丸"))
+        return rows
+
+    def test_attendant_himself_blocked_when_single_copy(self):
+        # 1 振极化长谷部，当了近侍 → 容量 1-1=0，所在队不可派
+        store = _store()
+        rows = self._hasebe_pool(store, 1, 0)
+        slots = [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                       kiwame_status="kiwame")]
+        profile = _profile(store, rows, {1: slots})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("近侍", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_second_kiwame_copy_keeps_capacity_one(self):
+        # 2 振极化长谷部，近侍占 1 → 另一振仍可远征（多重集 2-1=1）
+        store = _store()
+        rows = self._hasebe_pool(store, 2, 0)
+        slots = [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                       kiwame_status="kiwame")]
+        profile = _profile(store, rows, {1: slots})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "executable")
+        note = "；".join(assignment["availability_notes"])
+        self.assertIn("另一振", note)
+        self.assertNotIn("一号", note)  # 不伪造号机身份
+        self.assertNotIn("二号", note)
+
+    def test_normal_same_name_copy_not_implicated(self):
+        # 极化 1 振当近侍，普通长谷部（同位刀不同形态）不受影响
+        store = _store()
+        rows = self._hasebe_pool(store, 1, 1)
+        slots = [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                       kiwame_status="normal")]
+        profile = _profile(store, rows, {1: slots})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "executable")
+        self.assertEqual(assignment.get("uncertainties"), [])
+
+    def test_identity_unclear_is_uncertain_not_family_ban(self):
+        # 极化/普通各 1 振，近侍申报形态未知 → 不确定但不封整个家族
+        store = _store()
+        rows = self._hasebe_pool(store, 1, 1)
+        slots = [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                       kiwame_status="kiwame")]
+        profile = _profile(store, rows, {1: slots})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE})  # form 未知
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["infeasible"], [])  # 没有封禁
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "needs_confirmation")
+        self.assertIn("无法确认", "；".join(assignment["uncertainties"]))
+
+    def test_attendant_missing_from_pool_degrades(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("不在候选池" in w for w in result["warnings"]))
+
+
+class ExclusionTests(unittest.TestCase):
+    """工单第七节第四条：同队互斥独立于近侍约束。"""
+
+    def test_same_team_exclusion_conflict_blocks_team(self):
+        # 两振同名前田藤四郎同队（观测数据可疑）→ 拦下
+        store = _store()
+        rows = [_row(MAEDA, "前田藤四郎"), _row(MAEDA, "前田藤四郎", level=1)]
+        slots = [_slot(1, catalog_id=MAEDA, name="前田藤四郎",
+                       sword_type="短刀"),
+                 _slot(2, catalog_id=MAEDA, name="前田藤四郎",
+                       sword_type="短刀", level=1)]
+        profile = _profile(store, rows, {1: slots})
+        maps = {"M": _map("M", _rules())}
+        result = _plan(profile, maps, _facts(), allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("互斥冲突", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_exclusion_key_does_not_feed_attendant_rule(self):
+        # 近侍是极化长谷部；另一队里的普通长谷部共享同一 exclusion key，
+        # 但互斥键不得被拿来实现近侍限制——普通这振照常可派
+        store = _store()
+        rows = [_row(HASEBE, "压切长谷部", kiwame_date="2024-01-01"),
+                _row(HASEBE, "压切长谷部")]
+        profile = _profile(store, rows, {
+            2: [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                      kiwame_status="normal")]})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"][0]["confidence"],
+                         "executable")
+
+
+class TeamReservationTests(unittest.TestCase):
+    """工单第七节第五条：默认保一队，显式允许才全出。"""
+
+    def _two_teams(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        return _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+
+    def test_default_keeps_one_team_home(self):
+        store = _store()
+        profile = self._two_teams(store)
+        maps = {"M": _map("M", _rules(), 加速符=1)}
+        facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+        result = _plan(profile, maps, facts)
+        self.assertEqual(len(result["plan"]["assignments"]), 1)
+        staying = result["plan"]["staying_home"]
+        self.assertIsNotNone(staying)
+        self.assertIn(staying["team_no"], (1, 2))
+        self.assertIn("保留至少一支", staying["reason"])
+
+    def test_allow_all_teams_away_sends_everyone_with_warning(self):
+        store = _store()
+        profile = self._two_teams(store)
+        maps = {"M": _map("M", _rules(), 加速符=1)}
+        facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(len(result["plan"]["assignments"]), 2)
+        self.assertIsNone(result["plan"]["staying_home"])
+        self.assertIn("没有可出阵队伍",
+                      result["plan"]["all_away_warning"])
+
+
+class SakuraTests(unittest.TestCase):
+    """工单第七节第六条：49 不算飘花，50 算；无花不影响普通成功。"""
+
+    def _run_with_fatigue(self, fatigue):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1, fatigue=fatigue)]})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        return result["plan"]["assignments"][0]
+
+    def test_fatigue_49_is_not_sakura(self):
+        assignment = self._run_with_fatigue(49)
+        self.assertEqual(assignment["great_success"]["status"], "not_favored")
+
+    def test_fatigue_50_is_sakura(self):
+        assignment = self._run_with_fatigue(50)
+        self.assertEqual(assignment["great_success"]["status"], "favored")
+        self.assertIn("无法精确估算",
+                      assignment["great_success"]["note"])
+
+    def test_no_flowers_never_fails_normal_success(self):
+        assignment = self._run_with_fatigue(10)
+        self.assertEqual(assignment["confidence"], "executable")
+
+
+class GoalTests(unittest.TestCase):
+    """工单第七节第七条：默认 加速符>小判>最缺资源，可覆盖。"""
+
+    def _one_team(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        return _profile(store, rows, {1: [_slot(1)]})
+
+    def test_default_goals_prefer_speedup_over_koban(self):
+        store = _store()
+        profile = self._one_team(store)
+        maps = {"FAST": _map("FAST", _rules(), 加速符=1),
+                "KOBAN": _map("KOBAN", _rules(), 小判=400)}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        # 归一化后 加速符(权重3) 压过 小判(权重2)，不被绝对数值架空
+        self.assertEqual(result["plan"]["assignments"][0]["map_code"], "FAST")
+        goals = result["inputs"]["goals"]
+        self.assertEqual([g["resource"] for g in goals],
+                         ["加速符", "小判", "冷却材"])  # 冷却材 60 最缺
+
+    def test_custom_weights_override_default(self):
+        store = _store()
+        profile = self._one_team(store)
+        maps = {"FAST": _map("FAST", _rules(), 加速符=1),
+                "KOBAN": _map("KOBAN", _rules(), 小判=400)}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, weights=["小判"],
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"][0]["map_code"], "KOBAN")
+
+    def test_most_lacking_base_resource_as_third_goal(self):
+        store = _store()
+        profile = self._one_team(store)
+        maps = {"RES": _map("RES", _rules(), 冷却材=100),
+                "DRY": _map("DRY", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["assignments"][0]["map_code"], "RES")
+
+    def test_tied_inventory_leaves_third_goal_empty(self):
+        self.assertIsNone(most_lacking_base_resource(
+            {"木炭": 10, "玉钢": 10, "冷却材": 50, "砥石": 50}))
+        goals, notes = normalize_goals(None, {"木炭": 10, "玉钢": 10,
+                                              "冷却材": 50, "砥石": 50})
+        self.assertEqual([g["resource"] for g in goals], ["加速符", "小判"])
+        self.assertTrue(any("并列" in n or "空缺" in n for n in notes))
+
+
+class RuleHonestyTests(unittest.TestCase):
+    """工单第七节第八条：规则不完整不给伪确定方案；国服表无日服顶替。"""
+
+    def test_partial_rules_map_is_rule_incomplete_not_executable(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        maps = {"P": _map("P", _rules(completeness="partial"))}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "rule_incomplete")
+        self.assertEqual(result["plan"]["confidence"], "rule_incomplete")
+        self.assertIn("规则不完整",
+                      "；".join(assignment["uncertainties"]))
+
+    def test_maps_table_marks_server_and_unknowns(self):
+        maps = load_maps()
+        self.assertEqual(len(maps), 20)
+        for code, info in maps.items():
+            rules = info["rules"]
+            self.assertEqual(rules["server"], "cn")  # 只有国服规则
+            self.assertEqual(rules["total_level"], info["level_req"])
+            if code == "E2":
+                self.assertEqual(rules["completeness"], "complete")
+                self.assertEqual(rules["min_members"], 3)
+                self.assertEqual(rules["required_types"], {"枪": 1})
+            else:
+                # 没有依据的图必须标 partial，null=不知道而不是没有要求
+                self.assertEqual(rules["completeness"], "partial")
+                self.assertIsNone(rules["min_members"])
+                self.assertIsNone(rules["required_types"])
+                self.assertTrue(rules["unknown_aspects"])
+
+
+class DegradationTests(unittest.TestCase):
+    """工单第七节第九条：陈旧/残缺/事实缺失都要进解释并降级。"""
+
+    def _one_team(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        return _profile(store, rows, {1: [_slot(1)]})
+
+    def test_missing_member_facts_degrades_everything(self):
+        store = _store()
+        profile = self._one_team(store)
+        maps = {"M": _map("M", _rules())}
+        result = _plan(profile, maps, None, allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertEqual(result["inputs"]["member_facts_status"], "missing")
+        self.assertTrue(any("未提供近侍" in w for w in result["warnings"]))
+
+    def test_stale_pool_warns(self):
+        store = _store()
+        profile = self._one_team(store)  # 盘点 ts=100
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, now=100 + 25 * 3600,
+                       allow_all_teams_away=True)
+        self.assertTrue(any("陈旧" in w for w in result["warnings"]))
+
+    def test_partial_roster_observation_degrades_assignment(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        store.save_sword_snapshot(rows, owned=2, capacity=300, missing=0,
+                                  captured_at=100, source="owned_inventory")
+        store.record_event("team_roster.observed", {
+            "team_no": 1, "slots": [_slot(1)],
+            "observation_status": "partial", "source": "formation_page"})
+        store._conn().execute(
+            "UPDATE events SET ts = 150 WHERE id = "
+            "(SELECT MAX(id) FROM events)")
+        store._conn().commit()
+        profile = build_honmaru_profile(store)
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "needs_confirmation")
+        self.assertIn("partial", "；".join(assignment["uncertainties"]))
+
+    def test_pool_unavailable_warns_and_degrades(self):
+        store = _store()  # 只有图鉴 → 候选池不可用
+        store.save_sword_snapshot(
+            [{"sword_id": "album_003", "name_zh": "三日月宗近", "stats": {}}],
+            owned=204, capacity=208, missing=0, captured_at=100, source="album")
+        store.record_event("team_roster.observed", {
+            "team_no": 1, "slots": [_slot(1)],
+            "observation_status": "complete", "source": "formation_page"})
+        store._conn().execute(
+            "UPDATE events SET ts = 150 WHERE id = "
+            "(SELECT MAX(id) FROM events)")
+        store._conn().commit()
+        profile = build_honmaru_profile(store)
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertTrue(any("候选池不可用" in w for w in result["warnings"]))
+        # 近侍申报对不上账 → unmatched → 不得伪装可执行
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+
+    def test_unknown_slot_makes_team_uncertain(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        blind = _slot(2, catalog_id=None, name=None, name_status=None,
+                      slot_status="unknown", level=None, fatigue=None,
+                      survival=None, survival_max=None, injury=None,
+                      kiwame_status="unknown", unknown_fields=["all"])
+        profile = _profile(store, rows, {1: [_slot(1), blind]})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        assignment = result["plan"]["assignments"][0]
+        self.assertEqual(assignment["confidence"], "needs_confirmation")
+        self.assertIn("读不出", "；".join(assignment["uncertainties"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
