@@ -20,6 +20,8 @@ import copy
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
 from touken.flows.formation_editor import (
     FormationEditorMixin, decide_match, normalize_target, parse_selection_rows,
     row_conflicts_target, slot_matches_target,
@@ -221,7 +223,7 @@ class _EditorHost(FormationEditorMixin):
         return self.maa.current_tab
 
     def _list_end_sighted(self):
-        """注入缝：剧本末端视觉证据（未来真机滚动条/末端标记通道的位置）。"""
+        """注入缝：剧本滚动条证据（生产通道=右缘滑轨滑块贴底）。"""
         return self.maa.end_sighted()
 
     def _parse_selection_rows(self, tokens):
@@ -922,6 +924,57 @@ class BottomProofTests(unittest.TestCase):
         self.assertEqual(result["scan_status"], "stalled")
         decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
+
+
+# ==================== 末端证据：滚动条像素判定 ====================
+
+class ScrollbarEndEvidenceTests(unittest.TestCase):
+    """_list_end_sighted 的像素判定（合成帧；口径来自 2026-09-14 运行帧
+    校准：滑轨体 x[1262,1270]、轨道 y[124,689]、滑块亮 243/轨道灰 113、
+    到底底缘稳定 689、离底一页差 ~16px）。真机截图不进仓库，故用合成帧
+    钉死判定逻辑。"""
+
+    class _ShotMaa:
+        def __init__(self, img):
+            self._img = img
+
+        def screenshot(self, force=False):
+            return self._img
+
+    def _sighted(self, img):
+        host = FormationEditorMixin()
+        host.maa = self._ShotMaa(img)
+        return host._list_end_sighted()
+
+    @staticmethod
+    def _frame(thumb=None, with_track=True):
+        """thumb=(top, bottom)：滑块 y 区间；with_track=False 模拟无滑轨页。"""
+        img = np.full((720, 1280, 3), 247, dtype=np.uint8)    # 页面亮背景
+        if with_track:
+            img[124:690, 1262:1270] = 113                     # 灰色滑轨
+        if thumb is not None:
+            img[thumb[0]:thumb[1] + 1, 1256:1273] = 243       # 滑块略宽于轨
+        return img
+
+    def test_thumb_at_track_bottom_is_sighted(self):
+        self.assertTrue(self._sighted(self._frame(thumb=(588, 689))))
+
+    def test_thumb_mid_track_is_not_sighted(self):
+        self.assertFalse(self._sighted(self._frame(thumb=(300, 403))))
+
+    def test_thumb_one_page_short_of_bottom_is_not_sighted(self):
+        # 离底一页实测差 ~16px，容差 6px 内才算贴底
+        self.assertFalse(self._sighted(self._frame(thumb=(572, 675))))
+
+    def test_track_without_thumb_is_not_sighted(self):
+        self.assertFalse(self._sighted(self._frame(thumb=None)))
+
+    def test_bright_page_without_track_is_not_sighted(self):
+        # 无滑轨的亮页面不得冒充满轨滑块
+        self.assertFalse(self._sighted(self._frame(with_track=False)))
+
+    def test_no_frame_is_not_sighted(self):
+        self.assertFalse(self._sighted(None))
 
 
 if __name__ == "__main__":

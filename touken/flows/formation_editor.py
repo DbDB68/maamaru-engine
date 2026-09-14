@@ -62,6 +62,8 @@
 import re
 import time
 
+import numpy as np
+
 from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
 from .team_roster import _match_name, _ROW_CY, _TEAM_TAB
@@ -101,6 +103,15 @@ _BOTTOM_PROOF_STAGES = 2            # 到底核验的独立阶段数：每阶段
                                     # 可能被吞的探测滑不包装成绝对证明
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
+# 选择列表右缘滚动条（_list_end_sighted 的独立末端证据通道，
+# 校准口径见该函数 docstring；改动这些数必须重新从运行帧取样验证）
+_SCROLLBAR_BAND_X = (1262, 1270)          # 滑轨体列带
+_SCROLLBAR_TRACK_Y = (124, 690)           # 滑轨纵向范围
+_SCROLLBAR_BOTTOM_Y = 689                 # 滑块到底时底缘 y
+_SCROLLBAR_BOTTOM_TOL = 6                 # 贴底容差（离底一页还差 ~16px）
+_SCROLLBAR_THUMB_BRIGHT = 200             # 滑块亮 ~243 / 轨道灰 ~113
+_SCROLLBAR_TRACK_DARK = 150               # 轨道灰必须成段存在（防无滑轨
+                                          # 页面的亮背景冒充满轨滑块）
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
 DEFAULT_MATCH_FIELDS = ("name", "form", "level")
 
@@ -702,9 +713,8 @@ class FormationEditorMixin:
                       到底证据（满页被整行漏识与真正短末页长得一样，见
                       2026-09-14 牛老师组合反例），绝不使用；
           stalled   —— 连续滑动无响应且拿不出到底证据（滑动可能被吞；
-                      探测被吞与真底不可区分、单页名单无从回翻验证，同样
-                      保守 stalled，等待真机末端视觉证据校准后解禁——
-                      这是 honest stop）；
+                      探测被吞与真底不可区分、滚动条没贴底、或单页名单
+                      无从回翻验证，同样保守 stalled——这是 honest stop）；
           blind     —— 任何一页 OCR 一行都读不出（整页失明，识别失败）；
           truncated —— 触达 max_pages 安全阀仍未到底；
           loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
@@ -805,11 +815,33 @@ class FormationEditorMixin:
         return "complete", None
 
     def _list_end_sighted(self):
-        """独立末端视觉证据（滚动条到底/末端标记/回弹形态），回答的是
-        「当前位置是不是列表末尾」——与滑动是否被执行无关的绝对位置证据。
-        真机通道尚未从运行帧校准，保守返回 False：没有独立证据时多阶段
-        循环只能 stalled，绝不称底（honest stop）。测试经此注入剧本证据。"""
-        return False
+        """独立末端视觉证据：选择列表右缘滚动条的滑块底缘贴上滑轨底部。
+        回答「当前位置是不是列表末尾」——与滑动是否被执行无关的绝对
+        位置证据，探测滑被吞也不影响读数。读帧失败或找不到滑块时保守
+        False（证据不足，调用方只能 stalled）。测试经子类注入剧本证据。
+
+        校准来源（2026-09-14，MAAAdapter 运行帧通道逐页取样 30 页）：
+        滑轨体 x[1262,1270]、轨道 y[124,689]；滑块亮 ~243 / 轨道灰 ~113；
+        滑块高约 103px，到底时底缘三连帧稳定 689；离底一页还差 ~16px，
+        容差 6px 足够区分。页数更少时滑块更大、每页步进更大，只更安全。
+        """
+        img = self.maa.screenshot()     # 复用核验刚读过的那一帧，不再截
+        if img is None or img.shape[0] < 690 or img.shape[1] < 1270:
+            return False
+        x0, x1 = _SCROLLBAR_BAND_X
+        y0, y1 = _SCROLLBAR_TRACK_Y
+        band = np.asarray(img[y0:y1, x0:x1], dtype=np.int32).mean(axis=(1, 2))
+        hot = band > _SCROLLBAR_THUMB_BRIGHT
+        if (band < _SCROLLBAR_TRACK_DARK).sum() < 100:
+            return False                # 看不到灰色滑轨：不在选择列表上
+        best_len = best_end = cur = 0
+        for i, h in enumerate(hot):
+            cur = cur + 1 if h else 0
+            if cur > best_len:
+                best_len, best_end = cur, i
+        if best_len < 20:               # 滑块实测高 ~103px，太短当噪声
+            return False
+        return y0 + best_end >= _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
 
     def _goto_page(self, pages, fps, current_idx, target_idx):
         """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""
