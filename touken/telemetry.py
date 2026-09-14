@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 9
+TELEMETRY_SCHEMA_VERSION = 10
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -238,7 +238,9 @@ class TelemetryStore:
                 owned INTEGER,
                 capacity INTEGER,
                 sword_count INTEGER NOT NULL DEFAULT 0,
-                missing INTEGER
+                missing INTEGER,
+                source TEXT,
+                completeness TEXT
             );
             CREATE TABLE IF NOT EXISTS sword_snapshot_rows (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,6 +292,53 @@ class TelemetryStore:
             "PRAGMA table_info(runs)").fetchall()}
         if "label" not in run_cols:
             conn.execute("ALTER TABLE runs ADD COLUMN label TEXT")
+        # v10 原地补列 + 历史回填：刀帐快照的来源与完整度。
+        # 老库两类扫描（所持刀剑盘点/刀帐图鉴）共用一表没有 source，不能直接
+        # 拿最新快照当本丸候选池（图鉴会冒充具体刀）。
+        # 回填依据（确定证据，非猜测）：图鉴扫描器写的行 sword_id 恒为
+        # 「album_NNN」格式（代码固定生成）；一览盘点写的行恒为名册目录 id。
+        # 全 album 行 → album；零 album 行 → owned_inventory；混排/空快照
+        # 无法可靠判断 → unknown。completeness 同理按 owned/missing 对账回填，
+        # 证据不足 → unknown。
+        snap_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(sword_snapshots)").fetchall()}
+        if "source" not in snap_cols:
+            conn.execute("ALTER TABLE sword_snapshots ADD COLUMN source TEXT")
+        if "completeness" not in snap_cols:
+            conn.execute(
+                "ALTER TABLE sword_snapshots ADD COLUMN completeness TEXT")
+        conn.execute("""
+            UPDATE sword_snapshots SET source = (
+                CASE
+                    WHEN (SELECT COUNT(*) FROM sword_snapshot_rows r
+                          WHERE r.snapshot_id = sword_snapshots.id) = 0
+                        THEN 'unknown'
+                    WHEN (SELECT COUNT(*) FROM sword_snapshot_rows r
+                          WHERE r.snapshot_id = sword_snapshots.id
+                            AND r.sword_id LIKE 'album\\_%' ESCAPE '\\')
+                        = (SELECT COUNT(*) FROM sword_snapshot_rows r
+                           WHERE r.snapshot_id = sword_snapshots.id)
+                        THEN 'album'
+                    WHEN (SELECT COUNT(*) FROM sword_snapshot_rows r
+                          WHERE r.snapshot_id = sword_snapshots.id
+                            AND r.sword_id LIKE 'album\\_%' ESCAPE '\\') = 0
+                        THEN 'owned_inventory'
+                    ELSE 'unknown'
+                END
+            ) WHERE source IS NULL
+        """)
+        conn.execute("""
+            UPDATE sword_snapshots SET completeness = (
+                CASE
+                    WHEN owned IS NOT NULL AND missing IS NOT NULL
+                         AND missing = 0 AND sword_count > 0
+                        THEN 'complete'
+                    WHEN missing IS NOT NULL AND missing > 0
+                        THEN 'partial'
+                    ELSE 'unknown'
+                END
+            ) WHERE completeness IS NULL
+        """)
         conn.commit()
 
     def close(self) -> None:
@@ -812,18 +861,34 @@ class TelemetryStore:
     def save_sword_snapshot(self, rows: list[dict], *, owned: int | None = None,
                             capacity: int | None = None,
                             captured_at: float | None = None,
-                            missing: int | None = None) -> int:
+                            missing: int | None = None,
+                            source: str | None = None,
+                            completeness: str | None = None) -> int:
         """写一份刀帐快照（头 + 每刀一行），返回快照 id。
 
         rows 的每项：sword_id/name_zh 必填，其余字段缺省 None；
         stats 是九属性 dict（键=属性名），按 JSON 存。
+
+        source：owned_inventory（所持刀剑一览盘点）/ album（刀帐图鉴）/
+        unknown（调用方没说清，不允许冒充盘点）。
+        completeness：complete（对账平）/ partial（有缺口）/ unknown；
+        缺省按 owned/missing/行数推断，证据不足落 unknown。
         """
         ts = float(captured_at or time.time())
+        if source not in ("owned_inventory", "album"):
+            source = "unknown"
+        if completeness not in ("complete", "partial"):
+            if owned and missing == 0 and rows:
+                completeness = "complete"
+            elif missing:
+                completeness = "partial"
+            else:
+                completeness = "unknown"
         conn = self._conn()
         cursor = conn.execute(
-            "INSERT INTO sword_snapshots(captured_at, owned, capacity, sword_count, missing) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (ts, owned, capacity, len(rows), missing),
+            "INSERT INTO sword_snapshots(captured_at, owned, capacity, sword_count, "
+            "missing, source, completeness) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (ts, owned, capacity, len(rows), missing, source, completeness),
         )
         snapshot_id = cursor.lastrowid
         conn.executemany(
@@ -844,7 +909,8 @@ class TelemetryStore:
 
     def recent_sword_snapshots(self, limit: int = 20) -> list[dict]:
         rows = self._conn().execute(
-            "SELECT id, captured_at, owned, capacity, sword_count, missing "
+            "SELECT id, captured_at, owned, capacity, sword_count, missing, "
+            "source, completeness "
             "FROM sword_snapshots ORDER BY captured_at DESC, id DESC LIMIT ?",
             (max(1, min(int(limit), 200)),),
         ).fetchall()
@@ -852,14 +918,16 @@ class TelemetryStore:
 
     def sword_snapshot_detail(self, snapshot_id: int) -> dict | None:
         head = self._conn().execute(
-            "SELECT id, captured_at, owned, capacity, sword_count, missing "
+            "SELECT id, captured_at, owned, capacity, sword_count, missing, "
+            "source, completeness "
             "FROM sword_snapshots WHERE id = ?", (int(snapshot_id),),
         ).fetchone()
         if not head:
             return None
         rows = self._conn().execute(
-            "SELECT sword_id, name_zh, level, tou_level, survival, survival_max, "
-            "fatigue, fatigue_max, stats, kiwame_date, locked, page_no "
+            "SELECT id AS row_id, sword_id, name_zh, level, tou_level, "
+            "survival, survival_max, fatigue, fatigue_max, stats, kiwame_date, "
+            "locked, page_no "
             "FROM sword_snapshot_rows WHERE snapshot_id = ? ORDER BY id",
             (int(snapshot_id),),
         ).fetchall()

@@ -1,0 +1,207 @@
+# -*- coding: utf-8 -*-
+"""当前本丸共用档案 · 第一版事实层（只读生成，无 UI、无自动决策）。
+
+输入（全在 telemetry 库，不另造事实库）：
+  - sword_snapshots / sword_snapshot_rows：所持刀剑盘点（source=owned_inventory）
+    与刀帐图鉴扫描（source=album），带 completeness 对账状态；
+  - team_roster.observed 事件：五队六槽的编队即时状态。
+
+输出一份档案 dict：
+  - candidate_pool：只有「完整」的所持刀剑盘点（对账可信）才能晋升成当前
+    候选池；较新的 partial/failed/album 一律不覆盖上一份可信完整档案；
+  - roster：编队即时状态分层保存，槽位只在证据唯一时链接到候选行。
+
+铁律：
+  - 一振一行，同名多振保留，绝不按名字或 sword_catalog_id 去重；
+  - sword_catalog_id 只是刀种目录，不是本丸实例 ID；observation_id =
+    "{snapshot_id}:{row_id}" 只在该快照内有效，跨快照不伪造永久身份；
+  - 同名多振或字段不足时输出 ambiguous/unknown + 候选集合，绝不拿
+    第一把同名刀顶替；
+  - unknown_fields / 识别状态 / 观测时间 / 来源全部保留，让未来规划器
+    能解释「为什么能选 / 为什么不能确认」。
+"""
+
+import time
+
+PROFILE_SCHEMA_VERSION = 1
+
+# 候选行里参与 unknown_fields 盘点的可空字段
+_ENTRY_NULLABLE_FIELDS = ("level", "tou_level", "survival", "survival_max",
+                          "fatigue", "fatigue_max", "kiwame_date", "locked")
+
+
+def build_candidate_pool(store) -> dict:
+    """从刀帐快照晋升当前候选池。
+
+    晋升规则：最新一份 source=owned_inventory 且 completeness=complete
+    的盘点才当选；较新的残缺/图鉴/来源不明快照记进 skipped_newer_snapshots
+    留证，绝不覆盖上一份可信完整档案。
+    """
+    snapshots = store.recent_sword_snapshots(limit=200)
+    chosen = None
+    skipped = []
+    for snap in snapshots:  # 最新在前
+        if (snap.get("source") == "owned_inventory"
+                and snap.get("completeness") == "complete"):
+            chosen = snap
+            break
+        skipped.append({"snapshot_id": snap["id"],
+                        "captured_at": snap.get("captured_at"),
+                        "source": snap.get("source") or "unknown",
+                        "completeness": snap.get("completeness") or "unknown"})
+    if not chosen:
+        return {"done": False,
+                "reason": "没有可信的完整所持刀剑盘点（只有残缺/图鉴/来源不明）",
+                "source": None, "observed_at": None, "entries": [],
+                "skipped_newer_snapshots": skipped}
+
+    detail = store.sword_snapshot_detail(chosen["id"]) or {}
+    entries = [_pool_entry(row, chosen) for row in detail.get("swords", [])]
+    return {"done": True,
+            "completeness": "complete",
+            "source": {"snapshot_id": chosen["id"],
+                       "source": "owned_inventory",
+                       "completeness": "complete"},
+            "observed_at": chosen.get("captured_at"),
+            "owned": chosen.get("owned"),
+            "entry_count": len(entries),
+            "entries": entries,
+            "skipped_newer_snapshots": skipped}
+
+
+def _pool_entry(row: dict, head: dict) -> dict:
+    """一振一行。行身份 = snapshot_id:row_id（本次观察内有效）。"""
+    unknown = []
+    if not row.get("sword_id"):
+        unknown.append("identity")
+    for field in _ENTRY_NULLABLE_FIELDS:
+        if row.get(field) is None:
+            unknown.append(field)
+    if not row.get("stats"):
+        unknown.append("stats")
+    return {
+        "observation_id": f"{head['id']}:{row['row_id']}",
+        "row_no": row.get("row_id"),  # 行在库里的序号，仅配合 snapshot_id 使用
+        "sword_catalog_id": row.get("sword_id") or None,
+        "name_zh": row.get("name_zh") or None,
+        "level": row.get("level"),
+        "tou_level": row.get("tou_level"),
+        "survival": row.get("survival"),
+        "survival_max": row.get("survival_max"),
+        "fatigue": row.get("fatigue"),
+        "fatigue_max": row.get("fatigue_max"),
+        "stats": row.get("stats") or {},
+        "kiwame_date": row.get("kiwame_date"),
+        "locked": row.get("locked"),
+        "page_no": row.get("page_no"),
+        "unknown_fields": unknown,
+        "observed_at": head.get("captured_at"),
+        "source_snapshot_id": head["id"],
+    }
+
+
+def build_roster(store, entries: list[dict]) -> dict:
+    """编队即时状态层：每队取最新一条 team_roster.observed，逐槽链接候选池。
+
+    entries 为空（候选池不可用）时照样保留原始观察，链接全部落 unknown，
+    reason 说明为什么确认不了。
+    """
+    events = store.recent_events(limit=200,
+                                 event_type="team_roster.observed")
+    latest_by_team = {}
+    for ev in events:  # 最新在前
+        team_no = (ev.get("payload") or {}).get("team_no")
+        if isinstance(team_no, int) and team_no not in latest_by_team:
+            latest_by_team[team_no] = ev
+
+    teams = []
+    for team_no in (1, 2, 3, 4, 5):
+        ev = latest_by_team.get(team_no)
+        if ev is None:
+            teams.append({"team_no": team_no, "observation_status": "unknown",
+                          "observed_at": None, "source_event_id": None,
+                          "slots": []})
+            continue
+        payload = ev.get("payload") or {}
+        teams.append({
+            "team_no": team_no,
+            "observation_status": payload.get("observation_status") or "unknown",
+            "observed_at": ev.get("ts"),
+            "source_event_id": ev.get("id"),
+            "slots": [_link_slot(slot, entries)
+                      for slot in payload.get("slots") or []],
+        })
+    return {"teams": teams}
+
+
+def _link_slot(slot: dict, entries: list[dict]) -> dict:
+    """单个编队槽 → 候选池链接。证据唯一才 linked，否则如实报原因。"""
+    out = {"slot": slot.get("slot"),
+           "slot_status": slot.get("slot_status") or "unknown",
+           "link_status": "unknown",
+           "observation_id": None,
+           "candidate_ids": [],
+           "match_basis": "none",
+           "link_reason": None,
+           "observed": slot}
+    if slot.get("slot_status") != "occupied":
+        # 空位/读不出：不链接是正常状态，不是缺证据
+        out["link_status"] = "not_applicable"
+        out["link_reason"] = "槽位未占用或状态未知，无需链接候选池"
+        return out
+    if not entries:
+        out["link_reason"] = "候选池不可用（没有可信的完整所持刀剑盘点）"
+        return out
+
+    catalog_id = slot.get("sword_catalog_id")
+    name = slot.get("name")
+    if catalog_id:
+        candidates = [e for e in entries
+                      if e.get("sword_catalog_id") == catalog_id]
+        out["match_basis"] = "sword_catalog_id"
+    elif name:
+        candidates = [e for e in entries if e.get("name_zh") == name]
+        out["match_basis"] = "name"
+    else:
+        out["link_reason"] = "编队页没读出身份（目录 id 和名字都没有）"
+        return out
+
+    out["candidate_ids"] = [e["observation_id"] for e in candidates]
+    if len(candidates) == 1:
+        out["link_status"] = "linked"
+        out["observation_id"] = candidates[0]["observation_id"]
+        out["link_reason"] = "候选池内证据唯一"
+    elif candidates:
+        out["link_status"] = "ambiguous"
+        out["link_reason"] = (f"同名/同目录候选 {len(candidates)} 振，"
+                              "本版不裁决是哪一振")
+    else:
+        out["link_reason"] = ("候选池里没有这把刀"
+                              "（候选池过期、来源不明或该刀未盘点进池）")
+    return out
+
+
+def build_honmaru_profile(store) -> dict:
+    """生成完整档案（纯函数，不写库）。"""
+    pool = build_candidate_pool(store)
+    entries = pool["entries"] if pool.get("done") else []
+    return {"schema_version": PROFILE_SCHEMA_VERSION,
+            "generated_at": time.time(),
+            "candidate_pool": pool,
+            "roster": build_roster(store, entries)}
+
+
+def get_honmaru_profile(store=None) -> dict:
+    """后端消费者稳定入口：默认取全局 telemetry 库。
+    档案生成失败不拖垮调用方——返回 done=False 的骨架并注明错误。"""
+    if store is None:
+        from .telemetry import get_telemetry_store
+        store = get_telemetry_store()
+    try:
+        return build_honmaru_profile(store)
+    except Exception as exc:
+        return {"schema_version": PROFILE_SCHEMA_VERSION,
+                "generated_at": time.time(),
+                "done": False, "error": str(exc),
+                "candidate_pool": {"done": False, "entries": []},
+                "roster": {"teams": []}}

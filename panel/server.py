@@ -2176,13 +2176,25 @@ async def api_data_events(limit: int = 100, event_type: str = "",
 
 @app.get("/api/data/sword-inventory/latest")
 async def api_latest_sword_inventory():
-    """最近一份所持刀剑盘点；逐把保留，同名刀不会合并。"""
+    """最近一份所持刀剑盘点；逐把保留，同名刀不会合并。
+    只服务 owned_inventory 来源——图鉴（album）快照不是本丸里的具体刀，
+    不能冒充盘点；来源不明（老库无法可靠分类）同样不冒充。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     store = get_telemetry_store()
-    snapshots = store.recent_sword_snapshots(limit=1)
-    latest = (store.sword_snapshot_detail(snapshots[0]["id"])
-              if snapshots else None)
+    snapshots = store.recent_sword_snapshots(limit=50)
+    owned = next((s for s in snapshots if s.get("source") == "owned_inventory"),
+                 None)
+    latest = (store.sword_snapshot_detail(owned["id"])
+              if owned else None)
     return {"schema_version": TELEMETRY_SCHEMA_VERSION, "snapshot": latest}
+
+
+@app.get("/api/data/honmaru-profile")
+async def api_honmaru_profile():
+    """当前本丸共用档案（候选池 + 编队链接层），只读生成，契约见
+    docs/telemetry-data.md「当前本丸共用档案」。"""
+    from touken.honmaru_profile import get_honmaru_profile
+    return get_honmaru_profile()
 
 
 @app.get("/api/data/runs")

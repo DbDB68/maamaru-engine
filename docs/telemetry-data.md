@@ -172,6 +172,35 @@ payload 契约：
 - 确认的收益仍逐笔写 `resource.change`（source `expedition.settlement`），
   特殊道具用 evidence `settlement_special_ocr` 区分。
 
+## 当前本丸共用档案（honmaru-profile，schema_version 1）
+
+`touken/honmaru_profile.py` · 读取入口 `get_honmaru_profile(store=None)` ·
+只读 API `GET /api/data/honmaru-profile`。第一版只做事实层：无 UI、无自动
+选人/换人/派遣。数据全部来自本库，不另造第二套事实库。
+
+**地基契约（telemetry schema v10）**：`sword_snapshots` 新增 `source`
+（`owned_inventory` 所持刀剑一览盘点 / `album` 刀帐图鉴 / `unknown`）与
+`completeness`（`complete` 对账平 / `partial` 有缺口 / `unknown`）。
+历史库回填只凭行形态这一确定证据：图鉴写入器的 `sword_id` 恒为
+`album_NNN`，一览盘点恒为名册目录 id——全 album 行回填 album、零 album
+行回填 owned_inventory、混排/空快照保持 unknown，不硬猜。
+
+**晋升规则**：只有 source=owned_inventory 且 completeness=complete 的
+最新盘点才能成为 `candidate_pool`；较新的 partial/failed/album/unknown
+快照记进 `skipped_newer_snapshots` 留证，绝不覆盖上一份可信完整档案。
+`/api/data/sword-inventory/latest` 同样只服务 owned_inventory。
+
+**行身份**：一振一行，同名多振保留，绝不按名字/目录 id 去重。
+`sword_catalog_id` 只是刀种目录；`observation_id = "{snapshot_id}:{row_id}"`
+只在该快照内有效，跨快照不伪造永久实例 ID。每行带 `unknown_fields`
+（读不出就列出，不补默认值）、`observed_at`、`source_snapshot_id`。
+
+**编队链接层（roster）**：每队取最新一条 `team_roster.observed`，逐槽
+链接候选池：目录 id（缺了用名字）匹配唯一 → `linked` + observation_id；
+多候选 → `ambiguous` + candidate_ids，不拿第一把同名刀顶替；无身份/无候选
+→ `unknown` + 原因；空位/未占用 → `not_applicable`。原始槽位观察在
+`observed` 字段原样保留。
+
 ## 手动活动（manual-sessions）
 
 手动记录只保存玩法、圈数、起止时间和可选备注。服务端据此计算总用时与平均圈速，

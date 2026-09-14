@@ -419,7 +419,8 @@ class SwordInventoryMixin:
         elif owned:
             yield f"[刀帐] ✓ 对账平了：{len(all_rows)}/{owned} 把全认出"
         snapshot_id = self.telemetry_save_swords(
-            all_rows, owned=owned, capacity=capacity, missing=missing)
+            all_rows, owned=owned, capacity=capacity, missing=missing,
+            source="owned_inventory")
         yield (f"[刀帐] 快照 #{snapshot_id} 已入账：{len(all_rows)} 把刀"
                + (f"（缺 {missing}）" if missing else ""))
 
@@ -471,7 +472,8 @@ class SwordInventoryMixin:
         elif collected:
             yield f"[刀帐] ✓ 对账平了：{len(rows)}/{collected} 格全认出"
         snapshot_id = self.telemetry_save_swords(
-            rows, owned=collected, capacity=total, missing=missing)
+            rows, owned=collected, capacity=total, missing=missing,
+            source="album")
         yield (f"[刀帐] 快照 #{snapshot_id} 已入账：{len(rows)} 格"
                + (f"（缺 {missing}）" if missing else ""))
 
@@ -588,14 +590,17 @@ class SwordInventoryMixin:
         yield "[刀帐] ✗ 单趟滚了太多屏还没到边，停"
         return
 
-    def telemetry_save_swords(self, rows, *, owned, capacity, missing) -> int:
+    def telemetry_save_swords(self, rows, *, owned, capacity, missing,
+                              source) -> int:
         from ..telemetry import get_telemetry_store
         snapshot_id = get_telemetry_store().save_sword_snapshot(
-            rows, owned=owned, capacity=capacity, missing=missing)
+            rows, owned=owned, capacity=capacity, missing=missing,
+            source=source)
         try:
             if hasattr(self, "record_event"):
                 self.record_event("sword_inventory.completed", snapshot_id=snapshot_id,
-                                  count=len(rows), owned=owned, missing=missing)
+                                  count=len(rows), owned=owned, missing=missing,
+                                  source=source)
         except Exception:
             pass
         return snapshot_id

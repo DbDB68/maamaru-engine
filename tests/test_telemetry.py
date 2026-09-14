@@ -619,9 +619,10 @@ class TelemetryStoreTests(unittest.TestCase):
         from panel.server import api_latest_sword_inventory
 
         self.store.save_sword_snapshot([
-            {"sword_id": "album_039", "name_zh": "前田藤四郎", "level": 99},
-            {"sword_id": "album_039", "name_zh": "前田藤四郎", "level": 1},
-        ], owned=2, capacity=300, missing=0, captured_at=100)
+            {"sword_id": "touken_029_maeda", "name_zh": "前田藤四郎", "level": 99},
+            {"sword_id": "touken_029_maeda", "name_zh": "前田藤四郎", "level": 1},
+        ], owned=2, capacity=300, missing=0, captured_at=100,
+            source="owned_inventory")
         with patch("touken.telemetry._store", self.store):
             response = asyncio.run(api_latest_sword_inventory())
 
@@ -629,6 +630,30 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertEqual(response["snapshot"]["owned"], 2)
         self.assertEqual([row["level"] for row in response["snapshot"]["swords"]],
                          [99, 1])
+
+    def test_latest_sword_inventory_api_never_serves_album(self):
+        """图鉴快照再新也不是所持刀剑盘点，不得冒充候选池地基。"""
+        from panel.server import api_latest_sword_inventory
+
+        owned_id = self.store.save_sword_snapshot(
+            [{"sword_id": "touken_003_mikazuki", "name_zh": "三日月宗近"}],
+            owned=1, capacity=300, missing=0, captured_at=100,
+            source="owned_inventory")
+        self.store.save_sword_snapshot(
+            [{"sword_id": "album_003", "name_zh": "三日月宗近"}],
+            owned=204, capacity=208, missing=0, captured_at=200, source="album")
+        with patch("touken.telemetry._store", self.store):
+            response = asyncio.run(api_latest_sword_inventory())
+        self.assertEqual(response["snapshot"]["id"], owned_id)
+
+        # 只有图鉴/来源不明快照时：如实没有，不拿图鉴顶替
+        store2 = TelemetryStore(Path(tempfile.mkdtemp()) / "telemetry.db")
+        store2.save_sword_snapshot(
+            [{"sword_id": "album_003", "name_zh": "三日月宗近"}],
+            owned=204, capacity=208, missing=0, captured_at=200, source="album")
+        with patch("touken.telemetry._store", store2):
+            response2 = asyncio.run(api_latest_sword_inventory())
+        self.assertIsNone(response2["snapshot"])
 
     def test_manual_session_api_roundtrip_keeps_own_contract(self):
         from panel.server import (api_add_manual_session, api_manual_sessions,
