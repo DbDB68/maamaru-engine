@@ -164,7 +164,11 @@ payload 契约：
   `ok`（栏内图标全部模板命中且数量读出）/ `unknown`（栏里有内容但认不出，
   或读数失败）。`special_ink` 是墨水占比实测值，供日后校准阈值和图标模板。
   道具图标模板（`settlement_rewards.special_items.templates`）待真机道具栏
-  取帧后校准；未配置时该栏只能判空或 unknown。
+  取帧后校准；未配置时该栏只能判空或 unknown。`special_status=unknown`
+  且为新结算屏时，自动把读账用的同源稳定帧存到用户数据目录
+  `debug/expedition/`（`save_screenshot(force=False)`，不另走 ADB），
+  每个唯一结算屏至多一张、判空不留、存盘失败只记日志不挡流程；
+  payload 的 `special_sample_saved` 记录是否留成。攒够样本再校准模板。
 - 同一屏去重靠像素指纹（「第X部队」标签区 + 各资源行数字区）：静止画面跨帧
   逐像素一致（实测同屏三帧 meanabs=0.0），同一屏没翻动只记一次；不同队伍的
   结算「第X部队」字样必然不同，OCR 全灭也分得开屏。指纹列表按观察轮次
@@ -186,14 +190,23 @@ payload 契约：
 行回填 owned_inventory、混排/空快照保持 unknown，不硬猜。
 
 **晋升规则**：只有 source=owned_inventory 且 completeness=complete 的
-最新盘点才能成为 `candidate_pool`；较新的 partial/failed/album/unknown
-快照记进 `skipped_newer_snapshots` 留证，绝不覆盖上一份可信完整档案。
-`/api/data/sword-inventory/latest` 同样只服务 owned_inventory。
+最新盘点才能成为 `candidate_pool`——走 `TelemetryStore.latest_sword_snapshot`
+的 SQL 无窗口查询，较新的 partial/failed/album/unknown 快照攒得再多
+也挤不掉可信档案；它们记进 `skipped_newer_snapshots` 留证（展示证据，
+保留最近 200 条窗口）。`/api/data/sword-inventory/latest` 同样走无窗口
+查询、只服务 owned_inventory。
 
 **行身份**：一振一行，同名多振保留，绝不按名字/目录 id 去重。
 `sword_catalog_id` 只是刀种目录；`observation_id = "{snapshot_id}:{row_id}"`
 只在该快照内有效，跨快照不伪造永久实例 ID。每行带 `unknown_fields`
 （读不出就列出，不补默认值）、`observed_at`、`source_snapshot_id`。
+
+**同队互斥键**：目录里普通/极化共用一条 `sword_catalog_id` 记录（127 条
+目录实测无重名），同位刀（普通+极化、同名多振）游戏规则上不能同队。
+候选条目和 roster 链接输出都带 `same_team_exclusion_key`（当前值 =
+sword_catalog_id；身份未知保持 null，不拿名字/徽章硬猜）。
+纯函数 `formation_conflicts(entries)` 返回共享同一非空互斥键的冲突组，
+空 key 不参与判定——供未来规划器复用，本层不做选人/换人。
 
 **编队链接层（roster）**：每队取最新一条 `team_roster.observed`，逐槽
 链接候选池：目录 id（缺了用名字）匹配唯一 → `linked` + observation_id；

@@ -234,10 +234,12 @@ def _bright_frame():
 
 
 class _SettleMaa:
-    def __init__(self, frame, texts, tpl_points=None):
+    def __init__(self, frame, texts, tpl_points=None, save_ok=True):
         self.frame = frame
         self.texts = texts
         self.tpl_points = tpl_points or {}
+        self.save_ok = save_ok
+        self.saved = []
 
     def screenshot(self, force=False):
         return self.frame
@@ -253,6 +255,12 @@ class _SettleMaa:
 
     def template_match(self, template, roi=None, threshold=0.7):
         return self.tpl_points.get(template)
+
+    def save_screenshot(self, path, force=True):
+        self.saved.append((path, force))
+        if not self.save_ok:
+            raise RuntimeError("disk full")
+        return True
 
     def click(self, pt):
         return True
@@ -383,6 +391,56 @@ class SettlementObserverTests(unittest.TestCase):
         flow = _SettleFlow(maa)
         self.assertIsNone(_observe(flow, seen=[]))
         self.assertEqual(flow.events, [])
+
+
+class SpecialUnknownSampleTests(unittest.TestCase):
+    """道具栏认不出 → 留同源运行帧供校准；判空/认出/重复屏/存盘失败都守规矩。"""
+
+    def _unknown_frame(self):
+        frame = _bright_frame()
+        frame[480:680, 950:1080] = 40  # 道具栏有内容
+        return frame
+
+    def test_unknown_saves_one_sample(self):
+        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(maa)
+        obs = _observe(flow, seen=[])
+        self.assertEqual(obs["special_status"], "unknown")
+        self.assertTrue(obs["special_sample_saved"])
+        self.assertEqual(len(maa.saved), 1)
+        path, force = maa.saved[0]
+        self.assertIn("expedition", path)
+        self.assertFalse(force)  # 用缓存稳定帧，不另截图
+        # 事件里带着留样事实
+        settled = [p for t, p in flow.events if t == "expedition.settled"][0]
+        self.assertTrue(settled["special_sample_saved"])
+
+    def test_empty_column_saves_nothing(self):
+        maa = _SettleMaa(_bright_frame(), _settle_texts())
+        flow = _SettleFlow(maa)
+        obs = _observe(flow, seen=[])
+        self.assertEqual(obs["special_status"], "none")
+        self.assertFalse(obs["special_sample_saved"])
+        self.assertEqual(maa.saved, [])
+
+    def test_sticky_screen_does_not_save_twice(self):
+        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(maa)
+        seen = []
+        _observe(flow, seen)
+        second = _observe(flow, seen, sequence=2)  # 同一屏没翻动
+        self.assertEqual(second, {"new": False})
+        self.assertEqual(len(maa.saved), 1)
+
+    def test_save_failure_does_not_break_observation(self):
+        maa = _SettleMaa(self._unknown_frame(), _settle_texts(),
+                         save_ok=False)
+        flow = _SettleFlow(maa)
+        obs = _observe(flow, seen=[])  # 存盘抛异常也不许炸流程
+        self.assertEqual(obs["special_status"], "unknown")
+        self.assertFalse(obs["special_sample_saved"])
+        self.assertEqual(
+            len([1 for t, _p in flow.events if t == "expedition.settled"]), 1)
 
 
 class SettlementJudgeWordingTests(unittest.TestCase):

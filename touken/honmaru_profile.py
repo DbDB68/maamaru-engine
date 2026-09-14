@@ -34,21 +34,25 @@ def build_candidate_pool(store) -> dict:
     """从刀帐快照晋升当前候选池。
 
     晋升规则：最新一份 source=owned_inventory 且 completeness=complete
-    的盘点才当选；较新的残缺/图鉴/来源不明快照记进 skipped_newer_snapshots
-    留证，绝不覆盖上一份可信完整档案。
+    的盘点才当选——走 SQL 无窗口查询，较新的残缺/图鉴/来源不明快照
+    攒得再多也挤不掉可信档案；它们记进 skipped_newer_snapshots 留证
+    （展示证据，保留最近 200 条窗口）。
     """
-    snapshots = store.recent_sword_snapshots(limit=200)
-    chosen = None
-    skipped = []
-    for snap in snapshots:  # 最新在前
-        if (snap.get("source") == "owned_inventory"
-                and snap.get("completeness") == "complete"):
-            chosen = snap
-            break
-        skipped.append({"snapshot_id": snap["id"],
-                        "captured_at": snap.get("captured_at"),
-                        "source": snap.get("source") or "unknown",
-                        "completeness": snap.get("completeness") or "unknown"})
+    chosen = store.latest_sword_snapshot(source="owned_inventory",
+                                         completeness="complete")
+    recent = store.recent_sword_snapshots(limit=200)
+    if chosen:
+        skipped = [{"snapshot_id": s["id"], "captured_at": s.get("captured_at"),
+                    "source": s.get("source") or "unknown",
+                    "completeness": s.get("completeness") or "unknown"}
+                   for s in recent
+                   if (s.get("captured_at") or 0, s["id"])
+                      > (chosen["captured_at"], chosen["id"])]
+    else:
+        skipped = [{"snapshot_id": s["id"], "captured_at": s.get("captured_at"),
+                    "source": s.get("source") or "unknown",
+                    "completeness": s.get("completeness") or "unknown"}
+                   for s in recent]
     if not chosen:
         return {"done": False,
                 "reason": "没有可信的完整所持刀剑盘点（只有残缺/图鉴/来源不明）",
@@ -83,6 +87,10 @@ def _pool_entry(row: dict, head: dict) -> dict:
         "observation_id": f"{head['id']}:{row['row_id']}",
         "row_no": row.get("row_id"),  # 行在库里的序号，仅配合 snapshot_id 使用
         "sword_catalog_id": row.get("sword_id") or None,
+        # 同队互斥键：目录里普通/极化共用一条记录（127 条无重名实测），
+        # 同位刀（普通+极化、或同名多振）不能同队。取 sword_catalog_id；
+        # 未知身份保持 None，绝不拿名字/徽章颜色硬猜。
+        "same_team_exclusion_key": row.get("sword_id") or None,
         "name_zh": row.get("name_zh") or None,
         "level": row.get("level"),
         "tou_level": row.get("tou_level"),
@@ -140,6 +148,8 @@ def _link_slot(slot: dict, entries: list[dict]) -> dict:
            "slot_status": slot.get("slot_status") or "unknown",
            "link_status": "unknown",
            "observation_id": None,
+           # 同队互斥键随链接输出暴露给未来规划器；确认不了就 None
+           "same_team_exclusion_key": slot.get("sword_catalog_id") or None,
            "candidate_ids": [],
            "match_basis": "none",
            "link_reason": None,
@@ -179,6 +189,29 @@ def _link_slot(slot: dict, entries: list[dict]) -> dict:
         out["link_reason"] = ("候选池里没有这把刀"
                               "（候选池过期、来源不明或该刀未盘点进池）")
     return out
+
+
+def formation_conflicts(entries: list[dict]) -> list[dict]:
+    """同队互斥校验（纯函数）：给定拟选条目，返回冲突组。
+
+    规则（老大补充的游戏机制）：同一位刀的普通/极化形态不能同队，
+    同名多振普通刀同样不能同队——目录里普通/极化共用
+    sword_catalog_id，所以互斥键就是它。
+    只报冲突，不做选人/换人。空 key（身份未知）不参与判定，
+    绝不把「认不出」伪判成「不冲突」或「冲突」。
+
+    Returns:
+        [{"exclusion_key": 键, "observation_ids": [冲突条目...]}]，
+        无冲突返回 []。
+    """
+    groups = {}
+    for entry in entries:
+        key = (entry or {}).get("same_team_exclusion_key")
+        if not key:
+            continue
+        groups.setdefault(key, []).append((entry or {}).get("observation_id"))
+    return [{"exclusion_key": key, "observation_ids": ids}
+            for key, ids in groups.items() if len(ids) > 1]
 
 
 def build_honmaru_profile(store) -> dict:

@@ -14,7 +14,8 @@ import unittest
 from pathlib import Path
 
 from touken.honmaru_profile import (PROFILE_SCHEMA_VERSION,
-                                    build_candidate_pool, build_honmaru_profile)
+                                    build_candidate_pool, build_honmaru_profile,
+                                    formation_conflicts)
 from touken.telemetry import TelemetryStore
 
 
@@ -305,6 +306,105 @@ class LegacyMigrationTests(unittest.TestCase):
         self.assertEqual(snaps[1]["source"], "owned_inventory")
 
 
+class QueryWindowTests(unittest.TestCase):
+    """可信档案走 SQL 无窗口查询：较新无效快照攒再多也挤不掉它。"""
+
+    def test_pool_survives_200_newer_invalid_snapshots(self):
+        store = _store()
+        good_id = _owned_snapshot(
+            store, [_row("touken_003_mikazuki", "三日月宗近")], captured_at=100)
+        for i in range(230):  # 230 条较新的图鉴/残缺/来源不明
+            store.save_sword_snapshot(
+                [{"sword_id": f"album_{i:03d}", "name_zh": "某刀", "stats": {}}],
+                owned=204, capacity=208, missing=1, captured_at=200 + i,
+                source=("album", "unknown")[i % 2])
+        pool = build_candidate_pool(store)
+        self.assertTrue(pool["done"])
+        self.assertEqual(pool["source"]["snapshot_id"], good_id)
+        # 展示证据可以截断，但只许是"比当选者新"的
+        skipped = pool["skipped_newer_snapshots"]
+        self.assertTrue(skipped)
+        self.assertTrue(all(s["captured_at"] > 100 for s in skipped))
+
+    def test_latest_inventory_api_survives_50_newer_album_snapshots(self):
+        import asyncio
+        from unittest.mock import patch
+        from panel.server import api_latest_sword_inventory
+
+        store = _store()
+        good_id = _owned_snapshot(
+            store, [_row("touken_003_mikazuki", "三日月宗近")], captured_at=100)
+        for i in range(60):
+            store.save_sword_snapshot(
+                [{"sword_id": f"album_{i:03d}", "name_zh": "某刀", "stats": {}}],
+                owned=204, capacity=208, missing=0, captured_at=200 + i,
+                source="album")
+        with patch("touken.telemetry._store", store):
+            response = asyncio.run(api_latest_sword_inventory())
+        self.assertEqual(response["snapshot"]["id"], good_id)
+
+
+class FormationExclusionTests(unittest.TestCase):
+    """同位刀同队互斥：普通/极化共用目录 id（127 条目录实测无重名），
+    互斥键取 sword_catalog_id；一振一行全保留，绝不因此去重。"""
+
+    def test_normal_and_kiwame_same_position_conflict_and_both_kept(self):
+        store = _store()
+        # 同一位长谷部练了两振（一普一极，盘点行不区分形态）
+        _owned_snapshot(store, [
+            _row("touken_118_heshikiri_hasebe", "压切长谷部", level=99),
+            _row("touken_118_heshikiri_hasebe", "压切长谷部", level=35),
+        ], captured_at=100)
+        pool = build_candidate_pool(store)
+        self.assertEqual(len(pool["entries"]), 2)  # 两振都在，不合并
+        keys = {e["same_team_exclusion_key"] for e in pool["entries"]}
+        self.assertEqual(keys, {"touken_118_heshikiri_hasebe"})
+        conflicts = formation_conflicts(pool["entries"])
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]["exclusion_key"],
+                         "touken_118_heshikiri_hasebe")
+        self.assertEqual(len(conflicts[0]["observation_ids"]), 2)
+
+    def test_two_normal_copies_same_name_conflict(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row("touken_029_maeda", "前田藤四郎", level=99),
+            _row("touken_029_maeda", "前田藤四郎", level=1),
+        ], captured_at=100)
+        pool = build_candidate_pool(store)
+        self.assertEqual(len(formation_conflicts(pool["entries"])), 1)
+
+    def test_different_swords_do_not_conflict(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row("touken_003_mikazuki", "三日月宗近"),
+            _row("touken_005_kogitsunemaru", "小狐丸"),
+        ], captured_at=100)
+        pool = build_candidate_pool(store)
+        self.assertEqual(formation_conflicts(pool["entries"]), [])
+
+    def test_empty_key_is_never_judged(self):
+        entries = [{"observation_id": "1:1", "same_team_exclusion_key": None},
+                   {"observation_id": "1:2", "same_team_exclusion_key": None},
+                   {"observation_id": "1:3"}]  # 键都不存在
+        self.assertEqual(formation_conflicts(entries), [])
+
+    def test_roster_link_output_exposes_exclusion_key(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row("touken_003_mikazuki", "三日月宗近")], captured_at=100)
+        _roster_event(store, 1, [_slot(1)], ts=300)
+        slot = build_honmaru_profile(store)["roster"]["teams"][0]["slots"][0]
+        self.assertEqual(slot["same_team_exclusion_key"],
+                         "touken_003_mikazuki")
+        # 身份未知的槽：key 保持 None，不拿名字硬猜
+        _roster_event(store, 2, [
+            _slot(1, catalog_id=None, name=None, name_status="unrecognized",
+                  unknown_fields=["identity"])], ts=300)
+        slot2 = build_honmaru_profile(store)["roster"]["teams"][1]["slots"][0]
+        self.assertIsNone(slot2["same_team_exclusion_key"])
+
+
 class ProfileSkeletonTests(unittest.TestCase):
     def test_empty_store_returns_honest_skeleton(self):
         profile = build_honmaru_profile(_store())
@@ -315,7 +415,7 @@ class ProfileSkeletonTests(unittest.TestCase):
 
     def test_broken_store_returns_error_skeleton_not_raise(self):
         class BrokenStore:
-            def recent_sword_snapshots(self, limit=20):
+            def latest_sword_snapshot(self, **kw):
                 raise RuntimeError("db gone")
 
         from touken.honmaru_profile import get_honmaru_profile

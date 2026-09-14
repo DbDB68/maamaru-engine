@@ -916,6 +916,29 @@ class TelemetryStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def latest_sword_snapshot(self, *, source: str | None = None,
+                              completeness: str | None = None) -> dict | None:
+        """按来源/完整度直接查最新匹配快照（SQL 无窗口）。
+
+        recent_sword_snapshots 有行数窗口，较新的 album/partial/unknown
+        攒多了会把旧的可信完整盘点挤出窗口——候选池晋升和盘点展示
+        必须走这个无窗口入口，无效快照再多也盖不住可信档案。
+        """
+        clauses, args = [], []
+        if source:
+            clauses.append("source = ?")
+            args.append(source)
+        if completeness:
+            clauses.append("completeness = ?")
+            args.append(completeness)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        row = self._conn().execute(
+            "SELECT id, captured_at, owned, capacity, sword_count, missing, "
+            "source, completeness FROM sword_snapshots" + where +
+            " ORDER BY captured_at DESC, id DESC LIMIT 1", args,
+        ).fetchone()
+        return dict(row) if row else None
+
     def sword_snapshot_detail(self, snapshot_id: int) -> dict | None:
         head = self._conn().execute(
             "SELECT id, captured_at, owned, capacity, sword_count, missing, "

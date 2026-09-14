@@ -2181,9 +2181,7 @@ async def api_latest_sword_inventory():
     不能冒充盘点；来源不明（老库无法可靠分类）同样不冒充。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     store = get_telemetry_store()
-    snapshots = store.recent_sword_snapshots(limit=50)
-    owned = next((s for s in snapshots if s.get("source") == "owned_inventory"),
-                 None)
+    owned = store.latest_sword_snapshot(source="owned_inventory")
     latest = (store.sword_snapshot_detail(owned["id"])
               if owned else None)
     return {"schema_version": TELEMETRY_SCHEMA_VERSION, "snapshot": latest}

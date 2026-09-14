@@ -476,9 +476,15 @@ class ExpeditionMixin:
         info = self._read_settlement_info(cfg)
         rewards, rewards_status, result = self._read_settlement_rewards(cfg)
         special, special_status, special_ink = self._read_special_rewards(cfg, img)
+        # 道具栏认不出：留一帧同源运行截图供日后校准（攒样本，不硬识别）。
+        # 在去重判定之后，每个唯一结算屏至多留一张；判空/认出都不留。
+        sample_saved = False
+        if special_status == "unknown":
+            sample_saved = self._save_special_unknown_sample(via, sequence)
         obs = {"new": True, "via": via, "result": result,
                "rewards": rewards, "rewards_status": rewards_status,
                "special_rewards": special, "special_status": special_status,
+               "special_sample_saved": sample_saved,
                **info}
         if special_ink is not None:
             obs["special_ink"] = special_ink
@@ -643,6 +649,26 @@ class ExpeditionMixin:
         if ink <= special_cfg.get("empty_ink_max", 0.16):
             return [], "none", ink
         return [], "unknown", ink
+
+    def _save_special_unknown_sample(self, via: str, sequence) -> bool:
+        """道具栏认不出时留一帧同源运行截图供校准（DEBUG_DIR/expedition/）。
+
+        用 save_screenshot(force=False) 存当前缓存帧（就是读账用的那张稳定帧），
+        不另走 ADB 截图；失败只记日志，不阻塞收菜和事实落库。
+        """
+        save = getattr(self.maa, "save_screenshot", None)
+        if not callable(save):
+            return False
+        try:
+            from ..runtime_paths import DEBUG_DIR
+            target = DEBUG_DIR / "expedition" / (
+                f"settle-special-unknown-{via}-s{sequence or 0}-"
+                f"{time.strftime('%Y%m%d-%H%M%S')}.png")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            return bool(save(str(target), force=False))
+        except Exception as exc:
+            print(f"[远征] 特殊奖励留样失败（不影响收菜记账）: {exc}")
+            return False
 
     def _read_special_amount(self, col_roi, icon_pt):
         """道具图标右侧同行的 ×数量；读不出返回 None（不猜）"""
