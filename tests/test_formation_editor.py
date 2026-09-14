@@ -79,6 +79,8 @@ class _FakeMaa:
         self.pages = pages or []            # 选择列表分页剧本
         self.wrap = wrap                    # True=末页后再翻绕回首页（异常页序）
         self.swallow_swipes = swallow_swipes  # True=滑动全被模拟器吞掉
+        self.swallow_forward = set()        # 被吞的前滑序号（1 起）
+        self._forward_count = 0
         self.form_map = {(r["name"], r.get("level")): r["form"]
                          for page in self.pages for r in page
                          if r.get("form") is not None}
@@ -172,6 +174,9 @@ class _FakeMaa:
         if not self.in_list or not self.pages or self.swallow_swipes:
             return
         if y2 < y1:
+            self._forward_count += 1
+            if self._forward_count in self.swallow_forward:
+                return                      # 这一次前滑被模拟器吞掉
             if self.list_page + 1 >= len(self.pages) and self.wrap:
                 self.list_page = 0          # 异常：末页后绕回首页
             else:
@@ -660,6 +665,14 @@ class ExecutorFlowTests(unittest.TestCase):
         tab_clicks = [c for c in maa.clicks if c == _TEAM_TAB[2]]
         self.assertEqual(len(tab_clicks) >= 2, True)
 
+    def test_invalid_request(self):
+        maa, host = _std_setup()
+        result = _run(host, team_no=9)
+        self.assertEqual(result["result"], INVALID_REQUEST)
+        result = _run(host, target={"level": 35})
+        self.assertEqual(result["result"], INVALID_REQUEST)
+        self.assertEqual(maa.clicks, [])
+
     def test_confirm_popup_handled_after_decide(self):
         pages = [[_ok_row(300, popup=True)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
@@ -752,7 +765,7 @@ class ScanCompletenessTests(unittest.TestCase):
 
 class BottomProofTests(unittest.TestCase):
     """停滞只是"没翻动"，不是"到底"。OCR 行数不足不是独立到底证据
-    （满页整行漏识与真短末页不可区分）；唯一独立证据 = 回翻复归。"""
+    （满页整行漏识与真短末页不可区分）；独立证据 = 多阶段回翻复归+向前探测。"""
 
     @staticmethod
     def _full_page(page_idx, rows=6):
@@ -793,6 +806,21 @@ class BottomProofTests(unittest.TestCase):
         self.assertEqual(result["pages_scanned"], 1)
         decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
+        _assert_never_departs(self, maa)
+
+    def test_mid_scan_swallowed_swipes_cannot_fake_bottom(self):
+        """精确回归（老大独立复现）：page0→page1 成功，page1 上第 2、3 次
+        前滑被吞，之后反向滑和前滑全部正常。旧实现的回翻复归在 page1 上
+        两步全对，误把 page1 当底部返回 not_found——但回翻复归只证明
+        「反向和恢复有效」，证明不了候选页是底。必须继续探测并扫到
+        page2 找到目标，绝不 false not_found。"""
+        pages = [self._full_page(0), self._full_page(1),
+                 [_ok_row(300), _row("小狐丸", 450, level=99, fatigue=50)]]
+        maa, host = _std_setup(pages=pages)
+        maa.swallow_forward = {2, 3}         # 只吞第 2、3 次前滑
+        result = _run(host)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(result["pages_scanned"], 3)
         _assert_never_departs(self, maa)
 
     def test_blind_page_is_recognition_failure(self):

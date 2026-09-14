@@ -94,6 +94,9 @@ _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y �
 _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
                                     # 全局唯一只允许在 reached_end 后声称
 _STALL_LIMIT = 2                    # 指纹连续不动触发「到底核验」（不等于到底）
+_BOTTOM_PROOF_STAGES = 2            # 到底核验的独立阶段数：每阶段都重新正面
+                                    # 验证反向+恢复有效后再探测；单次可能被吞
+                                    # 的探测不包装成绝对证明
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
@@ -675,15 +678,25 @@ class FormationEditorMixin:
         形态/其他行内通道时在这里给行补证据（测试也经此注入剧本证据）。"""
         return parse_selection_rows(tokens)
 
+    def _read_list_page(self):
+        """当前帧读列表页。Returns (rows, unreadable)。"""
+        self.maa.screenshot(force=True)
+        tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
+        return self._parse_selection_rows(tokens)
+
     def _scan_selection_list(self, max_pages):
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
 
         status 四态分明——「滑不动」和「确认到底」是两件事：
-          complete  —— 停滞后通过回翻复归验证（反滑指纹回到上一页、
-                      再正滑回到末页）：滑动机制被证明正常工作，此时
-                      停滞才是到底。OCR 行数不足不是独立到底证据
+          complete  —— 停滞后通过多阶段到底核验（每阶段：反滑回上一页、
+                      正滑恢复候选页、再正滑探测候选页之后；连续
+                      _BOTTOM_PROOF_STAGES 个阶段探测都无新页、且每阶段
+                      机制都被重新验证过，才允许称底）。回翻复归只证明
+                      「反向和恢复有效」，证明不了候选页是底：中途被吞的
+                      前滑会在恢复后的探测里露出新页，新页交还本循环继续
+                      扫，不丢页不重复。OCR 行数不足不是独立到底证据
                       （满页被整行漏识与真正短末页长得一样，见
-                      2026-09-15 牛老师组合反例），绝不使用；
+                      2026-09-14 牛老师组合反例），绝不使用；
           stalled   —— 连续滑动无响应且拿不出到底证据（滑动可能被吞；
                       单页名单无从回翻验证，同样保守 stalled，等待真机
                       末端视觉证据校准后解禁——这是 honest stop）；
@@ -694,10 +707,13 @@ class FormationEditorMixin:
         """
         pages, fps, unreadable = [], [], 0
         current_idx, stalls, status = 0, 0, "complete"
+        pending = None          # 到底核验探出的新页，交还循环当当前页处理
         while True:
-            self.maa.screenshot(force=True)
-            tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
-            rows, bad = self._parse_selection_rows(tokens)
+            if pending is not None:
+                rows, bad = pending
+                pending = None
+            else:
+                rows, bad = self._read_list_page()
             if fps and not rows:
                 status = "blind"       # 翻页后整页失明
                 break
@@ -705,8 +721,12 @@ class FormationEditorMixin:
             if fps and fp == fps[-1]:
                 stalls += 1
                 if stalls >= _STALL_LIMIT:
-                    status = self._prove_bottom(pages, fps)
-                    break
+                    outcome, recovered = self._verify_bottom(fps)
+                    if outcome != "advanced":
+                        status = outcome           # complete / stalled
+                        break
+                    pending = recovered            # 候选页之后还有页：继续扫
+                    continue
                 self.maa.swipe(*_SWIPE_NEXT)
                 time.sleep(1.2)
                 continue
@@ -731,31 +751,43 @@ class FormationEditorMixin:
                f"读不清 {unreadable} 行）")
         return pages, fps, current_idx, unreadable, status
 
-    def _prove_bottom(self, pages, fps):
-        """停滞后的「到底」正面核验。Returns: complete / stalled。
+    def _verify_bottom(self, fps):
+        """停滞后的「到底」多阶段核验。Returns (outcome, recovered)：
+          ("stalled",  None)       证据不足（只有一页无从回翻，或回翻/
+                                   恢复/探测任一环失效）——绝不称底；
+          ("complete", None)       连续 _BOTTOM_PROOF_STAGES 个阶段，每阶段
+                                   反向+恢复都被正面验证、探测仍无新页；
+          ("advanced", (rows,bad)) 恢复后探测出新页——候选页不是底，新页
+                                   交还扫描循环继续（由主循环判 loop/blind）。
 
-        唯一独立证据 = 回翻复归：反滑一页指纹回到 fps[-2]、再正滑回到
-        fps[-1]，两步都对上才证明滑动机制工作正常、停滞=到底。
-        只有一页（短库存）无从回翻 → 保守 stalled（honest stop，等真机
-        末端视觉证据校准后解禁），绝不拿 OCR 行数冒充证据。
+        纪律：回翻复归只证明「此刻反向和恢复滑都有效」，证明不了候选页
+        就是底——中途被吞的前滑正是这么骗过单步核验的（2026-09-14 精确
+        反例：page1 上两次前滑被吞，回翻复归两步全对，page2 从未被看见，
+        误报 not_found）。所以恢复后必须继续探测候选页之后；探出新页就
+        交还扫描流程，探测连续多阶段无果才允许称底；任何一环证据不足
+        都只报 stalled，绝不 not_found。
         """
         if len(fps) < 2:
-            return "stalled"
-        self.maa.swipe(*_SWIPE_PREV)
-        time.sleep(1.2)
-        self.maa.screenshot(force=True)
-        rows, _b = self._parse_selection_rows(
-            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
-        if page_fingerprint(rows) != fps[-2]:
-            return "stalled"
-        self.maa.swipe(*_SWIPE_NEXT)
-        time.sleep(1.2)
-        self.maa.screenshot(force=True)
-        rows, _b = self._parse_selection_rows(
-            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
-        if page_fingerprint(rows) != fps[-1]:
-            return "stalled"
-        return "complete"
+            return "stalled", None      # 单页无从回翻：honest stop
+        for _stage in range(_BOTTOM_PROOF_STAGES):
+            self.maa.swipe(*_SWIPE_PREV)            # ① 反滑回上一页
+            time.sleep(1.2)
+            rows, _bad = self._read_list_page()
+            if page_fingerprint(rows) != fps[-2]:
+                return "stalled", None
+            self.maa.swipe(*_SWIPE_NEXT)            # ② 正滑恢复候选页
+            time.sleep(1.2)
+            rows, _bad = self._read_list_page()
+            if page_fingerprint(rows) != fps[-1]:
+                return "stalled", None
+            self.maa.swipe(*_SWIPE_NEXT)            # ③ 探测候选页之后
+            time.sleep(1.2)
+            rows, bad = self._read_list_page()
+            if not rows:
+                return "stalled", None              # 探测后失明：证据不足
+            if page_fingerprint(rows) != fps[-1]:
+                return "advanced", (rows, bad)      # 还有页：交还扫描循环
+        return "complete", None
 
     def _goto_page(self, pages, fps, current_idx, target_idx):
         """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""
