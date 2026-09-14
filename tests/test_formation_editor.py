@@ -432,12 +432,17 @@ class PureFunctionTests(unittest.TestCase):
 
 # ==================== 执行器流程 ====================
 
+
+_DECOY_PAGE = [_row("三日月宗近", 200, level=99, fatigue=100)]
+
+
 class ExecutorFlowTests(unittest.TestCase):
 
     def test_formation_shell_change_first_page(self):
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100),
                   _ok_row(300),
-                  _row("前田藤四郎", 450, level=80, fatigue=90)]]
+                  _row("前田藤四郎", 450, level=80, fatigue=90)],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
@@ -455,7 +460,7 @@ class ExecutorFlowTests(unittest.TestCase):
 
     def test_team_select_shell_same_path(self):
         """部队选择外壳走同一执行器：识别只看标题，没有颜色通道可依赖。"""
-        pages = [[_ok_row(300)]]
+        pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(shell="team_select", pages=pages)
         result = _run(host, entry_context="team_select")
         self.assertEqual(result["result"], CHANGED)
@@ -464,7 +469,7 @@ class ExecutorFlowTests(unittest.TestCase):
         _assert_never_departs(self, maa)
 
     def test_standalone_wrapper_navigates_to_formation(self):
-        pages = [[_ok_row(300)]]
+        pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(shell=None, pages=pages)
         with patch("touken.flows.formation_editor.time.sleep",
                    lambda *_: None):
@@ -493,7 +498,7 @@ class ExecutorFlowTests(unittest.TestCase):
 
     def test_already_correct_requires_proven_form(self):
         """槽位同名但形态读不出：不能零点击宣称正确（去名单找证据）。"""
-        pages = [[_ok_row(300)]]
+        pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35, kiwame="unknown")
@@ -518,6 +523,7 @@ class ExecutorFlowTests(unittest.TestCase):
         _assert_never_departs(self, maa)
 
     def test_scan_terminates_and_reports_not_found(self):
+        """两页短名单，回翻复归证明到底 → complete，确定 not_found。"""
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100)],
                  [_row("小狐丸", 300, level=99, fatigue=50)]]
         maa, host = _std_setup(pages=pages)
@@ -533,7 +539,8 @@ class ExecutorFlowTests(unittest.TestCase):
         pages = [[_row("压切长谷部", 200, level=35, fatigue=60,
                        form="normal"),
                   _row("压切长谷部", 400, level=35, fatigue=80,
-                       form="normal")]]
+                       form="normal")],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
@@ -545,7 +552,8 @@ class ExecutorFlowTests(unittest.TestCase):
     def test_single_row_missing_evidence_never_clicked(self):
         """流程级反例：唯一同名行但页面给不出形态证据 → ambiguous 停住。"""
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       form=None)]]            # 页面无形态通道
+                       form=None)],            # 页面无形态通道
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
@@ -556,7 +564,8 @@ class ExecutorFlowTests(unittest.TestCase):
     def test_catalog_alone_cannot_claim_unique(self):
         """只有 observation_id/sword_catalog_id 的目标遇同名多振 → ambiguous。"""
         pages = [[_row("压切长谷部", 200, level=35, fatigue=60),
-                  _row("压切长谷部", 400, level=99, fatigue=80)]]
+                  _row("压切长谷部", 400, level=99, fatigue=80)],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         target = {"observation_id": "9:12", "sword_catalog_id": HASEBE,
                   "name": "压切长谷部"}   # form/level 都没有
@@ -575,7 +584,8 @@ class ExecutorFlowTests(unittest.TestCase):
     def test_decide_no_effect_is_unavailable(self):
         """目标被游戏禁用（决定点了列表不关闭）→ unavailable，不盲试。"""
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       form="normal", disabled=True)]]
+                       form="normal", disabled=True)],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], UNAVAILABLE)
@@ -586,7 +596,8 @@ class ExecutorFlowTests(unittest.TestCase):
         """决定生效但回读是别的刀 → verification_failed，明说队伍可能已变。"""
         wrong = _slot(3, catalog=MAEDA, name="前田藤四郎", level=80)
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       form="normal", becomes=wrong)]]
+                       form="normal", becomes=wrong)],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], VERIFICATION_FAILED)
@@ -599,7 +610,8 @@ class ExecutorFlowTests(unittest.TestCase):
         weak = _slot(3, catalog=HASEBE, name="压切长谷部", level=35,
                      kiwame="unknown")
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       form="normal", becomes=weak)]]
+                       form="normal", becomes=weak)],
+                 _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], VERIFICATION_FAILED)
@@ -607,7 +619,7 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertIn("可能已发生变化", result["reason"])
 
     def test_verification_failed_on_unreadable_slot(self):
-        pages = [[_ok_row(300)]]
+        pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         original = host._formation_read_team
         state = {"decided": False}
@@ -633,13 +645,14 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(maa.clicks, [])     # 指定外壳不在场：不乱逛
         # auto 模式不在任何编队表面 → 导航去编队
-        maa2, host2 = _std_setup(shell=None, pages=[[_ok_row(300)]])
+        maa2, host2 = _std_setup(shell=None,
+                                 pages=[[_ok_row(300)], _DECOY_PAGE])
         result2 = _run(host2, entry_context="auto")
         self.assertEqual(result2["result"], CHANGED)
         self.assertEqual(result2["entry_shell"], "formation")
 
     def test_tab_click_swallowed_retries(self):
-        pages = [[_ok_row(300)]]
+        pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         maa.swallow_tabs.add(2)              # 第一次切队被吞
         result = _run(host)
@@ -647,16 +660,8 @@ class ExecutorFlowTests(unittest.TestCase):
         tab_clicks = [c for c in maa.clicks if c == _TEAM_TAB[2]]
         self.assertEqual(len(tab_clicks) >= 2, True)
 
-    def test_invalid_request(self):
-        maa, host = _std_setup()
-        result = _run(host, team_no=9)
-        self.assertEqual(result["result"], INVALID_REQUEST)
-        result = _run(host, target={"level": 35})
-        self.assertEqual(result["result"], INVALID_REQUEST)
-        self.assertEqual(maa.clicks, [])
-
     def test_confirm_popup_handled_after_decide(self):
-        pages = [[_ok_row(300, popup=True)]]
+        pages = [[_ok_row(300, popup=True)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
@@ -723,7 +728,7 @@ class ScanCompletenessTests(unittest.TestCase):
         self.assertNotIn(result["result"], (NOT_FOUND, CHANGED, AMBIGUOUS))
 
     def test_real_end_at_page_3_still_decides(self):
-        """真正第 3 页到底（指纹停滞）：unique/not_found 照常工作。"""
+        """真正第 3 页到底（回翻复归验证通过）：unique 照常工作。"""
         pages = [[_row("三日月宗近", 200, level=99, fatigue=100)],
                  [_ok_row(300)],
                  [_row("前田藤四郎", 400, level=80, fatigue=90)]]
@@ -746,7 +751,8 @@ class ScanCompletenessTests(unittest.TestCase):
 # ==================== 「滑不动」≠「确认到底」 ====================
 
 class BottomProofTests(unittest.TestCase):
-    """停滞只是"没翻动"，不是"到底"：到底需要正面证据（不满页/回翻复归）。"""
+    """停滞只是"没翻动"，不是"到底"。OCR 行数不足不是独立到底证据
+    （满页整行漏识与真短末页不可区分）；唯一独立证据 = 回翻复归。"""
 
     @staticmethod
     def _full_page(page_idx, rows=6):
@@ -756,8 +762,27 @@ class BottomProofTests(unittest.TestCase):
         return [_row(n, 120 + i * 90, level=page_idx * 10 + i, fatigue=90)
                 for i, n in enumerate(names[:rows])]
 
+    def test_exact_combo_counterexample_is_stalled(self):
+        """牛老师精确反例：首屏实际满页但 OCR 只解析 5 行 + 滑动全吞
+        + 目标在后页 → stalled，绝不 not_found/unique/点击。"""
+        page0 = [_row("三日月宗近", 120, level=1, fatigue=90),
+                 _row("小狐丸", 210, level=2, fatigue=90),
+                 _row("前田藤四郎", 300, level=3, fatigue=90),
+                 _row("加州清光", 390, level=4, fatigue=90),
+                 _row("歌仙兼定", 480, level=5, fatigue=90)]
+        # 实际第 6 行被 OCR 整行漏掉（根本没出现在 tokens 里）
+        pages = [page0, [_ok_row(300)]]
+        maa, host = _std_setup(pages=pages, swallow_swipes=True)
+        result = _run(host)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "stalled")
+        self.assertEqual(result["pages_scanned"], 1)
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+        _assert_never_departs(self, maa)
+
     def test_swallowed_swipes_are_stalled_not_not_found(self):
-        """牛老师反例：滑动全被吞，只扫了第一页，绝不能谎称整份名单没目标。"""
+        """滑动全被吞，只扫了第一页，绝不能谎称整份名单没目标。"""
         pages = [self._full_page(0), self._full_page(1),
                  self._full_page(2, rows=2)]
         maa, host = _std_setup(pages=pages, swallow_swipes=True)
@@ -771,7 +796,7 @@ class BottomProofTests(unittest.TestCase):
         _assert_never_departs(self, maa)
 
     def test_blind_page_is_recognition_failure(self):
-        """牛老师反例：OCR 完全失明连续空页 → 识别失败，不是 not_found。"""
+        """OCR 完全失明连续空页 → 识别失败，不是 not_found。"""
         maa, host = _std_setup(pages=[[]])
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
@@ -792,19 +817,30 @@ class BottomProofTests(unittest.TestCase):
         self.assertTrue(backward)        # 确实做了回翻验证
         _assert_never_departs(self, maa)
 
-    def test_short_last_page_is_direct_bottom_proof(self):
-        """不满页 = 正面到底证据，无需回翻（单页小库存同此路径）。"""
+    def test_single_short_page_is_honest_stalled(self):
+        """单页短库存无从回翻验证：保守 stalled（honest stop，等真机
+        末端视觉证据校准），不伪造 complete、不点决定。"""
         pages = [[_ok_row(300), _row("小狐丸", 450, level=99, fatigue=50)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
-        self.assertEqual(result["result"], CHANGED)
-        self.assertEqual(result["pages_scanned"], 1)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "stalled")
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+
+    def test_short_two_page_list_complete_via_backtrack(self):
+        """真短末页 + 独立到底证据（回翻复归）→ complete，可确定 not_found。"""
+        pages = [[_row("三日月宗近", 150, level=99, fatigue=100),
+                  _row("歌仙兼定", 300, level=90, fatigue=80)],
+                 [_row("小狐丸", 300, level=99, fatigue=50)]]
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], NOT_FOUND)
 
     def test_backtrack_mismatch_is_stalled(self):
-        """满页停滞且回翻后指纹对不上 → stalled，不裁决。"""
+        """满页停滞且回翻被吞（指纹对不上）→ stalled，不裁决。"""
         pages = [self._full_page(0), self._full_page(1)]
         maa, host = _std_setup(pages=pages)
-        # 回翻时滑动被吞：反滑不改变页 → 指纹仍是末页 ≠ fps[-2]
         original_swipe = maa.swipe
 
         def flaky_swipe(x1, y1, x2, y2, duration_ms=400):

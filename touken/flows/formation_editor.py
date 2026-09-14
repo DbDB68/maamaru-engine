@@ -94,8 +94,6 @@ _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y �
 _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
                                     # 全局唯一只允许在 reached_end 后声称
 _STALL_LIMIT = 2                    # 指纹连续不动触发「到底核验」（不等于到底）
-_FULL_PAGE_ROWS = 6                 # 列表满页行数（布局推算，待真机校准）：
-                                    # 不满页 = 末页的正面证据；满页停滞需回翻验证
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
@@ -681,10 +679,14 @@ class FormationEditorMixin:
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
 
         status 四态分明——「滑不动」和「确认到底」是两件事：
-          complete  —— 有正面到底证据：末页不满（列表没填满=最后一页），
-                      或满页停滞通过回翻复归验证（反滑指纹回到上一页、
-                      再正滑回到末页，证明滑动没被吞，停滞才是到底）；
-          stalled   —— 连续滑动无响应且拿不出到底证据（可能被模拟器吞）；
+          complete  —— 停滞后通过回翻复归验证（反滑指纹回到上一页、
+                      再正滑回到末页）：滑动机制被证明正常工作，此时
+                      停滞才是到底。OCR 行数不足不是独立到底证据
+                      （满页被整行漏识与真正短末页长得一样，见
+                      2026-09-15 牛老师组合反例），绝不使用；
+          stalled   —— 连续滑动无响应且拿不出到底证据（滑动可能被吞；
+                      单页名单无从回翻验证，同样保守 stalled，等待真机
+                      末端视觉证据校准后解禁——这是 honest stop）；
           blind     —— 任何一页 OCR 一行都读不出（整页失明，识别失败）；
           truncated —— 触达 max_pages 安全阀仍未到底；
           loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
@@ -732,12 +734,11 @@ class FormationEditorMixin:
     def _prove_bottom(self, pages, fps):
         """停滞后的「到底」正面核验。Returns: complete / stalled。
 
-        - 末页不满（行数 < 满页行数）：列表没填满，这就是最后一页；
-        - 满页停滞：回翻一页再翻回来，两步指纹都对上才证明滑动机制
-          正常工作、停滞=到底；对不上（或只有一页无从回翻）= stalled。
+        唯一独立证据 = 回翻复归：反滑一页指纹回到 fps[-2]、再正滑回到
+        fps[-1]，两步都对上才证明滑动机制工作正常、停滞=到底。
+        只有一页（短库存）无从回翻 → 保守 stalled（honest stop，等真机
+        末端视觉证据校准后解禁），绝不拿 OCR 行数冒充证据。
         """
-        if len(pages[-1]) < _FULL_PAGE_ROWS:
-            return "complete"
         if len(fps) < 2:
             return "stalled"
         self.maa.swipe(*_SWIPE_PREV)
