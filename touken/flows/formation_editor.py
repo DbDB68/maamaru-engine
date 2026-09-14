@@ -28,18 +28,31 @@
   - 跨页面定位只用候选页实际能看到、且本轮仍可靠的证据（默认
     match_fields=("name","form","level")）。疲劳会自然恢复，不是身份
     证据，默认不参与匹配；
-  - 缺证据的行既不冲突也不放行：同名多振拉不开 → ambiguous，
-    绝不点第一条；存在名字读不清的行时同样拒绝下点；
-  - 形态（普通/极化）只在页面给出可靠证据时参与区分；当前选择列表
-    没有形态直读通道，行 form 恒为 None——同名普通/极化只能靠等级等
-    字段拉开，拉不开就 ambiguous（诚实，不装能认）。
+  - 「零冲突」只是候选，「证据充分」才放行：对 match_fields 里 target
+    有值的身份字段，候选行缺值时不得 unique——target.form 已知而页面
+    形态未知、target.level 已知而等级没读到，都只凭同位名字点不得；
+    同名多振拉不开、有证据不足的同名行、或存在读不清的行，一律
+    ambiguous 并附 missing_evidence，绝不点第一条；
+  - 槽位验收同样三态：换前/换后都必须逐项验明（形态读不出=证据不足），
+    证据不足换前可继续开名单、换后必须 verification_failed；
+  - 当前选择列表没有形态直读通道（行 form 恒 None）：普通/极化同名
+    在无法由其他可靠身份证据区分时应诚实停住，不装能认。调用方若从
+    档案确知同名唯一，可显式收窄 match_fields（如 ("name","level")）
+    来证明证据链，而不是让执行器默认放宽。
+
+扫描完整度契约：
+  - 翻页有指纹停滞（=到底）/绕圈/截断三态结局；max_pages=60 只是
+    防死循环安全阀，不是"全表"的同义词；
+  - 只有 complete（确认到底）的扫描才允许裁决 unique 或确定
+    not_found；truncated/loop 一律 screen_unrecognized +
+    scan_incomplete 原因，绝不点击。
 
 失败边界：
   - 找不到列表 / 切队未确认 / 回读页认不出 → screen_unrecognized；
   - 目标整表不存在（可能被别队/手入/修行/互斥隐藏，或档案陈旧）
     → not_found，不换相似候选；
   - 决定已点但列表不关闭（游戏禁用该目标）→ unavailable；
-  - 决定后回读不是目标或读不出 → verification_failed，明确告知
+  - 决定后回读不是目标或证据不足 → verification_failed，明确告知
     "游戏队伍可能已发生变化"；只有原成员能被唯一定位时才允许恢复，
     本版不做盲回滚；
   - 翻页有指纹停滞/绕圈检测与页数上限，不在死循环里翻名单。
@@ -71,12 +84,15 @@ _LIST_TITLE = ("刀剑男士选择", (450, 0, 830, 110))
 _FORMATION_TITLE = ("部队编成", (480, 0, 800, 60))      # 与 navigator verify 一致
 _TEAM_SELECT_TITLE = ("部队选择", (506, 1, 774, 55))    # 与各玩法 team_ui_ocr 一致
 _LIST_ROI = (60, 100, 1240, 700)    # 列表整列 OCR
-_NAME_X_MAX = 300                   # 名字列（sakura 名字 ROI x[100,265]）
+_NAME_X = (100, 300)                # 姓名带（sakura 名字 ROI x[100,265] 同源）；
+                                    # x<100 是位置标记/锁图标区，直接排除
 _LEVEL_X = (300, 460)               # 等级列（布局推算，待真机校准）
 _FATIGUE_X = (460, 620)             # 疲劳列（sakura 真机校准）
+_POS_MARK = re.compile(r"^[一二三四五]\s*之\s*[一二三四五六]?$")  # "N之M"位置标记
 _ROW_MERGE_DY = 25                  # 同一行碎 token 归并的 y 容差
 _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y 容差
-_MAX_PAGES = 8                      # 翻页安全上限（sakura 同款）
+_MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
+                                    # 全局唯一只允许在 reached_end 后声称
 _STALL_LIMIT = 2                    # 指纹连续不动判到底
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
@@ -148,8 +164,11 @@ def _parse_fatigue_token(text):
 def parse_selection_rows(tokens):
     """列表整列 OCR token → 行列表（纯函数，可测）。
 
-    名字带（x<300）碎 token 先按 y 归并成文本行再过名册校正；
-    等级/疲劳 token 按 y 就近归属。 Returns: (rows, unreadable_rows)。
+    姓名带只收 x∈[100,300) 的 token：左侧 x<100 是"N之M"位置标记和
+    锁图标区（真机布局），落进姓名带的"N之M"标记也按格式排除——
+    两者都不算"读不清的名字"。姓名带里的其他乱码仍计入 unreadable
+    （保守阻断）。碎 token 按 y 归并成文本行再过名册校正；等级/疲劳
+    token 按 y 就近归属。 Returns: (rows, unreadable_rows)。
     rows 每项: {"y", "name_raw", "name", "sword_catalog_id", "level",
     "fatigue", "form": None, "unknown_fields": [...]}。
     form 恒为 None——选择列表目前没有形态直读通道（盲区，如实标注）。
@@ -160,7 +179,11 @@ def parse_selection_rows(tokens):
         if not text:
             continue
         x, y = getattr(pt, "x", 0) or 0, getattr(pt, "y", 0) or 0
-        if x < _NAME_X_MAX:
+        if x < _NAME_X[0]:
+            continue                # 位置标记/锁图标区：不是名字，不是乱码
+        if x < _NAME_X[1]:
+            if _POS_MARK.match(text):
+                continue            # 落进姓名带的"N之M"标记：排除，不算乱码
             name_band.append((x, y, text))
         elif _LEVEL_X[0] <= x < _LEVEL_X[1]:
             lv = _parse_level_token(text)
@@ -253,14 +276,20 @@ def row_evidence_gaps(row, target, match_fields):
 
 def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
                  unreadable_rows=0):
-    """全表扫描后的裁决（纯函数）。只有全局唯一才放行。
+    """全表扫描后的裁决（纯函数）。「零冲突」只是候选，「证据充分」才放行。
+
+    对调用方要求参与 match_fields 且 target 有值的身份字段，候选行缺值
+    时不得 unique——只凭同位名字点击会把"没证据反对"误当"有证据确认"。
+    只有满足以下全部条件才 unique：全表恰好一条零冲突且证据充分的行、
+    没有证据不足的同名行、没有读不清的行、扫描域完整（由调用方保证，
+    截断扫描不得进入本裁决）。
 
     Returns:
-        {"status": "unique", "page", "row", "evidence_gaps"}
-        {"status": "ambiguous", "candidates", "reason"}
+        {"status": "unique", "page", "row", "evidence_gaps": []}
+        {"status": "ambiguous", "candidates", "reason", "missing_evidence"}
         {"status": "not_found", "reason"}
     """
-    candidates = []
+    confirmed, unconfirmed = [], []
     for page_idx, rows in enumerate(pages):
         for row in rows:
             sid = row.get("sword_catalog_id")
@@ -268,27 +297,38 @@ def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
                 continue  # 读不清的行单独算 unreadable，别家的刀无关
             if row_conflicts_target(row, target, match_fields):
                 continue
-            candidates.append((page_idx, row))
+            missing = row_evidence_gaps(row, target, match_fields)
+            if missing:
+                unconfirmed.append((page_idx, row, missing))
+            else:
+                confirmed.append((page_idx, row))
 
-    if not candidates:
+    if len(confirmed) == 1 and not unconfirmed and not unreadable_rows:
+        page_idx, row = confirmed[0]
+        return {"status": "unique", "page": page_idx, "row": row,
+                "evidence_gaps": []}
+
+    if not confirmed and not unconfirmed:
         return {"status": "not_found",
                 "reason": ("整份列表没有与目标零冲突的行：目标可能被游戏"
                            "隐藏/禁用（在别队、手入/修行、同位互斥、远征中），"
                            "或档案字段已陈旧（等级变了会对不上）")}
-    if len(candidates) > 1:
-        return {"status": "ambiguous",
-                "candidates": [_row_summary(r) for _p, r in candidates],
-                "reason": (f"同名同型候选 {len(candidates)} 振在可观察字段上"
-                           "拉不开，拒绝点第一条（不伪造一号/二号）")}
-    if unreadable_rows:
-        page_idx, row = candidates[0]
-        return {"status": "ambiguous",
-                "candidates": [_row_summary(row)],
-                "reason": (f"有 {unreadable_rows} 行名字读不清，不能排除"
-                           "目标是其一，拒绝下点")}
-    page_idx, row = candidates[0]
-    return {"status": "unique", "page": page_idx, "row": row,
-            "evidence_gaps": row_evidence_gaps(row, target, match_fields)}
+
+    missing_evidence = sorted({f for _p, _r, m in unconfirmed for f in m})
+    candidates = [_row_summary(r) for _p, r in
+                  [(p, r) for p, r in confirmed]
+                  + [(p, r) for p, r, _m in unconfirmed]]
+    if len(confirmed) > 1:
+        reason = (f"同名同型候选 {len(confirmed)} 振在可观察字段上"
+                  "拉不开，拒绝点第一条（不伪造一号/二号）")
+    elif unconfirmed:
+        reason = (f"同名候选缺身份证据（{'、'.join(missing_evidence)}）："
+                  "缺证据不等于没冲突，不能排除是另一振，拒绝下点")
+    else:  # 唯一确认行，但有读不清的行不能排除
+        reason = (f"有 {unreadable_rows} 行名字读不清，不能排除"
+                  "目标是其一，拒绝下点")
+    return {"status": "ambiguous", "candidates": candidates,
+            "missing_evidence": missing_evidence, "reason": reason}
 
 
 def _row_summary(row):
@@ -298,11 +338,14 @@ def _row_summary(row):
             "unknown_fields": list(row.get("unknown_fields") or [])}
 
 
-def slot_matches_target(slot, target):
-    """编队槽观察 vs 目标身份：True/False/None（读不出）。
+def slot_matches_target(slot, target, match_fields=DEFAULT_MATCH_FIELDS):
+    """编队槽观察 vs 目标身份：三态 True / False / None（证据不足）。
 
-    刀种目录必须一致；形态两边都有证据且冲突 → False。等级不参与
-    否决（档案可能陈旧），差异由调用方记进 evidence/warnings。
+    刀种目录必须一致（不一致=False）。对 match_fields 里 target 有值的
+    身份字段：槽位有值且冲突 → False；槽位缺值 → None（证据不足，
+    不算确认也不算排除）。目标 form 已知而槽位形态读不出时绝不通过——
+    换前不能零点击宣称 already_correct，换后也不能报 changed。
+    疲劳不在默认 match_fields 里（自然恢复，不是身份证据）。
     """
     status = slot.get("slot_status")
     if status == "empty":
@@ -314,10 +357,25 @@ def slot_matches_target(slot, target):
         return None
     if sid != target["sword_catalog_id"]:
         return False
-    sf = slot.get("kiwame_status")
-    if sf in ("kiwame", "normal") and target.get("form") \
-            and sf != target["form"]:
-        return False
+    for field in match_fields:
+        if field == "name":
+            continue
+        tv = target.get(field)
+        if tv is None:
+            continue
+        if field == "form":
+            sv = slot.get("kiwame_status")
+            if sv in ("kiwame", "normal"):
+                if sv != tv:
+                    return False
+            else:
+                return None        # 形态证据不足
+        else:
+            sv = slot.get(field)
+            if sv is None:
+                return None        # 字段证据不足
+            if sv != tv:
+                return False
     return True
 
 
@@ -405,30 +463,27 @@ class FormationEditorMixin:
                                 f"部队{team_no}标签切队未确认，不落任何点击",
                                 entry_shell=shell)
 
-        # 3) 换前观察：目标已在位 → 零换人点击
+        # 3) 换前观察：三态验收——确认是目标才零点击；证据不足不冒充正确，
+        #    但可以继续打开名单寻找明确目标
         team_before = self._formation_read_team()
         slot_before = team_before[slot_no - 1] if team_before else None
-        if slot_before is not None:
-            m = slot_matches_target(slot_before, tgt)
-            level_clash = (m is True and tgt["level"] is not None
-                           and slot_before.get("level") is not None
-                           and slot_before["level"] != tgt["level"])
-            if m is True and not level_clash:
-                yield f"[编队] {slot_no}号位已是目标，零点击收工"
-                return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
-                                    "目标槽位回读与目标一致，未做任何换人点击",
-                                    entry_shell=shell,
-                                    before=slot_before, after=slot_before,
-                                    team_before=team_before,
-                                    team_after=team_before)
-            if m is True and level_clash:
-                yield (f"[编队] 槽位同名同形态但等级 "
-                       f"{slot_before.get('level')}≠档案 {tgt['level']}，"
-                       "可能是另一振，继续走替换确认")
-        else:
+        if slot_before is None:
             yield f"[编队] {slot_no}号位读不出（失明页？），停"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "换前观察失败：整页读不出", entry_shell=shell)
+        m = slot_matches_target(slot_before, tgt, match_fields)
+        if m is True:
+            yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
+            return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
+                                "目标槽位回读与目标逐项一致，未做任何换人点击",
+                                entry_shell=shell,
+                                before=slot_before, after=slot_before,
+                                team_before=team_before,
+                                team_after=team_before)
+        if m is None:
+            yield (f"[编队] {slot_no}号位读数与目标不足以互相确认"
+                   "（形态/等级证据缺口），不能零点击宣称正确——"
+                   "打开名单寻找明确目标")
 
         # 4) 点"替换"，确认进入"刀剑男士选择"
         cy = _ROW_CY[slot_no - 1]
@@ -439,9 +494,22 @@ class FormationEditorMixin:
                                 "点了替换但选择列表未出现", entry_shell=shell,
                                 before=slot_before, team_before=team_before)
 
-        # 5) 全表扫描（指纹停滞/绕圈保护），扫完才裁决——绝不点第一条
-        pages, fps, current_idx, unreadable = \
+        # 5) 全表扫描（指纹停滞=到底 / 绕圈 / 截断三种结局分明），
+        #    只有确定扫到底的完整扫描才允许裁决唯一——截断名单上的
+        #    "唯一"既找不到后段目标，也证明不了全局唯一
+        pages, fps, current_idx, unreadable, scan_status = \
             yield from self._scan_selection_list(max_pages)
+        if scan_status != "complete":
+            why = ("触达安全上限仍未到底" if scan_status == "truncated"
+                   else "翻页指纹绕圈，页序异常")
+            yield (f"[编队] 扫描未到底（scan_incomplete={scan_status}）："
+                   f"已扫 {len(pages)} 页，{why}，不能证明全局唯一，拒绝下点")
+            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
+                                f"scan_incomplete：{why}（已扫 {len(pages)} 页），"
+                                "不点击、不裁决", entry_shell=shell,
+                                before=slot_before, team_before=team_before,
+                                pages_scanned=len(pages),
+                                scan_status=scan_status)
         verdict = decide_match(pages, tgt, match_fields, unreadable)
         if verdict["status"] == "not_found":
             yield f"[编队] 翻遍 {len(pages)} 页没找到目标：{verdict['reason']}"
@@ -455,17 +523,15 @@ class FormationEditorMixin:
                                 verdict["reason"], entry_shell=shell,
                                 before=slot_before, team_before=team_before,
                                 candidates=verdict["candidates"],
+                                missing_evidence=verdict.get(
+                                    "missing_evidence", []),
                                 pages_scanned=len(pages))
 
-        # 6) 回到目标所在页，重新确认该行后点"决定"
+        # 6) 回到目标所在页，用同一套「证据充分」条件重新确认该行后点"决定"
         target_page = verdict["page"]
         row = verdict["row"]
-        gaps = verdict["evidence_gaps"]
-        if gaps:
-            yield (f"[编队] 唯一匹配在第 {target_page + 1} 页（证据缺口："
-                   f"{'、'.join(gaps)}——页面给不出这些字段，如实记录）")
-        else:
-            yield f"[编队] 唯一匹配在第 {target_page + 1} 页：{row['name']} Lv{row.get('level') or '?'}"
+        yield (f"[编队] 唯一匹配在第 {target_page + 1} 页："
+               f"{row['name']} Lv{row.get('level') or '?'}")
         current_idx = yield from self._goto_page(
             pages, fps, current_idx, target_page)
         if current_idx is None:
@@ -491,7 +557,8 @@ class FormationEditorMixin:
                                 entry_shell=shell, before=slot_before,
                                 team_before=team_before)
 
-        # 7) 回到原编队表面，重新观察验收（至少目标槽位，附整队前后）
+        # 7) 回到原编队表面，重新观察验收：三态——确认是目标才 changed；
+        #    证据不足与确认不是目标一样算 verification_failed，绝不假报成功
         shell_after = self._detect_shell()
         if shell_after is None:
             yield "[编队] 决定后回不到编队表面，页面状态未知，停"
@@ -508,32 +575,27 @@ class FormationEditorMixin:
         team_after = self._formation_read_team()
         slot_after = team_after[slot_no - 1] if team_after else None
         others = _other_slot_changes(team_before, team_after, slot_no)
-        if slot_after is not None and slot_matches_target(slot_after, tgt):
-            warns = []
-            if slot_after.get("kiwame_status") not in ("kiwame", "normal"):
-                warns.append("回读未能复核形态（kiwame_status 未知）")
-            if tgt["level"] is not None \
-                    and slot_after.get("level") is not None \
-                    and slot_after["level"] != tgt["level"]:
-                warns.append(f"回读等级 {slot_after['level']} 与档案 "
-                             f"{tgt['level']} 不一致（可能档案陈旧或等级已变）")
-            if warns:
-                yield f"[编队] ⚠️ {'；'.join(warns)}"
+        if slot_after is not None \
+                and slot_matches_target(slot_after, tgt, match_fields) is True:
             yield (f"[编队] ✓ 换好了：部队{team_no} {slot_no}号位 = "
                    f"{slot_after.get('name') or tgt['name']}")
             return self._finish(CHANGED, team_no, slot_no, tgt,
-                                "回读验收通过", entry_shell=shell,
+                                "回读逐项验收通过", entry_shell=shell,
                                 before=slot_before, after=slot_after,
                                 team_before=team_before, team_after=team_after,
                                 other_slot_changes=others,
-                                evidence_gaps=gaps, warnings=warns,
+                                evidence_gaps=[],
                                 pages_scanned=len(pages))
-        yield (f"[编队] ⚠️ 回读不是目标（"
-               f"{(slot_after or {}).get('name') or '读不出'}），"
+        if slot_after is not None \
+                and slot_matches_target(slot_after, tgt, match_fields) is None:
+            detail = ("回读证据不足（形态/等级未能逐项复核），无法确认是目标")
+        else:
+            detail = (f"回读不是目标（{(slot_after or {}).get('name') or '读不出'}）")
+        yield (f"[编队] ⚠️ {detail}，"
                "游戏队伍可能已发生变化，请人工核对；本版不做盲回滚")
         return self._finish(VERIFICATION_FAILED, team_no, slot_no, tgt,
-                            "决定后回读与目标不一致或读不出；游戏队伍可能"
-                            "已发生变化，未做盲回滚", entry_shell=shell,
+                            f"{detail}；游戏队伍可能已发生变化，未做盲回滚",
+                            entry_shell=shell,
                             before=slot_before, after=slot_after,
                             team_before=team_before, team_after=team_after,
                             other_slot_changes=others)
@@ -604,38 +666,51 @@ class FormationEditorMixin:
                 return True
         return False
 
-    def _scan_selection_list(self, max_pages):
-        """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable)。
+    def _parse_selection_rows(self, tokens):
+        """注入缝：默认调纯函数 parse_selection_rows；未来真机校准出
+        形态/其他行内通道时在这里给行补证据（测试也经此注入剧本证据）。"""
+        return parse_selection_rows(tokens)
 
-        指纹连续不动 → 到底；指纹绕回已见过的页 → 停（防死循环）。
+    def _scan_selection_list(self, max_pages):
+        """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
+
+        status 三态分明：
+          complete  —— 指纹连续不动确认到底（只有它允许裁决唯一）；
+          truncated —— 触达 max_pages 安全阀仍未到底（截断名单不裁决）；
+          loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
         """
         pages, fps, unreadable = [], [], 0
-        current_idx, stalls = 0, 0
-        for _round in range(max_pages + _STALL_LIMIT + 1):
+        current_idx, stalls, status = 0, 0, "complete"
+        while True:
             self.maa.screenshot(force=True)
             tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
-            rows, bad = parse_selection_rows(tokens)
+            rows, bad = self._parse_selection_rows(tokens)
             fp = page_fingerprint(rows)
             if fps and fp == fps[-1]:
                 stalls += 1
                 if stalls >= _STALL_LIMIT:
-                    break          # 到底了
+                    status = "complete"
+                    break
                 self.maa.swipe(*_SWIPE_NEXT)
                 time.sleep(1.2)
                 continue
             if fp in fps:
-                break              # 绕回来了
+                status = "loop"
+                break
             pages.append(rows)
             fps.append(fp)
             unreadable += bad
             current_idx = len(pages) - 1
             stalls = 0
             if len(pages) >= max_pages:
+                status = "truncated"
                 break
             self.maa.swipe(*_SWIPE_NEXT)
             time.sleep(1.2)
-        yield f"[编队] 列表扫描 {len(pages)} 页（读不清 {unreadable} 行）"
-        return pages, fps, current_idx, unreadable
+        yield (f"[编队] 列表扫描 {len(pages)} 页"
+               f"（{'已到底' if status == 'complete' else '未到底：' + status}，"
+               f"读不清 {unreadable} 行）")
+        return pages, fps, current_idx, unreadable, status
 
     def _goto_page(self, pages, fps, current_idx, target_idx):
         """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""
@@ -663,13 +738,15 @@ class FormationEditorMixin:
         return current_idx
 
     def _relocate_row(self, target, scanned_row, match_fields):
-        """回到目标页后重读该行：零冲突且仍指向目标才返回新行坐标。"""
+        """回到目标页后重读该行：与扫描裁决同一套「证据充分」条件——
+        零冲突且无缺证据的唯一行才返回新坐标（回页阶段不比扫描阶段宽）。"""
         self.maa.screenshot(force=True)
-        rows, _bad = parse_selection_rows(
+        rows, _bad = self._parse_selection_rows(
             self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
         hits = [r for r in rows
                 if r.get("sword_catalog_id") == target["sword_catalog_id"]
-                and not row_conflicts_target(r, target, match_fields)]
+                and not row_conflicts_target(r, target, match_fields)
+                and not row_evidence_gaps(r, target, match_fields)]
         if len(hits) != 1:
             return None
         # 与扫描时的行特征一致才认（y 允许微漂）

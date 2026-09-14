@@ -4,8 +4,11 @@
 假 MAA 是点击/滑动驱动的页面状态机：
   - 外壳（部队编成/部队选择）只看标题 OCR，不含任何主题色信息——
     两种外壳走同一条执行器路径本测试直接钉死；
-  - click(替换) 开"刀剑男士选择"列表；swipe 翻页；click(决定) 按剧本
-    应用换人或模拟禁用/未生效；
+  - click(替换) 开"刀剑男士选择"列表；swipe 翻页（wrap=True 时模拟
+    末页后绕回首页的异常页序）；click(决定) 按剧本应用换人或模拟
+    禁用/未生效；
+  - 页面行证据（形态等）经 host 的 _parse_selection_rows 注入缝喂入，
+    与真机未来校准通道同一位置；默认页面给不出形态（form=None）；
   - 编队槽观察不走真 OCR：host 覆写 _formation_read_team/_formation_row_label
     注入缝喂剧本槽位（team_roster 自己的读取有 test_team_roster 守着）。
 
@@ -58,19 +61,26 @@ def _target(catalog=HASEBE, name="压切长谷部", level=35, form="normal",
             "name": name, "form": form, "level": level}
 
 
-def _row(name, y, level=None, fatigue=None, becomes=None, disabled=False,
-         popup=False):
+def _row(name, y, level=None, fatigue=None, form=None, becomes=None,
+         disabled=False, popup=False):
+    """选择列表行剧本。form 为该行的形态证据（None=页面给不出，默认）。"""
     return {"name": name, "y": y, "level": level, "fatigue": fatigue,
-            "becomes": becomes, "disabled": disabled, "popup": popup}
+            "form": form, "becomes": becomes, "disabled": disabled,
+            "popup": popup}
 
 
 class _FakeMaa:
     """编队执行器状态机假 MAA（无图像，全靠剧本与坐标约定）。"""
 
-    def __init__(self, shell="formation", current_tab=1, pages=None):
+    def __init__(self, shell="formation", current_tab=1, pages=None,
+                 wrap=False):
         self.shell = shell                  # formation/team_select/None
         self.current_tab = current_tab
         self.pages = pages or []            # 选择列表分页剧本
+        self.wrap = wrap                    # True=末页后再翻绕回首页（异常页序）
+        self.form_map = {(r["name"], r.get("level")): r["form"]
+                         for page in self.pages for r in page
+                         if r.get("form") is not None}
         self.in_list = False
         self.list_page = 0
         self.pending_slot = None
@@ -161,7 +171,10 @@ class _FakeMaa:
         if not self.in_list or not self.pages:
             return
         if y2 < y1:
-            self.list_page = min(self.list_page + 1, len(self.pages) - 1)
+            if self.list_page + 1 >= len(self.pages) and self.wrap:
+                self.list_page = 0          # 异常：末页后绕回首页
+            else:
+                self.list_page = min(self.list_page + 1, len(self.pages) - 1)
         else:
             self.list_page = max(self.list_page - 1, 0)
 
@@ -195,6 +208,17 @@ class _EditorHost(FormationEditorMixin):
     def _formation_row_label(self, cy):
         return self.maa.current_tab
 
+    def _parse_selection_rows(self, tokens):
+        """注入缝：给行补上剧本里的形态证据（未来真机形态通道的位置）。"""
+        rows, bad = parse_selection_rows(tokens)
+        for r in rows:
+            form = self.maa.form_map.get((r["name_raw"], r["level"]))
+            if form is not None:
+                r["form"] = form
+                r["unknown_fields"] = [f for f in r["unknown_fields"]
+                                       if f != "form"]
+        return rows, bad
+
 
 def _run(host, team_no=2, slot_no=3, target=None, **kw):
     with patch("touken.flows.formation_editor.time.sleep", lambda *_: None):
@@ -202,11 +226,12 @@ def _run(host, team_no=2, slot_no=3, target=None, **kw):
                                        target or _target(), **kw)
 
 
-def _std_setup(shell="formation", pages=None, team_no=2, slot_no=3):
-    """部队 team_no 的 slot_no 是小狐丸，目标是压切长谷部 Lv35。"""
+def _std_setup(shell="formation", pages=None, team_no=2, slot_no=3,
+               wrap=False):
+    """部队 team_no 的 slot_no 是小狐丸，目标是压切长谷部 Lv35 普通。"""
     teams = {team_no: _six()}
     teams[team_no][slot_no - 1] = _slot(slot_no, catalog=KOGI, name="小狐丸")
-    maa = _FakeMaa(shell=shell, pages=pages or [])
+    maa = _FakeMaa(shell=shell, pages=pages or [], wrap=wrap)
     return maa, _EditorHost(maa, teams)
 
 
@@ -217,6 +242,13 @@ def _assert_never_departs(tc, maa):
     for tpl in maa.templates_seen:
         for word in ("即刻出阵", "继续出阵", "演练"):
             tc.assertNotIn(word, tpl)
+
+
+def _ok_row(y=300, **kw):
+    """一行证据齐全的目标（形态证据经注入缝给出）。"""
+    kw.setdefault("becomes", _slot(3, catalog=HASEBE, name="压切长谷部",
+                                   level=35))
+    return _row("压切长谷部", y, level=35, fatigue=60, form="normal", **kw)
 
 
 # ==================== 纯函数 ====================
@@ -247,6 +279,7 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         r0 = rows[0]
         self.assertEqual(r0["sword_catalog_id"], HASEBE)
+        self.assertEqual(r0["name_raw"], "压切长谷部")
         self.assertEqual(r0["level"], 35)
         self.assertEqual(r0["fatigue"], 85)
         self.assertIsNone(r0["form"])                 # 页面无形态通道
@@ -254,14 +287,79 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(rows[1]["sword_catalog_id"], KOGI)
         self.assertIn("level", rows[1]["unknown_fields"])
 
-    def test_parse_rows_unreadable_counted(self):
-        rows, unreadable = parse_selection_rows([("@@乱码@@", _P(150, 150))])
+    def test_position_markers_never_pollute_name_band(self):
+        """真机布局：名字左侧的"N之M"位置标记/锁图标不算读不清的名字。"""
+        for mx, my, mark in ((60, 300, "二之六"),      # 同 y，标记区
+                             (250, 310, "四之二"),      # 近 y，落进姓名带
+                             (120, 500, "四之"),        # 分离 y，OCR 残缺
+                             (75, 148, "一之五")):      # 同 y（目标行）
+            tokens = [("压切长谷部", _P(150, 150)), (mark, _P(mx, my))]
+            rows, unreadable = parse_selection_rows(tokens)
+            self.assertEqual(unreadable, 0, f"{mark}@({mx},{my}) 不应算乱码")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["name_raw"], "压切长谷部")
+            self.assertEqual(rows[0]["sword_catalog_id"], HASEBE)
+
+    def test_garbage_in_name_band_still_blocks(self):
+        """姓名带里的真乱码仍保守阻断（unreadable 防线不取消）。"""
+        rows, unreadable = parse_selection_rows(
+            [("压切长谷部", _P(150, 150)), ("@@乱码@@", _P(150, 300))])
         self.assertEqual(unreadable, 1)
-        self.assertIsNone(rows[0]["sword_catalog_id"])
+
+    def test_decide_unique_requires_sufficient_evidence(self):
+        """字段齐全（零冲突+零缺口+无读不清）才 unique。"""
+        tgt, _ = normalize_target(_target(form="kiwame", level=99))
+        row = {"y": 300, "name_raw": "压切长谷部", "name": "压切长谷部",
+               "sword_catalog_id": HASEBE, "level": 99, "fatigue": 60,
+               "form": "kiwame", "unknown_fields": []}
+        v = decide_match([[row]], tgt)
+        self.assertEqual(v["status"], "unique")
+        self.assertEqual(v["evidence_gaps"], [])
+
+    def test_decide_single_row_missing_form_and_level_not_unique(self):
+        """牛老师复现的反例：唯一同名行但 form+level 都缺 → 不放行。"""
+        tgt, _ = normalize_target(_target(form="kiwame", level=99))
+        row = {"y": 300, "name_raw": "压切长谷部", "name": "压切长谷部",
+               "sword_catalog_id": HASEBE, "level": None, "fatigue": 60,
+               "form": None, "unknown_fields": ["level", "form"]}
+        v = decide_match([[row]], tgt)
+        self.assertEqual(v["status"], "ambiguous")
+        self.assertEqual(v["missing_evidence"], ["form", "level"])
+        self.assertIn("缺身份证据", v["reason"])
+
+    def test_decide_missing_form_only_blocks(self):
+        tgt, _ = normalize_target(_target(form="kiwame", level=99))
+        row = {"y": 300, "name_raw": "压切长谷部", "name": "压切长谷部",
+               "sword_catalog_id": HASEBE, "level": 99, "fatigue": 60,
+               "form": None, "unknown_fields": ["form"]}
+        v = decide_match([[row]], tgt)
+        self.assertEqual(v["status"], "ambiguous")
+        self.assertEqual(v["missing_evidence"], ["form"])
+
+    def test_decide_missing_level_only_blocks(self):
+        tgt, _ = normalize_target(_target(form="kiwame", level=99))
+        row = {"y": 300, "name_raw": "压切长谷部", "name": "压切长谷部",
+               "sword_catalog_id": HASEBE, "level": None, "fatigue": 60,
+               "form": "kiwame", "unknown_fields": ["level"]}
+        v = decide_match([[row]], tgt)
+        self.assertEqual(v["status"], "ambiguous")
+        self.assertEqual(v["missing_evidence"], ["level"])
+
+    def test_decide_confirmed_plus_unconfirmed_is_ambiguous(self):
+        """一条证据充分 + 一条缺证据同名行：不能排除后者 → ambiguous。"""
+        tgt, _ = normalize_target(_target(form="normal", level=35))
+        good = {"y": 200, "name_raw": "压切长谷部", "name": "压切长谷部",
+                "sword_catalog_id": HASEBE, "level": 35, "fatigue": 60,
+                "form": "normal", "unknown_fields": []}
+        weak = {"y": 400, "name_raw": "压切长谷部", "name": "压切长谷部",
+                "sword_catalog_id": HASEBE, "level": None, "fatigue": 80,
+                "form": None, "unknown_fields": ["level", "form"]}
+        v = decide_match([[good, weak]], tgt)
+        self.assertEqual(v["status"], "ambiguous")
+        self.assertEqual(len(v["candidates"]), 2)
 
     def test_decide_unique_with_form_evidence(self):
-        # 同名普通/极化：页面给出可靠形态证据时选对（row form 由未来
-        # 真机校准通道提供，这里直接构造证明判定逻辑）
+        """同名普通/极化：页面给出可靠形态证据时选对。"""
         tgt, _ = normalize_target(_target(form="kiwame", level=99))
         rows = [{"y": 150, "name_raw": "压切长谷部", "name": "压切长谷部",
                  "sword_catalog_id": HASEBE, "level": 99, "fatigue": 50,
@@ -274,7 +372,7 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(v["row"]["y"], 300)
 
     def test_decide_ambiguous_identical_rows(self):
-        tgt, _ = normalize_target(_target(level=35))
+        tgt, _ = normalize_target(_target(level=35, form=None))
         row = {"y": 150, "name_raw": "压切长谷部", "name": "压切长谷部",
                "sword_catalog_id": HASEBE, "level": 35, "fatigue": 50,
                "form": None, "unknown_fields": ["form"]}
@@ -284,7 +382,7 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(len(v["candidates"]), 2)
 
     def test_decide_ambiguous_when_unreadable_rows_exist(self):
-        tgt, _ = normalize_target(_target(level=35))
+        tgt, _ = normalize_target(_target(level=35, form=None))
         rows = [{"y": 150, "name_raw": "压切长谷部", "name": "压切长谷部",
                  "sword_catalog_id": HASEBE, "level": 35, "fatigue": None,
                  "form": None, "unknown_fields": []}]
@@ -306,9 +404,10 @@ class PureFunctionTests(unittest.TestCase):
         self.assertTrue(row_conflicts_target(row, tgt, ("name", "level")))
         self.assertFalse(row_conflicts_target(
             {"sword_catalog_id": HASEBE, "level": None}, tgt,
-            ("name", "level")))   # 缺值不冲突
+            ("name", "level")))   # 缺值不冲突（但证据充分性另算）
 
-    def test_slot_matches_target(self):
+    def test_slot_matches_target_three_states(self):
+        """三态：确认匹配 / 确认不匹配 / 证据不足。形态未知绝不通过。"""
         tgt, _ = normalize_target(_target(level=35, form="normal"))
         self.assertTrue(slot_matches_target(
             _slot(1, catalog=HASEBE, name="压切长谷部", level=35), tgt))
@@ -316,6 +415,13 @@ class PureFunctionTests(unittest.TestCase):
         self.assertFalse(slot_matches_target(                     # 形态冲突
             _slot(1, catalog=HASEBE, name="压切长谷部", kiwame="kiwame"),
             tgt))
+        self.assertFalse(slot_matches_target(                     # 等级冲突
+            _slot(1, catalog=HASEBE, name="压切长谷部", level=99), tgt))
+        self.assertIsNone(slot_matches_target(                    # 形态读不出
+            _slot(1, catalog=HASEBE, name="压切长谷部", level=35,
+                  kiwame="unknown"), tgt))
+        self.assertIsNone(slot_matches_target(                    # 等级读不出
+            _slot(1, catalog=HASEBE, name="压切长谷部", level=None), tgt))
         self.assertFalse(slot_matches_target(
             _slot(1, status="empty", catalog=None, name=None), tgt))
         self.assertIsNone(slot_matches_target(
@@ -327,10 +433,8 @@ class PureFunctionTests(unittest.TestCase):
 class ExecutorFlowTests(unittest.TestCase):
 
     def test_formation_shell_change_first_page(self):
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100),
-                  _row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes),
+                  _ok_row(300),
                   _row("前田藤四郎", 450, level=80, fatigue=90)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
@@ -349,9 +453,7 @@ class ExecutorFlowTests(unittest.TestCase):
 
     def test_team_select_shell_same_path(self):
         """部队选择外壳走同一执行器：识别只看标题，没有颜色通道可依赖。"""
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes)]]
+        pages = [[_ok_row(300)]]
         maa, host = _std_setup(shell="team_select", pages=pages)
         result = _run(host, entry_context="team_select")
         self.assertEqual(result["result"], CHANGED)
@@ -360,9 +462,7 @@ class ExecutorFlowTests(unittest.TestCase):
         _assert_never_departs(self, maa)
 
     def test_standalone_wrapper_navigates_to_formation(self):
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes)]]
+        pages = [[_ok_row(300)]]
         maa, host = _std_setup(shell=None, pages=pages)
         with patch("touken.flows.formation_editor.time.sleep",
                    lambda *_: None):
@@ -389,18 +489,26 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(decide_clicks, [])
         _assert_never_departs(self, maa)
 
+    def test_already_correct_requires_proven_form(self):
+        """槽位同名但形态读不出：不能零点击宣称正确（去名单找证据）。"""
+        pages = [[_ok_row(300)]]
+        maa, host = _std_setup(pages=pages)
+        host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
+                                 level=35, kiwame="unknown")
+        result = _run(host)
+        self.assertNotEqual(result["result"], ALREADY_CORRECT)
+        swap_clicks = [c for c in maa.clicks if c[0] == _SWAP_X]
+        self.assertTrue(swap_clicks)     # 开了名单，没偷懒宣称正确
+
     def test_target_on_first_page_of_three_navigates_back(self):
         """目标在首页，扫完全表后按指纹翻回首页再点决定。"""
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes)],
+        pages = [[_ok_row(300)],
                  [_row("三日月宗近", 200, level=99, fatigue=100)],
                  [_row("前田藤四郎", 400, level=80, fatigue=90)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
-        # 既有正向翻页也有反向回翻
         forward = [s for s in maa.swipes if s[3] < s[1]]
         backward = [s for s in maa.swipes if s[3] > s[1]]
         self.assertTrue(forward)
@@ -416,12 +524,14 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertIn("隐藏", result["reason"])
         decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        self.assertLessEqual(len([s for s in maa.swipes]), 10)  # 有上限
+        self.assertLessEqual(len([s for s in maa.swipes]), 70)  # 有上限
         _assert_never_departs(self, maa)
 
     def test_ambiguous_same_name_never_clicks_first(self):
-        pages = [[_row("压切长谷部", 200, level=35, fatigue=60),
-                  _row("压切长谷部", 400, level=35, fatigue=80)]]
+        pages = [[_row("压切长谷部", 200, level=35, fatigue=60,
+                       form="normal"),
+                  _row("压切长谷部", 400, level=35, fatigue=80,
+                       form="normal")]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
@@ -429,6 +539,17 @@ class ExecutorFlowTests(unittest.TestCase):
         decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])     # 绝不点第一条
         _assert_never_departs(self, maa)
+
+    def test_single_row_missing_evidence_never_clicked(self):
+        """流程级反例：唯一同名行但页面给不出形态证据 → ambiguous 停住。"""
+        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
+                       form=None)]]            # 页面无形态通道
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], AMBIGUOUS)
+        self.assertIn("form", result["missing_evidence"])
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
 
     def test_catalog_alone_cannot_claim_unique(self):
         """只有 observation_id/sword_catalog_id 的目标遇同名多振 → ambiguous。"""
@@ -452,7 +573,7 @@ class ExecutorFlowTests(unittest.TestCase):
     def test_decide_no_effect_is_unavailable(self):
         """目标被游戏禁用（决定点了列表不关闭）→ unavailable，不盲试。"""
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       disabled=True)]]
+                       form="normal", disabled=True)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], UNAVAILABLE)
@@ -463,7 +584,7 @@ class ExecutorFlowTests(unittest.TestCase):
         """决定生效但回读是别的刀 → verification_failed，明说队伍可能已变。"""
         wrong = _slot(3, catalog=MAEDA, name="前田藤四郎", level=80)
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=wrong)]]
+                       form="normal", becomes=wrong)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], VERIFICATION_FAILED)
@@ -471,10 +592,20 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(result["after"]["sword_catalog_id"], MAEDA)
         _assert_never_departs(self, maa)
 
-    def test_verification_failed_on_unreadable_slot(self):
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
+    def test_verification_failed_on_insufficient_readback(self):
+        """回读同名但形态未知 → 证据不足也绝不报 changed。"""
+        weak = _slot(3, catalog=HASEBE, name="压切长谷部", level=35,
+                     kiwame="unknown")
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes)]]
+                       form="normal", becomes=weak)]]
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], VERIFICATION_FAILED)
+        self.assertIn("证据不足", result["reason"])
+        self.assertIn("可能已发生变化", result["reason"])
+
+    def test_verification_failed_on_unreadable_slot(self):
+        pages = [[_ok_row(300)]]
         maa, host = _std_setup(pages=pages)
         original = host._formation_read_team
         state = {"decided": False}
@@ -500,24 +631,19 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(maa.clicks, [])     # 指定外壳不在场：不乱逛
         # auto 模式不在任何编队表面 → 导航去编队
-        maa2, host2 = _std_setup(shell=None, pages=[
-            [_row("压切长谷部", 300, level=35, fatigue=60,
-                  becomes=_slot(3, catalog=HASEBE, name="压切长谷部",
-                                level=35))]])
+        maa2, host2 = _std_setup(shell=None, pages=[[_ok_row(300)]])
         result2 = _run(host2, entry_context="auto")
         self.assertEqual(result2["result"], CHANGED)
         self.assertEqual(result2["entry_shell"], "formation")
 
     def test_tab_click_swallowed_retries(self):
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes)]]
+        pages = [[_ok_row(300)]]
         maa, host = _std_setup(pages=pages)
         maa.swallow_tabs.add(2)              # 第一次切队被吞
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         tab_clicks = [c for c in maa.clicks if c == _TEAM_TAB[2]]
-        self.assertGreaterEqual(len(tab_clicks), 2)
+        self.assertEqual(len(tab_clicks) >= 2, True)
 
     def test_invalid_request(self):
         maa, host = _std_setup()
@@ -528,14 +654,91 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(maa.clicks, [])
 
     def test_confirm_popup_handled_after_decide(self):
-        target_becomes = _slot(3, catalog=HASEBE, name="压切长谷部", level=35)
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       becomes=target_becomes, popup=True)]]
+        pages = [[_ok_row(300, popup=True)]]
         maa, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertIn((640, 500), maa.clicks)      # 通用_确定 被点掉
         _assert_never_departs(self, maa)
+
+
+# ==================== 扫描完整度契约 ====================
+
+class ScanCompletenessTests(unittest.TestCase):
+
+    @staticmethod
+    def _many_pages(target_page, extra_target=False, total=9):
+        """total 页名单：target_page 页放目标（extra_target=True 时第 9 页
+        再放一振 identical 同名）。"""
+        pages = []
+        for i in range(total):
+            if i == target_page:
+                pages.append([_ok_row(300)])
+            elif extra_target and i == total - 1:
+                pages.append([_row("压切长谷部", 300, level=35, fatigue=70,
+                                   form="normal")])
+            else:
+                pages.append([_row("前田藤四郎", 200 + i, level=80 + i,
+                                   fatigue=90)])
+        return pages
+
+    def test_target_on_page_9_full_scan_finds_it(self):
+        """大库存：目标在第 9 页，默认上限足够扫到底 → 正常换入。"""
+        pages = self._many_pages(8)
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(result["pages_scanned"], 9)
+        _assert_never_departs(self, maa)
+
+    def test_second_copy_on_page_9_makes_ambiguous(self):
+        """同名第二振在第 9 页：扫到底后 ambiguous，绝不点第一条。"""
+        pages = self._many_pages(0, extra_target=True)
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], AMBIGUOUS)
+        self.assertEqual(len(result["candidates"]), 2)
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+
+    def test_truncated_scan_never_clicks(self):
+        """安全上限 8 页而名单有 9 页：截断不裁决、不点击。"""
+        pages = self._many_pages(8)
+        maa, host = _std_setup(pages=pages)
+        result = _run(host, max_pages=8)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "truncated")
+        self.assertIn("scan_incomplete", result["reason"])
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+        _assert_never_departs(self, maa)
+
+    def test_truncated_scan_cannot_prove_not_found(self):
+        """目标不在前 8 页：截断名单连 not_found 也不许确定。"""
+        pages = self._many_pages(8)
+        maa, host = _std_setup(pages=pages)
+        result = _run(host, max_pages=8)
+        self.assertNotIn(result["result"], (NOT_FOUND, CHANGED, AMBIGUOUS))
+
+    def test_real_end_at_page_3_still_decides(self):
+        """真正第 3 页到底（指纹停滞）：unique/not_found 照常工作。"""
+        pages = [[_row("三日月宗近", 200, level=99, fatigue=100)],
+                 [_ok_row(300)],
+                 [_row("前田藤四郎", 400, level=80, fatigue=90)]]
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(result["pages_scanned"], 3)
+
+    def test_loop_is_not_reached_end(self):
+        """末页后绕回首页（异常页序）：loop ≠ 到底，拒绝裁决。"""
+        pages = self._many_pages(2, total=3)
+        maa, host = _std_setup(pages=pages, wrap=True)
+        result = _run(host, max_pages=10)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "loop")
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
 
 
 if __name__ == "__main__":
