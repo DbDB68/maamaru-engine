@@ -76,7 +76,7 @@ def _rules(total=10, min_members=None, required=None, completeness="complete"):
             "required_types": required, "completeness": completeness,
             "unknown_aspects": ([] if completeness == "complete"
                                 else ["min_members", "required_types"]),
-            "server": "cn", "source": "测试规则", "verified_at": "2026-09-15"}
+            "server": "cn", "source": "测试规则", "verified_at": "2026-09-14"}
 
 
 def _map(name, rules, duration=60, **yields):
@@ -242,8 +242,10 @@ class AttendantTests(unittest.TestCase):
         self.assertEqual(result["plan"]["assignments"], [])
         self.assertIn("近侍", "；".join(result["infeasible"][0]["reasons"]))
 
-    def test_second_kiwame_copy_keeps_capacity_one(self):
-        # 2 振极化长谷部，近侍占 1 → 另一振仍可远征（多重集 2-1=1）
+    def test_second_kiwame_copy_keeps_capacity_but_needs_confirmation(self):
+        # 2 振极化长谷部，近侍占 1：容量证明「本丸另有一振可用」，
+        # 但固定队槽位里这振是不是近侍本人无法对账 → needs_confirmation，
+        # 不封家族、也不伪判「本队已用另一振」（收口票三）
         store = _store()
         rows = self._hasebe_pool(store, 2, 0)
         slots = [_slot(1, catalog_id=HASEBE, name="压切长谷部",
@@ -252,12 +254,14 @@ class AttendantTests(unittest.TestCase):
         maps = {"M": _map("M", _rules())}
         facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
         result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(result["infeasible"], [])  # 家族不被封禁
         assignment = result["plan"]["assignments"][0]
-        self.assertEqual(assignment["confidence"], "executable")
-        note = "；".join(assignment["availability_notes"])
-        self.assertIn("另一振", note)
-        self.assertNotIn("一号", note)  # 不伪造号机身份
-        self.assertNotIn("二号", note)
+        self.assertEqual(assignment["confidence"], "needs_confirmation")
+        note = "；".join(assignment["uncertainties"])
+        self.assertIn("无法确认", note)
+        self.assertIn("另有 1 振可用", note)      # 剩余容量如实展示
+        self.assertIn("换成另一振", note)
+        self.assertNotIn("本队用的是另一振", note)  # 不伪装已换
 
     def test_normal_same_name_copy_not_implicated(self):
         # 极化 1 振当近侍，普通长谷部（同位刀不同形态）不受影响
@@ -333,7 +337,7 @@ class ExclusionTests(unittest.TestCase):
 
 
 class TeamReservationTests(unittest.TestCase):
-    """工单第七节第五条：默认保一队，显式允许才全出。"""
+    """工单收口票四：留守判定看确认非空队，文案不得虚报五队全出。"""
 
     def _two_teams(self, store):
         rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
@@ -345,25 +349,99 @@ class TeamReservationTests(unittest.TestCase):
     def test_default_keeps_one_team_home(self):
         store = _store()
         profile = self._two_teams(store)
-        maps = {"M": _map("M", _rules(), 加速符=1)}
+        maps = {"M": _map("M", _rules(), 加速符=1),
+                "N": _map("N", _rules(), 小判=100)}
         facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
         result = _plan(profile, maps, facts)
         self.assertEqual(len(result["plan"]["assignments"]), 1)
         staying = result["plan"]["staying_home"]
         self.assertIsNotNone(staying)
-        self.assertIn(staying["team_no"], (1, 2))
+        self.assertEqual(len(staying["teams"]), 1)
+        self.assertIn(staying["teams"][0], (1, 2))
         self.assertIn("保留至少一支", staying["reason"])
 
-    def test_allow_all_teams_away_sends_everyone_with_warning(self):
+    def test_all_away_warning_only_when_nobody_stays(self):
+        # 两支可派队全出 + 无其他非空队 → 警告按实际派出数说，不虚报五队
         store = _store()
         profile = self._two_teams(store)
-        maps = {"M": _map("M", _rules(), 加速符=1)}
+        maps = {"M": _map("M", _rules(), 加速符=1),
+                "N": _map("N", _rules(), 小判=100)}
         facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
         result = _plan(profile, maps, facts, allow_all_teams_away=True)
         self.assertEqual(len(result["plan"]["assignments"]), 2)
+        warning = result["plan"]["all_away_warning"]
+        self.assertIn("没有可出阵队伍", warning)
+        self.assertIn("实际派出 2 队", warning)
+        self.assertNotIn("五队全出", warning)
+
+    def test_nonempty_blocked_team_staying_means_no_all_away_warning(self):
+        # 两队派出、另有非空队（近侍队）留守 → 不报「没人出阵」
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎"),
+                _row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")],
+            3: [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                      kiwame_status="kiwame")]})  # 近侍本人所在队
+        maps = {"M": _map("M", _rules(), 加速符=1),
+                "N": _map("N", _rules(), 小判=100)}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(len(result["plan"]["assignments"]), 2)
+        self.assertIsNone(result["plan"]["all_away_warning"])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [3])
+
+    def test_default_does_not_deduct_when_nonempty_team_stays(self):
+        # 已有非空不可远征队（近侍队）留守 → 默认模式不再额外扣可远征队
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"),
+                _row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],  # 可远征
+            2: [_slot(1, catalog_id=HASEBE, name="压切长谷部",
+                      kiwame_status="kiwame")]})  # 近侍队，天然留守
+        maps = {"M": _map("M", _rules(), 加速符=1)}
+        facts = _facts(attendant={"sword_catalog_id": HASEBE, "form": "kiwame"})
+        result = _plan(profile, maps, facts)
+        self.assertEqual(len(result["plan"]["assignments"]), 1)
+        self.assertEqual(result["plan"]["assignments"][0]["team_no"], 1)
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [2])
+        self.assertIn("不再额外扣", result["plan"]["staying_home"]["reason"])
+
+    def test_last_nonempty_team_stays_home_by_default(self):
+        # 只有一支非空队可派 → 默认留住，谁也不出门
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        maps = {"M": _map("M", _rules(), 加速符=1)}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
+        self.assertIn("只有一支", result["plan"]["staying_home"]["reason"])
+        self.assertIsNone(result["plan"]["all_away_warning"])
+
+    def test_five_nonempty_teams_all_out_reports_five(self):
+        # 五支非空队全部分配 → 警告按实际说五队
+        store = _store()
+        cats = [(MIKA, "三日月宗近"), (KOGI, "小狐丸"), (MAEDA, "前田藤四郎"),
+                (HASEBE, "压切长谷部"), ("touken_007_ishikirimaru", "石切丸")]
+        rows = [_row(cid, name) for cid, name in cats]
+        rows.append(_row("touken_011_imagiri_no_toshiro", "今剣"))
+        rosters = {i + 1: [_slot(1, catalog_id=cid, name=name)]
+                   for i, (cid, name) in enumerate(cats)}
+        profile = _profile(store, rows, rosters)
+        maps = {c: _map(c, _rules(), 加速符=i + 1)
+                for i, c in enumerate(("M1", "M2", "M3", "M4", "M5"))}
+        facts = _facts(attendant={
+            "sword_catalog_id": "touken_011_imagiri_no_toshiro",
+            "form": "normal"})
+        result = _plan(profile, maps, facts, allow_all_teams_away=True)
+        self.assertEqual(len(result["plan"]["assignments"]), 5)
+        self.assertIn("实际派出 5 队", result["plan"]["all_away_warning"])
         self.assertIsNone(result["plan"]["staying_home"])
-        self.assertIn("没有可出阵队伍",
-                      result["plan"]["all_away_warning"])
 
 
 class SakuraTests(unittest.TestCase):
@@ -555,6 +633,142 @@ class DegradationTests(unittest.TestCase):
         assignment = result["plan"]["assignments"][0]
         self.assertEqual(assignment["confidence"], "needs_confirmation")
         self.assertIn("读不出", "；".join(assignment["uncertainties"]))
+
+
+class JointAssignmentTests(unittest.TestCase):
+    """工单收口票一：同一远征地点同时只能派一支队，跨队联合分配。"""
+
+    def _two_teams(self, store, swap=False):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        rosters = {1: [_slot(1)], 2: [_slot(1, catalog_id=KOGI,
+                                        name="小狐丸")]}
+        if swap:  # 两队成员对调，整卷最优总分和地图集合不应变
+            rosters = {1: rosters[2], 2: rosters[1]}
+        return _profile(store, rows, rosters)
+
+    def _maps(self):
+        return {"A": _map("A", _rules(), 加速符=2),  # A 得分更高
+                "B": _map("B", _rules(), 加速符=1)}
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def test_same_map_never_assigned_twice(self):
+        store = _store()
+        result = _plan(self._two_teams(store), self._maps(), self._facts(),
+                       allow_all_teams_away=True)
+        codes = [a["map_code"] for a in result["plan"]["assignments"]]
+        self.assertEqual(len(codes), len(set(codes)))  # 不能都去 A
+        self.assertEqual(sorted(codes), ["A", "B"])
+
+    def test_higher_score_map_is_used_and_loser_explained(self):
+        store = _store()
+        result = _plan(self._two_teams(store), self._maps(), self._facts(),
+                       allow_all_teams_away=True)
+        by_team = {a["team_no"]: a for a in result["plan"]["assignments"]}
+        self.assertEqual(by_team[1]["map_code"], "A")  # 部队1 先得高分图
+        self.assertNotIn("occupancy_note", by_team[1])
+        self.assertEqual(by_team[2]["map_code"], "B")
+        note = by_team[2]["occupancy_note"]
+        self.assertIn("A", note)
+        self.assertIn("部队1", note)
+        self.assertIn("只能派一支队", note)
+
+    def test_team_order_does_not_change_optimal_total_or_map_set(self):
+        r1 = _plan(self._two_teams(_store(), swap=False), self._maps(),
+                   self._facts(), allow_all_teams_away=True)
+        r2 = _plan(self._two_teams(_store(), swap=True), self._maps(),
+                   self._facts(), allow_all_teams_away=True)
+        total1 = sum(a["score"] or 0 for a in r1["plan"]["assignments"])
+        total2 = sum(a["score"] or 0 for a in r2["plan"]["assignments"])
+        self.assertAlmostEqual(total1, total2)
+        set1 = {a["map_code"] for a in r1["plan"]["assignments"]}
+        set2 = {a["map_code"] for a in r2["plan"]["assignments"]}
+        self.assertEqual(set1, set2)
+
+    def test_single_team_behavior_unchanged(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, self._maps(), facts,
+                       allow_all_teams_away=True)
+        assignments = result["plan"]["assignments"]
+        self.assertEqual(len(assignments), 1)
+        self.assertEqual(assignments[0]["map_code"], "A")
+        self.assertNotIn("occupancy_note", assignments[0])
+        self.assertEqual(assignments[0]["alternatives"][0]["map_code"], "B")
+
+    def test_teams_sharing_single_map_one_left_home(self):
+        # 两队都只有同一图可去：一队派出，另一队如实记「图被占满」并留守
+        store = _store()
+        profile = self._two_teams(_store())
+        maps = {"ONLY": _map("ONLY", _rules(), 加速符=1)}
+        result = _plan(profile, maps, self._facts(), allow_all_teams_away=True)
+        self.assertEqual(len(result["plan"]["assignments"]), 1)
+        self.assertEqual(result["plan"]["assignments"][0]["map_code"], "ONLY")
+        reasons = "；".join(result["infeasible"][0]["reasons"])
+        self.assertIn("占满", reasons)
+        self.assertIsNone(result["plan"]["all_away_warning"])  # 有一队留守
+
+
+class FactsCompletenessTests(unittest.TestCase):
+    """工单收口票二：缺字段 ≠ 明确为空，三类事实各有完整度语义。"""
+
+    def _profile(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        return _profile(store, rows, {1: [_slot(1)]})
+
+    def _maps(self):
+        return {"M": _map("M", _rules())}
+
+    def test_attendant_only_still_degrades(self):
+        # 最小反例：只传 attendant，缺 training/repair → 不得 executable
+        result = _plan(self._profile(_store()), self._maps(),
+                       {"attendant": {"sword_catalog_id": KOGI,
+                                      "form": "normal"}},
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("修行中" in w for w in result["warnings"]))
+        self.assertTrue(any("手入中" in w for w in result["warnings"]))
+
+    def test_missing_training_degrades(self):
+        result = _plan(self._profile(_store()), self._maps(),
+                       {"attendant": {"sword_catalog_id": KOGI,
+                                      "form": "normal"},
+                        "repair": []},
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("修行中" in w for w in result["warnings"]))
+        self.assertFalse(any("手入中事实未提供" in w
+                             for w in result["warnings"]))
+
+    def test_missing_repair_degrades(self):
+        result = _plan(self._profile(_store()), self._maps(),
+                       {"attendant": {"sword_catalog_id": KOGI,
+                                      "form": "normal"},
+                        "training": []},
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("手入中" in w for w in result["warnings"]))
+
+    def test_none_is_not_empty_list(self):
+        result = _plan(self._profile(_store()), self._maps(),
+                       {"attendant": {"sword_catalog_id": KOGI,
+                                      "form": "normal"},
+                        "training": None, "repair": []},
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+
+    def test_explicit_empty_lists_are_executable(self):
+        result = _plan(self._profile(_store()), self._maps(),
+                       _facts(attendant={"sword_catalog_id": KOGI,
+                                         "form": "normal"},
+                              training=[], repair=[]),
+                       allow_all_teams_away=True)
+        self.assertEqual(result["plan"]["confidence"], "executable")
+        self.assertEqual(result["plan"]["assignments"][0]["map_code"], "M")
 
 
 if __name__ == "__main__":

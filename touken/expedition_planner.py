@@ -5,19 +5,27 @@
   - profile：当前本丸共用档案（touken/honmaru_profile.build_honmaru_profile），
     含候选池与五队 roster 链接层；
   - member_facts：近侍/修行/手入事实。事实层目前没有这三项的观察入口，
-    由调用方申报；缺申报不等于「无人受限」——整卷降级 needs_confirmation；
+    由调用方申报；三类各有完整度语义——attendant 必须是带
+    sword_catalog_id 的 dict（近侍必定存在，没有「无近侍」申报），
+    training/repair 必须显式给 list（[] = 确认无人受限；缺键/None =
+    未知）。任何一类未知，整卷降级 needs_confirmation，绝不把缺字段
+    当成明确为空；
   - weights：目标权重（有序列表或 {资源: 权重}），默认 加速符 > 小判 >
     当前最缺的基础资源（老大个人偏好，可覆盖，不是所有玩家的规则）；
-  - allow_all_teams_away：默认保留至少一支队在家打日课；显式 True 才五队全出。
+  - allow_all_teams_away：默认保留至少一支确认非空队在家打日课；
+    显式 True 才让全部可派队出门（无留守时带醒目警告）；
 
-硬规则（牛老师工单 2026-09-15 口径）：
+硬规则（牛老师工单 2026-09-14 口径）：
   - 每张图验：最低人数（若规则已知）、全队等级合计、指定刀种「至少包含」；
     规则不全的图只给 rule_incomplete，不输出伪安全方案；
   - 修行中/手入中的具体刀不能远征；受伤（含重伤）不影响远征资格，只如实展示；
-  - 近侍只扣那一振具体刀：同名/同形态多振用等价候选容量（多重集）表达——
-    组内观察 n 振、近侍占 1 名额 → 可用 n-1，文案写「另一振」，绝不伪造
-    一号机/二号机身份；n=1 时容量为 0；关联不可靠 → uncertain，不连坐
-    整个同位刀家族，也不伪判安全；
+  - 近侍只扣那一振具体刀：多重集容量（组内 n 振、占用 1）只证明
+    「本丸另有一振可用」，不能证明固定队槽位里这振不是被占用者——
+    无法对到具体实例时该队 needs_confirmation，提示确认/换另一振，
+    绝不写成本队已用另一振；n=1 时容量为 0 硬拦；
+  - 同一远征地点同时只能派一支队（wikiwiki 远征规则，老大查证
+    2026-09-14）：最终 assignments 同一 map_code 至多一次，
+    跨队穷举联合分配，先最大化整卷置信等级和、再最大化得分和；
   - same_team_exclusion_key 只管「同位刀不能同队」（复用
     honmaru_profile.formation_conflicts），与近侍约束是两套独立规则；
   - 樱吹雪阈值：fatigue >= 50（49 是自然恢复上限，不算花）；
@@ -140,9 +148,12 @@ def _normalize_facts(member_facts) -> tuple[list[dict], list[str], bool]:
     "form": kiwame/normal/None}。form=None 表示申报方也不知道形态，
     占用会落在该 catalog 的所有形态组上（不确定占用）。
 
-    事实完整性（facts_complete）=False 的情形：没申报、或近侍身份未知。
-    近侍必定存在（本丸看板），不存在「没有近侍」的申报——attendant
-    不是带 sword_catalog_id 的 dict 就按未知处理，整卷降级。
+    三类事实各有明确完整度语义，缺一即整卷降级 needs_confirmation：
+      - attendant：近侍必定存在（本丸看板），必须是带 sword_catalog_id
+        的 dict；缺键/None/缺 id 都是「未知」，不存在「没有近侍」；
+      - training / repair：键存在且为 list 才算「已确认」——显式 []
+        表示当前无人修行/手入；缺键或 None 是「未提供/未知」，
+        绝不把缺字段当成明确为空。
     """
     claims, warnings = [], []
     if not member_facts:
@@ -160,12 +171,22 @@ def _normalize_facts(member_facts) -> tuple[list[dict], list[str], bool]:
         warnings.append("近侍身份未申报/未知：各队「不含近侍本人」无法确认，"
                         "方案降级 needs_confirmation")
     for kind in ("training", "repair"):
-        for item in member_facts.get(kind) or []:
+        value = member_facts.get(kind)
+        if not isinstance(value, list):
+            complete = False
+            warnings.append(f"{_KIND_LABEL_FACTS[kind]}事实未提供/未知"
+                            "（显式传 [] 才表示确认无人受限）："
+                            "相关占用无法排除，方案降级 needs_confirmation")
+            continue
+        for item in value:
             if isinstance(item, dict) and item.get("sword_catalog_id"):
                 claims.append({"kind": kind,
                                "sword_catalog_id": item["sword_catalog_id"],
                                "form": item.get("form")})
     return claims, warnings, complete
+
+
+_KIND_LABEL_FACTS = {"training": "修行中", "repair": "手入中"}
 
 
 _KIND_LABEL = {"attendant": "近侍", "training": "修行中", "repair": "手入中"}
@@ -251,15 +272,18 @@ def _member_view(slot: dict, entries_by_id: dict) -> dict:
 
 
 def _team_availability(members, sizes, occ_def, occ_pos, occ_kinds):
-    """近侍/修行/手入占用检查（多重集容量，三套约束共用一套机制）。
+    """近侍/修行/手入占用检查（诚实语义：容量 ≠ 实例清白）。
 
-    对每组 g：确定占用 occ_def、不确定占用 occ_pos。
-      min_available = size - occ_def - occ_pos（最坏情况）
-      max_available = size - occ_def（最好情况）
-    队伍从 g 确定抽 d 振（linked）、可能抽 p 振（ambiguous 候选含 g）：
-      d > max_available      → blocked（一定带上了被占用的人）
-      d + p <= min_available → clear（备注「另一振」，不伪造号机身份）
-      其余                   → uncertain（可能是另一振，也可能就是本人）
+    多重集容量（组内 n 振 - 占用 k = 剩 n-k）只能证明「本丸存在另一振
+    可用」，不能证明当前固定队伍槽位里的这一振恰好不是被占用者——
+    本版不从候选池重新选人，只评估已编好的队伍：
+      - 槽位的等价组完全没有占用声明 → 不受影响（不出现在结果里）；
+      - 确定抽取 d 振 > 组内最好情况可用 max_available
+        → blocked（数学上必然带上了被占用的那振）；
+      - 其余任何从有占用声明的组里抽人的情况 → uncertain：
+        容量够也只说明「本丸另有一振可用」，需人工确认或换成另一振，
+        绝不写成本队已经用了另一振（当前事实层没有把占用声明链接到
+        具体槽位实例的证据，不造假接口）。
     """
     definite, possible = {}, {}
     for m in members:
@@ -283,17 +307,17 @@ def _team_availability(members, sizes, occ_def, occ_pos, occ_kinds):
         kinds = "、".join(_KIND_LABEL[k] for k in
                           sorted(occ_kinds.get(group) or ()))
         max_avail = size - od
-        min_avail = size - od - op
         if d > max_avail:
             blocked.append(f"{label}：名额已全被{kinds}占用"
                            f"（观察 {size} 振，占用 {od + op}）")
-        elif d + p <= min_avail:
-            notes.append(f"{label}：组内 {size} 振、{kinds}占 {od + op} 名额，"
-                         "本队用的是另一振（多重集容量足够）")
         else:
+            free = size - od - op
+            spare = (f"本丸另有 {free} 振可用" if free > 0
+                     else "本丸没有可替换的同型余量")
             uncertain.append(
                 f"{label}：组内 {size} 振、{kinds}占 {od + op} 名额，"
-                "无法确认本队成员是不是被占用的那一振")
+                f"无法确认本队这振是不是被占用的那一振——{spare}，"
+                "需人工确认或换成另一振后再派")
     return blocked, uncertain, notes
 
 
@@ -447,14 +471,18 @@ def _sacrifices(map_info: dict) -> list[str]:
     return out
 
 
-def _assignment(team: dict, members: list[dict], maps: dict,
-                goals: list[dict], now: float, next_online,
-                max_per_hour: dict):
-    """一队选一张图。
+def _team_options(team: dict, members: list[dict], maps: dict,
+                  goals: list[dict], now: float, next_online,
+                  max_per_hour: dict, team_uncertain: list[str],
+                  obs_status: str):
+    """一队的全部候选图（不做最终选择，选图归全局联合分配）。
 
-    Returns: (assignment 或 None, rejections)
+    队伍层的不确定性（占用身份不明/观测 partial/槽位读不出）在这里
+    统一压进每个候选的 confidence 和 uncertainties。
+
+    Returns: (options, rejections)
       rejections = [{"map_code", "failures", "unknowns"}]——每张没选上的图
-      为什么不行，可行性审计要用；None 时调用方靠它解释「为什么哪都去不了」。
+      为什么不行，可行性审计要用。
     """
     options, rejections = [], []
     for code, info in maps.items():
@@ -471,13 +499,21 @@ def _assignment(team: dict, members: list[dict], maps: dict,
         return_note = None
         if return_at is not None and next_online and return_at > next_online:
             return_note = "预计归来晚于下次上线时间"
+        confidence = check["confidence"]
+        uncertainties = list(check["unknowns"])
+        if team_uncertain or obs_status == "partial":
+            confidence = ("needs_confirmation"
+                          if confidence == "executable" else confidence)
+            uncertainties += list(team_uncertain)
+            if obs_status == "partial":
+                uncertainties.append("该队编队观测本身是 partial")
         yields = {r: info.get(r) or 0 for r in YIELD_RESOURCES}
         options.append({
             "team_no": team["team_no"], "map_code": code,
             "map_name": info.get("name") or "",
-            "confidence": check["confidence"],
+            "confidence": confidence,
             "why_eligible": check["passed"],
-            "uncertainties": check["unknowns"],
+            "uncertainties": uncertainties,
             "score": score,
             "members": [_member_brief(m) for m in members],
             "duration_min": duration,
@@ -491,19 +527,60 @@ def _assignment(team: dict, members: list[dict], maps: dict,
             "great_success": _great_success_note(members),
             "sacrifices": _sacrifices(info),
         })
-    if not options:
-        return None, rejections
-    # 可执行优先，其次分数；分数缺失的排最后
-    options.sort(key=lambda o: (-_CONFIDENCE_RANK[o["confidence"]],
-                                -(o["score"] if o["score"] is not None else -1)))
-    best = dict(options[0])
-    best["alternatives"] = [{"map_code": o["map_code"],
-                             "map_name": o["map_name"],
-                             "confidence": o["confidence"],
-                             "score": o["score"]}
-                            for o in options[1:]]
-    best["rejected_maps"] = rejections
-    return best, rejections
+    return options, rejections
+
+
+def _option_rank(option: dict) -> tuple:
+    """单选项排序键：置信等级优先，其次得分，最后地图编号（确定 Tie-break）。"""
+    return (-_CONFIDENCE_RANK[option["confidence"]],
+            -(option["score"] if option["score"] is not None else -1),
+            option["map_code"])
+
+
+def _global_assign(team_options: list[tuple[int, list[dict]]]) -> dict:
+    """跨队联合分配：同一远征地点同时只能派一支队（wikiwiki 远征规则
+    「第一部隊～第五部隊は、それぞれ異なる遠征先に同時に派遣」「同一の
+    遠征先には１部隊しか派遣できない」，老大查证 2026-09-14）。
+
+    穷举 DFS：队伍按 team_no 排序、候选按 map_code 排序，目标先最大化
+    整卷置信等级和、再最大化整卷得分和；严格大于才替换首个最优解，
+    结果与输入队伍顺序无关。5 队 × 20 图规模下穷举足够快，不引重依赖。
+
+    Returns: {team_no: option}
+    """
+    teams = sorted(team_options, key=lambda t: t[0])
+    best = {"key": None, "assign": None}
+
+    def dfs(i, used, chosen, conf_sum, score_sum):
+        if i == len(teams):
+            key = (conf_sum, round(score_sum, 9))
+            if best["key"] is None or key > best["key"]:
+                best["key"] = key
+                best["assign"] = dict(chosen)
+            return
+        team_no, options = teams[i]
+        for opt in sorted(options, key=lambda o: o["map_code"]):
+            if opt["map_code"] in used:
+                continue
+            used.add(opt["map_code"])
+            chosen[team_no] = opt
+            dfs(i + 1, used, chosen,
+                conf_sum + _CONFIDENCE_RANK[opt["confidence"]],
+                score_sum + (opt["score"] or 0.0))
+            used.discard(opt["map_code"])
+            del chosen[team_no]
+        # 该队没有可去的图（都被占满）时也必须能走到叶子；
+        # 置信和恒大于 0，能派时「不派」永远不会成为最优
+        dfs(i + 1, used, chosen, conf_sum, score_sum)
+
+    dfs(0, set(), {}, 0, 0.0)
+    return best["assign"] or {}
+
+
+def _objective(assign: dict) -> tuple:
+    """整卷目标：(置信等级和, 得分和)，与 _global_assign 的口径一致。"""
+    return (sum(_CONFIDENCE_RANK[o["confidence"]] for o in assign.values()),
+            round(sum(o["score"] or 0.0 for o in assign.values()), 9))
 
 
 def _member_brief(m: dict) -> dict:
@@ -522,12 +599,13 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     Args:
         profile: honmaru_profile 档案；None 时从 store/全局库现生成。
         store: TelemetryStore（profile/inventory 缺省时的数据来源）。
-        member_facts: {"attendant": {"sword_catalog_id":..., "form":...} | None,
-                       "attendant_known": bool,
+        member_facts: {"attendant": {"sword_catalog_id":..., "form":...},
                        "training": [...], "repair": [...]}；
-                      None = 完全没申报（整卷降级 needs_confirmation）。
+                      三类都需显式申报（training/repair 给 [] 表示确认无人）；
+                      None 或任一类缺失 = 未知（整卷降级 needs_confirmation）。
         weights: 目标权重（有序 list 或 dict）；None = 默认偏好。
-        allow_all_teams_away: True 才允许五队全出（带醒目警告）。
+        allow_all_teams_away: True 才允许所有确认非空队全出（此时若无
+                      留守队会带醒目警告）。
         now/next_online: epoch 秒；next_online 只标注不拦截。
         maps: 地图表（默认 data/expedition_maps.json）。
         inventory: 资源 dict；"__from_store__" 时从 store 读最新库存。
@@ -571,14 +649,17 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
                             f"，超过 {STALE_HOURS} 小时，可能陈旧")
 
     teams_out = []       # (team, members, blocked, uncertain, avail_notes)
+    unobserved_teams = []
     for team in (profile.get("roster") or {}).get("teams") or []:
         team_no = team.get("team_no")
         obs_status = team.get("observation_status")
         if obs_status in (None, "unknown") and not team.get("slots"):
             explanation.append(f"部队{team_no}：无编队观测，不参与规划")
+            unobserved_teams.append(team_no)
             continue
         if obs_status == "failed":
             warnings.append(f"部队{team_no}：编队观测失败，不参与规划")
+            unobserved_teams.append(team_no)
             continue
         slots = [s for s in team.get("slots") or []
                  if s.get("slot_status") == "occupied"]
@@ -605,7 +686,10 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
         teams_out.append((team, members, blocked, uncertain, avail_notes,
                           obs_status))
 
-    assignments, infeasible = [], []
+    # ---- 队伍评估：可远征的进候选，非空但不可远征的天然留守 ----
+    candidate_teams = []   # {"team_no", "options", "rejections", ...}
+    infeasible = []
+    staying_nonempty = []  # 确认非空但不远征的队（空队/未观测队不算留守）
     for team, members, blocked, uncertain, avail_notes, obs_status in teams_out:
         team_no = team["team_no"]
         if not members:
@@ -614,56 +698,135 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
             continue
         if blocked:
             infeasible.append({"team_no": team_no, "reasons": blocked})
+            staying_nonempty.append(team_no)
             continue
-        pick, rejections = _assignment(team, members, maps, goals, now,
-                                       next_online, max_per_hour)
-        if pick is None:
+        options, rejections = _team_options(team, members, maps, goals, now,
+                                            next_online, max_per_hour,
+                                            uncertain, obs_status)
+        if not options:
             reasons = ["所有远征图的硬条件都不满足或无法确认"]
             for r in rejections:
                 for f in r["failures"]:
                     reasons.append(f"{r['map_code']} {r['map_name']}：{f}")
             infeasible.append({"team_no": team_no, "reasons": reasons,
                                "rejected_maps": rejections})
+            staying_nonempty.append(team_no)
             continue
-        if uncertain:
-            pick["uncertainties"] = list(pick["uncertainties"]) + uncertain
-            if pick["confidence"] == "executable":
-                pick["confidence"] = "needs_confirmation"
-        if obs_status == "partial":
-            pick["uncertainties"].append("该队编队观测本身是 partial")
-            if pick["confidence"] == "executable":
-                pick["confidence"] = "needs_confirmation"
-        if avail_notes:
-            pick["availability_notes"] = avail_notes
-        pick["injury_note"] = _injury_note(members)
-        assignments.append(pick)
+        candidate_teams.append({"team_no": team_no, "options": options,
+                                "rejections": rejections,
+                                "avail_notes": avail_notes,
+                                "members": members})
 
-    staying, all_away_warning = None, None
-    if assignments and not allow_all_teams_away and len(assignments) > 1:
-        # 默认保留至少一支队在家：留下贡献最低的那支（它的备选进 infeasible 不丢）
-        worst = min(assignments,
-                    key=lambda a: (a["score"] is not None, a["score"] or 0))
-        assignments = [a for a in assignments if a is not worst]
-        staying = {"team_no": worst["team_no"],
-                   "best_option_if_sent": {"map_code": worst["map_code"],
-                                           "score": worst["score"]},
-                   "reason": "默认保留至少一支可出阵队伍在家（打日课）；"
-                             "如需全出请显式 allow_all_teams_away=True"}
-    elif assignments and not allow_all_teams_away and len(assignments) == 1:
-        staying = {"team_no": assignments[0]["team_no"],
-                   "best_option_if_sent": None,
-                   "reason": "只有一支队可派，保留在家（未派出）"}
-        assignments = []
-    if allow_all_teams_away and assignments:
-        all_away_warning = "⚠️ 本丸将暂时没有可出阵队伍（五队全出）"
+    # ---- 跨队联合分配：同一远征地点同时只能派一支队 ----
+    chosen_assign = {}
+    holdout = None          # 默认保队时从可远征队里额外留下的那支
+    holdout_reason = None
+    if candidate_teams:
+        if allow_all_teams_away or staying_nonempty:
+            # 显式允许全出，或已有非空队天然留守：可派队全进联合分配
+            chosen_assign = _global_assign(
+                [(t["team_no"], t["options"]) for t in candidate_teams])
+        elif len(candidate_teams) == 1:
+            holdout = candidate_teams[0]
+            holdout_reason = ("只有一支非空队可远征，默认保留在家打日课；"
+                              "如需派出请显式 allow_all_teams_away=True")
+        else:
+            # 没有天然留守队：枚举「留哪支」，取留下后整卷最优（顺序无关）
+            best = None
+            for hold in candidate_teams:
+                rest = [t for t in candidate_teams if t is not hold]
+                assign = _global_assign(
+                    [(t["team_no"], t["options"]) for t in rest])
+                key = _objective(assign)
+                if best is None or key > best[0]:
+                    best = (key, hold, assign)
+            _key, holdout, chosen_assign = best
+            holdout_reason = ("默认保留至少一支可出阵队伍在家（打日课）；"
+                              "如需全出请显式 allow_all_teams_away=True")
+
+    assignments = []
+    by_no = {t["team_no"]: t for t in candidate_teams}
+    for team_no, opt in sorted(chosen_assign.items()):
+        cand = by_no[team_no]
+        a = dict(opt)
+        others = [o for o in cand["options"]
+                  if o["map_code"] != opt["map_code"]]
+        a["alternatives"] = [{"map_code": o["map_code"],
+                              "map_name": o["map_name"],
+                              "confidence": o["confidence"],
+                              "score": o["score"]}
+                             for o in sorted(others, key=_option_rank)]
+        a["rejected_maps"] = cand["rejections"]
+        # 高分图因唯一地点约束被别队占用时，如实解释落选原因
+        personal_best = sorted(cand["options"], key=_option_rank)[0]
+        if personal_best["map_code"] != opt["map_code"]:
+            holder = next(no for no, o in chosen_assign.items()
+                          if o["map_code"] == personal_best["map_code"])
+            a["occupancy_note"] = (
+                f"本队单看最优是 {personal_best['map_code']} "
+                f"{personal_best['map_name']}，但同一远征地点同时只能派"
+                f"一支队，该图已派给部队{holder}，整卷最优改派 "
+                f"{opt['map_code']} {opt['map_name']}")
+        if cand["avail_notes"]:
+            a["availability_notes"] = cand["avail_notes"]
+        a["injury_note"] = _injury_note(cand["members"])
+        assignments.append(a)
+
+    # 联合分配后仍没分到图的候选队（可去的图被别队占满）：如实记原因，
+    # 它非空留在家中，计入留守
+    for cand in candidate_teams:
+        if cand["team_no"] in chosen_assign:
+            continue
+        if holdout is not None and cand["team_no"] == holdout["team_no"]:
+            continue
+        infeasible.append({
+            "team_no": cand["team_no"],
+            "reasons": ["可去的远征图都被其他队占满"
+                        "（同一远征地点同时只能派一支队）"],
+            "rejected_maps": cand["rejections"]})
+        staying_nonempty.append(cand["team_no"])
+
+    # ---- 留守与全出文案：按实际未派出的确认非空队判定 ----
+    staying = None
+    staying_parts = []
+    staying_teams = sorted(staying_nonempty)
+    if staying_nonempty:
+        staying_parts.append("已有非空队伍留守本丸（不适合远征）"
+                             + ("" if allow_all_teams_away
+                                else "，不再额外扣可远征队"))
+    if holdout is not None:
+        staying_teams = sorted(staying_teams + [holdout["team_no"]])
+        staying_parts.append(holdout_reason)
+    if staying_teams:
+        staying = {"teams": staying_teams,
+                   "reason": "；".join(staying_parts)}
+
+    all_away_warning = None
+    if assignments:
+        if staying_teams:
+            explanation.append(
+                f"实际派出 {len(assignments)} 队（"
+                + "、".join(f"部队{a['team_no']}" for a in assignments)
+                + "），留守：" + "、".join(f"部队{n}" for n in staying_teams))
+        else:
+            all_away_warning = (
+                f"⚠️ 本丸将暂时没有可出阵队伍（实际派出 "
+                f"{len(assignments)} 队，无确认非空队留守）")
+            if unobserved_teams:
+                all_away_warning += (
+                    "；另有未观测队伍（"
+                    + "、".join(f"部队{n}" for n in unobserved_teams)
+                    + "）状态未知，不能算作留守")
 
     plan_confidence = "executable"
-    if not assignments:
-        plan_confidence = "infeasible"
-    else:
+    if assignments:
         plan_confidence = min((a["confidence"] for a in assignments),
                               key=lambda c: _CONFIDENCE_RANK[c])
-    # 事实不完整（没申报/近侍未知/申报的刀不在池里）：硬资格不确定，
+    elif staying_teams:
+        plan_confidence = "executable"   # 方案 = 全体留守，本身可执行
+    else:
+        plan_confidence = "infeasible"
+    # 事实不完整（没申报/任一类未知/申报的刀不在池里）：硬资格不确定，
     # 任何方案都不得伪装成可直接执行
     if plan_confidence == "executable" and (not facts_complete or unmatched):
         plan_confidence = "needs_confirmation"
