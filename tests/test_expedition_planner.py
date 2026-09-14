@@ -13,6 +13,7 @@
 - 规则不完整的图只给 rule_incomplete；事实缺失整卷降级。
 """
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -28,7 +29,8 @@ MIKA = "touken_003_mikazuki"         # 三日月宗近（太刀）
 KOGI = "touken_005_kogitsunemaru"    # 小狐丸（太刀）
 MAEDA = "touken_029_maeda"           # 前田藤四郎（短刀）
 
-NOW = 1000  # 盘点 ts=100、roster ts=150，都在 24h 内，不触发陈旧警告
+NOW = 1_757_000_000  # 现代时间戳；盘点/roster 观测在其前 15 分钟内，
+                     # 不触发 24h 陈旧警告（Windows localtime 不支持负时间戳）
 INVENTORY = {"木炭": 500, "玉钢": 800, "冷却材": 60, "砥石": 900}
 
 
@@ -56,7 +58,8 @@ def _slot(slot, catalog_id=MIKA, name="三日月宗近", slot_status="occupied",
     return base
 
 
-def _profile(store, rows, rosters, captured_at=100):
+def _profile(store, rows, rosters, captured_at=None):
+    captured_at = NOW - 900 if captured_at is None else captured_at
     store.save_sword_snapshot(rows, owned=len(rows), capacity=300, missing=0,
                               captured_at=captured_at,
                               source="owned_inventory")
@@ -95,6 +98,8 @@ def _facts(attendant=None, training=None, repair=None):
 def _plan(profile, maps, facts, **kw):
     kw.setdefault("now", NOW)
     kw.setdefault("inventory", INVENTORY)
+    # 测试默认显式确认「无进行中远征」，不碰真实 expeditions.json
+    kw.setdefault("active_expeditions", {})
     return plan_expeditions(profile, maps=maps, member_facts=facts, **kw)
 
 
@@ -370,8 +375,8 @@ class TeamReservationTests(unittest.TestCase):
         result = _plan(profile, maps, facts, allow_all_teams_away=True)
         self.assertEqual(len(result["plan"]["assignments"]), 2)
         warning = result["plan"]["all_away_warning"]
-        self.assertIn("没有可出阵队伍", warning)
-        self.assertIn("实际派出 2 队", warning)
+        self.assertIn("没有已确认可出阵的留守队", warning)
+        self.assertIn("本轮新派出 2 队", warning)
         self.assertNotIn("五队全出", warning)
 
     def test_nonempty_blocked_team_staying_means_no_all_away_warning(self):
@@ -408,7 +413,8 @@ class TeamReservationTests(unittest.TestCase):
         self.assertEqual(len(result["plan"]["assignments"]), 1)
         self.assertEqual(result["plan"]["assignments"][0]["team_no"], 1)
         self.assertEqual(result["plan"]["staying_home"]["teams"], [2])
-        self.assertIn("不再额外扣", result["plan"]["staying_home"]["reason"])
+        # 近侍队只是不能远征，本身可作留守出阵队（收口票二/七）
+        self.assertIn("可出阵队留守", result["plan"]["staying_home"]["reason"])
 
     def test_last_nonempty_team_stays_home_by_default(self):
         # 只有一支非空队可派 → 默认留住，谁也不出门
@@ -440,7 +446,7 @@ class TeamReservationTests(unittest.TestCase):
             "form": "normal"})
         result = _plan(profile, maps, facts, allow_all_teams_away=True)
         self.assertEqual(len(result["plan"]["assignments"]), 5)
-        self.assertIn("实际派出 5 队", result["plan"]["all_away_warning"])
+        self.assertIn("本轮新派出 5 队", result["plan"]["all_away_warning"])
         self.assertIsNone(result["plan"]["staying_home"])
 
 
@@ -575,7 +581,7 @@ class DegradationTests(unittest.TestCase):
         profile = self._one_team(store)  # 盘点 ts=100
         maps = {"M": _map("M", _rules())}
         facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
-        result = _plan(profile, maps, facts, now=100 + 25 * 3600,
+        result = _plan(profile, maps, facts, now=NOW - 900 + 25 * 3600,
                        allow_all_teams_away=True)
         self.assertTrue(any("陈旧" in w for w in result["warnings"]))
 
@@ -769,6 +775,296 @@ class FactsCompletenessTests(unittest.TestCase):
                        allow_all_teams_away=True)
         self.assertEqual(result["plan"]["confidence"], "executable")
         self.assertEqual(result["plan"]["assignments"][0]["map_code"], "M")
+
+
+def _active_record(map_code="A", duration=120, dispatched_epoch=None):
+    """一条未到期（默认）的派遣记录，dispatched_at 按本地时间格式化。"""
+    if dispatched_epoch is None:
+        dispatched_epoch = NOW - 3600
+    return {"map_code": map_code, "map_name": "测试图", "era": 5, "slot": 1,
+            "duration_min": duration,
+            "dispatched_at": time.strftime("%Y-%m-%d %H:%M:%S",
+                                           time.localtime(dispatched_epoch))}
+
+
+class ActiveExpeditionTests(unittest.TestCase):
+    """工单收口票一：正在远征的队与已占用地图纳入规划。"""
+
+    def _two_teams(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        return _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def _maps(self):
+        return {"A": _map("A", _rules(), 加速符=2),
+                "B": _map("B", _rules(), 加速符=1)}
+
+    def test_active_team_excluded_and_map_occupied(self):
+        # 部队2 在 A 图上远征：不得重派；A 被占用，部队1 只能去 B
+        profile = self._two_teams(_store())
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": _active_record("A")})
+        assignments = result["plan"]["assignments"]
+        self.assertEqual([a["team_no"] for a in assignments], [1])
+        self.assertEqual(assignments[0]["map_code"], "B")
+        self.assertIn("正在远征的队伍", assignments[0]["occupancy_note"])
+        waiting = result["plan"]["waiting_for"]
+        self.assertEqual(waiting[0]["team_no"], 2)
+        self.assertIn("remain_min", waiting[0])
+        self.assertIn("return_text", waiting[0])
+        # 在外的队不算留守
+        staying = result["plan"]["staying_home"]
+        self.assertFalse(staying and 2 in staying["teams"])
+        self.assertEqual(result["inputs"]["active_expeditions"]
+                         ["occupied_maps"], ["A"])
+
+    def test_expired_record_frees_team_and_map(self):
+        profile = self._two_teams(_store())
+        expired = _active_record("A", duration=60,
+                                 dispatched_epoch=NOW - 7200)  # 已到期
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": expired})
+        self.assertEqual(len(result["plan"]["assignments"]), 2)
+        self.assertEqual({a["map_code"] for a in result["plan"]["assignments"]},
+                         {"A", "B"})
+
+    def test_explicit_empty_active_is_deterministic(self):
+        profile = self._two_teams(_store())
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True, active_expeditions={})
+        active = result["inputs"]["active_expeditions"]
+        self.assertEqual(active["status"], "ok")
+        self.assertEqual(active["active_teams"], [])
+        self.assertEqual(active["occupied_maps"], [])
+
+    def test_unreliable_time_excludes_team_and_degrades(self):
+        profile = self._two_teams(_store())
+        bad = {"map_code": "A", "map_name": "测试图", "duration_min": 120,
+               "dispatched_at": "垃圾时间"}
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": bad})
+        # 部队2 状态未知被排除，不静默当空闲
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("时间不可靠" in w for w in result["warnings"]))
+        self.assertEqual(result["inputs"]["active_expeditions"]
+                         ["unknown_state_teams"], [2])
+
+    def test_corrupt_structure_is_not_silently_idle(self):
+        profile = self._two_teams(_store())
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions=["不是队伍表"])
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("结构损坏" in w for w in result["warnings"]))
+        self.assertEqual(result["inputs"]["active_expeditions"]["status"],
+                         "corrupt")
+
+    def test_active_record_missing_map_code_degrades(self):
+        profile = self._two_teams(_store())
+        rec = _active_record(None)
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": rec})
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("占用地点未知" in w for w in result["warnings"]))
+
+    def test_all_away_warning_distinguishes_active_from_new(self):
+        # 活跃队不算本丸留守：文案区分「原本已在外面」与「本轮新派出」
+        profile = self._two_teams(_store())
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": _active_record("A")})
+        warning = result["plan"]["all_away_warning"]
+        self.assertIn("没有已确认可出阵的留守队", warning)
+        self.assertIn("本轮新派出 1 队", warning)
+        self.assertIn("原本已在远征途中", warning)
+        self.assertIn("部队2", warning)
+
+    def test_waiting_for_active_expeditions_outcome(self):
+        # 唯一的队在外面：没有新派遣是因为等归来，不是没图可去
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {2: [_slot(1)]})
+        result = _plan(profile, self._maps(), self._facts(),
+                       active_expeditions={"2": _active_record("A")})
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "waiting_for_active_expeditions")
+        self.assertEqual(result["plan"]["confidence"], "executable")
+        self.assertTrue(any("归来" in e for e in result["explanation"]))
+
+    def test_allow_all_never_redispatches_active_team(self):
+        profile = self._two_teams(_store())
+        result = _plan(profile, self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": _active_record("A")})
+        self.assertNotIn(2, [a["team_no"]
+                             for a in result["plan"]["assignments"]])
+
+
+class ZeroDispatchOutcomeTests(unittest.TestCase):
+    """工单收口票三：零派遣原因机器可读，不一律 executable。"""
+
+    def test_no_feasible_assignment_is_infeasible(self):
+        # 唯一队伍面对 total_level=999 的图：全部不可行
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近", level=10), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1, level=10)]})
+        maps = {"HARD": _map("HARD", _rules(total=999))}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"], "no_feasible_assignment")
+        self.assertEqual(result["plan"]["confidence"], "infeasible")
+
+    def test_intentionally_staying_home_outcome(self):
+        # 最后一支可行安全队被默认策略主动扣住
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        maps = {"M": _map("M", _rules())}
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, maps, facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "intentionally_staying_home")
+        self.assertEqual(result["plan"]["confidence"], "executable")
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
+
+
+class ReserveReadinessTests(unittest.TestCase):
+    """工单收口票二：留守只认「已确认可出阵」的队。"""
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def test_repair_blocked_team_is_not_reserve(self):
+        # 部队2 含手入成员（坏队）：默认仍扣住真正安全的部队1，
+        # 不拿坏队充数（牛老师复现的反例）
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+        facts = self._facts()
+        facts["repair"] = [{"sword_catalog_id": KOGI, "form": "normal"}]
+        result = _plan(profile, {"M": _map("M", _rules(), 加速符=1)}, facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "intentionally_staying_home")
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1, 2])
+        # allow_all 只覆盖留守偏好，不覆盖安全事实：部队2 依旧不可派
+        result2 = _plan(profile, {"M": _map("M", _rules(), 加速符=1)},
+                        facts, allow_all_teams_away=True)
+        self.assertEqual([a["team_no"] for a in result2["plan"]["assignments"]],
+                         [1])
+        self.assertIn(2, [i["team_no"] for i in result2["infeasible"]])
+
+    def test_training_blocked_team_is_not_reserve(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+        facts = self._facts()
+        facts["training"] = [{"sword_catalog_id": KOGI, "form": "normal"}]
+        result = _plan(profile, {"M": _map("M", _rules(), 加速符=1)}, facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1, 2])
+
+    def test_heavy_injury_team_is_not_reserve_but_can_expedition(self):
+        # 重伤队不挡远征但不算留守候选：默认留下健康的部队1
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", injury="heavy")]})
+        maps = {"M": _map("M", _rules(), 加速符=1),
+                "N": _map("N", _rules(), 小判=100)}
+        result = _plan(profile, maps, self._facts())
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [2])
+        self.assertIn("重伤", result["plan"]["assignments"][0]["injury_note"])
+
+    def test_unknown_slot_team_is_not_reserve(self):
+        store = _store()
+        blind = _slot(2, catalog_id=None, name=None, name_status=None,
+                      slot_status="unknown", level=None, fatigue=None,
+                      survival=None, survival_max=None, injury=None,
+                      kiwame_status="unknown", unknown_fields=["all"])
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸"), blind]})
+        maps = {"M": _map("M", _rules(), 加速符=1),
+                "N": _map("N", _rules(), 小判=100)}
+        result = _plan(profile, maps, self._facts())
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [2])
+
+    def test_map_failed_team_still_counts_as_reserve(self):
+        # 只是等级不够跑远征，人不伤不残：可以当日课留守队
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸", level=1),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", level=1)]})
+        maps = {"HARD": _map("HARD", _rules(total=999), 加速符=1),
+                "M": _map("M", _rules(), 小判=100)}
+        result = _plan(profile, maps, self._facts())
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [2])
+        self.assertIn("可出阵队留守",
+                      result["plan"]["staying_home"]["reason"])
+
+    def test_conflict_team_is_not_reserve(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎"), _row(MAEDA, "前田藤四郎", level=1)]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=MAEDA, name="前田藤四郎",
+                      sword_type="短刀"),
+                _slot(2, catalog_id=MAEDA, name="前田藤四郎",
+                      sword_type="短刀", level=1)]})
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, {"M": _map("M", _rules(), 加速符=1)}, facts)
+        # 冲突队不算留守 → 部队1 被默认扣住，谁也不出门
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1, 2])
+        self.assertEqual(result["plan"]["confidence"], "executable")
+
+    def test_empty_team_is_not_reserve(self):
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, slot_status="empty", catalog_id=None, name=None)]})
+        facts = _facts(attendant={"sword_catalog_id": KOGI, "form": "normal"})
+        result = _plan(profile, {"M": _map("M", _rules(), 加速符=1)}, facts)
+        # 空队不算留守 → 部队1 被默认扣住
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
 
 
 if __name__ == "__main__":
