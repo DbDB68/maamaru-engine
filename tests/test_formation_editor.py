@@ -73,11 +73,12 @@ class _FakeMaa:
     """编队执行器状态机假 MAA（无图像，全靠剧本与坐标约定）。"""
 
     def __init__(self, shell="formation", current_tab=1, pages=None,
-                 wrap=False):
+                 wrap=False, swallow_swipes=False):
         self.shell = shell                  # formation/team_select/None
         self.current_tab = current_tab
         self.pages = pages or []            # 选择列表分页剧本
         self.wrap = wrap                    # True=末页后再翻绕回首页（异常页序）
+        self.swallow_swipes = swallow_swipes  # True=滑动全被模拟器吞掉
         self.form_map = {(r["name"], r.get("level")): r["form"]
                          for page in self.pages for r in page
                          if r.get("form") is not None}
@@ -168,7 +169,7 @@ class _FakeMaa:
 
     def swipe(self, x1, y1, x2, y2, duration_ms=400):
         self.swipes.append((x1, y1, x2, y2, duration_ms))
-        if not self.in_list or not self.pages:
+        if not self.in_list or not self.pages or self.swallow_swipes:
             return
         if y2 < y1:
             if self.list_page + 1 >= len(self.pages) and self.wrap:
@@ -227,11 +228,12 @@ def _run(host, team_no=2, slot_no=3, target=None, **kw):
 
 
 def _std_setup(shell="formation", pages=None, team_no=2, slot_no=3,
-               wrap=False):
+               wrap=False, swallow_swipes=False):
     """部队 team_no 的 slot_no 是小狐丸，目标是压切长谷部 Lv35 普通。"""
     teams = {team_no: _six()}
     teams[team_no][slot_no - 1] = _slot(slot_no, catalog=KOGI, name="小狐丸")
-    maa = _FakeMaa(shell=shell, pages=pages or [], wrap=wrap)
+    maa = _FakeMaa(shell=shell, pages=pages or [], wrap=wrap,
+                   swallow_swipes=swallow_swipes)
     return maa, _EditorHost(maa, teams)
 
 
@@ -737,6 +739,83 @@ class ScanCompletenessTests(unittest.TestCase):
         result = _run(host, max_pages=10)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "loop")
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+
+
+# ==================== 「滑不动」≠「确认到底」 ====================
+
+class BottomProofTests(unittest.TestCase):
+    """停滞只是"没翻动"，不是"到底"：到底需要正面证据（不满页/回翻复归）。"""
+
+    @staticmethod
+    def _full_page(page_idx, rows=6):
+        """一页满行（6 行真实刀名，等级错开保证页指纹唯一）。"""
+        names = ["三日月宗近", "小狐丸", "前田藤四郎", "压切长谷部",
+                 "加州清光", "歌仙兼定"]
+        return [_row(n, 120 + i * 90, level=page_idx * 10 + i, fatigue=90)
+                for i, n in enumerate(names[:rows])]
+
+    def test_swallowed_swipes_are_stalled_not_not_found(self):
+        """牛老师反例：滑动全被吞，只扫了第一页，绝不能谎称整份名单没目标。"""
+        pages = [self._full_page(0), self._full_page(1),
+                 self._full_page(2, rows=2)]
+        maa, host = _std_setup(pages=pages, swallow_swipes=True)
+        result = _run(host)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "stalled")
+        self.assertIn("吞", result["reason"])
+        self.assertEqual(result["pages_scanned"], 1)
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+        _assert_never_departs(self, maa)
+
+    def test_blind_page_is_recognition_failure(self):
+        """牛老师反例：OCR 完全失明连续空页 → 识别失败，不是 not_found。"""
+        maa, host = _std_setup(pages=[[]])
+        result = _run(host)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "blind")
+        self.assertIn("失明", result["reason"])
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+
+    def test_full_last_page_proves_bottom_by_backtrack(self):
+        """满页末页：回翻一页再翻回来，指纹两步都对上 → complete 可裁决。"""
+        pages = [self._full_page(0), self._full_page(1),
+                 [_ok_row(660)] + self._full_page(2, rows=5)]
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(result["pages_scanned"], 3)
+        backward = [s for s in maa.swipes if s[3] > s[1]]
+        self.assertTrue(backward)        # 确实做了回翻验证
+        _assert_never_departs(self, maa)
+
+    def test_short_last_page_is_direct_bottom_proof(self):
+        """不满页 = 正面到底证据，无需回翻（单页小库存同此路径）。"""
+        pages = [[_ok_row(300), _row("小狐丸", 450, level=99, fatigue=50)]]
+        maa, host = _std_setup(pages=pages)
+        result = _run(host)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(result["pages_scanned"], 1)
+
+    def test_backtrack_mismatch_is_stalled(self):
+        """满页停滞且回翻后指纹对不上 → stalled，不裁决。"""
+        pages = [self._full_page(0), self._full_page(1)]
+        maa, host = _std_setup(pages=pages)
+        # 回翻时滑动被吞：反滑不改变页 → 指纹仍是末页 ≠ fps[-2]
+        original_swipe = maa.swipe
+
+        def flaky_swipe(x1, y1, x2, y2, duration_ms=400):
+            if y2 > y1:              # 反滑被吞
+                maa.swipes.append((x1, y1, x2, y2, duration_ms))
+                return
+            original_swipe(x1, y1, x2, y2, duration_ms)
+        maa.swipe = flaky_swipe
+        result = _run(host)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "stalled")
         decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 

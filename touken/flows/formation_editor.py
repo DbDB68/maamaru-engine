@@ -93,7 +93,9 @@ _ROW_MERGE_DY = 25                  # 同一行碎 token 归并的 y 容差
 _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y 容差
 _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
                                     # 全局唯一只允许在 reached_end 后声称
-_STALL_LIMIT = 2                    # 指纹连续不动判到底
+_STALL_LIMIT = 2                    # 指纹连续不动触发「到底核验」（不等于到底）
+_FULL_PAGE_ROWS = 6                 # 列表满页行数（布局推算，待真机校准）：
+                                    # 不满页 = 末页的正面证据；满页停滞需回翻验证
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
@@ -500,8 +502,12 @@ class FormationEditorMixin:
         pages, fps, current_idx, unreadable, scan_status = \
             yield from self._scan_selection_list(max_pages)
         if scan_status != "complete":
-            why = ("触达安全上限仍未到底" if scan_status == "truncated"
-                   else "翻页指纹绕圈，页序异常")
+            why = {"truncated": "触达安全上限仍未到底",
+                   "loop": "翻页指纹绕圈，页序异常",
+                   "stalled": "连续滑动无响应且无法证明到底"
+                              "（滑动可能被模拟器吞掉）",
+                   "blind": "整页 OCR 失明，一行都读不出（页面识别失败）",
+                   }.get(scan_status, scan_status)
             yield (f"[编队] 扫描未到底（scan_incomplete={scan_status}）："
                    f"已扫 {len(pages)} 页，{why}，不能证明全局唯一，拒绝下点")
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
@@ -674,10 +680,15 @@ class FormationEditorMixin:
     def _scan_selection_list(self, max_pages):
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
 
-        status 三态分明：
-          complete  —— 指纹连续不动确认到底（只有它允许裁决唯一）；
-          truncated —— 触达 max_pages 安全阀仍未到底（截断名单不裁决）；
+        status 四态分明——「滑不动」和「确认到底」是两件事：
+          complete  —— 有正面到底证据：末页不满（列表没填满=最后一页），
+                      或满页停滞通过回翻复归验证（反滑指纹回到上一页、
+                      再正滑回到末页，证明滑动没被吞，停滞才是到底）；
+          stalled   —— 连续滑动无响应且拿不出到底证据（可能被模拟器吞）；
+          blind     —— 任何一页 OCR 一行都读不出（整页失明，识别失败）；
+          truncated —— 触达 max_pages 安全阀仍未到底；
           loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
+        只有 complete 允许裁决唯一/确定 not_found，其余一律拒绝下点。
         """
         pages, fps, unreadable = [], [], 0
         current_idx, stalls, status = 0, 0, "complete"
@@ -685,17 +696,23 @@ class FormationEditorMixin:
             self.maa.screenshot(force=True)
             tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
             rows, bad = self._parse_selection_rows(tokens)
+            if fps and not rows:
+                status = "blind"       # 翻页后整页失明
+                break
             fp = page_fingerprint(rows)
             if fps and fp == fps[-1]:
                 stalls += 1
                 if stalls >= _STALL_LIMIT:
-                    status = "complete"
+                    status = self._prove_bottom(pages, fps)
                     break
                 self.maa.swipe(*_SWIPE_NEXT)
                 time.sleep(1.2)
                 continue
             if fp in fps:
                 status = "loop"
+                break
+            if not rows:
+                status = "blind"       # 首页就一行都读不出
                 break
             pages.append(rows)
             fps.append(fp)
@@ -711,6 +728,33 @@ class FormationEditorMixin:
                f"（{'已到底' if status == 'complete' else '未到底：' + status}，"
                f"读不清 {unreadable} 行）")
         return pages, fps, current_idx, unreadable, status
+
+    def _prove_bottom(self, pages, fps):
+        """停滞后的「到底」正面核验。Returns: complete / stalled。
+
+        - 末页不满（行数 < 满页行数）：列表没填满，这就是最后一页；
+        - 满页停滞：回翻一页再翻回来，两步指纹都对上才证明滑动机制
+          正常工作、停滞=到底；对不上（或只有一页无从回翻）= stalled。
+        """
+        if len(pages[-1]) < _FULL_PAGE_ROWS:
+            return "complete"
+        if len(fps) < 2:
+            return "stalled"
+        self.maa.swipe(*_SWIPE_PREV)
+        time.sleep(1.2)
+        self.maa.screenshot(force=True)
+        rows, _b = self._parse_selection_rows(
+            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+        if page_fingerprint(rows) != fps[-2]:
+            return "stalled"
+        self.maa.swipe(*_SWIPE_NEXT)
+        time.sleep(1.2)
+        self.maa.screenshot(force=True)
+        rows, _b = self._parse_selection_rows(
+            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+        if page_fingerprint(rows) != fps[-1]:
+            return "stalled"
+        return "complete"
 
     def _goto_page(self, pages, fps, current_idx, target_idx):
         """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""
