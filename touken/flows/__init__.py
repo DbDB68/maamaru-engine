@@ -27,5 +27,6 @@ from .edocastle import EdocastleMixin
 from .hanafuda import HanafudaMixin
 from .sword_inventory import SwordInventoryMixin
 from .team_roster import TeamRosterMixin
+from .formation_editor import FormationEditorMixin
 
-__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin", "OsakaMixin", "EdocastleMixin", "HanafudaMixin", "SwordInventoryMixin", "TeamRosterMixin"]
+__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin", "OsakaMixin", "EdocastleMixin", "HanafudaMixin", "SwordInventoryMixin", "TeamRosterMixin", "FormationEditorMixin"]
