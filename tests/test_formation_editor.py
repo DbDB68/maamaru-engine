@@ -931,8 +931,8 @@ class BottomProofTests(unittest.TestCase):
 class ScrollbarEndEvidenceTests(unittest.TestCase):
     """_list_end_sighted 的像素判定（合成帧；口径来自 2026-09-14 运行帧
     校准：滑轨体 x[1262,1270]、轨道 y[124,689]、滑块亮 243/轨道灰 113、
-    到底底缘稳定 689、离底一页差 ~16px）。真机截图不进仓库，故用合成帧
-    钉死判定逻辑。"""
+    到底底缘被轨道钳住恒定 689、离底一页的过渡帧底缘 685 只差 4px）。
+    真机截图不进仓库，故用合成帧钉死判定逻辑。"""
 
     class _ShotMaa:
         def __init__(self, img):
@@ -963,8 +963,13 @@ class ScrollbarEndEvidenceTests(unittest.TestCase):
         self.assertFalse(self._sighted(self._frame(thumb=(300, 403))))
 
     def test_thumb_one_page_short_of_bottom_is_not_sighted(self):
-        # 离底一页实测差 ~16px，容差 6px 内才算贴底
-        self.assertFalse(self._sighted(self._frame(thumb=(572, 675))))
+        # 真机反例 cal_page_28：离底一页的过渡帧底缘 685，内容仍在变，
+        # 只差 4px——容差必须紧到把它挡在门外
+        self.assertFalse(self._sighted(self._frame(thumb=(582, 685))))
+
+    def test_thumb_two_px_off_bottom_still_sighted(self):
+        # 贴底容差边界：钳位读数恒定 689，687 以内仍认（抗 ±1px 量化抖动）
+        self.assertTrue(self._sighted(self._frame(thumb=(585, 687))))
 
     def test_track_without_thumb_is_not_sighted(self):
         self.assertFalse(self._sighted(self._frame(thumb=None)))
