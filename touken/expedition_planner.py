@@ -295,9 +295,12 @@ def _team_availability(members, sizes, occ_def, occ_pos, occ_kinds):
         绝不写成本队已经用了另一振（当前事实层没有把占用声明链接到
         具体槽位实例的证据，不造假接口）。
 
-    Returns: (blocked 文案, blocked_kinds 占用来历集合, uncertain 文案,
-              notes)。blocked_kinds 给留守资格判定用：attendant 拦截的队
-              仍可出阵留守，training/repair 的不行。
+    Returns: (blocked 文案, blocked_kinds, uncertain 文案, uncertain_kinds,
+              notes)。blocked/uncertain 的 kinds 都是结构化集合，不靠解析
+              中文文案：blocked_kinds 里 attendant 拦截的队仍可出阵留守，
+              training/repair 不行；uncertain_kinds 里 training/repair
+              身份不明同样失去留守资格（当前槽位可能就是被占用者），
+              attendant 身份不明不影响留守（近侍本人本来就能随队出阵）。
     """
     definite, possible = {}, {}
     for m in members:
@@ -308,7 +311,8 @@ def _team_availability(members, sizes, occ_def, occ_pos, occ_kinds):
             for g in groups:
                 possible[g] = possible.get(g, 0) + 1
 
-    blocked, blocked_kinds, uncertain, notes = [], set(), [], []
+    blocked, blocked_kinds, uncertain, uncertain_kinds, notes = \
+        [], set(), [], set(), []
     for group in set(definite) | set(possible):
         size = sizes.get(group, 0)
         d = definite.get(group, 0)
@@ -333,7 +337,8 @@ def _team_availability(members, sizes, occ_def, occ_pos, occ_kinds):
                 f"{label}：组内 {size} 振、{kinds}占 {od + op} 名额，"
                 f"无法确认本队这振是不是被占用的那一振——{spare}，"
                 "需人工确认或换成另一振后再派")
-    return blocked, blocked_kinds, uncertain, notes
+            uncertain_kinds.update(occ_kinds.get(group) or ())
+    return blocked, blocked_kinds, uncertain, uncertain_kinds, notes
 
 
 def _group_label(group) -> str:
@@ -622,6 +627,14 @@ def _reserve_readiness(rec: dict) -> tuple[bool, str | None]:
         return False, ("含"
                        + "、".join(label.get(k, k) for k in sorted(kinds))
                        + "拦截")
+    uncertain_kinds = rec.get("uncertain_kinds") or set()
+    bad_uncertain = uncertain_kinds - {"attendant"}
+    if bad_uncertain:
+        label = {"training": "修行中", "repair": "手入中"}
+        return False, (
+            "、".join(label.get(k, k) for k in sorted(bad_uncertain))
+            + "身份不明：当前槽位可能正是被占用的那一振，"
+            "无法确认该队已安全")
     if rec["obs_status"] != "complete":
         return False, "编队观测不完整"
     if rec["unknown_slots"]:
@@ -749,8 +762,8 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
         unknown_slots = [s for s in team.get("slots") or []
                          if s.get("slot_status") == "unknown"]
         members = [_member_view(s, entries_by_id) for s in slots]
-        blocked, blocked_kinds, uncertain, avail_notes = _team_availability(
-            members, sizes, occ_def, occ_pos, occ_kinds)
+        blocked, blocked_kinds, uncertain, uncertain_kinds, avail_notes = \
+            _team_availability(members, sizes, occ_def, occ_pos, occ_kinds)
         if unknown_slots:
             uncertain.append(f"{len(unknown_slots)} 个槽位状态读不出，"
                              "队伍构成无法完全确认")
@@ -769,6 +782,7 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
             blocked_kinds.add("conflict")
         rec = {"team": team, "members": members, "blocked": blocked,
                "blocked_kinds": blocked_kinds, "uncertain": uncertain,
+               "uncertain_kinds": uncertain_kinds,
                "avail_notes": avail_notes, "obs_status": obs_status,
                "unknown_slots": unknown_slots}
         rec["reserve_ready"], rec["reserve_reason"] = _reserve_readiness(rec)
@@ -811,58 +825,78 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
                         for rec in teams_out}
 
     # ---- 跨队联合分配：同一远征地点同时只能派一支队（含活跃占用）----
+    # 先扣除 active occupied_maps：可去图全被占满的队不是「可派队」，
+    # 零派遣原因是占用而非留守策略，绝不能记成 intentionally_staying_home
     chosen_assign = {}
     holdout = None          # 默认保队时从可远征队里额外留下的那支
     holdout_reason = None
+    free_candidates = []
+    for cand in candidate_teams:
+        free = [o for o in cand["options"]
+                if o["map_code"] not in occupied_maps]
+        if free:
+            free_candidates.append({**cand, "free_options": free})
+        else:
+            infeasible.append({
+                "team_no": cand["team_no"],
+                "reasons": ["可去的远征图都在被远征中的队伍占用"
+                            "（同一远征地点同时只能派一支队）"],
+                "rejected_maps": cand["rejections"]})
+            staying_nonempty.append(cand["team_no"])
     reserve_staying_now = [n for n in staying_nonempty
                            if reserve_ready_of.get(n)]
     need_holdout = not reserve_staying_now
-    if candidate_teams:
+    if free_candidates:
         if allow_all_teams_away or not need_holdout:
             # 显式允许全出，或已有可出阵队天然留守：可派队全进联合分配
             chosen_assign = _global_assign(
-                [(t["team_no"], t["options"]) for t in candidate_teams],
+                [(t["team_no"], t["free_options"]) for t in free_candidates],
                 used_maps=occupied_maps)
-        elif len(candidate_teams) == 1:
-            if candidate_teams[0]["reserve_ready"]:
-                holdout = candidate_teams[0]
-                holdout_reason = ("只有一支可安全出阵的非空队，默认保留在家"
-                                  "打日课；如需派出请显式 "
-                                  "allow_all_teams_away=True")
-            else:
-                # 唯一的可远征队自身状态不安全，扣下来也当不了留守队
-                chosen_assign = _global_assign(
-                    [(candidate_teams[0]["team_no"],
-                      candidate_teams[0]["options"])],
-                    used_maps=occupied_maps)
         else:
-            # 没有安全天然留守队：枚举「留哪支」，留守队必须自己能出阵
-            # （reserve_ready）优先，其次取留下后整卷最优（顺序无关）
-            best = None
-            for hold in candidate_teams:
-                rest = [t for t in candidate_teams if t is not hold]
-                assign = _global_assign(
-                    [(t["team_no"], t["options"]) for t in rest],
-                    used_maps=occupied_maps)
-                key = (1 if hold["reserve_ready"] else 0,
-                       *_objective(assign))
-                if best is None or key > best[0]:
-                    best = (key, hold, assign)
-            _key, holdout, chosen_assign = best
-            if holdout["reserve_ready"]:
-                holdout_reason = ("默认保留至少一支可出阵队伍在家（打日课）；"
-                                  "如需全出请显式 allow_all_teams_away=True")
+            # 先确认「不执行留守策略时确实能派出去」，否则零派遣不是
+            # 主动留守造成的
+            full = _global_assign(
+                [(t["team_no"], t["free_options"]) for t in free_candidates],
+                used_maps=occupied_maps)
+            if not full:
+                pass  # 无图可派是占用/条件造成，与留守策略无关
+            elif len(free_candidates) == 1:
+                if free_candidates[0]["reserve_ready"]:
+                    holdout = free_candidates[0]
+                    holdout_reason = ("只有一支可安全出阵的非空队，默认保留在家"
+                                      "打日课；如需派出请显式 "
+                                      "allow_all_teams_away=True")
+                else:
+                    # 唯一的可远征队自身状态不安全，扣下来也当不了留守队
+                    chosen_assign = full
             else:
-                holdout_reason = ("没有任何状态安全的队可留守，只能留下状态"
-                                  "未达出阵候选的一队；如需全出请显式 "
-                                  "allow_all_teams_away=True")
+                # 枚举「留哪支」：留守队必须自己能出阵（reserve_ready）
+                # 优先，其次取留下后整卷最优（顺序无关）
+                best = None
+                for hold in free_candidates:
+                    rest = [t for t in free_candidates if t is not hold]
+                    assign = _global_assign(
+                        [(t["team_no"], t["free_options"]) for t in rest],
+                        used_maps=occupied_maps)
+                    key = (1 if hold["reserve_ready"] else 0,
+                           *_objective(assign))
+                    if best is None or key > best[0]:
+                        best = (key, hold, assign)
+                _key, holdout, chosen_assign = best
+                if holdout["reserve_ready"]:
+                    holdout_reason = ("默认保留至少一支可出阵队伍在家（打日课）；"
+                                      "如需全出请显式 allow_all_teams_away=True")
+                else:
+                    holdout_reason = ("没有任何状态安全的队可留守，只能留下状态"
+                                      "未达出阵候选的一队；如需全出请显式 "
+                                      "allow_all_teams_away=True")
 
     assignments = []
-    by_no = {t["team_no"]: t for t in candidate_teams}
+    by_no = {t["team_no"]: t for t in free_candidates}
     for team_no, opt in sorted(chosen_assign.items()):
         cand = by_no[team_no]
         a = dict(opt)
-        others = [o for o in cand["options"]
+        others = [o for o in cand["free_options"]
                   if o["map_code"] != opt["map_code"]]
         a["alternatives"] = [{"map_code": o["map_code"],
                               "map_name": o["map_name"],
@@ -890,9 +924,9 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
         a["injury_note"] = _injury_note(cand["members"])
         assignments.append(a)
 
-    # 联合分配后仍没分到图的候选队（可去的图被占满）：如实记原因，
+    # 联合分配后仍没分到图的可派队（可去的图被别队占满）：如实记原因，
     # 它非空留在家中，计入留守
-    for cand in candidate_teams:
+    for cand in free_candidates:
         if cand["team_no"] in chosen_assign:
             continue
         if holdout is not None and cand["team_no"] == holdout["team_no"]:
@@ -963,7 +997,7 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     elif holdout is not None:
         outcome = "intentionally_staying_home"
         plan_confidence = "executable"   # 方案 = 主动留守，本身可执行
-    elif away and not map_failed_teams and not candidate_teams:
+    elif away and not map_failed_teams:
         outcome = "waiting_for_active_expeditions"
         plan_confidence = "executable"   # 方案 = 等归来，本身可执行
         explanation.append("没有新派遣是因为队伍正在远征："

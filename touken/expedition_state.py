@@ -16,6 +16,7 @@ panel/server.py、panel/scheduler.py 也读同一文件。本模块只读不写�
 """
 
 import json
+import math
 import time
 
 from .runtime_paths import STATUS_DIR
@@ -62,27 +63,37 @@ def parse_expedition_records(raw, now: float) -> dict:
         except (TypeError, ValueError):
             out["status"] = "corrupt"
             out["warnings"].append(f"远征派遣记录含无法识别的队伍键 {key!r}，"
-                                   "该条作废并降级")
+                                   "该条作废并降级（不伪造队号）")
             continue
         if not isinstance(rec, dict):
+            # 队号已知但条目损坏：无法判断该队是否仍在外面，
+            # 按状态未知排除该队，绝不放进候选
             out["status"] = "corrupt"
-            out["warnings"].append(f"部队{team_no}的远征记录结构损坏，"
-                                   "该条作废并降级")
+            out["unknown_end"].append(team_no)
+            out["warnings"].append(
+                f"部队{team_no}的远征记录结构损坏：该队是否仍在外面"
+                "无法判断，排除出本轮规划并降级")
             continue
         dispatched = _parse_dispatched_at(rec.get("dispatched_at"))
         duration = rec.get("duration_min")
-        if dispatched is None or not isinstance(duration, (int, float)):
+        if (dispatched is None or isinstance(duration, bool)
+                or not isinstance(duration, (int, float))
+                or not math.isfinite(duration)):
             # 队伍有派遣记录但算不出结束时间：不能当它空闲
             out["unknown_end"].append(team_no)
             out["warnings"].append(
                 f"部队{team_no}的远征记录时间不可靠（dispatched_at/"
                 "duration_min 读不出）：该队状态未知，排除出本轮规划")
             continue
+        map_code = rec.get("map_code")
+        if not isinstance(map_code, str) or not map_code:
+            map_code = None  # 非字符串/不可哈希/空串一律按地点未知处理
         return_at = dispatched + duration * 60
         if return_at <= now:
             continue  # 已到期：视为已归来，不再占队或地图
-        info = {"map_code": rec.get("map_code") or None,
-                "map_name": rec.get("map_name") or "",
+        info = {"map_code": map_code,
+                "map_name": rec.get("map_name")
+                if isinstance(rec.get("map_name"), str) else "",
                 "duration_min": duration,
                 "return_at": return_at,
                 "return_text": time.strftime(_TIME_FORMAT,

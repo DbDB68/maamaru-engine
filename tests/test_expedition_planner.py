@@ -1067,5 +1067,208 @@ class ReserveReadinessTests(unittest.TestCase):
         self.assertEqual(result["plan"]["staying_home"]["teams"], [1])
 
 
+class OccupiedMapsAreNotHoldoutTests(unittest.TestCase):
+    """修票一：被活跃远征占满的图不能触发「主动留守」。"""
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def test_single_home_team_only_map_occupied_is_waiting(self):
+        # 部队2 在 A 图；家里的部队1 只满足 A；默认模式
+        # → 是「等归来」不是「主动留守」
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {1: [_slot(1)]})
+        maps = {"A": _map("A", _rules(), 加速符=1)}
+        result = _plan(profile, maps, self._facts(),
+                       active_expeditions={"2": _active_record("A")})
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "waiting_for_active_expeditions")
+        self.assertNotEqual(result["plan"]["outcome"],
+                            "intentionally_staying_home")
+        self.assertIsNone(result["plan"]["staying_home"] and
+                          result["plan"]["staying_home"].get("teams") == [1]
+                          and "保留" in result["plan"]["staying_home"]
+                          ["reason"] or None)
+        self.assertTrue(any("归来" in e for e in result["explanation"]))
+
+    def test_multiple_home_teams_all_maps_occupied_is_waiting(self):
+        # 两支家中队，可去的 A/B 全被 active 占满 → 不能假装留守策略
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+        maps = {"A": _map("A", _rules(), 加速符=2),
+                "B": _map("B", _rules(), 加速符=1)}
+        result = _plan(profile, maps, self._facts(),
+                       active_expeditions={"3": _active_record("A"),
+                                           "4": _active_record("B")})
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "waiting_for_active_expeditions")
+        self.assertIn("占", "；".join(result["infeasible"][0]["reasons"]))
+
+    def test_free_map_still_dispatches_and_holds_normally(self):
+        # A 被占、B/C 空着：正常派遣并按需留队
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+        maps = {"A": _map("A", _rules(), 加速符=3),
+                "B": _map("B", _rules(), 加速符=2),
+                "C": _map("C", _rules(), 小判=100)}
+        result = _plan(profile, maps, self._facts(),
+                       active_expeditions={"3": _active_record("A")})
+        assignments = result["plan"]["assignments"]
+        self.assertEqual(result["plan"]["outcome"], "assigned")
+        self.assertEqual(len(assignments), 1)
+        self.assertIn(assignments[0]["map_code"], ("B", "C"))
+        self.assertNotEqual(assignments[0]["map_code"], "A")
+        staying = result["plan"]["staying_home"]
+        self.assertEqual(len(staying["teams"]), 1)
+        self.assertIn("保留", staying["reason"])
+
+
+class AmbiguousOccupancyReserveTests(unittest.TestCase):
+    """修票二：修行/手入身份不清的多号机不能充当已确认留守。"""
+
+    def _profile_with_ambiguous_kogi(self, store):
+        # 两振同型极化小狐丸；部队2 只能 ambiguous 链到这两振且等级低
+        # （跑不了图，会留在家里）；部队1 健康可派
+        rows = [_row(MIKA, "三日月宗近"),
+                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
+                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
+                _row(MAEDA, "前田藤四郎")]
+        return _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", level=1,
+                      kiwame_status="kiwame")]})
+
+    def _maps(self):
+        return {"M": _map("M", _rules(total=50), 加速符=1)}
+
+    def test_repair_ambiguous_copy_is_not_reserve(self):
+        facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"},
+                       repair=[{"sword_catalog_id": KOGI, "form": "kiwame"}])
+        result = _plan(self._profile_with_ambiguous_kogi(_store()),
+                       self._maps(), facts)
+        # 部队2 不算已确认留守 → 默认扣住健康的部队1，谁也不派
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["staying_home"]["teams"], [1, 2])
+        reason = result["plan"]["staying_home"]["reason"]
+        self.assertIn("部队2", reason)
+        self.assertIn("出阵状态不可确认", reason)
+
+    def test_training_ambiguous_copy_is_not_reserve(self):
+        facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"},
+                       training=[{"sword_catalog_id": KOGI, "form": "kiwame"}])
+        result = _plan(self._profile_with_ambiguous_kogi(_store()),
+                       self._maps(), facts)
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertIn("出阵状态不可确认",
+                      result["plan"]["staying_home"]["reason"])
+
+    def test_attendant_ambiguous_copy_still_reserve(self):
+        # 近侍身份不清只影响远征资格；近侍本人本来就能随队出阵，
+        # 不失去留守资格 → 部队1 照常派出，部队2 算可出阵留守
+        facts = _facts(attendant={"sword_catalog_id": KOGI})  # 形态未知
+        result = _plan(self._profile_with_ambiguous_kogi(_store()),
+                       self._maps(), facts)
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertIn("可出阵队留守",
+                      result["plan"]["staying_home"]["reason"])
+
+    def test_form_mismatch_evidence_is_not_blocked(self):
+        # 手入申报的是极化小狐丸，部队2 槽位确认是普通形态（不同组）：
+        # 形态证据足以证明当前槽位不是被占用者，不误拦留守资格
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"),
+                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
+                _row(KOGI, "小狐丸", level=1),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", level=1,
+                      kiwame_status="normal")]})
+        facts = _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"},
+                       repair=[{"sword_catalog_id": KOGI, "form": "kiwame"}])
+        result = _plan(profile, self._maps(), facts)
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertIn("可出阵队留守",
+                      result["plan"]["staying_home"]["reason"])
+
+
+class BrokenActiveRecordTests(unittest.TestCase):
+    """修票三：队号已知但记录损坏必须排除该队；解析边界不崩溃。"""
+
+    def _two_teams(self, store):
+        rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
+                _row(MAEDA, "前田藤四郎")]
+        return _profile(store, rows, {
+            1: [_slot(1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸")]})
+
+    def _maps(self):
+        return {"A": _map("A", _rules(), 加速符=2),
+                "B": _map("B", _rules(), 加速符=1)}
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def test_broken_entry_excludes_known_team(self):
+        result = _plan(self._two_teams(_store()), self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": "broken"})
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertEqual(result["inputs"]["active_expeditions"]
+                         ["unknown_state_teams"], [2])
+        self.assertTrue(any("结构损坏" in w for w in result["warnings"]))
+
+    def test_invalid_team_key_degrades_without_fabricating(self):
+        result = _plan(self._two_teams(_store()), self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"x": _active_record("A")})
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("无法识别的队伍键" in w
+                            for w in result["warnings"]))
+        # 不伪造队号：unknown_state/active 里都没有 x
+        active = result["inputs"]["active_expeditions"]
+        self.assertEqual(active["active_teams"], [])
+        self.assertEqual(active["unknown_state_teams"], [])
+
+    def test_non_finite_and_bool_duration_are_unknown_end(self):
+        for bad_duration in (float("nan"), float("inf"), True):
+            rec = _active_record("A")
+            rec["duration_min"] = bad_duration
+            result = _plan(self._two_teams(_store()), self._maps(),
+                           self._facts(), allow_all_teams_away=True,
+                           active_expeditions={"2": rec})
+            self.assertEqual(result["inputs"]["active_expeditions"]
+                             ["unknown_state_teams"], [2])
+            self.assertEqual([a["team_no"]
+                              for a in result["plan"]["assignments"]], [1])
+
+    def test_unhashable_map_code_is_unknown_location_not_crash(self):
+        rec = _active_record("A")
+        rec["map_code"] = ["A"]  # 不可哈希：按地点未知处理
+        result = _plan(self._two_teams(_store()), self._maps(), self._facts(),
+                       allow_all_teams_away=True,
+                       active_expeditions={"2": rec})
+        self.assertEqual(result["plan"]["confidence"], "needs_confirmation")
+        self.assertTrue(any("占用地点未知" in w for w in result["warnings"]))
+        self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
+                         [1])
+
+
 if __name__ == "__main__":
     unittest.main()
