@@ -170,12 +170,14 @@ class NavigationMixin:
 
     # ==================== 导航流程 ====================
 
-    def _open_menu(self, max_attempts: int = 10) -> bool:
+    def _open_menu(self, max_attempts: int = 10, settle_seen: list = None) -> bool:
         """
         循环点击目录按钮，直到菜单展开
 
         Args:
             max_attempts: 最大尝试次数
+            settle_seen: 已记账远征结算屏的像素指纹列表（救援分支和主循环
+                         共用，防止同一屏记两次）；None 时内部新建
 
         Returns:
             是否成功打开菜单
@@ -189,6 +191,8 @@ class NavigationMixin:
 
         attempt = 0
         loading_waits = 0
+        if settle_seen is None:
+            settle_seen = []
         # 加载等待按「次」数不按墙钟：固定 1.5s 一拍，次数上限 = 耐心/拍长。
         # （Windows 的 time.monotonic 粒度十几毫秒，测试里快转会永远不够耐心值）
         max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 1.5))
@@ -224,12 +228,23 @@ class NavigationMixin:
             if self.maa.exists("目录.png", threshold=0.7):
                 self._click_template_config(common_config)
             else:
-                close_pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
-                if close_pt:
-                    print("[NAV] 发现全屏界面/弹窗，点关闭")
-                    self.maa.click(close_pt)
-                else:
+                # 远征结算屏会盖住目录按钮：归来收益先照实记账再点过，
+                # 不许盲点跳过把账点没了（收尾回本丸常在这里撞见归来结算）
+                obs = None
+                if hasattr(self, "observe_expedition_settlement"):
+                    obs = self.observe_expedition_settlement(
+                        via="open_menu", seen=settle_seen)
+                if obs is not None:
+                    if obs.get("new"):
+                        print("[NAV] 远征结算屏挡路，照实记账后点过")
                     self.maa.click(Point(993, 690))
+                else:
+                    close_pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
+                    if close_pt:
+                        print("[NAV] 发现全屏界面/弹窗，点关闭")
+                        self.maa.click(close_pt)
+                    else:
+                        self.maa.click(Point(993, 690))
             time.sleep(0.8)
 
         print("[NAV] 目录始终未展开")
@@ -407,12 +422,19 @@ class NavigationMixin:
                         self.maa.click(close_pt)
                         time.sleep(1.0)
                     elif not self.maa.exists("menu/ui目录.png"):
-                        # 菜单都不见了：多半被动画/结算顶走了，推一把再重新开菜单
+                        # 菜单都不见了：多半被动画/结算顶走了。远征结算屏先记账
+                        # 再推，seen 传给 _open_menu 防止同一屏记两次
+                        rescue_seen = []
+                        if hasattr(self, "observe_expedition_settlement"):
+                            obs = self.observe_expedition_settlement(
+                                via="open_menu", seen=rescue_seen)
+                            if obs is not None and obs.get("new"):
+                                yield "[NAV] 救援：远征结算屏挡路，照实记账后点过"
                         yield "[NAV] 救援：界面被顶走，点跳过点推一把"
                         self.maa.click(Point(993, 690))
                         time.sleep(1.0)
                         self.current_location = None
-                        if not self._open_menu():
+                        if not self._open_menu(settle_seen=rescue_seen):
                             yield "[NAV] 救援后目录仍打不开，导航失败"
                             return
                 else:

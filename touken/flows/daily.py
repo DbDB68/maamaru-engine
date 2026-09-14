@@ -599,6 +599,7 @@ class DailyMixin:
         """
         clean = 0
         claimed_signin = False  # 启动签到奖励每轮扫地最多领一次（领完按钮变灰，字还在，别空点死循环）
+        settle_seen = []      # 本轮已记账远征结算屏的像素指纹（同一屏只记一次）
         for _ in range(max_rounds):
             self.maa.screenshot(force=True)
             acted = False
@@ -675,6 +676,23 @@ class DailyMixin:
                 time.sleep(2.0)
                 clean = 0
                 continue
+            # 远征结算屏：归来部队的收益先照实记账再点过（认不出记 unknown），
+            # 不许盲点跳动画把账点没了——冤案二号之后扫地本来就负责收这块屏
+            if hasattr(self, "observe_expedition_settlement"):
+                obs = self.observe_expedition_settlement(via="popup_sweep",
+                                                         seen=settle_seen)
+                if obs is not None:
+                    if obs.get("new"):
+                        who = (f"部队{obs['team_no']}" if obs.get("team_no")
+                               else "未知部队")
+                        print(f"[扫地] 远征结算屏：{who} 从 "
+                              f"{obs.get('header') or '未知地图'} 回来"
+                              f"（结果{obs.get('result') or 'unknown'}），"
+                              f"照实记账，点过")
+                    self.maa.click(Point(993, 690))
+                    clean = 0
+                    time.sleep(1.5)
+                    continue
             if self.maa.exists("目录.png", threshold=0.7):
                 clean += 1
                 if clean >= 2:

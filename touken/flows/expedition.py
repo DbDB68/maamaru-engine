@@ -25,6 +25,8 @@ import re
 import time
 from pathlib import Path
 
+import numpy as np
+
 from ..runtime_paths import STATUS_DIR
 
 from ..maa_adapter import roi_4to4
@@ -301,41 +303,41 @@ class ExpeditionMixin:
         settlements = []     # 每份结算的归来信息（第几部队、哪张图）
         home_streak = 0      # 连续看到本丸的次数
         unknown_streak = 0   # 连续认不出画面的次数
+        settle_seen = []     # 本轮已记账结算屏的像素指纹（同一屏没翻动不重复记）
         time.sleep(2.0)      # 等归来动画冒出来
 
         for _ in range(30):  # 安全上限
             self.maa.screenshot(force=True)
 
-            # 结算界面 → 先读归来信息，再点一下翻页
+            # 结算界面 → 观察哨读账记账（认不出记 unknown），再点一下翻页
+            obs = None
             if self.maa.ocr(expected=title_ocr["expected"], roi=title_roi):
+                obs = self.observe_expedition_settlement(
+                    via="collect", seen=settle_seen, sequence=collected + 1)
+            if obs is not None:
+                if not obs["new"]:
+                    # 同一屏没翻动（转场慢半拍），再点一下，不重复记账
+                    self._click_point(tap)
+                    time.sleep(1.2)
+                    continue
                 collected += 1
-                info = self._read_settlement_info(cfg)
-                rewards, result = self._read_settlement_rewards(cfg)
-                if hasattr(self, "record_event"):
-                    self.record_event("expedition.settled", sequence=collected,
-                                      result=result, rewards=rewards, **info)
-                    for resource, amount in rewards.items():
-                        self.record_event(
-                            "resource.change",
-                            resource=resource,
-                            delta=amount,
-                            source="expedition.settlement",
-                            attribution="confirmed",
-                            evidence="settlement_ocr",
-                            note=(info["header"] or info["map_name"]
-                                  or f"第{collected}份远征结算"),
-                            settlement_sequence=collected,
-                            team_no=info["team_no"],
-                            result=result,
-                        )
-                if info["team_no"]:
-                    settlements.append(info)
-                    # 这支队回来了，派遣记录销掉
-                    rec = _load_exp_record()
-                    if rec.pop(str(info["team_no"]), None) is not None:
-                        _save_exp_record(rec)
+                if obs["team_no"]:
+                    settlements.append(obs)
+                    bits = []
+                    if obs["result"] == "失败":
+                        bits.append("游戏判定「失败」，不是翻车，照实记账")
+                    elif obs["result"] == "unknown":
+                        bits.append("结果字样没看清，记 unknown")
+                    unk = [r for r, s in obs["rewards_status"].items()
+                           if s == "unknown"]
+                    if unk:
+                        bits.append(f"{'、'.join(unk)}的数字没看清，记 unknown")
+                    if obs["special_status"] == "unknown":
+                        bits.append("道具栏有内容认不出，记 unknown")
+                    tail = f"（{'；'.join(bits)}）" if bits else ""
                     yield (f"[收菜] 远征结果结算（第{collected}份）："
-                           f"部队{info['team_no']} 从 {info['header'] or '未知地图'} 回来")
+                           f"部队{obs['team_no']} 从 {obs['header'] or '未知地图'} "
+                           f"回来{tail}")
                 else:
                     yield f"[收菜] 远征结果结算（第{collected}份），翻页"
                 self._click_point(tap)
@@ -431,15 +433,139 @@ class ExpeditionMixin:
                 return True
         return False
 
-    def _read_settlement_rewards(self, cfg) -> tuple[dict, str | None]:
-        """读取结算页四行基础资源；任何一行没读清就只跳过该行。"""
+    # ==================== 结算观察哨（收菜/扫地/导航共用） ====================
+
+    def observe_expedition_settlement(self, via: str, seen: list = None,
+                                      sequence: int = None) -> dict | None:
+        """
+        远征结算屏观察哨。当前画面是「远征结果」结算屏时，把能读的事实全部
+        读下来并照实记账，返回观察记录；不是结算屏返回 None。
+
+        诚实契约：认不清的一律记 unknown——结果字样读不出不会默认成「成功」，
+        资源行读不出不会默认成「没给」，道具栏有内容认不出不会默认成「空」。
+
+        只观察、不点击——翻页/跳过永远是调用方的动作。
+        seen 是调用方（一轮收菜/扫地/导航）持有的像素指纹列表：同一屏没翻动
+        时凭指纹只记一次账；不同队伍的结算「第X部队」字样必然不同，OCR 全灭
+        也分得开屏。via 写进事件 payload 区分观察来源（collect/popup_sweep/
+        open_menu）。
+        """
+        cfg = self.config.get("expedition", {})
+        title_ocr = cfg.get("result_title_ocr")
+        if not title_ocr or not cfg.get("settlement_team_roi"):
+            return None
+
+        title_roi = roi_4to4(*title_ocr["roi"])
+        img = self.maa.screenshot(force=True)
+        if img is None or not self.maa.ocr(expected=title_ocr["expected"],
+                                           roi=title_roi):
+            return None
+        # 转场半途保护：标题连看两帧都在才读账，防止读进翻页动画里
+        time.sleep(0.4)
+        img = self.maa.screenshot(force=True)
+        if img is None or not self.maa.ocr(expected=title_ocr["expected"],
+                                           roi=title_roi):
+            return None
+
+        fingerprint = self._settlement_fingerprint(cfg, img)
+        if fingerprint and seen is not None:
+            for old in seen:
+                if self._fingerprint_same(old, fingerprint):
+                    return {"new": False}
+
+        info = self._read_settlement_info(cfg)
+        rewards, rewards_status, result = self._read_settlement_rewards(cfg)
+        special, special_status, special_ink = self._read_special_rewards(cfg, img)
+        obs = {"new": True, "via": via, "result": result,
+               "rewards": rewards, "rewards_status": rewards_status,
+               "special_rewards": special, "special_status": special_status,
+               **info}
+        if special_ink is not None:
+            obs["special_ink"] = special_ink
+
+        if hasattr(self, "record_event"):
+            payload = {k: v for k, v in obs.items() if k != "new"}
+            payload["sequence"] = sequence
+            self.record_event("expedition.settled", **payload)
+            note = (info["header"] or info["map_name"]
+                    or f"第{sequence}份远征结算")
+            for resource, amount in rewards.items():
+                self.record_event("resource.change", resource=resource,
+                                  delta=amount, source="expedition.settlement",
+                                  attribution="confirmed",
+                                  evidence="settlement_ocr", note=note,
+                                  settlement_sequence=sequence,
+                                  team_no=info["team_no"], result=result,
+                                  via=via)
+            for entry in special:
+                self.record_event("resource.change", resource=entry["name"],
+                                  delta=entry["amount"],
+                                  source="expedition.settlement",
+                                  attribution="confirmed",
+                                  evidence="settlement_special_ocr", note=note,
+                                  settlement_sequence=sequence,
+                                  team_no=info["team_no"], result=result,
+                                  via=via)
+        # 这支队回来了，派遣记录销掉（看板倒计时用）
+        if info["team_no"]:
+            try:
+                rec = _load_exp_record()
+                if rec.pop(str(info["team_no"]), None) is not None:
+                    _save_exp_record(rec)
+            except Exception:
+                pass
+        if fingerprint and seen is not None:
+            seen.append(fingerprint)
+        return obs
+
+    @staticmethod
+    def _settlement_fingerprint(cfg, img):
+        """结算屏像素指纹：「第X部队」标签区 + 各行资源数字区。
+        静止画面跨帧逐像素一致（2026-09 实测同屏三帧 meanabs=0.0）；
+        不同队伍回来「第X部队」字样必然不同，OCR 全灭也分得开屏。"""
+        regions = [cfg.get("settlement_team_roi")]
+        regions.extend((cfg.get("settlement_rewards", {})
+                        .get("resource_rois", {})).values())
+        crops = []
+        h, w = img.shape[:2]
+        for r in regions:
+            if not r or len(r) != 4:
+                continue
+            x1, y1, x2, y2 = (int(v) for v in r)
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            crops.append(np.ascontiguousarray(img[y1:y2, x1:x2]))
+        return tuple(crops) or None
+
+    @staticmethod
+    def _fingerprint_same(a, b) -> bool:
+        if len(a) != len(b):
+            return False
+        for ca, cb in zip(a, b):
+            if ca.shape != cb.shape:
+                return False
+            diff = np.abs(ca.astype(np.int16) - cb.astype(np.int16)).mean()
+            if float(diff) > 0.5:  # 同屏实测 0.0；换一个字远不止这个数
+                return False
+        return True
+
+    def _read_settlement_rewards(self, cfg) -> tuple[dict, dict, str]:
+        """
+        读结算页四行基础资源 + 结果字样。
+        返回 (rewards, rewards_status, result)：
+          rewards 只放 OCR 确认的正值；rewards_status 逐行 ok/zero/unknown
+          （一行没读清只影响该行，不猜数）；result ∈ 成功/大成功/失败/unknown，
+          读不清就是 unknown，绝不默认成成功。
+        """
         reward_cfg = cfg.get("settlement_rewards", {})
         resources = ("木炭", "玉钢", "冷却材", "砥石")
         fallback_rois = (
             [875, 470, 920, 525], [875, 520, 920, 575],
             [875, 570, 920, 625], [875, 620, 920, 680],
         )
-        rewards = {}
+        rewards, status = {}, {}
         ocr_all = getattr(self.maa, "ocr_all", None)
         if callable(ocr_all):
             for resource, fallback in zip(resources, fallback_rois):
@@ -447,16 +573,20 @@ class ExpeditionMixin:
                 try:
                     rows = ocr_all(roi_4to4(*roi)) or []
                 except Exception:
+                    status[resource] = "unknown"
                     continue
                 ordered = sorted(rows, key=lambda row: getattr(row[1], "x", 0))
                 digits = "".join(re.sub(r"\D", "", str(text))
                                  for text, _point in ordered)
-                if digits:
-                    amount = int(digits)
-                    if amount > 0:
-                        rewards[resource] = amount
+                if not digits:
+                    status[resource] = "unknown"
+                elif int(digits) > 0:
+                    rewards[resource] = int(digits)
+                    status[resource] = "ok"
+                else:
+                    status[resource] = "zero"
 
-        result = None
+        result = "unknown"
         result_cfg = reward_cfg.get("result", {})
         if callable(ocr_all):
             try:
@@ -465,11 +595,70 @@ class ExpeditionMixin:
                 result_text = "".join(str(text) for text, _point in rows)
                 if "大成功" in result_text:
                     result = "大成功"
+                elif "失败" in result_text:
+                    result = "失败"
                 elif "成功" in result_text:
                     result = "成功"
             except Exception:
                 pass
-        return rewards, result
+        return rewards, status, result
+
+    def _read_special_rewards(self, cfg, img) -> tuple[list, str, float | None]:
+        """
+        读「获得道具」栏（小判/委托符/加速符等特殊奖励）。
+        返回 (entries, status, ink)：
+          entries = [{"name": 资源名, "amount": 数量}]——图标模板命中 + 同行
+                    数量读出才算（templates 待真机道具栏取帧校准，未配则为空）
+          status: none（栏体墨水低于阈值，判空栏）/ ok（栏里内容全部认出）/
+                  unknown（栏里有内容但认不出，或读数失败——不猜）
+          ink: 栏体墨水占比实测值，写进事件供日后校准阈值和模板
+        """
+        special_cfg = cfg.get("settlement_rewards", {}).get("special_items", {})
+        col = special_cfg.get("column_roi")
+        if not col or img is None:
+            return [], "unknown", None
+        try:
+            x1, y1, x2, y2 = (int(v) for v in col)
+            gray = img[y1:y2, x1:x2].astype(np.float32).mean(axis=2)
+            ink = float((gray < 100).mean())
+        except Exception:
+            return [], "unknown", None
+        ink = round(ink, 4)
+
+        entries = []
+        col_roi = roi_4to4(*[int(v) for v in col])
+        for resource, tpl in special_cfg.get("templates", {}).items():
+            try:
+                pt = self.maa.template_match(tpl, roi=col_roi)
+            except Exception:
+                pt = None
+            if not pt:
+                continue
+            amount = self._read_special_amount(col_roi, pt)
+            if amount is None:
+                return entries, "unknown", ink
+            entries.append({"name": resource, "amount": amount})
+        if entries:
+            return entries, "ok", ink
+        if ink <= special_cfg.get("empty_ink_max", 0.16):
+            return [], "none", ink
+        return [], "unknown", ink
+
+    def _read_special_amount(self, col_roi, icon_pt):
+        """道具图标右侧同行的 ×数量；读不出返回 None（不猜）"""
+        try:
+            rows = self.maa.ocr_all(col_roi) or []
+        except Exception:
+            return None
+        best = None
+        for text, point in rows:
+            digits = re.sub(r"\D", "", str(text))
+            if not digits:
+                continue
+            dy = abs(getattr(point, "y", 0) - icon_pt.y)
+            if best is None or dy < best[0]:
+                best = (dy, int(digits))
+        return best[1] if best else None
 
     def _read_settlement_info(self, cfg) -> dict:
         """

@@ -139,6 +139,39 @@
 - 资源不摊到单圈：整轮库存差值、途中 `inventory.peek`、地图随机资源点仍归整轮
   任务，逐圈事件不带资源字段。
 
+## 远征结算观察（expedition.settled，2026-09 诚实契约补齐）
+
+结算屏观察哨是 `ExpeditionMixin.observe_expedition_settlement`，三条路径同口径：
+专用收菜流程（`via=collect`）、登录/收尾扫地（`via=popup_sweep`）、导航开目录被
+结算屏挡路（`via=open_menu`）。观察哨只读不点，翻页/跳过永远是调用方的动作。
+
+payload 契约：
+
+```json
+{"sequence": 1, "via": "collect", "team_no": 2, "era": 1, "slot": 1,
+ "map_name": "鸟羽·伏见之战", "header": "一-一 鸟羽·伏见之战",
+ "result": "大成功", "rewards": {"木炭": 15, "玉钢": 22},
+ "rewards_status": {"木炭": "ok", "玉钢": "ok", "冷却材": "zero", "砥石": "zero"},
+ "special_rewards": [], "special_status": "none", "special_ink": 0.0}
+```
+
+- `result` ∈ `成功` / `大成功` / `失败` / `unknown`——结果字样读不出就是
+  `unknown`，绝不默认成成功。
+- `rewards` 只放 OCR 确认的正值；`rewards_status` 逐行 `ok`/`zero`/`unknown`，
+  某行没读清只影响该行，unknown 行不进 `resource.change`（不猜金额）。
+- `special_rewards` 是「获得道具」栏（小判/委托符/加速符等）的已确认明细；
+  `special_status`：`none`（栏体墨水低于 `empty_ink_max`，判空栏）/
+  `ok`（栏内图标全部模板命中且数量读出）/ `unknown`（栏里有内容但认不出，
+  或读数失败）。`special_ink` 是墨水占比实测值，供日后校准阈值和图标模板。
+  道具图标模板（`settlement_rewards.special_items.templates`）待真机道具栏
+  取帧后校准；未配置时该栏只能判空或 unknown。
+- 同一屏去重靠像素指纹（「第X部队」标签区 + 各资源行数字区）：静止画面跨帧
+  逐像素一致（实测同屏三帧 meanabs=0.0），同一屏没翻动只记一次；不同队伍的
+  结算「第X部队」字样必然不同，OCR 全灭也分得开屏。指纹列表按观察轮次
+  （一次收菜/扫地/导航）持有，不跨轮复用。
+- 确认的收益仍逐笔写 `resource.change`（source `expedition.settlement`），
+  特殊道具用 evidence `settlement_special_ocr` 区分。
+
 ## 手动活动（manual-sessions）
 
 手动记录只保存玩法、圈数、起止时间和可选备注。服务端据此计算总用时与平均圈速，
@@ -251,7 +284,7 @@
 | 锻刀点火 | `forge.started` + `resource.change` | 已知配方 | 已覆盖四资源与委托符，已接统一入口 |
 | 手入 | `resource.change` | 确认页 OCR；加速符为已知操作 | 已覆盖；OCR 失败时明确记 unknown，不猜金额 |
 | 任务奖励 | `task_rewards.claimed` + `resource.change` | 奖励弹窗图标 + 数量 OCR | 已接统一入口；“完成远征 3 次”等任务确认会给加速符，现有模板覆盖四资源、委托符、小判，缺加速符模板；陌生图标或同种资源重复命中时不猜类别，并在本地 `debug/` 自动留取同源运行帧 |
-| 远征结算 | `expedition.settled` + `resource.change` | 结算页 OCR | 四项基础资源已覆盖；附带小判、委托符、加速符尚未逐笔识别 |
+| 远征结算 | `expedition.settled` + `resource.change` | 结算页 OCR | 四项基础资源逐行带 ok/zero/unknown 状态，读不清记 unknown 不猜数；结果字样 成功/大成功/失败/unknown；获得道具栏墨水判空 + 图标模板待校准，栏里有内容认不出记 unknown；收菜/扫地/导航三条路径同口径记账（via 字段区分），同一屏像素指纹去重 |
 | 刀解 | `dismantle.completed` + `resource.change` | 选择页四资源收益预览 OCR | 已覆盖；只在二次确认完成后落账，单项读不出时明确记 unknown，不猜数值 |
 | 异去补提灯 | `yosari.ticket_refilled` + `resource.change` | 购买页前后小判 | 读全时已覆盖；读不全只留补充事实，不猜金额 |
 | 江户城补手形 | `ticket.refilled` + `resource.change` | 当前活动固定 300 小判/张 | 已覆盖；v0.4.1 历史事实由兼容层回算 |

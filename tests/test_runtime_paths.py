@@ -212,6 +212,47 @@ class RuntimePathsTests(unittest.TestCase):
             self.assertEqual(merged["max_runs"], 2)
             self.assertEqual(merged["confirm_button"]["roi"], [536, 565, 742, 637])
 
+    def test_old_expedition_section_gets_special_items_filled(self):
+        """老安装的远征结算段没有 special_items（获得道具栏观察）：
+        递归补键必须补上，且不动用户已有的资源行 ROI。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = root / "program"
+            (bundle / "panel").mkdir(parents=True)
+            (bundle / "profiles").mkdir()
+            # 直接拿真实 example 当模板，保证测试跟着配置演进
+            real_example = Path(__file__).resolve().parent.parent / (
+                "touken_config.example.json")
+            example_cfg = json.loads(real_example.read_text(encoding="utf-8-sig"))
+            (bundle / "touken_config.example.json").write_text(
+                json.dumps(example_cfg, ensure_ascii=False), encoding="utf-8")
+            (bundle / "panel" / "panel_config.example.json").write_text('{}', encoding="utf-8")
+            (bundle / "panel" / "expedition_schedule.json").write_text('{}', encoding="utf-8")
+            data = root / "user-data"
+            (data / "config").mkdir(parents=True)
+            target = data / "config" / "touken.json"
+            # 模拟本次改动前的老 expedition 段：有四资源行 ROI，没道具栏观察
+            target.write_text(json.dumps({
+                "expedition": {
+                    "settlement_rewards": {
+                        "resource_rois": {"木炭": [870, 470, 920, 525]},
+                        "result": {"roi": [680, 35, 940, 150]},
+                    },
+                },
+            }, ensure_ascii=False), encoding="utf-8")
+
+            ensure_runtime_data(data, bundle, legacy_roots=[])
+
+            merged = json.loads(target.read_text(encoding="utf-8"))["expedition"]
+            special = merged["settlement_rewards"].get("special_items")
+            self.assertIsNotNone(special, "老安装没补到 special_items")
+            self.assertIn("column_roi", special)
+            self.assertIn("empty_ink_max", special)
+            # 用户已有的资源行 ROI 原样保留（递归补键不覆盖）
+            self.assertEqual(
+                merged["settlement_rewards"]["resource_rois"]["木炭"],
+                [870, 470, 920, 525])
+
     def test_v014_flat_user_directory_migrates_completely_and_is_repeatable(self):
         """Model the writable files produced beside data in the v0.1.4 release."""
         with tempfile.TemporaryDirectory() as tmp:
