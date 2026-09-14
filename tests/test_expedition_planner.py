@@ -1135,6 +1135,70 @@ class OccupiedMapsAreNotHoldoutTests(unittest.TestCase):
         self.assertIn("保留", staying["reason"])
 
 
+class WaitingOutcomeRelevanceTests(unittest.TestCase):
+    """极小修票：waiting 只在与活跃占图直接相关时使用。"""
+
+    def _facts(self):
+        return _facts(attendant={"sword_catalog_id": MAEDA, "form": "normal"})
+
+    def test_mixed_occupied_blocked_and_hard_failed_is_waiting(self):
+        # 精确反例：部队3 在 A；部队1 只满足 A（被占）→ occupied-only 阻塞；
+        # 部队2 对所有图纯硬失败 → 仍应 waiting 等部队3，而非 no_feasible
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近", level=50),
+                _row(KOGI, "小狐丸", level=1),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1, level=50)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", level=1)]})
+        maps = {"A": _map("A", _rules(total=30), 加速符=1),
+                "B": _map("B", _rules(total=999), 小判=100)}
+        result = _plan(profile, maps, self._facts(),
+                       active_expeditions={"3": _active_record("A")})
+        plan = result["plan"]
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(plan["outcome"], "waiting_for_active_expeditions")
+        self.assertEqual(plan["confidence"], "executable")
+        self.assertTrue(any("部队3" in e and "归来" in e
+                            for e in result["explanation"]))
+        # 两支家中队各自的原因都必须保留：部队1 是占图，部队2 是硬失败
+        reasons = {i["team_no"]: "；".join(i["reasons"])
+                   for i in result["infeasible"]}
+        self.assertIn("占用", reasons[1])
+        self.assertIn("硬条件", reasons[2])
+        self.assertNotIn("占用", reasons[2])
+
+    def test_irrelevant_occupied_map_with_pure_hard_fail_is_no_feasible(self):
+        # 活跃队占的是无关地图 X；家中队对 A/B 全部纯硬失败
+        # → 不能仅因 away 非空就 waiting
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近", level=1),
+                _row(KOGI, "小狐丸", level=1),
+                _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {
+            1: [_slot(1, level=1)],
+            2: [_slot(1, catalog_id=KOGI, name="小狐丸", level=1)]})
+        maps = {"A": _map("A", _rules(total=999)),
+                "B": _map("B", _rules(total=999))}
+        result = _plan(profile, maps, self._facts(),
+                       active_expeditions={"3": _active_record("X")})
+        plan = result["plan"]
+        self.assertEqual(plan["assignments"], [])
+        self.assertEqual(plan["outcome"], "no_feasible_assignment")
+        self.assertEqual(plan["confidence"], "infeasible")
+
+    def test_all_nonempty_observed_teams_away_is_waiting(self):
+        # 已观测非空队全在外面（roster 只有远征中的部队2）
+        store = _store()
+        rows = [_row(MIKA, "三日月宗近"), _row(MAEDA, "前田藤四郎")]
+        profile = _profile(store, rows, {2: [_slot(1)]})
+        result = _plan(profile, {"A": _map("A", _rules())}, self._facts(),
+                       active_expeditions={"2": _active_record("A")})
+        self.assertEqual(result["plan"]["assignments"], [])
+        self.assertEqual(result["plan"]["outcome"],
+                         "waiting_for_active_expeditions")
+
+
 class AmbiguousOccupancyReserveTests(unittest.TestCase):
     """修票二：修行/手入身份不清的多号机不能充当已确认留守。"""
 

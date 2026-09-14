@@ -40,6 +40,10 @@
   - 零派遣输出机器可读 outcome：assigned / intentionally_staying_home /
     waiting_for_active_expeditions / no_feasible_assignment（infeasible），
     状态未知一律 needs_confirmation，不把「全体留守」当万能成功。
+    waiting 优先级：仅当某队原本满足硬条件的图被活跃占图全部占掉
+    （occupied_blocked_teams），或已观测非空队全部在外面；家中队
+    纯硬失败/无可用图不算等待。waiting 表示本卷下一步动作，各队
+    具体原因仍留在 per-team infeasible。
 """
 
 import time
@@ -792,7 +796,6 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     candidate_teams = []   # rec + options/rejections
     infeasible = []
     staying_nonempty = []  # 确认非空但不远征的队（空队/未观测/在外不算）
-    map_failed_teams = []  # 非空、未拦截、但所有图硬条件都过不了
     for rec in teams_out:
         team = rec["team"]
         team_no = team["team_no"]
@@ -815,7 +818,6 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
             infeasible.append({"team_no": team_no, "reasons": reasons,
                                "rejected_maps": rejections})
             staying_nonempty.append(team_no)
-            map_failed_teams.append(team_no)
             continue
         rec = {**rec, "team_no": team_no,
                "options": options, "rejections": rejections}
@@ -831,12 +833,16 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     holdout = None          # 默认保队时从可远征队里额外留下的那支
     holdout_reason = None
     free_candidates = []
+    occupied_blocked_teams = []  # 原本有满足硬条件的图、只因活跃占图而
+                                 # free_options 变空的队：零派遣与活跃
+                                 # 占图直接相关（区别于纯硬失败）
     for cand in candidate_teams:
         free = [o for o in cand["options"]
                 if o["map_code"] not in occupied_maps]
         if free:
             free_candidates.append({**cand, "free_options": free})
         else:
+            occupied_blocked_teams.append(cand["team_no"])
             infeasible.append({
                 "team_no": cand["team_no"],
                 "reasons": ["可去的远征图都在被远征中的队伍占用"
@@ -990,6 +996,11 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
                     + "）状态未知，不能算作留守")
 
     # ---- 零派遣原因：机器可读 outcome，不一律当成功 ----
+    # 优先级：主动留守 > 活跃占图导致可行选项归零（即使另有队硬失败）
+    # > 非空队全在外面 > 纯硬失败/无可用图。waiting 只表示「这卷的下一步
+    # 动作是等归来」，不代表每支队归来后都可行；各队原因留在 infeasible
+    home_nonempty = [rec["team"]["team_no"] for rec in teams_out
+                     if rec["members"]]
     if assignments:
         outcome = "assigned"
         plan_confidence = min((a["confidence"] for a in assignments),
@@ -997,7 +1008,17 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     elif holdout is not None:
         outcome = "intentionally_staying_home"
         plan_confidence = "executable"   # 方案 = 主动留守，本身可执行
-    elif away and not map_failed_teams:
+    elif occupied_blocked_teams:
+        outcome = "waiting_for_active_expeditions"
+        plan_confidence = "executable"   # 方案 = 等归来，本身可执行
+        explanation.append(
+            "没有新派遣："
+            + "、".join(f"部队{n}" for n in occupied_blocked_teams)
+            + " 原本满足硬条件的远征图都被正在远征的队伍占用；"
+            + "、".join(f"部队{w['team_no']}预计 {w['return_text']} 归来"
+                        for w in waiting_for)
+            + "，归来后可再评估")
+    elif away and not home_nonempty:
         outcome = "waiting_for_active_expeditions"
         plan_confidence = "executable"   # 方案 = 等归来，本身可执行
         explanation.append("没有新派遣是因为队伍正在远征："
