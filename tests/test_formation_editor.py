@@ -964,12 +964,14 @@ class ScrollbarEndEvidenceTests(unittest.TestCase):
 
     def test_thumb_one_page_short_of_bottom_is_not_sighted(self):
         # 真机反例 cal_page_28：离底一页的过渡帧底缘 685，内容仍在变，
-        # 只差 4px——容差必须紧到把它挡在门外
+        # 只差 4px——必须挡在门外
         self.assertFalse(self._sighted(self._frame(thumb=(582, 685))))
 
-    def test_thumb_two_px_off_bottom_still_sighted(self):
-        # 贴底容差边界：钳位读数恒定 689，687 以内仍认（抗 ±1px 量化抖动）
-        self.assertTrue(self._sighted(self._frame(thumb=(585, 687))))
+    def test_thumb_near_bottom_without_evidence_is_not_sighted(self):
+        # 真机证据只有「到底恒为 689」，没有任何 687/688 的抖动样本；
+        # 滑块 1~2px 就够藏一行姓名——零容差，差一点都不放行
+        self.assertFalse(self._sighted(self._frame(thumb=(585, 687))))
+        self.assertFalse(self._sighted(self._frame(thumb=(586, 688))))
 
     def test_track_without_thumb_is_not_sighted(self):
         self.assertFalse(self._sighted(self._frame(thumb=None)))
