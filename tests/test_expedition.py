@@ -432,6 +432,23 @@ class SpecialUnknownSampleTests(unittest.TestCase):
         self.assertEqual(second, {"new": False})
         self.assertEqual(len(maa.saved), 1)
 
+    def test_same_second_same_via_different_screens_never_collide(self):
+        """冻结在同一秒 + via 相同 + sequence=None：两张不同的新结算屏
+        必须拿到不同保存路径，谁也不覆盖谁。"""
+        frame2 = self._unknown_frame()
+        frame2[30:60, 30:100] = 50  # 换了一队的另一张结算屏
+        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(maa)
+        seen = []
+        with patch("touken.flows.expedition.time.strftime",
+                   return_value="20260912-120000"):  # 同一秒
+            _observe(flow, seen, sequence=None)
+            maa.frame = frame2
+            _observe(flow, seen, sequence=None)
+        paths = [p for p, _f in maa.saved]
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(len(set(paths)), 2)
+
     def test_save_failure_does_not_break_observation(self):
         maa = _SettleMaa(self._unknown_frame(), _settle_texts(),
                          save_ok=False)

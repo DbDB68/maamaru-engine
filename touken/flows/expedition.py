@@ -661,9 +661,13 @@ class ExpeditionMixin:
             return False
         try:
             from ..runtime_paths import DEBUG_DIR
+            # 微秒级时间戳尾缀：扫地/导航路径 sequence=None（都落 s0），
+            # 同一秒两张不同结算屏也不许互相覆盖——样本攒一张是一张
+            now = time.time()
             target = DEBUG_DIR / "expedition" / (
                 f"settle-special-unknown-{via}-s{sequence or 0}-"
-                f"{time.strftime('%Y%m%d-%H%M%S')}.png")
+                f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}"
+                f"-{int(now * 1_000_000) % 1_000_000:06d}.png")
             target.parent.mkdir(parents=True, exist_ok=True)
             return bool(save(str(target), force=False))
         except Exception as exc:
