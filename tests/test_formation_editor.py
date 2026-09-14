@@ -99,6 +99,12 @@ class _FakeMaa:
 
     # ---- 识别 ----
 
+    def end_sighted(self):
+        """剧本末端视觉证据（滚动条到底）：当前页就是最后一页才为真——
+        与滑动是否被执行无关的绝对位置证据。"""
+        return bool(self.in_list and self.pages
+                    and self.list_page == len(self.pages) - 1)
+
     def screenshot(self, force=False):
         return None
 
@@ -213,6 +219,10 @@ class _EditorHost(FormationEditorMixin):
 
     def _formation_row_label(self, cy):
         return self.maa.current_tab
+
+    def _list_end_sighted(self):
+        """注入缝：剧本末端视觉证据（未来真机滚动条/末端标记通道的位置）。"""
+        return self.maa.end_sighted()
 
     def _parse_selection_rows(self, tokens):
         """注入缝：给行补上剧本里的形态证据（未来真机形态通道的位置）。"""
@@ -821,6 +831,36 @@ class BottomProofTests(unittest.TestCase):
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
+        _assert_never_departs(self, maa)
+
+    def test_probe_swipes_also_swallowed_cannot_fake_bottom(self):
+        """精确回归（老大第二轮反例）：吞第 2、3、5、7 次前滑——停滞触发
+        核验后的两次「探测滑」也恰好被吞。探测滑本身也可能被吞，「两轮
+        探测都没翻动」和「真到底」在指纹流上不可区分，没有独立末端证据
+        时只能 stalled，绝不 not_found。"""
+        pages = [self._full_page(0), self._full_page(1),
+                 self._full_page(2, rows=2)]
+        maa, host = _std_setup(pages=pages)
+        maa.swallow_forward = {2, 3, 5, 7}   # 吞停滞滑 + 两次探测滑
+        result = _run(host)
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(result["scan_status"], "stalled")
+        self.assertEqual(result["pages_scanned"], 2)
+        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        self.assertEqual(decide_clicks, [])
+        _assert_never_departs(self, maa)
+
+    def test_true_bottom_with_swallowed_probes_still_completes(self):
+        """反向钉死：真只有两页、目标不存在，且探测滑也被吞——独立末端
+        证据（当前位置就是末页）与「滑动是否被执行」无关，仍允许
+        complete 并裁决 not_found。缺了这条，反例修复就退化成
+        「永远 stalled」的过度收紧。"""
+        pages = [self._full_page(0), self._full_page(1, rows=3)]
+        maa, host = _std_setup(pages=pages)
+        maa.swallow_forward = {2, 3, 5, 7}
+        result = _run(host)
+        self.assertEqual(result["result"], NOT_FOUND)
+        self.assertEqual(result["pages_scanned"], 2)
         _assert_never_departs(self, maa)
 
     def test_blind_page_is_recognition_failure(self):
