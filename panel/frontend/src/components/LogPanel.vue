@@ -4,7 +4,7 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import UiIcon from './UiIcon.vue'
 
-const props = withDefaults(defineProps<{ running?: boolean; stopping?: boolean; taskLabel?: string }>(), { running: false, stopping: false, taskLabel: '' })
+const props = withDefaults(defineProps<{ running?: boolean; stopping?: boolean; taskLabel?: string; onlyScript?: string }>(), { running: false, stopping: false, taskLabel: '', onlyScript: '' })
 const runStatus = computed(() => props.stopping ? '正在停止…' : props.running ? `${props.taskLabel || '任务'}正在执行` : '空闲')
 
 const entries = ref<any[]>([])
@@ -17,7 +17,9 @@ const list = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
 let feedbackResetTimer = 0
 
-const visibleEntries = computed(() => entries.value.filter(entry => raw.value || !/^\[(?:NAV|ADB|MAA)\]/.test(entry.message)))
+const visibleEntries = computed(() => entries.value.filter(entry =>
+  (!props.onlyScript || entry.script === props.onlyScript)
+  && (raw.value || !/^\[(?:NAV|ADB|MAA)\]/.test(entry.message))))
 const feedbackLabel = computed(() => feedbackDisabled.value ? '狐之助已下班' : '反馈错误')
 const issueUrl = 'https://github.com/DbDB68/maamaru-engine/issues/new'
 const feedbackLines: Record<number, string> = {
@@ -36,7 +38,7 @@ const scriptNames: Record<string, string> = {
   daily: '一键日课', pumpkin: '南瓜', raid: '联队战', sortie: '合战场',
   yosari: '异去', osaka: '挖地', expedition: '远征', practice: '演练', smith: '锻刀',
   sakura: '刷花', sugar: '炼糖', repair: '手入', snapshot: '库存',
-  rotate_captain: '换队长',
+  rotate_captain: '换队长', formation: '编队换人',
   scheduler: '排班', system: '系统',
 }
 

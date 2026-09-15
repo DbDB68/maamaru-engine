@@ -27,6 +27,8 @@ from pathlib import Path
 
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
+from .team_roster import (load_flower_templates, match_badge_flowers,
+                          conclude_kiwame, norm_sword_type)
 
 # 置 MAAMARU_SWEEP_DEBUG=1 时，扫描把每页运行帧存到数据目录 debug/sweep/
 # （只写用户数据目录，不进仓库），用于事后核对"OCR 当时看到的是什么"
@@ -52,6 +54,32 @@ _STAT_SLOT_XS = (551, 603, 662, 716, 770, 827, 883, 936)
 _STAT_NAMES = ("生存", "打击", "防御", "机动", "冲力", "侦察", "隐蔽", "必杀")
 _LEVEL_PAT = r"\d{1,2}\s*级"
 _BAR_PAT = r"\d+/\d+"
+
+# 一览行首刀种徽章 ROI（相对行基线 _ROW_NAME_YS）：真机科研帧
+# （Maamaru-Dev debug/research/after_scan.png）三日月行徽章实测
+# x 168-225 / y 138-194（base_y=215），放宽余量定为 x 150-260、
+# y base_y-85 ~ base_y-12（避开下方名字行）
+_INV_BADGE_X = (150, 260)
+_INV_BADGE_DY = (-85, -12)
+
+# 一览页花数证据白名单：与编队页 _PROVEN_FLOWER_COMBOS 各自校准——
+# 模板同尺度（2026-09-15 after_scan 探针：五花太刀 0.837 达标），但证据
+# 必须来自一览同源运行帧，不跨页挪用。
+# 校准依据（2026-09-15 快照 #18，199 行真机帧 debug/sweep/ 全量复算）：
+# 入列组合满足 p10 分 ≥0.72 且确认刀种内次高区分度 p25 ≥0.08 且有零冲突
+# 正样本；与编队页直读真值按（刀+等级）交叉核对零矛盾（页 21 双 99 级
+# 长谷部一普一极、页 26 加州清光极/普对，眼见帧逐行复核）。
+# 结构不可靠、永久排除：短刀（1/2 花徽章只差一朵花瓣，margin p25≤0.08
+# 且 2 花样本 15/19 跨刀种冲突）、太刀 6 花（与 5 花 margin 0.006）、
+# 大太刀 4 花（p10 0.679）、枪 3/4 花（冲突或低分）、薙刀 3 花（唯一
+# 样本即冲突）、剑 5 花（p10 0.705）。未入列组合的行保持 unknown，
+# 原始观测照常落盘。
+_INV_PROVEN_FLOWER_COMBOS = frozenset({
+    ("打刀", 2), ("打刀", 3), ("打刀", 4),
+    ("太刀", 3), ("太刀", 4), ("太刀", 5),
+    ("胁差", 2), ("胁差", 3),
+    ("大太刀", 3), ("薙刀", 4), ("剑", 4), ("枪", 5),
+})
 
 # 图鉴（刀帐 tab）扫描参数
 _ALBUM_TAB_POINT = (20, 612)
@@ -206,7 +234,10 @@ def _parse_row(cells) -> dict | None:
 
 
 def _parse_kiwame(texts) -> str | None:
-    """极化「显现」块：年份（4 位数）+ 月/日（n/n），x 都在 1040 附近"""
+    """「显现」日期块：年份（4 位数）+ 月/日（n/n），x 都在 1040 附近。
+
+    历史名字叫 kiwame_date 是误命名（2026-09-15 P0）：这是每振刀都有
+    的获得/显现日期，不是极化日期，禁止拿去推普通/极化。"""
     year = day = None
     for x, y, t in sorted(texts, key=lambda c: (c[1], c[0])):  # 块从上往下读
         if x < 1020:
@@ -222,6 +253,34 @@ def parse_owned(text: str) -> tuple:
     """「196/200」→ (196, 200)；读不出返回 (None, None)"""
     m = re.search(r"(\d+)\s*/\s*(\d+)", text or "")
     return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+
+
+def read_row_form_fact(img, base_y, sword_id, templates, proven_combos):
+    """一览行徽章形态事实：同帧刀种+花数匹配 → 复用 team_roster 结论规则。
+
+    确认刀种与名册基线取自 sword_db（一览行名已过名册匹配，身份可靠）；
+    白樱花通道不在此页使用（编队页专属 ROI，未做一览同源校准）。
+    返回 form_fact dict：status（kiwame/normal/unknown）+ evidence（人读
+    字符串）+ badge（原始观测全保留：花数/分数/全局顶分）+ 名册基线，
+    随快照落盘；结论只认白名单内达标的正面证据，绝不默认普通/极化。
+    """
+    info = (sword_db.all_swords() or {}).get(sword_id) or {}
+    confirmed_type = norm_sword_type(info.get("type"))
+    rarity_base = info.get("rarity")
+    region = None
+    if img is not None and base_y:
+        y0, y1 = base_y + _INV_BADGE_DY[0], base_y + _INV_BADGE_DY[1]
+        x0, x1 = _INV_BADGE_X
+        if 0 <= y0 < y1 <= img.shape[0]:
+            region = img[y0:y1, x0:x1]
+    badge = match_badge_flowers(region, templates, confirmed_type,
+                                proven_combos)
+    status, evidence = conclude_kiwame(sword_id, rarity_base, badge)
+    return {"status": status,
+            "evidence": [str(e["raw_value"]) for e in evidence],
+            "badge": badge,
+            "rarity_base": rarity_base,
+            "sword_type": confirmed_type}
 
 
 def parse_album_tokens(tokens) -> list[dict]:
@@ -273,7 +332,7 @@ class SwordInventoryMixin:
     """刀帐盘点：只读扫描，全程不碰任何确认/消耗按钮"""
 
     def sword_inventory_stream(self):
-        """主入口：一览逐页扫描，每行一把刀（等级/乱舞/血条/属性/极化日期）"""
+        """主入口：一览逐页扫描，每行一把刀（等级/乱舞/血条/属性/显现日期）"""
         maa = self.maa
         # ── 1. 到本丸 → 进一览 ──
         if self.current_location != "本丸":
@@ -355,6 +414,8 @@ class SwordInventoryMixin:
                 parsed = parse_list_tokens(tokens)
             fail_rows_total += parsed["fail_rows"]
             self._retry_missing_levels(parsed["rows"])
+            # 同帧读行首徽章（刀种+花数）→ 形态事实随快照落盘
+            self._read_row_form_facts(img, parsed["rows"])
 
             new_names = []
             for row in parsed["rows"]:
@@ -418,6 +479,11 @@ class SwordInventoryMixin:
                    f"快照照记，但账本会标注缺口")
         elif owned:
             yield f"[刀帐] ✓ 对账平了：{len(all_rows)}/{owned} 把全认出"
+        form_ok = sum(1 for r in all_rows
+                      if (r.get("form_fact") or {}).get("status")
+                      in ("kiwame", "normal"))
+        yield (f"[刀帐] 形态确认 {form_ok}/{len(all_rows)} 振"
+               f"（未确认的存原始观测，证据随档案落盘）")
         snapshot_id = self.telemetry_save_swords(
             all_rows, owned=owned, capacity=capacity, missing=missing,
             source="owned_inventory")
@@ -478,6 +544,22 @@ class SwordInventoryMixin:
                + (f"（缺 {missing}）" if missing else ""))
 
     # ---- 内部零件 ----
+
+    def _read_row_form_facts(self, img, rows):
+        """逐行读徽章形态事实（与 OCR 同一帧），挂 row['form_fact'] 随落盘。
+
+        只处理身份已确认的行（名字过了名册匹配）；认不出的行没有确认
+        刀种，不产生花数证据（规则本体在 team_roster，结论冲突/证据
+        不足一律 unknown，原始观测照样落盘供审计与校准）。
+        """
+        templates = load_flower_templates(
+            getattr(self.maa, "resource_dir", "resource/base"))
+        for row in rows:
+            if not row.get("sword_id"):
+                continue
+            row["form_fact"] = read_row_form_fact(
+                img, row.get("_base_y"), row["sword_id"],
+                templates, _INV_PROVEN_FLOWER_COMBOS)
 
     def _retry_missing_levels(self, rows):
         """整列 OCR 偶发漏读等级：按行窄条单独重读"""

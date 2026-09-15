@@ -524,3 +524,98 @@ export interface Incident {
   last_seen: number
   count: number
 }
+
+// ---- 编队（当前本丸共用档案 /api/data/honmaru-profile）----
+
+export interface FormationCandidate {
+  observation_id: string
+  row_no: number | null
+  sword_catalog_id: string | null
+  same_team_exclusion_key: string | null
+  name_zh: string | null
+  level: number | null
+  tou_level: number | null
+  survival: number | null
+  survival_max: number | null
+  fatigue: number | null
+  fatigue_max: number | null
+  stats: Record<string, number>
+  /** 历史字段名，实际是「显现日期」（获得日期），每振都有，不是极化证据 */
+  kiwame_date: string | null
+  /** 形态结论：kiwame=极 / normal=普通 / ambiguous=有极化记录但分不清哪振 / unknown=未确认 */
+  form_status?: 'kiwame' | 'normal' | 'ambiguous' | 'unknown'
+  form_evidence?: string[]
+  locked: boolean | null
+  page_no: number | null
+  unknown_fields: string[]
+  observed_at: number | null
+  source_snapshot_id: number
+}
+
+export interface FormationCandidatePool {
+  done: boolean
+  reason?: string
+  completeness?: string
+  observed_at: number | null
+  owned?: number | null
+  entry_count?: number
+  entries: FormationCandidate[]
+  skipped_newer_snapshots?: Array<{ snapshot_id: number; captured_at: number | null; source: string; completeness: string }>
+}
+
+export interface FormationSlot {
+  slot: number | null
+  slot_status: string
+  link_status: string
+  observation_id: string | null
+  same_team_exclusion_key: string | null
+  candidate_ids: string[]
+  match_basis: string
+  link_reason: string | null
+  observed: {
+    name?: string | null
+    level?: number | null
+    kiwame_status?: string | null
+    slot_status?: string
+    [key: string]: unknown
+  }
+}
+
+export interface FormationTeam {
+  team_no: number
+  observation_status: string
+  observed_at: number | null
+  source_event_id: number | null
+  slots: FormationSlot[]
+}
+
+export interface HonmaruFormationProfile {
+  schema_version: number
+  generated_at: number
+  done?: boolean
+  error?: string
+  candidate_pool: FormationCandidatePool
+  roster: { teams: FormationTeam[] }
+}
+
+export type FormationSwapResult =
+  | 'changed' | 'already_correct' | 'ambiguous' | 'not_found'
+  | 'unavailable' | 'screen_unrecognized' | 'verification_failed'
+  | 'invalid_request'
+
+export interface FormationSwapEvent {
+  id: number
+  ts: number
+  run_id: string | null
+  script: string | null
+  event_type: string
+  payload: {
+    team_no: number
+    slot_no: number
+    result: FormationSwapResult
+    reason: string
+    target?: { name?: string; form?: string | null; level?: number | null }
+    candidates?: Array<{ name?: string | null; level?: number | null; fatigue?: number | null; unknown_fields?: string[] }>
+    missing_evidence?: string[]
+  }
+}

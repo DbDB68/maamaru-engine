@@ -11,8 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from touken.flows.sword_inventory import (  # noqa: E402
     _parse_row, _row_key, parse_album_tokens, parse_collected,
-    parse_list_tokens, parse_owned)
+    parse_list_tokens, parse_owned, read_row_form_fact)
+from touken.flows.team_roster import load_flower_templates  # noqa: E402
 from touken.telemetry import TelemetryStore  # noqa: E402
+
+HASEBE = "touken_118_heshikiri_hasebe"   # 压切长谷部（打刀，名册基线 2）
+HIGEKIRI = "touken_107_higekiri"         # 髭切（太刀，动态涨花例外）
 
 
 def _tok(text, x, y):
@@ -147,6 +151,87 @@ class ParseAlbumTests(unittest.TestCase):
         self.assertEqual(parse_collected("没读出来"), (None, None))
 
 
+class RowFormFactTests(unittest.TestCase):
+    """一览行徽章形态事实（read_row_form_fact）：合成帧 + 仓库真模板验证
+    白名单门禁与结论规则（规则本体与编队页同一套，team_roster）。
+
+    合成帧把模板原图贴进行 1（base_y=215）徽章位，匹配分必然接近 1.0，
+    专测「结论怎么走」，不测「真机能不能读出」——后者靠一览同源真帧
+    校准（_INV_PROVEN_FLOWER_COMBOS 注释里的流程）。"""
+
+    BASE_Y = 215  # _ROW_NAME_YS[0]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.templates = load_flower_templates("resource/base")
+        if not cls.templates:
+            raise unittest.SkipTest("缺刀种花数模板资源")
+
+    def _frame_with_badge(self, template_stem):
+        import cv2
+        import numpy as np
+        img = np.full((720, 1280, 3), 235, dtype=np.uint8)
+        for path, _flowers, _type in self.templates:
+            if path.stem == template_stem:
+                tpl = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8),
+                                   cv2.IMREAD_COLOR)
+                h, w = tpl.shape[:2]
+                img[138:138 + h, 168:168 + w] = tpl  # 行 1 徽章实测位置
+                return img
+        raise AssertionError(f"模板不存在 {template_stem}")
+
+    def test_normal_when_flowers_equal_base(self):
+        # 压切长谷部（打刀基线 2）+ 二花打刀徽章 → 普通
+        img = self._frame_with_badge("二花打刀")
+        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+                                  {("打刀", 2)})
+        self.assertEqual(fact["status"], "normal")
+        self.assertEqual(fact["badge"]["flowers"], 2)
+        self.assertEqual(fact["sword_type"], "打刀")
+        self.assertEqual(fact["rarity_base"], 2)
+        self.assertTrue(any("花数2/基线2" in e for e in fact["evidence"]))
+
+    def test_kiwame_when_flowers_above_base(self):
+        # 压切长谷部（基线 2）+ 三花打刀徽章 → 极化
+        img = self._frame_with_badge("三花打刀")
+        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+                                  {("打刀", 3)})
+        self.assertEqual(fact["status"], "kiwame")
+        self.assertEqual(fact["badge"]["flowers"], 3)
+
+    def test_unproven_combo_stays_unknown_but_keeps_raw_observation(self):
+        # 白名单外的达标匹配：不出结论，但原始观测（花数/分数）保留落盘
+        img = self._frame_with_badge("二花打刀")
+        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+                                  frozenset())
+        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["evidence"], [])
+        self.assertEqual(fact["badge"]["conclusion"], "unproven_combo")
+        self.assertEqual(fact["badge"]["observed_flowers"], 2)
+        self.assertGreaterEqual(fact["badge"]["observed_score"], 0.7)
+
+    def test_dynamic_flower_exception_never_concludes(self):
+        # 髭切/膝丸普通形态随特阶段涨花：花数>基线也不区分极化
+        img = self._frame_with_badge("三花太刀")
+        fact = read_row_form_fact(img, self.BASE_Y, HIGEKIRI, self.templates,
+                                  {("太刀", 3)})
+        self.assertEqual(fact["status"], "unknown")
+        self.assertTrue(any("花数3/基线2" in e for e in fact["evidence"]))
+
+    def test_no_frame_or_wrong_identity_gives_unknown(self):
+        # 截图失明：不出证据
+        fact = read_row_form_fact(None, self.BASE_Y, HASEBE, self.templates,
+                                  {("打刀", 2)})
+        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["badge"]["conclusion"], "low_score")
+        # 名册没有的身份：没有确认刀种，不产生花数证据
+        img = self._frame_with_badge("二花打刀")
+        fact = read_row_form_fact(img, self.BASE_Y, "touken_999_nobody",
+                                  self.templates, {("打刀", 2)})
+        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["badge"]["conclusion"], "no_confirmed_type")
+
+
 class SwordSnapshotStoreTests(unittest.TestCase):
     def _store(self):
         return TelemetryStore(Path(tempfile.mkdtemp()) / "telemetry.db")
@@ -198,6 +283,64 @@ class SwordSnapshotStoreTests(unittest.TestCase):
             "SELECT script FROM runs WHERE run_id='legacy_run'").fetchone()
         check.close()
         self.assertEqual(kept[0], "workflow")
+
+    def test_form_fact_roundtrip(self):
+        # 形态事实随快照落盘：存进去什么读出来什么
+        store = self._store()
+        fact = {"status": "kiwame", "evidence": ["花数3/基线2"],
+                "badge": {"flowers": 3, "score": 0.9,
+                          "conclusion": "recognized"},
+                "rarity_base": 2, "sword_type": "打刀"}
+        snapshot_id = store.save_sword_snapshot(
+            [{"sword_id": "touken_118_heshikiri_hasebe", "name_zh": "压切长谷部",
+              "form_fact": fact}], owned=1, capacity=300, missing=0)
+        row = store.sword_snapshot_detail(snapshot_id)["swords"][0]
+        self.assertEqual(row["form_fact"], fact)
+        # 没带形态事实的行落 NULL，读回 None
+        snapshot_id = store.save_sword_snapshot(
+            [{"sword_id": "album_003", "name_zh": "三日月宗近"}])
+        row = store.sword_snapshot_detail(snapshot_id)["swords"][0]
+        self.assertIsNone(row["form_fact"])
+
+    def test_legacy_rows_table_gets_form_fact_column(self):
+        # v10 时代的老库（行表无 form_fact）打开即补列；老行不丢、
+        # 形态事实为 None（不回填不猜测：老快照没看过徽章就是没有）
+        import sqlite3
+        db = Path(tempfile.mkdtemp()) / "telemetry.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE sword_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at REAL NOT NULL, owned INTEGER, capacity INTEGER,
+                sword_count INTEGER NOT NULL DEFAULT 0, missing INTEGER,
+                source TEXT, completeness TEXT);
+            CREATE TABLE sword_snapshot_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL, sword_id TEXT NOT NULL,
+                name_zh TEXT NOT NULL, level INTEGER, tou_level INTEGER,
+                survival INTEGER, survival_max INTEGER,
+                fatigue INTEGER, fatigue_max INTEGER,
+                stats TEXT NOT NULL DEFAULT '{}', kiwame_date TEXT,
+                locked INTEGER, page_no INTEGER);
+            INSERT INTO sword_snapshots(captured_at, owned, capacity,
+                sword_count, missing, source, completeness)
+                VALUES (100, 1, 300, 1, 0, 'owned_inventory', 'complete');
+            INSERT INTO sword_snapshot_rows(snapshot_id, sword_id, name_zh,
+                level, tou_level, survival, survival_max, fatigue, fatigue_max,
+                stats, kiwame_date, locked, page_no)
+                VALUES (1, 'touken_118_heshikiri_hasebe', '压切长谷部', 99, 1,
+                        50, 50, 100, 100, '{}', '2024-01-01', 1, 1);
+        """)
+        conn.commit()
+        conn.close()
+
+        store = TelemetryStore(db)  # 打开即迁移
+        detail = store.sword_snapshot_detail(1)
+        self.assertEqual(detail["swords"][0]["name_zh"], "压切长谷部")
+        self.assertIsNone(detail["swords"][0]["form_fact"])
+        cols = {r["name"] for r in store._conn().execute(
+            "PRAGMA table_info(sword_snapshot_rows)")}
+        self.assertIn("form_fact", cols)
 
 
 if __name__ == "__main__":

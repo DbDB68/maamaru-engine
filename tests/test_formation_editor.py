@@ -275,15 +275,26 @@ def _ok_row(y=300, **kw):
 class PureFunctionTests(unittest.TestCase):
 
     def test_normalize_target_from_pool_entry(self):
+        """反例钉死（2026-09-15 P0）：kiwame_date 是显现日期，每振都有，
+        永远推不出形态；form 只认显式 form 或档案 form_status 结论。"""
         entry = {"observation_id": "9:12", "sword_catalog_id": HASEBE,
                  "name_zh": "压切长谷部", "level": 35, "kiwame_date": None}
         tgt, err = normalize_target(entry)
         self.assertIsNone(err)
-        self.assertEqual(tgt["form"], "normal")       # 无显现日期 → 普通
-        entry["kiwame_date"] = "2024-01-01"
+        self.assertIsNone(tgt["form"])                # 无证据 → None
+        entry["kiwame_date"] = "2024-01-01"           # 显现日期 ≠ 极化
+        tgt, _ = normalize_target(entry)
+        self.assertIsNone(tgt["form"])                # 不许再推 kiwame
+        entry["form_status"] = "ambiguous"            # 分不清 → None
+        tgt, _ = normalize_target(entry)
+        self.assertIsNone(tgt["form"])
+        entry["form_status"] = "kiwame"               # 档案确认极 → kiwame
         tgt, _ = normalize_target(entry)
         self.assertEqual(tgt["form"], "kiwame")
-        bare = {"sword_catalog_id": HASEBE}           # 没给 kiwame_date 键
+        entry["form"] = "normal"                      # 显式 form 优先
+        tgt, _ = normalize_target(entry)
+        self.assertEqual(tgt["form"], "normal")
+        bare = {"sword_catalog_id": HASEBE}
         tgt, _ = normalize_target(bare)
         self.assertIsNone(tgt["form"])                # 不硬猜
         tgt, err = normalize_target({"level": 35})
@@ -470,9 +481,11 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(len(result["team_after"]), 6)
         self.assertIn((_DECIDE_X, 300 - 22), maa.clicks)
         self.assertEqual(maa.shell, "formation")   # 保持原入口上下文
-        ev = host.events[-1]
-        self.assertEqual(ev["event_type"], "formation.member_ensured")
+        ev = [e for e in host.events
+              if e["event_type"] == "formation.member_ensured"][-1]
         self.assertEqual(ev["payload"]["result"], CHANGED)
+        # 换后整队回读要落成新事实，本丸档案编队层只认这类事件
+        self.assertEqual(host.events[-1]["event_type"], "team_roster.observed")
         _assert_never_departs(self, maa)
 
     def test_team_select_shell_same_path(self):

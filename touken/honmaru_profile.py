@@ -73,6 +73,22 @@ def build_candidate_pool(store) -> dict:
             "skipped_newer_snapshots": skipped}
 
 
+def _stored_form_status(row: dict) -> str:
+    """落盘形态结论：只信 kiwame/normal 正面结论，其余一律 unknown。"""
+    fact = row.get("form_fact") or {}
+    status = fact.get("status")
+    return status if status in ("kiwame", "normal") else "unknown"
+
+
+def _stored_form_evidence(row: dict) -> list:
+    """落盘形态证据（仅正面结论附人读证据；unknown 不挂证据）。"""
+    if _stored_form_status(row) == "unknown":
+        return []
+    fact = row.get("form_fact") or {}
+    detail = "、".join(str(e) for e in fact.get("evidence") or [] if e)
+    return [f"刀帐盘点徽章直读（{detail}）" if detail else "刀帐盘点徽章直读"]
+
+
 def _pool_entry(row: dict, head: dict) -> dict:
     """一振一行。行身份 = snapshot_id:row_id（本次观察内有效）。"""
     unknown = []
@@ -83,6 +99,7 @@ def _pool_entry(row: dict, head: dict) -> dict:
             unknown.append(field)
     if not row.get("stats"):
         unknown.append("stats")
+    form_status = _stored_form_status(row)
     return {
         "observation_id": f"{head['id']}:{row['row_id']}",
         "row_no": row.get("row_id"),  # 行在库里的序号，仅配合 snapshot_id 使用
@@ -99,7 +116,14 @@ def _pool_entry(row: dict, head: dict) -> dict:
         "fatigue": row.get("fatigue"),
         "fatigue_max": row.get("fatigue_max"),
         "stats": row.get("stats") or {},
+        # 注意：这个字段历史名字叫 kiwame_date，实际读的是「显现日期」
+        # （获得日期），每振刀都有——绝不是极化证据，形态结论只看
+        # form_status/form_evidence（_annotate_form_conclusions 落）。
         "kiwame_date": row.get("kiwame_date"),
+        # 形态事实来自盘点快照落盘的 form_fact（一览行徽章刀种+花数同帧
+        # 观测，规则与编队页同一套）；老快照没有该列 → unknown，不猜。
+        "form_status": form_status,
+        "form_evidence": _stored_form_evidence(row),
         "locked": row.get("locked"),
         "page_no": row.get("page_no"),
         "unknown_fields": unknown,
@@ -214,14 +238,84 @@ def formation_conflicts(entries: list[dict]) -> list[dict]:
             for key, ids in groups.items() if len(ids) > 1]
 
 
+def _annotate_form_conclusions(entries: list[dict], roster: dict,
+                               store) -> None:
+    """候选形态结论（原地标注）。纪律与编队页同一套（team_roster）：
+    没有可靠证据就 unknown（前端显示「形态未确认」），绝不默认极/普通。
+
+    证据强弱三级：
+      1. 实例级（落盘）——一览盘点同帧徽章直读：刀种+花数 vs 名册基线，
+         结论随快照存在 form_fact，_pool_entry 已挂上；
+      2. 实例级（在线）——编队页槽位直读：该振被唯一链接到在队槽位，且槽位的
+         刀种+花数/白樱花通道给出了 kiwame/normal 结论 → 采用；与落盘结论
+         一致则证据叠加，冲突则降级 ambiguous（两处直读打架，存疑）；
+      3. 种级——刀帐图鉴「极」字标（只取正向命中，漏读/未扫不算反证）：
+         该刀种图鉴有极化记录，但分不清候选池里哪一振 → ambiguous。
+    """
+    if not entries:
+        return
+    by_oid = {e["observation_id"]: e for e in entries if e.get("observation_id")}
+    for team in (roster or {}).get("teams") or []:
+        for slot in team.get("slots") or []:
+            if slot.get("link_status") != "linked":
+                continue
+            entry = by_oid.get(slot.get("observation_id"))
+            if entry is None:
+                continue
+            ks = (slot.get("observed") or {}).get("kiwame_status")
+            if ks not in ("kiwame", "normal"):
+                continue
+            ev = (slot.get("observed") or {}).get("kiwame_evidence") or []
+            detail = "、".join(str(x.get("raw_value")) for x in ev
+                               if isinstance(x, dict) and x.get("raw_value"))
+            roster_ev = (f"编队页{team.get('team_no')}队{slot.get('slot')}号位直读"
+                         + (f"（{detail}）" if detail else ""))
+            prior = entry["form_status"]
+            if prior in ("kiwame", "normal"):
+                if prior == ks:
+                    # 两处直读一致：证据叠加
+                    entry["form_evidence"] = entry["form_evidence"] + [roster_ev]
+                else:
+                    # 盘点徽章与编队页直读打架：降级存疑，两条证据都摆出来
+                    entry["form_status"] = "ambiguous"
+                    entry["form_evidence"] = entry["form_evidence"] + [
+                        roster_ev, "两处直读结论冲突，分不清，存疑"]
+            else:
+                entry["form_status"] = ks
+                entry["form_evidence"] = [roster_ev]
+    marked = _album_kiwame_names(store)
+    for entry in entries:
+        if entry["form_status"] != "unknown":
+            continue
+        if entry.get("name_zh") and entry["name_zh"] in marked:
+            entry["form_status"] = "ambiguous"
+            entry["form_evidence"] = [
+                "刀帐图鉴有这振刀的极化记录，档案分不清是不是这一振"]
+
+
+def _album_kiwame_names(store) -> set:
+    """最新图鉴快照里带「极」字标的刀名集合（正向证据，异常即空集）。"""
+    try:
+        head = store.latest_sword_snapshot(source="album")
+        if not head:
+            return set()
+        detail = store.sword_snapshot_detail(head["id"]) or {}
+        return {row.get("name_zh") for row in detail.get("swords", [])
+                if (row.get("stats") or {}).get("极化") and row.get("name_zh")}
+    except Exception:
+        return set()
+
+
 def build_honmaru_profile(store) -> dict:
     """生成完整档案（纯函数，不写库）。"""
     pool = build_candidate_pool(store)
     entries = pool["entries"] if pool.get("done") else []
+    roster = build_roster(store, entries)
+    _annotate_form_conclusions(entries, roster, store)
     return {"schema_version": PROFILE_SCHEMA_VERSION,
             "generated_at": time.time(),
             "candidate_pool": pool,
-            "roster": build_roster(store, entries)}
+            "roster": roster}
 
 
 def get_honmaru_profile(store=None) -> dict:

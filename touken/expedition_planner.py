@@ -136,10 +136,12 @@ def normalize_goals(weights, resources) -> tuple[list[dict], list[str]]:
 # ---------------------------------------------------------------- 成员视图
 
 def _entry_form(entry: dict) -> str:
-    """盘点行的形态：有极化显现日期 → kiwame，否则 normal（名册语义：
-    显现块只有极化刀才有）。kiwame_date 缺失的证据强度记在 unknown_fields，
-    本版按 normal 处理并在降级说明里保留原始字段。"""
-    return "kiwame" if entry.get("kiwame_date") else "normal"
+    """盘点行的形态：只信形态证据链的 form_status（一览徽章直读/编队页
+    直读，规则见 team_roster）。历史版本曾拿 kiwame_date 推形态——那是
+    每振刀都有的「显现日期」，不是极化证据（2026-09-15 P0 拔毒）；
+    证据不足一律 unknown，宁可分组保守也不吃假身份。"""
+    status = entry.get("form_status")
+    return status if status in ("kiwame", "normal") else "unknown"
 
 
 def _entry_group(entry: dict):

@@ -17,8 +17,8 @@ import time
 import unittest
 from pathlib import Path
 
-from touken.expedition_planner import (SAKURA_FATIGUE_MIN, load_maps,
-                                       most_lacking_base_resource,
+from touken.expedition_planner import (SAKURA_FATIGUE_MIN, _entry_form,
+                                       load_maps, most_lacking_base_resource,
                                        normalize_goals, plan_expeditions)
 from touken.honmaru_profile import build_honmaru_profile
 from touken.telemetry import TelemetryStore
@@ -38,11 +38,18 @@ def _store() -> TelemetryStore:
     return TelemetryStore(Path(tempfile.mkdtemp()) / "telemetry.db")
 
 
+# 形态事实桩：形态结论只信落盘 form_fact（2026-09-15 P0 后 kiwame_date
+# 只是显现日期，不再推形态）；测试世界默认「普通已确认」，极化显式给桩
+_FACT_NORMAL = {"status": "normal", "evidence": ["测试桩：普通形态"]}
+_FACT_KIWAME = {"status": "kiwame", "evidence": ["测试桩：极化形态"]}
+
+
 def _row(catalog_id, name, **kw):
     row = {"sword_id": catalog_id, "name_zh": name, "level": 99,
            "tou_level": 1, "survival": 50, "survival_max": 50,
            "fatigue": 100, "fatigue_max": 100, "stats": {"打击": 55},
-           "kiwame_date": None, "locked": 1, "page_no": 1}
+           "kiwame_date": None, "locked": 1, "page_no": 1,
+           "form_fact": dict(_FACT_NORMAL)}
     row.update(kw)
     return row
 
@@ -228,7 +235,7 @@ class AttendantTests(unittest.TestCase):
     """工单第七节第三条：近侍只扣本人一振，多重集容量，不连坐。"""
 
     def _hasebe_pool(self, store, kiwame_copies, normal_copies):
-        rows = [_row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")
+        rows = [_row(HASEBE, "压切长谷部", form_fact=dict(_FACT_KIWAME))
                 for _ in range(kiwame_copies)]
         rows += [_row(HASEBE, "压切长谷部") for _ in range(normal_copies)]
         rows.append(_row(KOGI, "小狐丸"))
@@ -329,7 +336,7 @@ class ExclusionTests(unittest.TestCase):
         # 近侍是极化长谷部；另一队里的普通长谷部共享同一 exclusion key，
         # 但互斥键不得被拿来实现近侍限制——普通这振照常可派
         store = _store()
-        rows = [_row(HASEBE, "压切长谷部", kiwame_date="2024-01-01"),
+        rows = [_row(HASEBE, "压切长谷部", form_fact=dict(_FACT_KIWAME)),
                 _row(HASEBE, "压切长谷部")]
         profile = _profile(store, rows, {
             2: [_slot(1, catalog_id=HASEBE, name="压切长谷部",
@@ -384,7 +391,7 @@ class TeamReservationTests(unittest.TestCase):
         store = _store()
         rows = [_row(MIKA, "三日月宗近"), _row(KOGI, "小狐丸"),
                 _row(MAEDA, "前田藤四郎"),
-                _row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")]
+                _row(HASEBE, "压切长谷部", form_fact=dict(_FACT_KIWAME))]
         profile = _profile(store, rows, {
             1: [_slot(1)],
             2: [_slot(1, catalog_id=KOGI, name="小狐丸")],
@@ -402,7 +409,7 @@ class TeamReservationTests(unittest.TestCase):
         # 已有非空不可远征队（近侍队）留守 → 默认模式不再额外扣可远征队
         store = _store()
         rows = [_row(MIKA, "三日月宗近"),
-                _row(HASEBE, "压切长谷部", kiwame_date="2024-01-01")]
+                _row(HASEBE, "压切长谷部", form_fact=dict(_FACT_KIWAME))]
         profile = _profile(store, rows, {
             1: [_slot(1)],  # 可远征
             2: [_slot(1, catalog_id=HASEBE, name="压切长谷部",
@@ -1206,8 +1213,8 @@ class AmbiguousOccupancyReserveTests(unittest.TestCase):
         # 两振同型极化小狐丸；部队2 只能 ambiguous 链到这两振且等级低
         # （跑不了图，会留在家里）；部队1 健康可派
         rows = [_row(MIKA, "三日月宗近"),
-                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
-                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
+                _row(KOGI, "小狐丸", level=1, form_fact=dict(_FACT_KIWAME)),
+                _row(KOGI, "小狐丸", level=1, form_fact=dict(_FACT_KIWAME)),
                 _row(MAEDA, "前田藤四郎")]
         return _profile(store, rows, {
             1: [_slot(1)],
@@ -1254,7 +1261,7 @@ class AmbiguousOccupancyReserveTests(unittest.TestCase):
         # 形态证据足以证明当前槽位不是被占用者，不误拦留守资格
         store = _store()
         rows = [_row(MIKA, "三日月宗近"),
-                _row(KOGI, "小狐丸", level=1, kiwame_date="2024-01-01"),
+                _row(KOGI, "小狐丸", level=1, form_fact=dict(_FACT_KIWAME)),
                 _row(KOGI, "小狐丸", level=1),
                 _row(MAEDA, "前田藤四郎")]
         profile = _profile(store, rows, {
@@ -1332,6 +1339,23 @@ class BrokenActiveRecordTests(unittest.TestCase):
         self.assertTrue(any("占用地点未知" in w for w in result["warnings"]))
         self.assertEqual([a["team_no"] for a in result["plan"]["assignments"]],
                          [1])
+
+
+class EntryFormTests(unittest.TestCase):
+    """_entry_form 只信形态证据链 form_status（2026-09-15 P0 拔毒）：
+    kiwame_date 是每振刀都有的「显现日期」，永不当形态证据。"""
+
+    def test_manifest_date_alone_is_unknown(self):
+        # 旧版就是拿它把全库误判成 kiwame——反例钉死
+        entry = {"sword_catalog_id": MIKA, "kiwame_date": "2024-01-01"}
+        self.assertEqual(_entry_form(entry), "unknown")
+
+    def test_form_status_drives_form(self):
+        self.assertEqual(_entry_form({"form_status": "kiwame"}), "kiwame")
+        self.assertEqual(_entry_form({"form_status": "normal"}), "normal")
+        # 存疑/未确认/缺字段一律 unknown，宁可保守分组
+        self.assertEqual(_entry_form({"form_status": "ambiguous"}), "unknown")
+        self.assertEqual(_entry_form({}), "unknown")
 
 
 if __name__ == "__main__":

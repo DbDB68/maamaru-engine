@@ -424,5 +424,160 @@ class ProfileSkeletonTests(unittest.TestCase):
         self.assertIn("db gone", profile["error"])
 
 
+class FormConclusionTests(unittest.TestCase):
+    """候选形态结论（2026-09-15 P0 修正）：kiwame_date 是显现日期，
+    每振都有，永不当形态证据。结论只来自——实例级：一览盘点落盘的
+    徽章直读（刀种+花数 vs 名册基线）与编队页槽位直读（两处冲突降级
+    ambiguous）；种级：图鉴「极」字标（只正向，分不清哪振就 ambiguous）；
+    都没有 → unknown（前端显示「形态未确认」）。"""
+
+    HASEBE = "touken_118_heshikiri_hasebe"
+
+    def _profile(self, store):
+        return build_honmaru_profile(store)
+
+    def test_manifest_date_alone_proves_nothing(self):
+        """带显现日期（kiwame_date）的条目没有任何形态结论——反例，
+        旧版就是拿它把 185/196 振全误判成极。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=35,
+                 kiwame_date="2024-01-01")], captured_at=100)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "unknown")
+        self.assertEqual(entry["form_evidence"], [])
+
+    def test_roster_linked_slot_gives_instance_conclusion(self):
+        """实例级最强证据：唯一链接到在队槽位 + 槽位直读结论。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99)], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, catalog_id=self.HASEBE, name="压切长谷部",
+                  kiwame_status="kiwame",
+                  kiwame_evidence=[{"raw_value": "白樱花"}])], ts=200)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "kiwame")
+        self.assertTrue(any("编队页" in e for e in entry["form_evidence"]))
+        self.assertTrue(any("白樱花" in e for e in entry["form_evidence"]))
+
+    def test_roster_normal_conclusion_too(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99)], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, catalog_id=self.HASEBE, name="压切长谷部",
+                  kiwame_status="normal")], ts=200)
+        profile = self._profile(store)
+        self.assertEqual(profile["candidate_pool"]["entries"][0]
+                         ["form_status"], "normal")
+
+    def test_album_mark_without_instance_evidence_is_ambiguous(self):
+        """图鉴有极标但分不清哪一振 → ambiguous，不猜 kiwame。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99),
+            _row(self.HASEBE, "压切长谷部", level=35)], captured_at=100)
+        _owned_snapshot(store, [
+            {"sword_id": "album_118", "name_zh": "压切长谷部",
+             "stats": {"极化": True}}],
+            owned=204, missing=3, captured_at=300,
+            source="album")
+        profile = self._profile(store)
+        for entry in profile["candidate_pool"]["entries"]:
+            self.assertEqual(entry["form_status"], "ambiguous")
+            self.assertTrue(any("图鉴" in e for e in entry["form_evidence"]))
+
+    def test_unmarked_and_unseen_stays_unknown(self):
+        """图鉴没极标（或未扫过图鉴）又不是队里直读 → unknown。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row("touken_999_adana", "安宅切", level=99,
+                 kiwame_date="2026-7-29")], captured_at=100)
+        _owned_snapshot(store, [
+            {"sword_id": "album_118", "name_zh": "压切长谷部",
+             "stats": {"极化": True}}],
+            owned=204, missing=3, captured_at=300,
+            source="album")
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "unknown")  # 安宅切不再盖极章
+        self.assertEqual(entry["form_evidence"], [])
+
+    def test_roster_unknown_slot_does_not_downgrade(self):
+        """槽位直读 unknown 不算证据，落回种级/无证据路径。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99)], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, catalog_id=self.HASEBE, name="压切长谷部",
+                  kiwame_status="unknown")], ts=200)
+        profile = self._profile(store)
+        self.assertEqual(profile["candidate_pool"]["entries"][0]
+                         ["form_status"], "unknown")
+
+    def test_stored_badge_fact_gives_instance_conclusion(self):
+        """落盘形态事实（一览徽章直读，2026-09-15 收口）：实例级结论，
+        证据标来源；显现日期依旧零证据。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99,
+                 kiwame_date="2024-01-01",
+                 form_fact={"status": "kiwame",
+                            "evidence": ["花数3/基线2"]})], captured_at=100)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "kiwame")
+        self.assertTrue(any("刀帐盘点徽章直读" in e and "花数3/基线2" in e
+                            for e in entry["form_evidence"]))
+
+    def test_stored_fact_and_roster_agree_stacks_evidence(self):
+        """落盘结论与编队页直读一致 → 结论不变，证据叠加。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99,
+                 form_fact={"status": "normal",
+                            "evidence": ["花数2/基线2"]})], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, catalog_id=self.HASEBE, name="压切长谷部",
+                  kiwame_status="normal")], ts=200)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "normal")
+        self.assertTrue(any("刀帐盘点" in e for e in entry["form_evidence"]))
+        self.assertTrue(any("编队页" in e for e in entry["form_evidence"]))
+
+    def test_stored_fact_conflicting_roster_is_ambiguous(self):
+        """盘点徽章说普通、编队页直读说极化 → 两处打架，降级存疑。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99,
+                 form_fact={"status": "normal",
+                            "evidence": ["花数2/基线2"]})], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, catalog_id=self.HASEBE, name="压切长谷部",
+                  kiwame_status="kiwame",
+                  kiwame_evidence=[{"raw_value": "白樱花"}])], ts=200)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "ambiguous")
+        self.assertTrue(any("冲突" in e for e in entry["form_evidence"]))
+
+    def test_stored_unknown_fact_is_not_evidence(self):
+        """落盘 status=unknown（徽章没读出/白名单未覆盖）不挂证据。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99,
+                 form_fact={"status": "unknown", "evidence": [],
+                            "badge": {"conclusion": "unproven_combo"}})],
+            captured_at=100)
+        profile = self._profile(store)
+        entry = profile["candidate_pool"]["entries"][0]
+        self.assertEqual(entry["form_status"], "unknown")
+        self.assertEqual(entry["form_evidence"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

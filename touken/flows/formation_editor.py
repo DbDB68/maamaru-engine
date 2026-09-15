@@ -139,8 +139,11 @@ def normalize_target(target):
     """把候选池条目（或等价 dict）规范化成执行目标。
 
     必填身份：sword_catalog_id 或 name（能过名册校正）；observation_id
-    仅作档案引用随结果带回。form 缺省时按名册语义从 kiwame_date 推
-    （显现块只有极化刀才有）；调用方没给 kiwame_date 键则 form=None。
+    仅作档案引用随结果带回。form 只认两条来路：调用方显式给的
+    form（normal/kiwame），或档案候选条目的 form_status 结论
+    （ambiguous/unknown 一律落 None）。kiwame_date 是「显现日期」，
+    每振刀都有，永远不参与形态推断（2026-09-15 P0 修正：旧版拿它
+    推形态，把 185/196 振全误判成极）。
     Returns: (normalized, error)；error 非 None 表示输入不可用。
     """
     if not isinstance(target, dict):
@@ -156,10 +159,8 @@ def normalize_target(target):
         name = info.get("name_zh") or info.get("name")
     form = target.get("form")
     if form not in ("normal", "kiwame"):
-        if "kiwame_date" in target:
-            form = "kiwame" if target.get("kiwame_date") else "normal"
-        else:
-            form = None
+        status = target.get("form_status")
+        form = status if status in ("normal", "kiwame") else None
     out = {"observation_id": target.get("observation_id"),
            "sword_catalog_id": sid,
            "name": name,
@@ -918,6 +919,26 @@ class FormationEditorMixin:
                 self.record_event("formation.member_ensured", **payload)
             except Exception:
                 pass  # 记账失败不阻塞执行结果
+            # 换后事实刷新：验收通过（CHANGED/ALREADY_CORRECT）时把刚回读的
+            # 整队六槽落成 team_roster.observed。本丸档案的编队层
+            # （honmaru_profile.build_roster）只认这类事件——不补这条，
+            # 页面会一直显示旧成员，点"刷新档案"也救不回来。
+            # verification_failed 不落：那时队伍状态存疑，不拿存疑读数冒充事实。
+            team_after = extra.get("team_after")
+            if result in (CHANGED, ALREADY_CORRECT) and team_after:
+                try:
+                    observe = getattr(self, "_observation_status", None)
+                    status = observe(team_after) if observe else (
+                        "partial" if any(
+                            s.get("slot_status") == "unknown"
+                            or s.get("unknown_fields")
+                            for s in team_after) else "complete")
+                    self.record_event("team_roster.observed",
+                                      team_no=team_no, slots=team_after,
+                                      observation_status=status,
+                                      source="formation_editor")
+                except Exception:
+                    pass  # 记账失败不阻塞执行结果
         return out
 
 

@@ -123,6 +123,150 @@ def _norm_type(type_name: str):
     return _TYPE_NORMALIZE.get(type_name, type_name)
 
 
+# 公开别名：一览盘点（sword_inventory）等同包模块复用
+norm_sword_type = _norm_type
+
+_FLOWER_TEMPLATE_CACHE = {}
+
+
+def load_flower_templates(resource_dir):
+    """花数徽章模板 [(路径, 花数, 刀种枚举)]，按资源目录进程内缓存。
+
+    模板来自仓库既有版本资源（文件名自带刀种，如 五花太刀.png），
+    刀种统一规范化后供"确认刀种过滤"用。
+    """
+    key = str(resource_dir)
+    cached = _FLOWER_TEMPLATE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    folder = Path(resource_dir) / "image" / "刀种"
+    templates = []
+    for path in sorted(folder.glob("*.png")):
+        m = re.match(r"([一二三四五六])花(.+)", path.stem)
+        if m:
+            templates.append((path, _FLOWER_OF[m.group(1)],
+                              _norm_type(m.group(2))))
+    _FLOWER_TEMPLATE_CACHE[key] = templates
+    return templates
+
+
+def match_badge_flowers(region, templates, confirmed_type, proven_combos):
+    """徽章花数匹配核心（纯 cv2，编队页/一览共用同一套判定）。
+
+    region: 已裁好的徽章区域 BGR 图（None/空图 → low_score）；
+    confirmed_type: 确认刀种（名册优先，其次徽章字符），None 表示没有
+    确认刀种 → 不产生花数证据（no_confirmed_type），只留全局诊断分数；
+    proven_combos: 调用方所在页面的同源真帧校准白名单 (刀种, 花数)，
+    页面各自校准，不得跨页挪用。
+    返回 badge dict：flowers/score/threshold/top_type/top_score/conclusion。
+    """
+    import cv2
+    import numpy as np
+    badge = {"flowers": None, "score": None, "threshold": _BADGE_THRESHOLD,
+             "top_type": None, "top_score": None, "conclusion": "low_score"}
+    if region is None or region.size == 0 or not templates:
+        return badge
+    best = {"flowers": None, "score": 0.0, "type": None}
+    top = {"flowers": None, "score": 0.0, "type": None}
+    for path, flowers, tpl_type in templates:
+        raw = np.fromfile(str(path), dtype=np.uint8)
+        tpl = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+        if tpl is None:
+            continue
+        for scale in (0.9, 1.0, 1.1, 1.2, 1.3, 1.4):
+            t = cv2.resize(tpl, None, fx=scale, fy=scale)
+            if t.shape[0] > region.shape[0] or t.shape[1] > region.shape[1]:
+                continue
+            res = cv2.matchTemplate(region, t, cv2.TM_CCOEFF_NORMED)
+            _mn, mx, _mnl, _mxl = cv2.minMaxLoc(res)
+            if mx > top["score"]:
+                top.update(flowers=flowers, score=mx, type=tpl_type)
+            if (confirmed_type is None or tpl_type == confirmed_type) \
+                    and mx > best["score"]:
+                best.update(flowers=flowers, score=mx, type=tpl_type)
+    badge["top_type"] = top["type"]
+    badge["top_score"] = round(top["score"], 3)
+    # 原始观测（确认刀种过滤后的最佳花数/分数）不受阈值与白名单门禁影响，
+    # 始终落盘供审计与跨页校准；只有 flowers/score 是出过门禁的证据
+    badge["observed_flowers"] = best["flowers"] if best["type"] else None
+    badge["observed_score"] = round(best["score"], 3) if best["type"] else None
+    if confirmed_type is None:
+        badge["conclusion"] = "no_confirmed_type"
+        return badge
+    if top["type"] is not None and top["type"] != confirmed_type \
+            and top["score"] >= _BADGE_THRESHOLD \
+            and top["score"] > best["score"]:
+        # 全局最高分模板是另一个刀种：刀种冲突，花数证据作废
+        badge.update(flowers=None, score=round(top["score"], 3),
+                     conclusion="type_conflict")
+        return badge
+    if best["type"] == confirmed_type and best["score"] >= _BADGE_THRESHOLD:
+        if (confirmed_type, best["flowers"]) not in proven_combos:
+            # 该刀种×花数组合在本页面没有同源真帧达标记录：不出证据
+            badge["score"] = round(best["score"], 3)
+            badge["conclusion"] = "unproven_combo"
+            return badge
+        badge.update(flowers=best["flowers"], score=round(best["score"], 3),
+                     conclusion="recognized")
+    else:
+        badge["score"] = round(best["score"], 3)
+        badge["conclusion"] = "low_score"
+    return badge
+
+
+def conclude_kiwame(sid, rarity_base, badge, sakura_hit=False):
+    """极化结论：证据数组 + 单向结论，冲突 → unknown（编队页/一览共用）。
+
+    Returns:
+        (kiwame_status ∈ kiwame/normal/unknown, kiwame_evidence 数组)
+        数组每项 {type, raw_value, score, threshold, conclusion}，
+        保留每条证据的实测原值供以后审计。
+    """
+    evidence = []
+    if badge["conclusion"] == "type_conflict":
+        # 刀种冲突：花数证据不可参与极化结论
+        evidence.append({"type": "flower_type_conflict",
+                         "raw_value": f"冲突刀种={badge['top_type']}",
+                         "score": badge["score"],
+                         "threshold": _BADGE_THRESHOLD,
+                         "conclusion": "unknown"})
+    elif rarity_base is not None and badge["flowers"] is not None:
+        # 徽章证据：确认刀种下的花数 vs 名册基线
+        if sid in _DYNAMIC_FLOWER_EXCEPTIONS:
+            # 髭切/膝丸普通形态随特阶段涨花：徽章花数不区分极化
+            conclusion = "ambiguous_dynamic_flowers"
+        elif badge["flowers"] > rarity_base:
+            conclusion = "kiwame"
+        elif badge["flowers"] == rarity_base:
+            # normal 需正面、无遮挡且达标的徽章证据，不接受"没匹配到"
+            conclusion = "normal"
+        else:
+            conclusion = "flowers_below_base"
+        evidence.append({"type": "badge_flowers_vs_base",
+                         "raw_value": f"花数{badge['flowers']}/基线{rarity_base}",
+                         "score": badge["score"],
+                         "threshold": badge["threshold"],
+                         "conclusion": conclusion})
+    if sakura_hit:
+        # 白樱花（极化标记）可靠命中：直接证明 kiwame；
+        # 未命中不产生证据（可能被章遮挡或可见性波动，不反推 normal）
+        evidence.append({"type": "sakura_template",
+                         "raw_value": "白樱花",
+                         "score": None,
+                         "threshold": _SAKURA_THRESHOLD,
+                         "conclusion": "kiwame"})
+
+    # 单向结论：白樱花命中优先；徽章花数差其次；冲突/不足 → unknown
+    conclusions = {e["conclusion"] for e in evidence}
+    if "kiwame" in conclusions and "normal" in conclusions:
+        return "unknown", evidence  # 白樱花与徽章花数冲突
+    if "kiwame" in conclusions:
+        return "kiwame", evidence
+    if "normal" in conclusions:
+        return "normal", evidence
+    return "unknown", evidence
+
+
 def _parse_fatigue_tokens(tokens, y_min=None, y_max=None):
     """疲劳 = 疲劳行带（按 token 实际 y）内分母恰为 100 的配对。
 
@@ -507,21 +651,11 @@ class TeamRosterMixin:
         """花数徽章模板 [(路径, 花数, 刀种枚举)]，进程内缓存。
 
         模板来自仓库既有版本资源（文件名自带刀种，如 五花太刀.png），
-        刀种统一规范化后供"确认刀种过滤"用。
+        刀种统一规范化后供"确认刀种过滤"用。加载本体在模块级
+        load_flower_templates（一览盘点复用同一套模板库）。
         """
-        cached = getattr(self, "_flower_template_cache", None)
-        if cached is not None:
-            return cached
-        base = Path(getattr(self.maa, "resource_dir", "resource/base"))
-        folder = base / "image" / "刀种"
-        templates = []
-        for path in sorted(folder.glob("*.png")):
-            m = re.match(r"([一二三四五六])花(.+)", path.stem)
-            if m:
-                templates.append((path, _FLOWER_OF[m.group(1)],
-                                  _norm_type(m.group(2))))
-        self._flower_template_cache = templates
-        return templates
+        return load_flower_templates(
+            getattr(self.maa, "resource_dir", "resource/base"))
 
     def _match_slot_flowers(self, cy, badge, sword_type):
         """花瓣数量通道：在确认刀种的模板子集里匹配当前花数。
@@ -532,9 +666,8 @@ class TeamRosterMixin:
             匹配；全局最高分模板若是别的刀种且分数达标 → 刀种冲突作废；
           - 没有确认刀种（名字没认出+字符没读到）→ 不产生花数证据
             （no_confirmed_type），只留全局诊断分数。
+        匹配核心在模块级 match_badge_flowers（一览盘点复用同一套）。
         """
-        import cv2
-        import numpy as np
         char_type = badge["type"]
         if sword_type and char_type and sword_type != char_type:
             # 徽章字符与名册刀种不一致：花数证据不可参与极化结论
@@ -543,55 +676,13 @@ class TeamRosterMixin:
             return badge
         confirmed_type = sword_type or char_type
         img = self.maa.screenshot()
-        if img is None or not self._flower_templates():
-            badge["conclusion"] = "low_score"
-            return badge
-        x0, y0, x1, y1 = _shift(_BADGE_ROI, cy)
-        region = img[y0:y1, x0:x1]
-        if region.size == 0:
-            badge["conclusion"] = "low_score"
-            return badge
-        best = {"flowers": None, "score": 0.0, "type": None}
-        top = {"flowers": None, "score": 0.0, "type": None}
-        for path, flowers, tpl_type in self._flower_templates():
-            raw = np.fromfile(str(path), dtype=np.uint8)
-            tpl = cv2.imdecode(raw, cv2.IMREAD_COLOR)
-            if tpl is None:
-                continue
-            for scale in (0.9, 1.0, 1.1, 1.2, 1.3, 1.4):
-                t = cv2.resize(tpl, None, fx=scale, fy=scale)
-                if t.shape[0] > region.shape[0] or t.shape[1] > region.shape[1]:
-                    continue
-                res = cv2.matchTemplate(region, t, cv2.TM_CCOEFF_NORMED)
-                _mn, mx, _mnl, _mxl = cv2.minMaxLoc(res)
-                if mx > top["score"]:
-                    top.update(flowers=flowers, score=mx, type=tpl_type)
-                if (confirmed_type is None or tpl_type == confirmed_type) \
-                        and mx > best["score"]:
-                    best.update(flowers=flowers, score=mx, type=tpl_type)
-        badge["top_type"] = top["type"]
-        badge["top_score"] = round(top["score"], 3)
-        if confirmed_type is None:
-            badge["conclusion"] = "no_confirmed_type"
-            return badge
-        if top["type"] is not None and top["type"] != confirmed_type \
-                and top["score"] >= _BADGE_THRESHOLD \
-                and top["score"] > best["score"]:
-            # 全局最高分模板是另一个刀种：刀种冲突，花数证据作废
-            badge.update(flowers=None, score=round(top["score"], 3),
-                         conclusion="type_conflict")
-            return badge
-        if best["type"] == confirmed_type and best["score"] >= _BADGE_THRESHOLD:
-            if (confirmed_type, best["flowers"]) not in _PROVEN_FLOWER_COMBOS:
-                # 该刀种×花数组合没有编队页真帧达标记录：不出证据
-                badge["score"] = round(best["score"], 3)
-                badge["conclusion"] = "unproven_combo"
-                return badge
-            badge.update(flowers=best["flowers"], score=round(best["score"], 3),
-                         conclusion="recognized")
-        else:
-            badge["score"] = round(best["score"], 3)
-            badge["conclusion"] = "low_score"
+        region = None
+        if img is not None:
+            x0, y0, x1, y1 = _shift(_BADGE_ROI, cy)
+            region = img[y0:y1, x0:x1]
+        badge.update(match_badge_flowers(
+            region, self._flower_templates(), confirmed_type,
+            _PROVEN_FLOWER_COMBOS))
         return badge
 
     # ---------- 极化结论（分层单向证明） ----------
@@ -603,50 +694,10 @@ class TeamRosterMixin:
             (kiwame_status ∈ kiwame/normal/unknown, kiwame_evidence 数组)
             数组每项 {type, raw_value, score, threshold, conclusion}，
             保留每条证据的实测原值供以后审计。
+        injury 仅保留在签名里占位（伤势不参与形态结论）。
+        规则本体在模块级 conclude_kiwame（一览盘点复用同一套）。
         """
-        evidence = []
-        if badge["conclusion"] == "type_conflict":
-            # 刀种冲突：花数证据不可参与极化结论
-            evidence.append({"type": "flower_type_conflict",
-                             "raw_value": f"冲突刀种={badge['top_type']}",
-                             "score": badge["score"],
-                             "threshold": _BADGE_THRESHOLD,
-                             "conclusion": "unknown"})
-        elif rarity_base is not None and badge["flowers"] is not None:
-            # 徽章证据：确认刀种下的花数 vs 名册基线
-            if sid in _DYNAMIC_FLOWER_EXCEPTIONS:
-                # 髭切/膝丸普通形态随特阶段涨花：徽章花数不区分极化
-                conclusion = "ambiguous_dynamic_flowers"
-            elif badge["flowers"] > rarity_base:
-                conclusion = "kiwame"
-            elif badge["flowers"] == rarity_base:
-                # normal 需正面、无遮挡且达标的徽章证据，不接受"没匹配到"
-                conclusion = "normal"
-            else:
-                conclusion = "flowers_below_base"
-            evidence.append({"type": "badge_flowers_vs_base",
-                             "raw_value": f"花数{badge['flowers']}/基线{rarity_base}",
-                             "score": badge["score"],
-                             "threshold": badge["threshold"],
-                             "conclusion": conclusion})
-        if sakura_hit:
-            # 白樱花（极化标记）可靠命中：直接证明 kiwame；
-            # 未命中不产生证据（可能被章遮挡或可见性波动，不反推 normal）
-            evidence.append({"type": "sakura_template",
-                             "raw_value": "白樱花",
-                             "score": None,
-                             "threshold": _SAKURA_THRESHOLD,
-                             "conclusion": "kiwame"})
-
-        # 单向结论：白樱花命中优先；徽章花数差其次；冲突/不足 → unknown
-        conclusions = {e["conclusion"] for e in evidence}
-        if "kiwame" in conclusions and "normal" in conclusions:
-            return "unknown", evidence  # 白樱花与徽章花数冲突
-        if "kiwame" in conclusions:
-            return "kiwame", evidence
-        if "normal" in conclusions:
-            return "normal", evidence
-        return "unknown", evidence
+        return conclude_kiwame(sid, rarity_base, badge, sakura_hit)
 
     # ---------- 位置标签（切队正面确认） ----------
 

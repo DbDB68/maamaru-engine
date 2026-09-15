@@ -1,6 +1,7 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordInventoryResponse, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
+import type { FormationSwapEvent, HonmaruFormationProfile } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -31,11 +32,13 @@ export const api = {
   saveBackdrop: (backdrop: string) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backdrop }),
   }),
-  run: (script: string, params: ScriptParams) => request<{ ok: boolean; workflow?: WorkflowIdentity | null }>('/api/scripts/run', {
+  run: (script: string, params: ScriptParams) => request<{ ok: boolean; run_id?: string; workflow?: WorkflowIdentity | null }>('/api/scripts/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, params }),
   }),
+  honmaruProfile: () => request<HonmaruFormationProfile>('/api/data/honmaru-profile'),
+  formationEvents: (eventType: string, limit = 20, fromTs?: number) => request<{ schema_version: number; items: FormationSwapEvent[]; has_more: boolean }>(`/api/data/events?limit=${limit}&event_type=${encodeURIComponent(eventType)}${fromTs == null ? '' : `&from_ts=${fromTs}`}`),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
   homeLayout: () => request<HomeLayout>('/api/home-layout'),

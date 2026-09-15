@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 10
+TELEMETRY_SCHEMA_VERSION = 11
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -339,6 +339,14 @@ class TelemetryStore:
                 END
             ) WHERE completeness IS NULL
         """)
+        # v11 原地补列：一览盘点的行级形态事实（徽章刀种+花数观测与结论，
+        # JSON）。旧记录保持 NULL = 没有形态事实，不回填不猜测——形态结论
+        # 只能来自当次扫描的同帧观测，历史快照没看过徽章就是没有。
+        row_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(sword_snapshot_rows)").fetchall()}
+        if "form_fact" not in row_cols:
+            conn.execute(
+                "ALTER TABLE sword_snapshot_rows ADD COLUMN form_fact TEXT")
         conn.commit()
 
     def close(self) -> None:
@@ -894,14 +902,15 @@ class TelemetryStore:
         conn.executemany(
             "INSERT INTO sword_snapshot_rows(snapshot_id, sword_id, name_zh, level, "
             "tou_level, survival, survival_max, fatigue, fatigue_max, stats, "
-            "kiwame_date, locked, page_no) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "kiwame_date, locked, page_no, form_fact) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(snapshot_id, row["sword_id"], row["name_zh"],
               row.get("level"), row.get("tou_level"),
               row.get("survival"), row.get("survival_max"),
               row.get("fatigue"), row.get("fatigue_max"),
               _json(row.get("stats") or {}),
-              row.get("kiwame_date"), row.get("locked"), row.get("page_no"))
+              row.get("kiwame_date"), row.get("locked"), row.get("page_no"),
+              _json(row["form_fact"]) if row.get("form_fact") else None)
              for row in rows],
         )
         conn.commit()
@@ -950,12 +959,13 @@ class TelemetryStore:
         rows = self._conn().execute(
             "SELECT id AS row_id, sword_id, name_zh, level, tou_level, "
             "survival, survival_max, fatigue, fatigue_max, stats, kiwame_date, "
-            "locked, page_no "
+            "locked, page_no, form_fact "
             "FROM sword_snapshot_rows WHERE snapshot_id = ? ORDER BY id",
             (int(snapshot_id),),
         ).fetchall()
         out = dict(head)
-        out["swords"] = [{**dict(row), "stats": _loads(row["stats"], {})}
+        out["swords"] = [{**dict(row), "stats": _loads(row["stats"], {}),
+                          "form_fact": _loads(row["form_fact"], None)}
                          for row in rows]
         return out
 

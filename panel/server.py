@@ -792,6 +792,35 @@ def _build_simple(stream_method_name):
     return _run
 
 
+def _build_formation(agent, config_path, params):
+    """编队换人接线：把前端从本丸档案里选好的完整目标对象原样交给
+    共用编队执行器。匹配/翻页/同名裁决/换后验收全在
+    touken/flows/formation_editor.py，这层不做任何识别，
+    也不包装、不粉饰结果。
+
+    match_fields 为什么收窄成 ("name", "level")：刀剑男士选择列表没有
+    形态直读通道（行 form 恒 None）。档案条目的形态结论是独立的
+    form_status（kiwame_date 只是显现日期，不参与形态）；一旦某振
+    形态被档案确认，按默认 (name, form, level) 匹配就会因页面缺形态
+    证据一路 ambiguous 永远换不成。name+level 是列表真实可见、且
+    候选池完整档案必然携带的身份证据；同名同等级拉不开、或有读不清
+    的行，执行器照样安全拒绝，不在这条窄证据链上放水。"""
+    try:
+        team_no = int(params.get("team_no"))
+        slot_no = int(params.get("slot_no"))
+    except (TypeError, ValueError):
+        yield "[编队] 请求无效：部队或位置的编号不是数字，这次不换人"
+        return
+    target = params.get("target")
+    if not isinstance(target, dict) or not (
+            target.get("sword_catalog_id")
+            or target.get("name") or target.get("name_zh")):
+        yield "[编队] 请求无效：换人目标缺身份信息，这次不换人"
+        return
+    yield from agent.ensure_team_member_from_honmaru_stream(
+        team_no, slot_no, target, match_fields=("name", "level"))
+
+
 register_script("daily", "一键日课", "",
                  _build_daily_standalone,
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
@@ -1139,6 +1168,12 @@ register_script("snapshot", "库存快照",
 register_script("sword_inventory", "刀帐盘点",
                 "走进刀剑男士一览，逐页认出每把刀的等级、疲劳和属性记成快照；全程只看不点，怕漏会如实报缺口",
                 _wrap_inventory("刀帐盘点", _build_sword_inventory))
+# 编队换人由前端「编队」页选目标后直接 POST /api/scripts/run 触发，
+# target 是整支档案条目对象，任务表单画不出来，故对任务列表隐藏（仍可运行）。
+register_script("formation", "编队换人",
+                "把指定部队的指定位置换成本丸档案里选好的那振刀；换完逐项回读验收，认不准就如实说，不装成功",
+                _wrap_inventory("编队", _build_formation),
+                hidden=True)
 
 
 # ── 自定义工作流（乐高排班）──

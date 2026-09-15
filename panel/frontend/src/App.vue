@@ -9,6 +9,7 @@ import LogPanel from './components/LogPanel.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
+import FormationPanel from './components/FormationPanel.vue'
 import WorkflowPanel from './components/WorkflowPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
 import OverviewTaskCard from './components/OverviewTaskCard.vue'
@@ -532,6 +533,10 @@ watch(tab, value => {
             <span><img class="task-menu-icon" :src="taskIcon('workflow')" alt="">工作流</span>
           </SideNavItem>
         </template>
+        <h3>队伍</h3>
+        <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
+          <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
+        </SideNavItem>
         <h3>名单设置</h3>
         <SideNavItem :active="selected === '$repair-list'" @click="selected = '$repair-list'">
           <span><img class="task-menu-icon" :src="'/static/img/ui/repair-tools.png'" alt="">手入黑名单</span>
@@ -576,6 +581,7 @@ watch(tab, value => {
         </TaskForm>
         <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课已放进工作流</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
         <SchedulePanel v-else-if="selected === '$schedule'" embedded />
+        <FormationPanel v-else-if="selected === '$formation'" :running="running" :current="current" :stopping="stopping" @stop="stop" @notify="message = $event" />
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
         <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />

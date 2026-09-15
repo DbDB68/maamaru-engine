@@ -10,7 +10,8 @@
     "build": "vue-tsc -b panel/frontend/tsconfig.app.json && vite build --config panel/frontend/vite.config.mts",
     "typecheck": "vue-tsc -b panel/frontend/tsconfig.app.json",
     "check": "pnpm run typecheck",
-    "check:py": "python -m unittest discover -s tests -p test_*.py"
+    "check:py": "python -m unittest discover -s tests -p test_*.py",
+    "test:front": "vitest run"
   },
   "dependencies": {
     "@primeuix/themes": "1.2.5",
@@ -21,5 +22,8 @@
     "vite": "latest",
     "vue": "latest",
     "vue-tsc": "latest"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0"
   }
 }
