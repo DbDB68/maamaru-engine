@@ -124,6 +124,68 @@ class CaptureTests(unittest.TestCase):
         self.assertIsNotNone(img)
         self.assertEqual(img.shape, (4, 2, 3))
 
+    def _frozen_lib(self, state, w=2, h=2):
+        """帧内容随时可换的假 dll：state['frame'] 是当前吐的帧。"""
+        lib = mock.MagicMock()
+        lib.nemu_connect.return_value = 7
+
+        def capture(handle, display_id, buf_size, w_ptr, h_ptr, pixels):
+            wp = ctypes.cast(w_ptr, ctypes.POINTER(ctypes.c_int))
+            hp = ctypes.cast(h_ptr, ctypes.POINTER(ctypes.c_int))
+            if buf_size == 0:
+                wp.contents.value = w
+                hp.contents.value = h
+                return 0
+            data = state["frame"]
+            for i, b in enumerate(data):
+                pixels[i] = b
+            return 0
+
+        lib.nemu_capture_display.side_effect = capture
+        return lib
+
+    def test_frozen_channel_reconnects_then_recovers(self):
+        # 冻帧撞线 → 当次返回 None（调用方回退 ADB）；MuMu 复活后自动恢复
+        state = {"frame": bytes(4 * 2 * 2)}
+        channel = self._channel()
+        with mock.patch.object(mumu_screen.ctypes, "CDLL",
+                               return_value=self._frozen_lib(state)):
+            for _ in range(mumu_screen._STALE_LIMIT):
+                self.assertIsNotNone(channel.capture())
+            self.assertIsNone(channel.capture())  # 撞线，断开重连
+            self.assertFalse(channel._dead)
+            state["frame"] = bytes([1]) * (4 * 2 * 2)  # MuMu 复活，画面变了
+            self.assertIsNotNone(channel.capture())
+
+    def test_frozen_channel_dies_after_revive_fails(self):
+        # 重连后还是同一帧 → 本场判死，不再碰 dll
+        state = {"frame": bytes(4 * 2 * 2)}
+        channel = self._channel()
+        lib = self._frozen_lib(state)
+        with mock.patch.object(mumu_screen.ctypes, "CDLL", return_value=lib):
+            for _ in range(mumu_screen._STALE_LIMIT):
+                self.assertIsNotNone(channel.capture())
+            self.assertIsNone(channel.capture())  # 第一次撞线：重连
+            self.assertFalse(channel._dead)
+            for _ in range(mumu_screen._STALE_LIMIT - 1):
+                self.assertIsNotNone(channel.capture())
+            self.assertIsNone(channel.capture())  # 第二次撞线：判死
+            self.assertTrue(channel._dead)
+            lib.nemu_connect.reset_mock()
+            self.assertIsNone(channel.capture())
+            lib.nemu_connect.assert_not_called()
+
+    def test_live_frames_never_trigger_stale_detection(self):
+        # 帧 alternating 变化，撞不到冻帧线
+        state = {"frame": bytes(4 * 2 * 2)}
+        channel = self._channel()
+        with mock.patch.object(mumu_screen.ctypes, "CDLL",
+                               return_value=self._frozen_lib(state)):
+            for i in range(mumu_screen._STALE_LIMIT * 3):
+                state["frame"] = bytes([i % 256]) * (4 * 2 * 2)
+                self.assertIsNotNone(channel.capture())
+            self.assertFalse(channel._dead)
+
 
 if __name__ == "__main__":
     unittest.main()

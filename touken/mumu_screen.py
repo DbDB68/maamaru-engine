@@ -28,6 +28,10 @@ from typing import Optional
 _MAX_FAILURES = 3
 _DEFAULT_ADB_PORT = 16384  # MuMu 12：实例 N 的 ADB 端口 = 16384 + 32*N
 _PORT_STEP = 32
+# 连续这么多帧字节级一致 = 通道冻了。真静态画面（黑屏过场）误判了也无害：
+# 回退 ADB 截到的还是同一张静态图，只是慢一点。2026-09-17 现场：通道冻在
+# 公告弹窗帧上（dll 照样返回 rc=0），真实画面已在本丸，until_gone 死循环。
+_STALE_LIMIT = 10
 
 
 
@@ -58,6 +62,9 @@ class MumuScreen:
         self._buf_size = 0
         self._failures = 0
         self._dead = False
+        self._prev_frame = None
+        self._same_frames = 0
+        self._stale_revives = 0
 
     @classmethod
     def from_adb(cls, adb_path: str, adb_address: str) -> Optional["MumuScreen"]:
@@ -160,6 +167,32 @@ class MumuScreen:
             # RGBA → BGR（MAA 识别要 BGR），并垂直翻转（显存帧是倒的）
             bgr = np.ascontiguousarray(frame[::-1, :, [2, 1, 0]])
             self._failures = 0
+            # 冻帧检测：dll 缓冲区冻结时照样返回 rc=0 + 旧帧，表面一切正常。
+            # 字节级连撞 _STALE_LIMIT 次就断开重连；救过还冻就本场判死，
+            # 返回 None 让调用方回退 ADB 截图。
+            if self._prev_frame is not None and np.array_equal(bgr, self._prev_frame):
+                self._same_frames += 1
+                if self._same_frames >= _STALE_LIMIT:
+                    self._same_frames = 0
+                    self._stale_revives += 1
+                    if self._handle is not None:
+                        try:
+                            self._lib.nemu_disconnect(self._handle)
+                        except Exception:
+                            pass
+                        self._handle = None
+                    if self._stale_revives >= 2:
+                        _safe_print("[MuMu截图] 重连后仍是冻帧，本场停用显存通道，"
+                                    "退回 ADB 截图")
+                        self._dead = True
+                    else:
+                        _safe_print(f"[MuMu截图] 连续 {_STALE_LIMIT} 帧完全一致，"
+                                    "通道疑似冻帧，断开重连")
+                    return None
+            else:
+                self._same_frames = 0
+                self._stale_revives = 0
+            self._prev_frame = bgr
             return bgr
         except Exception as exc:
             _safe_print(f"[MuMu截图] 抓帧异常: {exc}")

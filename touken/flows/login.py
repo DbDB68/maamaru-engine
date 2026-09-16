@@ -237,7 +237,9 @@ class LoginMixin:
             print(f"\n[LOGIN] 执行: {step_name}")
 
             if step_config.get("repeat") == "until_gone":
-                while True:
+                # 上限 8 次：识别源冻帧时点一万次模板也不会消失（2026-09-17
+                # 显存通道冻帧死循环现场），宁可留残局给扫地，不许死磕。
+                for _ in range(8):
                     if "roi" in step_config:
                         roi_raw = step_config["roi"]
                         roi = roi_4to4(roi_raw[0], roi_raw[1], roi_raw[2], roi_raw[3])
@@ -248,6 +250,9 @@ class LoginMixin:
                         break
                     self._click_template_config(step_config)
                     time.sleep(0.5)
+                else:
+                    print(f"[LOGIN] {step_name} 连点 8 次还在，疑似识别源冻帧，"
+                          "跳过这步交给扫地")
             else:
                 self._click_template_config(step_config)
                 time.sleep(step_config.get("post_delay", 500) / 1000)
