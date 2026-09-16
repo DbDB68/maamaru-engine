@@ -204,6 +204,48 @@ class ResolveAdbAddressTests(unittest.TestCase):
                                         emit=lambda m: None),
                 "127.0.0.1:16384")
 
+    def test_mumu_standard_port_heals_typoed_config(self):
+        # 2026-09-17 现场：16384 被手滑改成 16385，窗口模式下没有 emulator-*，
+        # 必须能从 MuMu 标准端口自愈
+        emu, patches = self._run_with(
+            "List of devices attached\n",
+            alive=lambda a: a == "127.0.0.1:16384")
+        with patches:
+            self.assertEqual(
+                emu.resolve_adb_address("adb", "127.0.0.1:16385",
+                                        emit=lambda m: None, instance=0),
+                "127.0.0.1:16384")
+
+    def test_mumu_standard_port_respects_instance(self):
+        emu, patches = self._run_with(
+            "List of devices attached\n",
+            alive=lambda a: a == "127.0.0.1:16416")
+        with patches:
+            self.assertEqual(
+                emu.resolve_adb_address("adb", "127.0.0.1:16385",
+                                        emit=lambda m: None, instance=1),
+                "127.0.0.1:16416")
+
+    def test_single_registered_localhost_device_becomes_fallback(self):
+        emu, patches = self._run_with(
+            "List of devices attached\n127.0.0.1:16384\tdevice\n",
+            alive=lambda a: a == "127.0.0.1:16384")
+        with patches:
+            self.assertEqual(
+                emu.resolve_adb_address("adb", "127.0.0.1:7555",
+                                        emit=lambda m: None),
+                "127.0.0.1:16384")
+
+    def test_multiple_localhost_devices_never_guessed(self):
+        emu, patches = self._run_with(
+            "127.0.0.1:16384\tdevice\n127.0.0.1:21503\tdevice\n",
+            alive=lambda a: False)
+        with patches:
+            self.assertEqual(
+                emu.resolve_adb_address("adb", "127.0.0.1:7555",
+                                        emit=lambda m: None),
+                "127.0.0.1:7555")
+
 
 if __name__ == "__main__":
     unittest.main()
