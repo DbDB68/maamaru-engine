@@ -56,13 +56,23 @@ function level(message: string) {
 async function exportFeedback() {
   if (feedbackDisabled.value) return
   try {
-    const response = await fetch('/api/diagnostics/export')
-    if (!response.ok) throw new Error(`feedback export failed (${response.status})`)
-    // 先用 fetch 捕获“反馈系统自己出错”，再交给浏览器做原生下载。
-    // 某些 WebView 会拦截异步回调里临时创建的 blob 链接。
-    window.location.assign('/api/diagnostics/export')
+    // 面板套在 pywebview 里，浏览器下载会被 WebView 静默吞掉（点两下毫无反应
+    // 的翻车现场）；让后端把反馈包落盘，并在资源管理器里替用户选好。
+    const response = await fetch('/api/diagnostics/export-local', { method: 'POST' })
+    if (response.status === 404) {
+      // 旧版后端没有这个接口，退回浏览器原生下载
+      const probe = await fetch('/api/diagnostics/export')
+      if (!probe.ok) throw new Error(`feedback export failed (${probe.status})`)
+      window.location.assign('/api/diagnostics/export')
+      feedbackFailures.value = 0
+      showIssueButton.value = false
+      return
+    }
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.ok) throw new Error(data?.message || `feedback export failed (${response.status})`)
     feedbackFailures.value = 0
-    showIssueButton.value = false
+    showIssueButton.value = true
+    window.alert(`错误反馈包已生成，并在文件夹里替你选好了：\n${data.filename}\n\n去 Issue 发帖时把它附上就行。`)
   } catch (_) {
     feedbackFailures.value += 1
     if (feedbackFailures.value === 3) {

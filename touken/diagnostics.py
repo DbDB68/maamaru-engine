@@ -255,6 +255,27 @@ Privacy boundary:
     return DiagnosticBundle(filename=filename, content=stream.getvalue())
 
 
+def reveal_file_in_explorer(path: Path) -> bool:
+    """在资源管理器里打开所在文件夹并选中文件；打不开退而打开文件夹。不抛异常。"""
+    import subprocess
+    path = Path(path)
+    try:
+        subprocess.Popen(
+            ["explorer.exe", "/select,", str(path)],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except OSError:
+        startfile = getattr(os, "startfile", None)
+        if startfile is None:
+            return False
+        try:
+            startfile(path.parent)
+            return True
+        except OSError:
+            return False
+
+
 def create_diagnostic_bundle(destination_dir: Path | None = None, **kwargs) -> Path:
     """Write the bundle atomically and return a path suitable for Explorer selection."""
     target_dir = Path(destination_dir or (DATA_ROOT / "diagnostics"))

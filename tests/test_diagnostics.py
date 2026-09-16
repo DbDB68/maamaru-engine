@@ -6,7 +6,11 @@ import zipfile
 from contextlib import closing
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
+from panel import server
 from touken.diagnostics import _expedition_schedule_summary, build_diagnostic_bundle, create_diagnostic_bundle
 
 
@@ -141,6 +145,30 @@ class DiagnosticBundleTests(unittest.TestCase):
             self.assertTrue(zipfile.is_zipfile(target))
 
 
+class DiagnosticExportEndpointTests(unittest.TestCase):
+    def test_export_local_saves_bundle_and_reports_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "maamaru-feedback-test.zip"
+            fake.write_bytes(b"zip")
+            with patch.object(server, "create_diagnostic_bundle", return_value=fake), \
+                    patch.object(server, "reveal_file_in_explorer", return_value=True) as reveal:
+                resp = TestClient(server.app).post("/api/diagnostics/export-local")
+            self.assertEqual(resp.status_code, 200)
+            payload = resp.json()
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["filename"], fake.name)
+            self.assertTrue(payload["revealed"])
+            reveal.assert_called_once_with(fake)
+
+    def test_export_local_reports_failure_as_json(self):
+        with patch.object(server, "create_diagnostic_bundle", side_effect=OSError("boom")):
+            resp = TestClient(server.app).post("/api/diagnostics/export-local")
+        self.assertEqual(resp.status_code, 500)
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertIn("boom", payload["message"])
+
+
 class DiagnosticUiContractTests(unittest.TestCase):
     def test_feedback_entry_and_failure_easter_eggs_stay_wired(self):
         root = Path(__file__).resolve().parent.parent
@@ -153,6 +181,10 @@ class DiagnosticUiContractTests(unittest.TestCase):
         self.assertNotIn(">过程</button>", log_panel)
         self.assertIn("反馈错误", launcher)
         self.assertIn("反馈错误", log_panel)
+        # 面板在 pywebview 里浏览器下载会被吞，必须走落盘接口
+        self.assertIn("/api/diagnostics/export-local", log_panel)
+        self.assertIn("/api/diagnostics/export-local",
+                      (root / "panel" / "server.py").read_text(encoding="utf-8"))
         self.assertIn("https://github.com/DbDB68/maamaru-engine/issues/new", combined)
         for line in (
             "导出失败？问问上天",

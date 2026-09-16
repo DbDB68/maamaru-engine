@@ -25,7 +25,9 @@ from .log_store import get_store
 from .honmaru_home import create_home_router
 from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
 from .daily_workflow import install_daily_template, recipe_fields, recipe_from_params
-from touken.diagnostics import build_diagnostic_bundle
+from touken.diagnostics import (
+    build_diagnostic_bundle, create_diagnostic_bundle, reveal_file_in_explorer,
+)
 from touken.runtime_paths import (
     BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
     ensure_runtime_data,
@@ -1396,6 +1398,20 @@ def export_diagnostics():
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{bundle.filename}"'},
     )
+
+
+@app.post("/api/diagnostics/export-local")
+def export_diagnostics_local():
+    """面板跑在 pywebview 里，浏览器下载会被 WebView 静默吞掉：
+    反馈包直接落盘，再在资源管理器里替用户选好。"""
+    try:
+        path = create_diagnostic_bundle()
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "message": f"暂时没能生成错误反馈包：{exc}"},
+            status_code=500)
+    revealed = reveal_file_in_explorer(path)
+    return {"ok": True, "filename": path.name, "revealed": revealed}
 
 
 @app.get("/api/logs/stream")
