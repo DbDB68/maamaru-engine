@@ -629,6 +629,8 @@ export interface SwordArchiveHuman {
   form: 'kiwame' | 'normal' | null
   keeper: boolean
   note: string | null
+  /** 人工确认的等级（只补机器读不出的空缺）；没有为 null */
+  level: number | null
   confirmed_at: number
   stale: boolean
 }
@@ -649,7 +651,7 @@ export interface SwordArchiveEntry {
   hints: string[]
 }
 
-export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicate_fingerprint' | 'stale_annotation'
+export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicate_fingerprint' | 'stale_annotation' | 'level_unknown'
 
 export interface SwordArchiveAttentionItem {
   observation_id: string | null
@@ -682,6 +684,7 @@ export interface SwordAnnotationBody {
   sword_catalog_id: string | null
   kiwame_date: string | null
   level_at_mark?: number
+  level_confirmed?: number | null
   form_confirmed?: 'kiwame' | 'normal' | null
   keeper?: boolean | null
   note?: string | null

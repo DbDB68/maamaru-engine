@@ -10,6 +10,8 @@ import {
   filterArchiveEntries,
   formConfirmBody,
   keeperBody,
+  levelConfirmBody,
+  parseLevelInput,
   sortArchiveEntries,
 } from './archive'
 
@@ -50,6 +52,7 @@ function human(over: Partial<SwordArchiveHuman> = {}): SwordArchiveHuman {
     form: 'kiwame',
     keeper: true,
     note: '修行回来的',
+    level: null,
     confirmed_at: 1700000000,
     stale: false,
     ...over,
@@ -144,14 +147,17 @@ describe('搜索与刀种筛选', () => {
 })
 
 describe('reason 人话', () => {
-  it('四种 reason 各归各的说法', () => {
+  it('五种 reason 各归各的说法', () => {
     expect(ATTENTION_REASON_TEXT.form_unknown).toBe('分不清极/普通')
     expect(ATTENTION_REASON_TEXT.form_ambiguous).toBe('两处证据打架')
     expect(ATTENTION_REASON_TEXT.duplicate_fingerprint).toBe('同名同日多振，要你指认')
     expect(ATTENTION_REASON_TEXT.stale_annotation).toBe('之前的确认对不上号了')
+    expect(ATTENTION_REASON_TEXT.level_unknown).toBe('等级没读出来')
   })
 
-  it('逐条翻译、保留顺序；不认识的 reason 原样透出，不炸页面', () => {
+  it('reasons 可多值并存，逐条翻译、保留顺序；不认识的 reason 原样透出，不炸页面', () => {
+    expect(attentionReasonTexts(['form_unknown', 'level_unknown']))
+      .toEqual(['分不清极/普通', '等级没读出来'])
     expect(attentionReasonTexts(['duplicate_fingerprint', 'stale_annotation']))
       .toEqual(['同名同日多振，要你指认', '之前的确认对不上号了'])
     expect(attentionReasonTexts(['some_new_reason' as never])).toEqual(['some_new_reason'])
@@ -198,5 +204,58 @@ describe('标注请求体', () => {
     expect(on.keeper).toBe(false)
     expect(on.form_confirmed).toBeNull()
     expect(on.note).toBeNull()
+  })
+
+  it('翻别的位时不弄丢人工等级：form/keeper 确认带旧 level_confirmed 递回', () => {
+    const byForm = formConfirmBody(attentionTarget(attention()), 'normal', human({ level: 55 }))
+    expect(byForm.level_confirmed).toBe(55)
+    const byKeeper = keeperBody(attentionTarget(attention()), false, human({ level: 55 }))
+    expect(byKeeper.level_confirmed).toBe(55)
+    // 旧标注没有等级时不递这个键
+    expect(formConfirmBody(attentionTarget(attention()), 'normal', human()).level_confirmed).toBeUndefined()
+    expect(keeperBody(attentionTarget(attention()), true, null).level_confirmed).toBeUndefined()
+  })
+})
+
+describe('等级填写', () => {
+  it('parseLevelInput：空/非数/非整数/超界都给 null，合法值放行', () => {
+    expect(parseLevelInput('')).toBeNull()
+    expect(parseLevelInput('   ')).toBeNull()
+    expect(parseLevelInput('abc')).toBeNull()
+    expect(parseLevelInput('1.5')).toBeNull()
+    expect(parseLevelInput('0')).toBeNull()
+    expect(parseLevelInput('100')).toBeNull()
+    expect(parseLevelInput('-3')).toBeNull()
+    expect(parseLevelInput('42')).toBe(42)
+    expect(parseLevelInput(' 9 ')).toBe(9)
+    expect(parseLevelInput('99')).toBe(99)
+    expect(parseLevelInput('1')).toBe(1)
+  })
+
+  it('levelConfirmBody：只翻 level_confirmed 一位，旧标注的 form/keeper/note 原样递回', () => {
+    expect(levelConfirmBody(attentionTarget(attention()), 42)).toEqual({
+      sword_catalog_id: '00003',
+      kiwame_date: '2026-01-01',
+      level_confirmed: 42,
+    })
+    const body = levelConfirmBody(attentionTarget(attention()), 42, human())
+    expect(body).toEqual({
+      sword_catalog_id: '00003',
+      kiwame_date: '2026-01-01',
+      level_confirmed: 42,
+      form_confirmed: 'kiwame',
+      keeper: true,
+      note: '修行回来的',
+    })
+  })
+
+  it('levelConfirmBody：1 和 99 边界放行，0/100/小数/NaN 返回 null', () => {
+    expect(levelConfirmBody(attentionTarget(attention()), 1)?.level_confirmed).toBe(1)
+    expect(levelConfirmBody(attentionTarget(attention()), 99)?.level_confirmed).toBe(99)
+    expect(levelConfirmBody(attentionTarget(attention()), 0)).toBeNull()
+    expect(levelConfirmBody(attentionTarget(attention()), 100)).toBeNull()
+    expect(levelConfirmBody(attentionTarget(attention()), 55.5)).toBeNull()
+    expect(levelConfirmBody(attentionTarget(attention()), Number.NaN)).toBeNull()
+    expect(levelConfirmBody(attentionTarget(attention()), Number('x'))).toBeNull()
   })
 })

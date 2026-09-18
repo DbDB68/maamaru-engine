@@ -168,12 +168,15 @@ def _confirm_day(updated_at) -> str | None:
 
 
 def _apply_human_confirmations(entries: list, annotations: list) -> None:
-    """人工标注合并进候选池（原地标注）：机器 unknown + 人工确认形态 →
-    以人工为准，证据追加「人工确认（日期）」；ambiguous/kiwame/normal
-    的机器结论一律不动。
+    """人工标注合并进候选池（原地标注）：
+    - 形态：机器 unknown + 人工确认 → 以人工为准，证据追加
+      「人工确认（日期）」；ambiguous/kiwame/normal 的机器结论一律不动；
+    - 等级：只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）。
+      机器 level 读不出（None）才用人工确认值，并把 "level" 从
+      unknown_fields 里摘掉。
 
     只有指纹唯一命中（一标注对一行、一行对一标注）才合并；同名多振同日
-    显现等撞车情形保持 unknown，交给刀帐档案标 stale/duplicate 让人处理。
+    显现等撞车情形保持原样，交给刀帐档案标 stale/duplicate 让人处理。
     """
     if not entries or not annotations:
         return
@@ -193,6 +196,12 @@ def _apply_human_confirmations(entries: list, annotations: list) -> None:
             day = _confirm_day(anns[0].get("updated_at"))
             entry["form_evidence"] = (entry.get("form_evidence") or []) + [
                 f"人工确认（{day}）" if day else "人工确认"]
+        level = anns[0].get("level_confirmed")
+        if entry.get("level") is None and level is not None:
+            entry["level"] = level
+            unknown = entry.get("unknown_fields") or []
+            if "level" in unknown:
+                entry["unknown_fields"] = [f for f in unknown if f != "level"]
 
 
 def build_roster(store, entries: list[dict]) -> dict:

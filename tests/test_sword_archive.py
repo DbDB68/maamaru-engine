@@ -101,8 +101,9 @@ class SwordArchiveMergeTests(unittest.TestCase):
         self.assertIn(f"人工确认（{EXPECTED_DAY}）", entry["form_evidence"])
         self.assertEqual(entry["sword_type"], "短刀")
         self.assertEqual(entry["human"], {
-            "id": ann["id"], "form": "kiwame", "keeper": True,
-            "note": "要练", "confirmed_at": CONFIRM_TS, "stale": False,
+            "id": ann["id"], "form": "kiwame", "level": None,
+            "keeper": True, "note": "要练",
+            "confirmed_at": CONFIRM_TS, "stale": False,
         })
         self.assertEqual(archive["summary"], {
             "total": 1, "human_confirmed": 1, "keepers": 1,
@@ -182,9 +183,10 @@ class FingerprintCollisionTests(unittest.TestCase):
             # 撞车不裁决：形态保持 unknown，attention 同时记 form_unknown
             self.assertEqual(entry["form_status"], "unknown")
         reasons = [tuple(a["reasons"]) for a in archive["attention"]]
+        # 行内 reasons 按优先级排：form_unknown > duplicate_fingerprint
         self.assertEqual(reasons, [
-            ("duplicate_fingerprint", "form_unknown"),
-            ("duplicate_fingerprint", "form_unknown")])
+            ("form_unknown", "duplicate_fingerprint"),
+            ("form_unknown", "duplicate_fingerprint")])
         self.assertEqual(archive["summary"]["human_confirmed"], 0)
 
     def test_stale_annotation_without_row_surfaces_in_attention(self):
@@ -212,6 +214,117 @@ class FingerprintCollisionTests(unittest.TestCase):
 
         stale = build_sword_archive(store)["attention"][-1]
         self.assertEqual(stale["name_zh"], "touken_999_nobody")
+
+
+class LevelMergeTests(unittest.TestCase):
+    """人工等级只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）。"""
+
+    def test_human_level_fills_machine_gap_and_clears_unknown_field(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", level=None,
+                 form_fact={"status": "normal",
+                            "evidence": ["花数2/基线2"]}),
+        ], captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", level_confirmed=88)
+
+        entry = build_sword_archive(store)["entries"][0]
+        self.assertEqual(entry["level"], 88)
+        self.assertNotIn("level", entry["unknown_fields"])
+        self.assertEqual(entry["human"]["level"], 88)
+        # 形态机器已确认、等级人工补上 → 不再是 attention
+        self.assertEqual(build_sword_archive(store)["attention"], [])
+
+    def test_machine_level_wins_over_human_value(self):
+        store = _store()
+        _owned_snapshot(store, [_row(IMA_GIRI, "今剑", level=67)],
+                        captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", level_confirmed=88)
+
+        entry = build_sword_archive(store)["entries"][0]
+        self.assertEqual(entry["level"], 67)  # 机器有值一律信机器
+        # 前端仍要标「这等级是你填的」
+        self.assertEqual(entry["human"]["level"], 88)
+
+    def test_human_level_key_present_even_without_value(self):
+        store = _store()
+        _owned_snapshot(store, [_row(IMA_GIRI, "今剑")], captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", form_confirmed="kiwame")
+
+        human = build_sword_archive(store)["entries"][0]["human"]
+        self.assertIn("level", human)
+        self.assertIsNone(human["level"])
+
+    def test_collision_rows_do_not_merge_level(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(MAEDA, "前田藤四郎", level=None, kiwame_date="2024-5-1"),
+            _row(MAEDA, "前田藤四郎", level=None, kiwame_date="2024-5-1"),
+        ], captured_at=100)
+        _annotate(store, MAEDA, "2024-5-1", level_confirmed=88)
+
+        archive = build_sword_archive(store)
+        for entry in archive["entries"]:
+            self.assertIsNone(entry["level"])  # 撞车不合并，照旧
+            self.assertIn("level", entry["unknown_fields"])
+            self.assertTrue(entry["human"]["stale"])
+
+    def test_level_unknown_reason_alone_and_alongside_form_unknown(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", level=None),  # 形态等级双缺 → 两个 reason
+            _row(HIRANO, "平野藤四郎", level=None,
+                 form_fact={"status": "kiwame",
+                            "evidence": ["花数3/基线2"]}),  # 只缺等级
+        ], captured_at=100)
+
+        reasons = [tuple(a["reasons"]) for a in
+                   build_sword_archive(store)["attention"]]
+        self.assertEqual(reasons, [
+            ("form_unknown", "level_unknown"),
+            ("level_unknown",),
+        ])
+
+    def test_attention_sorting_places_level_unknown_between(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row("touken_005_kogitsunemaru", "小狐丸"),  # form_unknown
+            _row(IMA_GIRI, "今剑", level=None,
+                 form_fact={"status": "normal",
+                            "evidence": ["花数2/基线2"]}),  # 编队打架→ambiguous
+            _row(HIRANO, "平野藤四郎", level=None,
+                 form_fact={"status": "kiwame",
+                            "evidence": ["花数3/基线2"]}),  # 只缺等级
+        ], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, IMA_GIRI, "今剑", kiwame_status="kiwame")], ts=200)
+
+        archive = build_sword_archive(store)
+        # form_unknown > level_unknown > form_ambiguous；同级按 name_zh
+        self.assertEqual(
+            [(a["name_zh"], tuple(a["reasons"]))
+             for a in archive["attention"]],
+            [("小狐丸", ("form_unknown",)),
+             ("今剑", ("level_unknown", "form_ambiguous")),
+             ("平野藤四郎", ("level_unknown",))])
+        # 今剑等级被人工没补、机器没读 → attention 行的 level 如实为 None
+        jian = next(a for a in archive["attention"] if a["name_zh"] == "今剑")
+        self.assertIsNone(jian["level"])
+
+    def test_profile_pool_fills_level_gap_but_never_overwrites(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", level=None),
+            _row(HIRANO, "平野藤四郎", level=67),
+        ], captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", level_confirmed=88)
+        _annotate(store, HIRANO, "2024-5-1", level_confirmed=88)
+
+        entries = build_candidate_pool(store)["entries"]
+        gap, machine = entries
+        self.assertEqual(gap["level"], 88)
+        self.assertNotIn("level", gap["unknown_fields"])
+        self.assertEqual(machine["level"], 67)  # 机器读数不被盖
 
 
 class HintTests(unittest.TestCase):

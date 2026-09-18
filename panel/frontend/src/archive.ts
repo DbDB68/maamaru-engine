@@ -86,6 +86,7 @@ export const ATTENTION_REASON_TEXT: Record<SwordAttentionReason, string> = {
   form_ambiguous: '两处证据打架',
   duplicate_fingerprint: '同名同日多振，要你指认',
   stale_annotation: '之前的确认对不上号了',
+  level_unknown: '等级没读出来',
 }
 
 export function attentionReasonTexts(reasons: SwordAttentionReason[]): string[] {
@@ -102,13 +103,19 @@ export interface ArchiveAnnotationTarget {
   reasons?: SwordAttentionReason[]
 }
 
-export type ArchiveHumanLike = Pick<SwordArchiveHuman, 'form' | 'keeper' | 'note'>
+export type ArchiveHumanLike = Pick<SwordArchiveHuman, 'form' | 'keeper' | 'note' | 'level'>
 
 function baseBody(target: ArchiveAnnotationTarget): SwordAnnotationBody {
   return { sword_catalog_id: target.sword_catalog_id, kiwame_date: target.kiwame_date }
 }
 
-// 确认形态：只翻 form 这一位，旧标注的 keeper/note 原样递回，
+// 旧标注的人工等级原样递回（有的话）——它是合并进档案的空缺补值，
+// 别的字段翻位时不该把它弄丢。
+function preserveLevel(body: SwordAnnotationBody, human?: ArchiveHumanLike | null) {
+  if (human && human.level != null) body.level_confirmed = human.level
+}
+
+// 确认形态：只翻 form 这一位，旧标注的 keeper/note/等级原样递回，
 // 免得后端整行覆盖时把确认过的信息顺手清掉。
 export function formConfirmBody(
   target: ArchiveAnnotationTarget,
@@ -124,11 +131,12 @@ export function formConfirmBody(
     body.keeper = human.keeper
     body.note = human.note
   }
+  preserveLevel(body, human)
   return body
 }
 
 // 要练开关：只翻 keeper 这一位（next 由调用方算好取反），
-// 旧标注的形态结论和备注原样递回。没标注时就只递 keeper 新建。
+// 旧标注的形态结论/备注/等级原样递回。没标注时就只递 keeper 新建。
 export function keeperBody(
   target: ArchiveAnnotationTarget,
   next: boolean,
@@ -138,6 +146,34 @@ export function keeperBody(
   body.keeper = next
   if (human) {
     body.form_confirmed = human.form
+    body.note = human.note
+  }
+  preserveLevel(body, human)
+  return body
+}
+
+// 输入框草稿 → 等级：空/非数/非整数/超界都给 null（按钮据此禁用）。
+export function parseLevelInput(raw: string): number | null {
+  const text = raw.trim()
+  if (!text) return null
+  const value = Number(text)
+  if (!Number.isInteger(value) || value < 1 || value > 99) return null
+  return value
+}
+
+// 记下等级：只翻 level_confirmed 这一位，旧标注的 form/keeper/note 原样递回。
+// 等级限 1~99 整数，非法返回 null（组件据 null 拒绝提交并提示）。
+export function levelConfirmBody(
+  target: ArchiveAnnotationTarget,
+  level: number,
+  human?: ArchiveHumanLike | null,
+): SwordAnnotationBody | null {
+  if (!Number.isInteger(level) || level < 1 || level > 99) return null
+  const body = baseBody(target)
+  body.level_confirmed = level
+  if (human) {
+    body.form_confirmed = human.form
+    body.keeper = human.keeper
     body.note = human.note
   }
   return body

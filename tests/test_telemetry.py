@@ -773,6 +773,11 @@ class SwordAnnotationStoreTests(unittest.TestCase):
         self.assertEqual(second["form_confirmed"], "kiwame")
 
     def test_validation_rejects_bad_values(self):
+        for bad in (0, 100, -1, "88", True, 88.5):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    self.store.save_sword_annotation(
+                        "touken_011_x", "2024-5-1", level_confirmed=bad)
         with self.assertRaises(ValueError):
             self.store.save_sword_annotation("", "2024-5-1")
         with self.assertRaises(ValueError):
@@ -787,6 +792,20 @@ class SwordAnnotationStoreTests(unittest.TestCase):
                 "touken_011_x", "2024-5-1", level_at_mark="九十九")
         with self.assertRaises(ValueError):
             self.store.revoke_sword_annotation(999)
+
+    def test_level_confirmed_saves_and_upserts_like_other_fields(self):
+        ann = self.store.save_sword_annotation(
+            "touken_011_x", "2024-5-1", level_confirmed=99)
+        self.assertEqual(ann["level_confirmed"], 99)
+        # upsert：不传就不覆盖
+        again = self.store.save_sword_annotation(
+            "touken_011_x", "2024-5-1", note="改备注")
+        self.assertEqual(again["level_confirmed"], 99)
+        self.assertEqual(again["note"], "改备注")
+        # 边界值 1 合法
+        low = self.store.save_sword_annotation(
+            "touken_011_x", "2024-5-1", level_confirmed=1)
+        self.assertEqual(low["level_confirmed"], 1)
 
     def test_sword_annotation_api_roundtrip_and_soft_delete(self):
         from panel.server import (api_revoke_sword_annotation,
@@ -810,6 +829,14 @@ class SwordAnnotationStoreTests(unittest.TestCase):
                 "sword_catalog_id": "touken_031_hirano_toushirou",
                 "kiwame_date": "2024/6/1", "form_confirmed": "maybe",
             })))
+            with_level = asyncio.run(api_save_sword_annotation(_Req({
+                "sword_catalog_id": "touken_031_hirano_toushirou",
+                "kiwame_date": "2024/6/1", "level_confirmed": 88,
+            })))
+            bad_level = asyncio.run(api_save_sword_annotation(_Req({
+                "sword_catalog_id": "touken_031_hirano_toushirou",
+                "kiwame_date": "2024/6/1", "level_confirmed": 100,
+            })))
             deleted = asyncio.run(api_revoke_sword_annotation(
                 created["annotation"]["id"]))
             missing = asyncio.run(api_revoke_sword_annotation(
@@ -819,6 +846,10 @@ class SwordAnnotationStoreTests(unittest.TestCase):
         self.assertTrue(created["annotation"]["keeper"])
         self.assertEqual(created["annotation"]["form_confirmed"], "kiwame")
         self.assertEqual(bad.status_code, 400)
+        # level_confirmed 同指纹 upsert 补上，别的字段不动
+        self.assertEqual(with_level["annotation"]["level_confirmed"], 88)
+        self.assertEqual(with_level["annotation"]["form_confirmed"], "kiwame")
+        self.assertEqual(bad_level.status_code, 400)
         self.assertEqual(deleted, {"ok": True})
         self.assertEqual(missing.status_code, 400)
 
@@ -890,7 +921,7 @@ class SchemaV12MigrationTests(unittest.TestCase):
             # 版本号原地升级，老数据原样可读
             self.assertEqual(store.summary()["schema_version"],
                              TELEMETRY_SCHEMA_VERSION)
-            self.assertEqual(TELEMETRY_SCHEMA_VERSION, 12)
+            self.assertEqual(TELEMETRY_SCHEMA_VERSION, 13)
             self.assertEqual(store.run_summary("old-run")["label"], "老任务")
             self.assertEqual(store.human_reports()[0]["note"], "老报备")
             detail = store.sword_snapshot_detail(1)
@@ -912,6 +943,69 @@ class SchemaV12MigrationTests(unittest.TestCase):
         store2 = TelemetryStore(db)
         try:
             self.assertEqual(len(store2.sword_annotations()), 1)
+        finally:
+            store2.close()
+
+
+class SchemaV13MigrationTests(unittest.TestCase):
+    """v12 老库（sword_annotations 没有 level_confirmed 列）原地升级：
+    ALTER 补列，老标注一条不丢（新列为 NULL），重复打开幂等。"""
+
+    def _v12_db(self) -> Path:
+        import sqlite3
+        db = Path(tempfile.mkdtemp()) / "telemetry.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE sword_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sword_catalog_id TEXT NOT NULL,
+                kiwame_date TEXT NOT NULL,
+                level_at_mark INTEGER,
+                form_confirmed TEXT,
+                keeper INTEGER NOT NULL DEFAULT 0,
+                note TEXT,
+                created_at REAL,
+                updated_at REAL,
+                revoked INTEGER NOT NULL DEFAULT 0);
+            INSERT INTO metadata(key, value) VALUES('schema_version', '12');
+            INSERT INTO sword_annotations(sword_catalog_id, kiwame_date,
+                form_confirmed, keeper, note, created_at, updated_at, revoked)
+                VALUES ('touken_011_imagiri_no_toshiro', '2024-5-1',
+                        'kiwame', 1, '老标注', 100, 100, 0);
+        """)
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_v12_database_gains_level_confirmed_without_data_loss(self):
+        db = self._v12_db()
+        store = TelemetryStore(db)
+        try:
+            self.assertEqual(store.summary()["schema_version"],
+                             TELEMETRY_SCHEMA_VERSION)
+            cols = {row["name"] for row in store._conn().execute(
+                "PRAGMA table_info(sword_annotations)").fetchall()}
+            self.assertIn("level_confirmed", cols)
+            # 老标注原样在，新列补成 NULL，不回填不猜测
+            old = store.sword_annotations()[0]
+            self.assertEqual(old["note"], "老标注")
+            self.assertTrue(old["keeper"])
+            self.assertIsNone(old["level_confirmed"])
+            # 老行照常 upsert 补等级，别的字段不动
+            updated = store.save_sword_annotation(
+                "touken_011_imagiri_no_toshiro", "2024-5-1",
+                level_confirmed=88)
+            self.assertEqual(updated["level_confirmed"], 88)
+            self.assertEqual(updated["form_confirmed"], "kiwame")
+            self.assertEqual(updated["note"], "老标注")
+        finally:
+            store.close()
+        # 重复打开幂等：列不重复加、补的值不丢
+        store2 = TelemetryStore(db)
+        try:
+            self.assertEqual(
+                store2.sword_annotations()[0]["level_confirmed"], 88)
         finally:
             store2.close()
 

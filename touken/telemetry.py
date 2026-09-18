@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 12
+TELEMETRY_SCHEMA_VERSION = 13
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -265,6 +265,7 @@ class TelemetryStore:
                 sword_catalog_id TEXT NOT NULL,
                 kiwame_date TEXT NOT NULL,
                 level_at_mark INTEGER,
+                level_confirmed INTEGER,
                 form_confirmed TEXT,
                 keeper INTEGER NOT NULL DEFAULT 0,
                 note TEXT,
@@ -363,6 +364,12 @@ class TelemetryStore:
         if "form_fact" not in row_cols:
             conn.execute(
                 "ALTER TABLE sword_snapshot_rows ADD COLUMN form_fact TEXT")
+        # v13 原地补列：人工确认的等级。旧标注保持 NULL，不回填不猜测。
+        ann_cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(sword_annotations)").fetchall()}
+        if "level_confirmed" not in ann_cols:
+            conn.execute(
+                "ALTER TABLE sword_annotations ADD COLUMN level_confirmed INTEGER")
         conn.commit()
 
     def close(self) -> None:
@@ -985,11 +992,11 @@ class TelemetryStore:
                          for row in rows]
         return out
 
-    # ---------- 刀帐人工标注（sword_annotations，schema v12） ----------
+    # ---------- 刀帐人工标注（sword_annotations，schema v12/v13） ----------
 
     def save_sword_annotation(self, sword_catalog_id, kiwame_date,
                               level_at_mark=None, form_confirmed=None,
-                              keeper=None, note=None) -> dict:
+                              keeper=None, note=None, level_confirmed=None) -> dict:
         """保存一条人工标注；同指纹（目录 id + 显现日期）已存在有效标注时更新。
 
         更新只覆盖传入的非 None 字段（updated_at 随刷新），软删的指纹视为
@@ -1010,6 +1017,13 @@ class TelemetryStore:
                     or int(level_at_mark) != level_at_mark):
                 raise ValueError("标记等级要填整数")
             level_at_mark = int(level_at_mark)
+        if level_confirmed is not None:
+            if (isinstance(level_confirmed, bool)
+                    or not isinstance(level_confirmed, (int, float))
+                    or int(level_confirmed) != level_confirmed
+                    or not 1 <= int(level_confirmed) <= 99):
+                raise ValueError("确认等级必须是 1 到 99 的整数")
+            level_confirmed = int(level_confirmed)
         keeper_value = None if keeper is None else int(bool(keeper))
         note = str(note).strip()[:300] if note is not None else None
         conn = self._conn()
@@ -1024,6 +1038,9 @@ class TelemetryStore:
             if level_at_mark is not None:
                 sets.append("level_at_mark = ?")
                 args.append(level_at_mark)
+            if level_confirmed is not None:
+                sets.append("level_confirmed = ?")
+                args.append(level_confirmed)
             if form_confirmed is not None:
                 sets.append("form_confirmed = ?")
                 args.append(form_confirmed)
@@ -1043,10 +1060,11 @@ class TelemetryStore:
             return self._sword_annotation_dict(row["id"])
         cursor = conn.execute(
             "INSERT INTO sword_annotations(sword_catalog_id, kiwame_date, "
-            "level_at_mark, form_confirmed, keeper, note, created_at, "
-            "updated_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (sword_catalog_id, kiwame_date, level_at_mark, form_confirmed,
-             keeper_value or 0, note, now, now),
+            "level_at_mark, level_confirmed, form_confirmed, keeper, note, "
+            "created_at, updated_at, revoked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (sword_catalog_id, kiwame_date, level_at_mark, level_confirmed,
+             form_confirmed, keeper_value or 0, note, now, now),
         )
         conn.commit()
         return self._sword_annotation_dict(cursor.lastrowid)
@@ -1054,7 +1072,8 @@ class TelemetryStore:
     def _sword_annotation_dict(self, annotation_id: int) -> dict:
         row = self._conn().execute(
             "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
-            "form_confirmed, keeper, note, created_at, updated_at, revoked "
+            "level_confirmed, form_confirmed, keeper, note, created_at, "
+            "updated_at, revoked "
             "FROM sword_annotations WHERE id = ?", (int(annotation_id),),
         ).fetchone()
         if not row:
@@ -1066,7 +1085,8 @@ class TelemetryStore:
         where = "" if include_revoked else " WHERE revoked = 0"
         rows = self._conn().execute(
             "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
-            "form_confirmed, keeper, note, created_at, updated_at, revoked "
+            "level_confirmed, form_confirmed, keeper, note, created_at, "
+            "updated_at, revoked "
             f"FROM sword_annotations{where} ORDER BY updated_at DESC, id DESC",
         ).fetchall()
         return [{**dict(row), "keeper": bool(row["keeper"]),

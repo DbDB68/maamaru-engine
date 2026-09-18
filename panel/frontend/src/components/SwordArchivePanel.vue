@@ -17,6 +17,8 @@ import {
   filterArchiveEntries,
   formConfirmBody,
   keeperBody,
+  levelConfirmBody,
+  parseLevelInput,
   sortArchiveEntries,
 } from '../archive'
 
@@ -30,6 +32,8 @@ const error = ref('')
 const saving = ref(false)
 const query = ref('')
 const swordType = ref<string>(ARCHIVE_ALL_TYPES)
+// 每条「等级没读出来」的等级草稿，按 attentionKey 各自独立绑定，互不串行
+const levelDrafts = ref<Record<string, string>>({})
 
 const done = computed(() => Boolean(data.value?.done))
 const summary = computed(() => data.value?.summary || null)
@@ -85,15 +89,17 @@ async function load() {
   }
 }
 
-async function annotate(body: SwordAnnotationBody) {
-  if (saving.value) return
+async function annotate(body: SwordAnnotationBody): Promise<boolean> {
+  if (saving.value) return false
   saving.value = true
   error.value = ''
   try {
     await api.saveSwordAnnotation(body)
     await load()
+    return true
   } catch (cause) {
     error.value = cause instanceof Error ? `这次没能记下：${cause.message}` : '这次没能记下，请重试'
+    return false
   } finally {
     saving.value = false
   }
@@ -106,6 +112,24 @@ function confirmAttention(item: SwordArchiveAttentionItem, form: 'kiwame' | 'nor
 }
 function keepAttention(item: SwordArchiveAttentionItem) {
   annotate(keeperBody(attentionTarget(item), true, entryOf(item.observation_id)?.human))
+}
+
+// 等级没读出来的条目：填 1~99 的整数才给递，记下成功就清掉这行的草稿
+async function confirmLevel(item: SwordArchiveAttentionItem) {
+  const key = attentionKey(item)
+  const parsed = parseLevelInput(levelDrafts.value[key] || '')
+  const body = parsed == null
+    ? null
+    : levelConfirmBody(attentionTarget(item), parsed, entryOf(item.observation_id)?.human)
+  if (!body) {
+    error.value = '等级要填 1～99 的整数，才能记下。'
+    return
+  }
+  if (await annotate(body)) {
+    const drafts = { ...levelDrafts.value }
+    delete drafts[key]
+    levelDrafts.value = drafts
+  }
 }
 
 function toggleKeeper(entry: SwordArchiveEntry) {
@@ -160,6 +184,24 @@ onMounted(load)
               <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'normal')">是普通</button>
               <button type="button" class="secondary" :disabled="saving" @click="keepAttention(item)">是要练的刀</button>
             </div>
+            <div v-if="item.reasons.includes('level_unknown')" class="archive-level">
+              <PixelControl
+                v-model="levelDrafts[attentionKey(item)]"
+                type="number"
+                :min="1"
+                :max="99"
+                placeholder="等级"
+                aria-label="填等级（1 到 99）"
+                @keyup.enter="confirmLevel(item)"
+              />
+              <button
+                type="button"
+                class="secondary"
+                :disabled="saving || parseLevelInput(levelDrafts[attentionKey(item)] || '') == null"
+                @click="confirmLevel(item)"
+              >记下等级</button>
+              <small v-if="(levelDrafts[attentionKey(item)] || '').trim() && parseLevelInput(levelDrafts[attentionKey(item)] || '') == null" class="archive-level-bad">要填 1～99 的整数</small>
+            </div>
           </li>
         </ul>
       </PaperCard>
@@ -181,7 +223,7 @@ onMounted(load)
             </div>
             <div class="archive-entry-facts">
               <i class="archive-form" :class="entry.form_status" :title="(entry.form_evidence || []).join('；')">{{ archiveFormLabel(entry) }}</i>
-              <span>Lv.{{ entry.level ?? '—' }}</span>
+              <span>Lv.{{ entry.level ?? '—' }}<i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="机器没读出来，这个等级是你填的">你填的</i></span>
               <span>乱舞 Lv.{{ entry.tou_level ?? '—' }}</span>
               <span>显现 {{ entry.kiwame_date || '—' }}</span>
               <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
@@ -233,6 +275,11 @@ onMounted(load)
 .archive-hint { padding: 2px 8px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 10px; font-style: normal; }
 .archive-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .archive-actions button { min-height: 30px; padding: 4px 13px; font-size: 12px; }
+/* 等级填写照操作组的风格排：行内 flex 自然换行，不把行撑歪 */
+.archive-level { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.archive-level :deep(.pixel-control) { width: 96px; min-height: 30px; padding: 4px 9px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; font-variant-numeric: tabular-nums; }
+.archive-level button { min-height: 30px; padding: 4px 13px; font-size: 12px; }
+.archive-level-bad { color: #9f3d28; font-size: 11px; }
 
 .archive-toolbar { display: grid; grid-template-columns: minmax(170px, 330px) auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-dim); font-size: 12px; }
 .archive-toolbar :deep(.pixel-control) { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; }
@@ -247,6 +294,7 @@ onMounted(load)
 .archive-entry-name b { font-size: 13px; }
 .archive-entry-name small { color: var(--fox-gold-deep); font-size: 10px; }
 .archive-confirmed { padding: 1px 7px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #b2caa8; border-radius: 999px; font-size: 10px; font-style: normal; }
+.archive-level-tag { margin-left: 5px; }
 .archive-stale { padding: 1px 7px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 999px; font-size: 10px; font-style: normal; }
 .archive-entry-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
 .archive-form { padding: 2px 8px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 10px; font-style: normal; }

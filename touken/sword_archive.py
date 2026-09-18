@@ -11,6 +11,7 @@
     裁决，标 stale/duplicate_fingerprint 交回给人点；
   - 人工确认的 form 只覆盖机器的 unknown；机器 ambiguous（两处直读
     打架/图鉴分不清哪振）不被人工自动覆盖，进 attention 等人在界面上点；
+  - 人工等级只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）；
   - 标注匹配不到任何行（刀解了/快照过期）不进 entries，进 attention
     记 stale_annotation。
 """
@@ -27,8 +28,9 @@ from .honmaru_profile import (_annotation_index, _human_annotations,
 ARCHIVE_SCHEMA_VERSION = 1
 
 # attention 排序：同类内按 name_zh
-_ATTENTION_PRIORITY = {"form_unknown": 0, "form_ambiguous": 1,
-                       "duplicate_fingerprint": 2, "stale_annotation": 3}
+_ATTENTION_PRIORITY = {"form_unknown": 0, "level_unknown": 1,
+                       "form_ambiguous": 2, "duplicate_fingerprint": 3,
+                       "stale_annotation": 4}
 
 _CATALOG_ID_RE = re.compile(r"touken_(\d+)_")
 _DAY_RE = re.compile(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})")
@@ -138,23 +140,27 @@ def build_sword_archive(store) -> dict:
         anns = index.get(key) or []
         matched_ids.update(ann.get("id") for ann in anns)
         row_hints = hints.get(entry.get("observation_id"), [])
-        human = None
         reasons = []
+        form_status = entry.get("form_status") or "unknown"
+        if form_status == "unknown":
+            reasons.append("form_unknown")
+        # 合并后等级仍是空缺（机器没读出、人工也没补）→ 等人来填
+        if entry.get("level") is None:
+            reasons.append("level_unknown")
+        if form_status == "ambiguous":
+            reasons.append("form_ambiguous")
+        human = None
         if anns:
             collision = len(anns) > 1 or row_counts.get(key, 0) > 1
             human = {"id": anns[0].get("id"),
                      "form": anns[0].get("form_confirmed"),
+                     "level": anns[0].get("level_confirmed"),
                      "keeper": bool(anns[0].get("keeper")),
                      "note": anns[0].get("note"),
                      "confirmed_at": anns[0].get("updated_at"),
                      "stale": collision}
             if collision:
                 reasons.append("duplicate_fingerprint")
-        form_status = entry.get("form_status") or "unknown"
-        if form_status == "unknown":
-            reasons.append("form_unknown")
-        elif form_status == "ambiguous":
-            reasons.append("form_ambiguous")
         out_entries.append({
             "observation_id": entry.get("observation_id"),
             "sword_catalog_id": entry.get("sword_catalog_id"),
