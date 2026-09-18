@@ -27,13 +27,25 @@ from .honmaru_profile import (_annotation_index, _human_annotations,
 
 ARCHIVE_SCHEMA_VERSION = 1
 
-# attention 排序：同类内按 name_zh
-_ATTENTION_PRIORITY = {"form_unknown": 0, "level_unknown": 1,
-                       "form_ambiguous": 2, "duplicate_fingerprint": 3,
-                       "stale_annotation": 4}
-
+# attention 排序：按刀帐番号升序（对齐游戏「刀帐顺序」，方便对照游戏
+# 翻页核对，2026-09-21 老大点名）；番号认不出的排最后。
+# 条内 reasons 的先后仍按添加顺序：形态 > 等级 > 打架 > 撞车 > 对不上号。
 _CATALOG_ID_RE = re.compile(r"touken_(\d+)_")
 _DAY_RE = re.compile(r"(20\d{2})[-/](\d{1,2})[-/](\d{1,2})")
+
+
+def _catalog_no(sword_catalog_id):
+    """刀帐番号（touken_118_... → 118）；认不出返回 None。"""
+    match = _CATALOG_ID_RE.match(str(sword_catalog_id or ""))
+    return int(match.group(1)) if match else None
+
+
+def _attention_sort_key(item: dict) -> tuple:
+    """等你拿主意排序：刀帐番号升序（认不出的殿后），同番号按显现
+    日期（老的在前），再按 observation_id 稳定收尾。"""
+    no = _catalog_no(item.get("sword_catalog_id"))
+    day = _parse_manifest_day(item.get("kiwame_date")) or date.max
+    return (no is None, no or 0, day, item.get("observation_id") or "")
 
 
 def _catalog_info(sword_catalog_id):
@@ -198,9 +210,7 @@ def build_sword_archive(store) -> dict:
             "reasons": ["stale_annotation"],
             "hints": [],
         })
-    attention.sort(key=lambda item: (
-        min(_ATTENTION_PRIORITY[r] for r in item["reasons"]),
-        item["name_zh"] or "", item["observation_id"] or ""))
+    attention.sort(key=_attention_sort_key)
     summary = {
         "total": len(out_entries),
         # 撞车（stale）的标注没生效，不算确认下来

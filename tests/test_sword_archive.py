@@ -10,8 +10,8 @@
 - 标注匹配不到任何行 → 不进 entries，attention 记 stale_annotation
 - hints 只对同名多振组出：等级最高（并列都给）/ 显现最早（并列都给），
   日期解析不了就不出那条
-- attention 排序：form_unknown > form_ambiguous > duplicate_fingerprint
-  > stale_annotation，同类按 name_zh
+- attention 排序：按刀帐番号升序（对齐游戏「刀帐顺序」，方便对照
+  游戏翻页核对），番号认不出的殿后，同番号按显现日期老的在前
 """
 import tempfile
 import time
@@ -300,7 +300,7 @@ class LevelMergeTests(unittest.TestCase):
             _slot(1, IMA_GIRI, "今剑", kiwame_status="kiwame")], ts=200)
 
         archive = build_sword_archive(store)
-        # form_unknown > level_unknown > form_ambiguous；同级按 name_zh
+        # attention 按刀帐番号升序：小狐丸(5) → 今剑(11) → 平野藤四郎(31)
         self.assertEqual(
             [(a["name_zh"], tuple(a["reasons"]))
              for a in archive["attention"]],
@@ -310,6 +310,20 @@ class LevelMergeTests(unittest.TestCase):
         # 今剑等级被人工没补、机器没读 → attention 行的 level 如实为 None
         jian = next(a for a in archive["attention"] if a["name_zh"] == "今剑")
         self.assertIsNone(jian["level"])
+
+    def test_attention_sorted_by_catalog_number_not_reason_priority(self):
+        """番号大的先出事也不能插队：平野(31) 形态没认出、今剑(11) 只缺
+        等级——旧优先级排序会把平野排前，刀帐番号排序必须今剑在前。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", level=None,
+                 form_fact={"status": "normal",
+                            "evidence": ["花数2/基线2"]}),  # 只缺等级
+            _row(HIRANO, "平野藤四郎"),  # form_unknown
+        ], captured_at=100)
+
+        names = [a["name_zh"] for a in build_sword_archive(store)["attention"]]
+        self.assertEqual(names, ["今剑", "平野藤四郎"])
 
     def test_profile_pool_fills_level_gap_but_never_overwrites(self):
         store = _store()
@@ -389,7 +403,7 @@ class HintTests(unittest.TestCase):
 
 
 class AttentionOrderTests(unittest.TestCase):
-    def test_reason_priority_then_name_zh(self):
+    def test_attention_sorted_by_catalog_number(self):
         store = _store()
         _owned_snapshot(store, [
             _row("touken_005_kogitsunemaru", "小狐丸"),   # unknown
@@ -407,12 +421,14 @@ class AttentionOrderTests(unittest.TestCase):
 
         archive = build_sword_archive(store)
         attention = archive["attention"]
+        # 刀帐番号升序：小狐丸(5) → 今剑(11) → 前田(29)×2 → 平野(31)；
+        # 与 reason 优先级无关——番号大的先出事也不插队
         self.assertEqual(
             [(a["name_zh"], tuple(a["reasons"])) for a in attention],
-            [("前田藤四郎", ("form_unknown",)),   # 同名两振，按 oid 稳定次序
-             ("前田藤四郎", ("form_unknown",)),
-             ("小狐丸", ("form_unknown",)),
+            [("小狐丸", ("form_unknown",)),
              ("今剑", ("form_ambiguous",)),
+             ("前田藤四郎", ("form_unknown",)),   # 同名两振，按 oid 稳定次序
+             ("前田藤四郎", ("form_unknown",)),
              ("平野藤四郎", ("stale_annotation",))])
         # 同名多振的 unknown 行带 hints；attention 行也带
         maeda_rows = [a for a in attention if a["name_zh"] == "前田藤四郎"]
