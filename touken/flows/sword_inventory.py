@@ -118,23 +118,62 @@ def _row_key(row: dict) -> tuple:
             row.get("survival"), row.get("kiwame_date"))
 
 
-def parse_list_tokens(tokens) -> dict:
-    """把一览页一屏的 OCR token 按五行基线解析成每行结构。
+def _row_baselines(cells) -> list[int]:
+    """动态行基线：以左列竖排「刀剑」标签为锚（每行恰好一个、全页 OCR
+    最稳的 token），名字基线 = 锚 + 62px。锚缺失按行距插值补齐；一个锚都
+    没有时退回硬编码基线（旧行为）。
 
-    tokens: [(text, (x, y)) ...]。返回 {"rows": [...], "fail_rows": n}；
+    为什么不用固定 ±50 窗口：刀剑/等级行在名字上方 ~61px，乱舞在上方
+    ~40px——等级行永远更靠近上一行基线（40px），整列等级会静默错一行
+    （2026-09-18 真机帧实锤：三日月 95 级被记成下一行的 1 级）。
+    """
+    anchors = set()
+    for text, pt in cells:
+        x, y = _as_xy(pt)
+        if str(text).strip() == "刀剑" and 400 <= x <= 460:
+            anchors.add(y)
+    anchors = sorted(anchors)
+    deduped = []  # 同一标签偶尔被 OCR 出两次，30px 内算同一个
+    for y in anchors:
+        if not deduped or y - deduped[-1] > 30:
+            deduped.append(y)
+    if not deduped:
+        return list(_ROW_NAME_YS)
+    gaps = sorted(b - a for a, b in zip(deduped, deduped[1:]))
+    spacing = gaps[(len(gaps) - 1) // 2] if gaps else 101
+    full = []
+    for i, anchor in enumerate(deduped):
+        full.append(anchor)
+        if i + 1 < len(deduped):
+            missing = round((deduped[i + 1] - anchor) / spacing) - 1
+            for k in range(1, max(missing, 0) + 1):
+                full.append(anchor + spacing * k)
+    return [anchor + 62 for anchor in full]
+
+
+def parse_list_tokens(tokens) -> dict:
+    """把一览页一屏的 OCR token 按行动态锚点解析成每行结构。
+
+    tokens: [(text, (x, y)) ...]（中心点）。返回 {"rows": [...], "fail_rows": n}；
     页面上有内容却认不出名字的行计入 fail_rows（空行不算），绝不静默丢。
     """
-    buckets = {y: [] for y in _ROW_NAME_YS}
+    norm = []
     for text, pt in tokens:
         x, y = _as_xy(pt)
-        if not text.strip() or x > 1115:  # 右界卡在按钮列（裝备 x≈1134）之前
-            continue
-        nearest = min(_ROW_NAME_YS, key=lambda ry: abs(ry - y))
-        if abs(nearest - y) <= 50:
-            buckets[nearest].append((x, y, text.strip()))
+        if text.strip() and x <= 1115:  # 右界卡在按钮列（裝备 x≈1134）之前
+            norm.append((x, y, text.strip()))
+    baselines = _row_baselines(tokens)
+    buckets = {y: [] for y in baselines}
+    for x, y, text in norm:
+        # 按行带归属：内容从锚(刀剑行,基线-62)一路到疲劳行(基线+13)，
+        # 行带下沿取基线+22——名字(基线±几)永远归本行，邻行内容进不来
+        for base_y in baselines:
+            if base_y - 82 <= y < base_y + 22:
+                buckets[base_y].append((x, y, text))
+                break
 
     rows, fail_rows = [], 0
-    for base_y in _ROW_NAME_YS:
+    for base_y in baselines:
         row = _parse_row(buckets[base_y])
         if row is None:
             continue
