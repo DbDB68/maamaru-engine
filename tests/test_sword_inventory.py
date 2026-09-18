@@ -411,5 +411,50 @@ class DynamicRowAnchorTests(unittest.TestCase):
         self.assertEqual(baselines, [155 + 62, 256 + 62, 357 + 62, 458 + 62])
 
 
+class PageTurnConfirmTests(unittest.TestCase):
+    """翻页确认：两页内容一模一样时（整页五振 Lv.1 狮子王连排，
+    2026-09-21 第 15→16 页真机实锤）行指纹分不出翻没翻，靠页码条
+    高亮块像素兜底；指纹用有序多重集，重复行数不同也算翻过。"""
+
+    def _strip(self, fill):
+        import numpy as np
+        return np.full((45, 400, 3), fill, dtype=np.uint8)
+
+    def test_identical_pages_but_strip_moved_is_turned(self):
+        from touken.flows.sword_inventory import _page_turned
+        row = {"sword_id": "touken_122_shishiou", "level": 1,
+               "survival_max": 45, "survival": 45, "kiwame_date": None}
+        fp = sorted([_row_key(row)] * 5)   # 两页各五振一模一样的狮子王
+        old_strip = self._strip(0)
+        new_strip = self._strip(0)
+        new_strip[10:30, 100:160] = 255    # 高亮块挪了一格
+        self.assertTrue(_page_turned(fp, fp, old_strip, new_strip, True))
+
+    def test_identical_pages_and_strip_still_is_not_turned(self):
+        from touken.flows.sword_inventory import _page_turned
+        row = {"sword_id": "touken_122_shishiou", "level": 1,
+               "survival_max": 45, "survival": 45, "kiwame_date": None}
+        fp = sorted([_row_key(row)] * 5)
+        strip = self._strip(0)
+        self.assertFalse(_page_turned(fp, fp, strip, strip.copy(), True))
+
+    def test_duplicate_row_count_differs_is_turned(self):
+        from touken.flows.sword_inventory import _page_turned
+        row = {"sword_id": "touken_122_shishiou", "level": 1,
+               "survival_max": 45, "survival": 45, "kiwame_date": None}
+        old_fp = sorted([_row_key(row)] * 5)
+        new_fp = sorted([_row_key(row)] * 4)   # 末页少一行
+        strip = self._strip(0)
+        self.assertTrue(_page_turned(old_fp, new_fp,
+                                     strip, strip.copy(), True))
+
+    def test_strip_noise_below_threshold_is_not_turned(self):
+        from touken.flows.sword_inventory import _page_turned
+        old_strip = self._strip(0)
+        new_strip = self._strip(0)
+        new_strip[0, :49] = 60               # 零星抖动 < 50 像素阈值
+        self.assertFalse(_page_turned([], [], old_strip, new_strip, False))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,12 @@ _ROWS_PER_PAGE = 5
 
 _NEXT_PAGE_SWIPE = ((1100, 400), (200, 400), 2500)  # 右→左慢拖 = 下一页
 _PAGE_TURN_WAIT_S = 3.0            # 翻页樱花转场实测 2~3s
+# 页码条 ROI（x0,y0,x1,y1）：列表底部「◀ 12 13 14 15 16 17 ▶」，当前页
+# 带高亮块，翻页必动。兜底场景：相邻两页内容一模一样（五振 Lv.1 狮子王
+# 连排两页，2026-09-21 真机实锤）时行指纹分不出翻没翻，会误判卡死。
+# 实测相邻页该条稳定 700+ 像素差异，同页复读为 0。
+_PAGE_STRIP = (500, 655, 900, 700)
+_STRIP_DIFF_MIN_PX = 50            # 条内灰度差 >20 的像素数阈值
 _LEVEL_RETRY_ROI = lambda base_y: (455, base_y - 70, 575, base_y + 5)
 
 # 五行的名字基线 y（行距约 100.5px，行内容 y 波动 ±50 内归到该行）
@@ -116,6 +122,22 @@ def _row_key(row: dict) -> tuple:
     按 名字+等级+生存上限+显现日期 区分；等级没读出来时退回生存现值。"""
     return (row["sword_id"], row.get("level"), row.get("survival_max"),
             row.get("survival"), row.get("kiwame_date"))
+
+
+def _strip_changed(prev, cur) -> bool:
+    """页码条像素是否变了（当前页高亮块随翻页移动）。任一帧缺失返回 False。"""
+    if prev is None or cur is None:
+        return False
+    import numpy as np
+    diff = np.abs(prev.astype(np.int16) - cur.astype(np.int16))
+    return bool((diff > 20).any(axis=2).sum() >= _STRIP_DIFF_MIN_PX)
+
+
+def _page_turned(old_fp, new_fp, old_strip, new_strip, has_rows: bool) -> bool:
+    """翻页确认：行指纹（有序多重集，保留重复行）变了，或页码条动了。"""
+    if has_rows and new_fp != old_fp:
+        return True
+    return _strip_changed(old_strip, new_strip)
 
 
 def _row_baselines(cells) -> list[int]:
@@ -486,8 +508,12 @@ class SwordInventoryMixin:
                 break
 
             # ── 翻页并确认：内核慢拖实测约有一半概率静默不翻（往回 20 翻
-            # 只翻了 10 页的实测），翻完比对整页行指纹，没翻动就重翻 ──
-            old_fp = frozenset(_row_key(r) for r in parsed["rows"])
+            # 只翻了 10 页的实测），翻完比对整页行指纹，没翻动就重翻。
+            # 指纹用有序多重集（frozenset 会把整页重复行压成一条，两页
+            # 五振相同狮子王会误判没翻）；仍分不清时看页码条像素兜底 ──
+            old_fp = sorted(_row_key(r) for r in parsed["rows"])
+            sx0, sy0, sx1, sy1 = _PAGE_STRIP
+            old_strip = img[sy0:sy1, sx0:sx1]
             turned = False
             for _ in range(3):
                 maa.touch_swipe(*_NEXT_PAGE_SWIPE[0], *_NEXT_PAGE_SWIPE[1],
@@ -498,8 +524,9 @@ class SwordInventoryMixin:
                 tokens = [(t, (p.x, p.y)) for t, p in
                           maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
                 check = parse_list_tokens(tokens)
-                new_fp = frozenset(_row_key(r) for r in check["rows"])
-                if check["rows"] and new_fp != old_fp:
+                new_fp = sorted(_row_key(r) for r in check["rows"])
+                if _page_turned(old_fp, new_fp, old_strip,
+                                img[sy0:sy1, sx0:sx1], bool(check["rows"])):
                     turned = True
                     break
                 time.sleep(1.5)
