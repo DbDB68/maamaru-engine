@@ -105,15 +105,17 @@ describe('同名编号与整本排序', () => {
     expect(ordinals.size).toBe(0)
   })
 
-  it('整本排序：按刀名分组（拼音序），组内按显现日期升序，没日期的排最后，没名字的排最后', () => {
+  it('整本排序：按刀帐番号升序（对齐游戏刀帐顺序），同名多振组内按显现日期升序，番号认不出的排最后', () => {
     const rows = [
-      entry({ observation_id: '9:1', name_zh: '小狐丸', kiwame_date: '2026-03-01' }),
-      entry({ observation_id: '9:2', name_zh: null, sword_catalog_id: null, kiwame_date: '2026-01-01' }),
-      entry({ observation_id: '9:3', name_zh: '小狐丸', kiwame_date: null }),
-      entry({ observation_id: '9:4', name_zh: '小狐丸', kiwame_date: '2026-01-01' }),
-      entry({ observation_id: '9:5', name_zh: '石切丸', kiwame_date: null }),
+      entry({ observation_id: '9:1', sword_catalog_id: 'touken_005_kogitsunemaru', name_zh: '小狐丸', kiwame_date: '2026-03-01' }),
+      entry({ observation_id: '9:2', sword_catalog_id: null, name_zh: null, kiwame_date: '2026-01-01' }),
+      entry({ observation_id: '9:3', sword_catalog_id: 'touken_005_kogitsunemaru', name_zh: '小狐丸', kiwame_date: null }),
+      entry({ observation_id: '9:4', sword_catalog_id: 'touken_005_kogitsunemaru', name_zh: '小狐丸', kiwame_date: '2026-01-01' }),
+      entry({ observation_id: '9:5', sword_catalog_id: 'touken_003_mikazuki', name_zh: '三日月宗近', kiwame_date: null }),
     ]
     const sorted = sortArchiveEntries(rows)
+    // 3 号三日月在最前；5 号小狐丸三振挨着（有日期的升序，没日期的殿后）；
+    // 认不出番号的 9:2 排整本最后
     expect(sorted.map(row => row.observation_id)).toEqual(['9:5', '9:4', '9:1', '9:3', '9:2'])
   })
 })

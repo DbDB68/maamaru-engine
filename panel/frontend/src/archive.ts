@@ -27,19 +27,28 @@ function byAcquisitionDate(a: string | null, b: string | null): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-// 整本刀帐的排列：按刀名分组（没认出名字的排最后），组内按显现日期先后排。
+// 刀帐番号：sword_catalog_id 形如 touken_118_heshikiri_hasebe，118 即
+// 游戏刀帐里的官方编号；纯数字字符串（旧测试数据）也认。
+function catalogNo(id: string | null): number | null {
+  if (!id) return null
+  const match = /touken_(\d+)_/.exec(id)
+  if (match) return Number(match[1])
+  return /^\d+$/.test(id) ? Number(id) : null
+}
+
+// 整本刀帐的排列：按刀帐番号升序——和游戏里「刀帐顺序」排序一致，
+// 对照游戏翻页对账不用来回滑；同名多振挨在一起，组内按显现日期升序
+// （与游戏内同名排法一致，老振在前）；番号认不出的排最后按名字兜底。
 export function sortArchiveEntries(entries: SwordArchiveEntry[]): SwordArchiveEntry[] {
   return [...entries].sort((a, b) => {
-    const na = a.name_zh || ''
-    const nb = b.name_zh || ''
-    if (na || nb) {
-      if (!na) return 1
-      if (!nb) return -1
-      const byName = na.localeCompare(nb, 'zh-CN')
+    const na = catalogNo(a.sword_catalog_id)
+    const nb = catalogNo(b.sword_catalog_id)
+    if (na != null && nb != null && na !== nb) return na - nb
+    if (na != null && nb == null) return -1
+    if (na == null && nb != null) return 1
+    if (na == null && nb == null) {
+      const byName = (a.name_zh || '').localeCompare(b.name_zh || '', 'zh-CN')
       if (byName) return byName
-    } else {
-      const byId = String(a.sword_catalog_id || '').localeCompare(String(b.sword_catalog_id || ''))
-      if (byId) return byId
     }
     return byAcquisitionDate(a.kiwame_date, b.kiwame_date) || a.observation_id.localeCompare(b.observation_id)
   })
