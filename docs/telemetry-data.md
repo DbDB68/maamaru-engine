@@ -214,6 +214,94 @@ sword_catalog_id；身份未知保持 null，不拿名字/徽章硬猜）。
 → `unknown` + 原因；空位/未占用 → `not_applicable`。原始槽位观察在
 `observed` 字段原样保留。
 
+**人工标注合并（telemetry schema v12 起）**：候选池输出行在
+`form_status` 为 `unknown` 时合并 `sword_annotations` 的人工形态确认
+（以人工为准，证据追加「人工确认（YYYY-MM-DD）」）；机器
+ambiguous/kiwame/normal 结论不动。只有指纹唯一命中（一标注对一行、
+一行对一标注）才合并；同名多振同日显现等撞车情形保持 unknown，交
+「刀帐档案」标 stale/duplicate 让人处理。
+
+## 刀帐档案（sword-archive）
+
+`touken/sword_archive.py` · 读取入口 `get_sword_archive(store=None)` ·
+只读 API `GET /api/data/sword-archive`。地基与「当前本丸共用档案」同一份
+最新完整盘点（机器形态结论 = 盘点落盘事实 + 编队页直读 + 图鉴极标的
+完整管线），人工标注按指纹 `(sword_catalog_id, kiwame_date)` 挂到具体
+某一振，合成「机器观察 + 人工确认」的固定档案，供界面确认形态、标记
+要练的刀。没有可信盘点时如实返回 `done=false` 骨架（summary 全 0）。
+
+**人工标注表（sword_annotations，telemetry schema v12）**：
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK | 标注 id |
+| sword_catalog_id | TEXT NOT NULL | 名册目录 id（指纹一半） |
+| kiwame_date | TEXT NOT NULL | 显现日期（指纹另一半，每振终身不变） |
+| level_at_mark | INTEGER NULL | 标记时的等级 |
+| form_confirmed | TEXT NULL | `kiwame` / `normal` |
+| keeper | INTEGER NOT NULL DEFAULT 0 | 要练的刀 |
+| note | TEXT NULL | 备注（≤300 字） |
+| created_at / updated_at | REAL | 创建 / 最近更新时间 |
+| revoked | INTEGER NOT NULL DEFAULT 0 | 软删标记 |
+
+- 同一指纹最多一条有效标注：`POST` 同指纹再保存 = 更新传入的非空字段
+  （`updated_at` 刷新，软删的除外）；撤销是软删（`revoked=1`），历史不丢。
+- 标注挂行规则：一标注多行（同名多振同日显现）→ 每行 `human` 都带且
+  `stale=true`，形态不合并，attention 记 `duplicate_fingerprint`；标注
+  匹配不到任何行（刀解了/快照过期）→ 不进 entries，attention 记
+  `stale_annotation`，`name_zh` 按 sword_db 目录反查。
+
+**端点**（`keeper` 布尔出入，confirmed_at 为标注 updated_at epoch）：
+
+- `GET /api/data/sword-archive` → 档案本体，契约如下。
+- `POST /api/data/sword-archive/annotations`，body：
+  `{"sword_catalog_id": str, "kiwame_date": str, "level_at_mark": int|null,
+    "form_confirmed": "kiwame"|"normal"|null, "keeper": bool|null,
+    "note": str|null}`
+  → `{"ok": true, "annotation": {...}}`；校验失败（空指纹/形态值非法/
+  等级非整数）→ 400。
+- `DELETE /api/data/sword-archive/annotations/{annotation_id}` →
+  `{"ok": true}`；标注不存在 → 400。
+
+**响应契约**：
+
+```json
+{"done": true, "reason": null,
+ "observed_at": 1787219985.79, "snapshot_id": 19,
+ "summary": {"total": 199, "human_confirmed": 12, "keepers": 3,
+             "attention_count": 68},
+ "entries": [{"observation_id": "19:12", "sword_catalog_id": "touken_xxx",
+              "name_zh": "包丁藤四郎", "sword_type": "短刀",
+              "level": 99, "tou_level": 5, "kiwame_date": "2024/5/1",
+              "form_status": "unknown", "form_evidence": ["..."],
+              "unknown_fields": ["..."],
+              "human": {"id": 3, "form": "kiwame", "keeper": true,
+                        "note": "...", "confirmed_at": 1787219985.79,
+                        "stale": false},
+              "hints": ["同名 2 振中等级最高", "同名中显现最早"]}],
+ "attention": [{"observation_id": "19:12", "sword_catalog_id": "touken_xxx",
+                "name_zh": "包丁藤四郎", "level": 99,
+                "kiwame_date": "2024/5/1", "reasons": ["form_unknown"],
+                "hints": ["同名 2 振中等级最高"]}]}
+```
+
+- `summary`：`total` = 行数；`human_confirmed` = 人工形态确认干净挂上的
+  行数；`keepers` = 人工标了「要练」且干净挂上的行数（撞车 stale 的标注
+  不算确认下来）；`attention_count` = attention 条数。
+- `form_status` 合并口径：机器 unknown + 人工确认 → 以人工为准
+  （`form_evidence` 追加「人工确认（YYYY-MM-DD）」，日期取标注
+  updated_at 本地格式化）；机器 ambiguous（两处直读打架/图鉴分不清
+  哪振）不被人工自动覆盖，进 attention 等人在界面上点；机器
+  kiwame/normal 保持不变。
+- `attention` reasons：`form_unknown`（合并后仍 unknown）>
+  `form_ambiguous` > `duplicate_fingerprint`（一行多标注或一标注多行）>
+  `stale_annotation`（标注没挂到任何行）；同类内按 `name_zh` 排序。
+- `hints` 只对同名多振组（同 sword_catalog_id ≥2 行）出：同名中等级
+  最高（并列都给）/ 同名中显现最早（并列都给）；显现日期解析不了
+  （如 OCR 残文）就不出那条，不猜。
+- `sword_type` 按 sword_catalog_id 从名册目录（`touken/sword_db.py`）
+  反查；`human` 无标注时为 null。
+
 ## 手动活动（manual-sessions）
 
 手动记录只保存玩法、圈数、起止时间和可选备注。服务端据此计算总用时与平均圈速，

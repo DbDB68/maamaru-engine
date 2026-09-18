@@ -710,5 +710,211 @@ class TelemetryStoreTests(unittest.TestCase):
         self.assertTrue(deleted["ok"])
 
 
+class SwordAnnotationStoreTests(unittest.TestCase):
+    """刀帐人工标注（sword_annotations，schema v12）：同指纹 upsert、
+    软删后同指纹可重建；校验失败抛 ValueError。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = TelemetryStore(Path(self.temp.name) / "telemetry.db")
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_save_creates_with_defaults_and_lists(self):
+        ann = self.store.save_sword_annotation(
+            "touken_011_imagiri_no_toshiro", "2024-5-1",
+            level_at_mark=99, form_confirmed="kiwame",
+            keeper=True, note="要练")
+
+        self.assertEqual(ann["sword_catalog_id"],
+                         "touken_011_imagiri_no_toshiro")
+        self.assertEqual(ann["kiwame_date"], "2024-5-1")
+        self.assertEqual(ann["level_at_mark"], 99)
+        self.assertEqual(ann["form_confirmed"], "kiwame")
+        self.assertTrue(ann["keeper"])
+        self.assertEqual(ann["note"], "要练")
+        self.assertFalse(ann["revoked"])
+        self.assertIsNotNone(ann["created_at"])
+        self.assertIsNotNone(ann["updated_at"])
+        listed = self.store.sword_annotations()
+        self.assertEqual([a["id"] for a in listed], [ann["id"]])
+
+    def test_same_fingerprint_upserts_only_non_none_fields(self):
+        first = self.store.save_sword_annotation(
+            "touken_011_imagiri_no_toshiro", "2024-5-1",
+            form_confirmed="kiwame", keeper=True, note="第一版")
+        second = self.store.save_sword_annotation(
+            "touken_011_imagiri_no_toshiro", "2024-5-1", note="改备注")
+
+        self.assertEqual(second["id"], first["id"])  # 更新而非新建
+        self.assertEqual(second["form_confirmed"], "kiwame")  # 没传的保持
+        self.assertTrue(second["keeper"])
+        self.assertEqual(second["note"], "改备注")
+        self.assertEqual(second["created_at"], first["created_at"])
+        self.assertGreaterEqual(second["updated_at"], first["updated_at"])
+        self.assertEqual(len(self.store.sword_annotations()), 1)
+
+    def test_revoked_fingerprint_is_free_for_new_record(self):
+        first = self.store.save_sword_annotation(
+            "touken_011_imagiri_no_toshiro", "2024-5-1",
+            form_confirmed="normal")
+        revoked = self.store.revoke_sword_annotation(first["id"])
+        self.assertTrue(revoked["revoked"])
+        self.assertEqual(self.store.sword_annotations(), [])
+        self.assertEqual(len(self.store.sword_annotations(
+            include_revoked=True)), 1)
+
+        second = self.store.save_sword_annotation(
+            "touken_011_imagiri_no_toshiro", "2024-5-1",
+            form_confirmed="kiwame")
+        self.assertNotEqual(second["id"], first["id"])
+        self.assertEqual(second["form_confirmed"], "kiwame")
+
+    def test_validation_rejects_bad_values(self):
+        with self.assertRaises(ValueError):
+            self.store.save_sword_annotation("", "2024-5-1")
+        with self.assertRaises(ValueError):
+            self.store.save_sword_annotation("touken_011_x", "")
+        with self.assertRaises(ValueError):
+            self.store.save_sword_annotation(None, None)
+        with self.assertRaises(ValueError):
+            self.store.save_sword_annotation(
+                "touken_011_x", "2024-5-1", form_confirmed="极")
+        with self.assertRaises(ValueError):
+            self.store.save_sword_annotation(
+                "touken_011_x", "2024-5-1", level_at_mark="九十九")
+        with self.assertRaises(ValueError):
+            self.store.revoke_sword_annotation(999)
+
+    def test_sword_annotation_api_roundtrip_and_soft_delete(self):
+        from panel.server import (api_revoke_sword_annotation,
+                                  api_save_sword_annotation)
+
+        class _Req:
+            def __init__(self, body):
+                self.body = body
+
+            async def json(self):
+                return self.body
+
+        with patch("touken.telemetry._store", self.store):
+            created = asyncio.run(api_save_sword_annotation(_Req({
+                "sword_catalog_id": "touken_031_hirano_toushirou",
+                "kiwame_date": "2024/6/1", "level_at_mark": 99,
+                "form_confirmed": "kiwame", "keeper": True,
+                "note": "极化毕业",
+            })))
+            bad = asyncio.run(api_save_sword_annotation(_Req({
+                "sword_catalog_id": "touken_031_hirano_toushirou",
+                "kiwame_date": "2024/6/1", "form_confirmed": "maybe",
+            })))
+            deleted = asyncio.run(api_revoke_sword_annotation(
+                created["annotation"]["id"]))
+            missing = asyncio.run(api_revoke_sword_annotation(
+                created["annotation"]["id"]))
+
+        self.assertTrue(created["ok"])
+        self.assertTrue(created["annotation"]["keeper"])
+        self.assertEqual(created["annotation"]["form_confirmed"], "kiwame")
+        self.assertEqual(bad.status_code, 400)
+        self.assertEqual(deleted, {"ok": True})
+        self.assertEqual(missing.status_code, 400)
+
+
+class SchemaV12MigrationTests(unittest.TestCase):
+    """v11 老库（没有 sword_annotations 表）原地升级到 v12：
+    旧数据一条不丢，新表自动补上，标注照常读写。"""
+
+    def _v11_db(self) -> Path:
+        import sqlite3
+        db = Path(tempfile.mkdtemp()) / "telemetry.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE runs (run_id TEXT PRIMARY KEY, script TEXT NOT NULL,
+                started_at REAL NOT NULL, ended_at REAL,
+                status TEXT NOT NULL DEFAULT 'running', label TEXT);
+            CREATE TABLE observations (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL, run_id TEXT, script TEXT, kind TEXT NOT NULL,
+                expected TEXT, match_mode TEXT, matched INTEGER,
+                roi TEXT NOT NULL, tokens TEXT NOT NULL, error TEXT);
+            CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL, run_id TEXT, script TEXT,
+                event_type TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE human_reports (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL, occurred_at REAL NOT NULL,
+                source TEXT NOT NULL, gap_key TEXT, activities TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT '', resource TEXT,
+                claimed_delta REAL, group_id TEXT);
+            CREATE TABLE manual_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL, script TEXT NOT NULL,
+                started_at REAL NOT NULL, ended_at REAL NOT NULL,
+                loops INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '');
+            CREATE TABLE sword_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at REAL NOT NULL, owned INTEGER, capacity INTEGER,
+                sword_count INTEGER NOT NULL DEFAULT 0, missing INTEGER,
+                source TEXT, completeness TEXT);
+            CREATE TABLE sword_snapshot_rows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL, sword_id TEXT NOT NULL,
+                name_zh TEXT NOT NULL, level INTEGER, tou_level INTEGER,
+                survival INTEGER, survival_max INTEGER, fatigue INTEGER,
+                fatigue_max INTEGER, stats TEXT NOT NULL DEFAULT '{}',
+                kiwame_date TEXT, locked INTEGER, page_no INTEGER,
+                form_fact TEXT);
+            INSERT INTO metadata(key, value) VALUES('schema_version', '11');
+            INSERT INTO runs(run_id, script, started_at, ended_at, status,
+                             label) VALUES ('old-run', 'daily', 100, 200,
+                                            'completed', '老任务');
+            INSERT INTO sword_snapshots(id, captured_at, owned, capacity,
+                sword_count, missing, source, completeness)
+                VALUES (1, 100, 2, 300, 2, 0, 'owned_inventory', 'complete');
+            INSERT INTO sword_snapshot_rows(snapshot_id, sword_id, name_zh,
+                level, kiwame_date, stats, form_fact)
+                VALUES (1, 'touken_011_imagiri_no_toshiro', '今剑', 99,
+                        '2024-5-1', '{}',
+                        '{"status":"normal","evidence":["花数2/基线2"]}');
+            INSERT INTO human_reports(created_at, occurred_at, source,
+                activities, note) VALUES (50, 50, 'proactive', '[]', '老报备');
+        """)
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_v11_database_migrates_in_place_without_data_loss(self):
+        db = self._v11_db()
+        store = TelemetryStore(db)
+        try:
+            # 版本号原地升级，老数据原样可读
+            self.assertEqual(store.summary()["schema_version"],
+                             TELEMETRY_SCHEMA_VERSION)
+            self.assertEqual(TELEMETRY_SCHEMA_VERSION, 12)
+            self.assertEqual(store.run_summary("old-run")["label"], "老任务")
+            self.assertEqual(store.human_reports()[0]["note"], "老报备")
+            detail = store.sword_snapshot_detail(1)
+            self.assertEqual(detail["swords"][0]["name_zh"], "今剑")
+            self.assertEqual(detail["swords"][0]["form_fact"]["status"],
+                             "normal")
+            # 新表存在且照常读写
+            cols = {row["name"] for row in store._conn().execute(
+                "PRAGMA table_info(sword_annotations)").fetchall()}
+            self.assertIn("form_confirmed", cols)
+            self.assertIn("revoked", cols)
+            ann = store.save_sword_annotation(
+                "touken_011_imagiri_no_toshiro", "2024-5-1",
+                form_confirmed="kiwame")
+            self.assertEqual(store.sword_annotations()[0]["id"], ann["id"])
+        finally:
+            store.close()
+        # 重复打开幂等：已有标注不丢、不重复建表
+        store2 = TelemetryStore(db)
+        try:
+            self.assertEqual(len(store2.sword_annotations()), 1)
+        finally:
+            store2.close()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@
 """
 
 import time
+from datetime import datetime
 
 PROFILE_SCHEMA_VERSION = 1
 
@@ -61,6 +62,7 @@ def build_candidate_pool(store) -> dict:
 
     detail = store.sword_snapshot_detail(chosen["id"]) or {}
     entries = [_pool_entry(row, chosen) for row in detail.get("swords", [])]
+    _apply_human_confirmations(entries, _human_annotations(store))
     return {"done": True,
             "completeness": "complete",
             "source": {"snapshot_id": chosen["id"],
@@ -130,6 +132,67 @@ def _pool_entry(row: dict, head: dict) -> dict:
         "observed_at": head.get("captured_at"),
         "source_snapshot_id": head["id"],
     }
+
+
+def _human_annotations(store) -> list:
+    """刀帐人工标注（sword_annotations）；取不到按没有处理，不拖垮档案。"""
+    fetch = getattr(store, "sword_annotations", None)
+    if fetch is None:
+        return []
+    try:
+        return fetch() or []
+    except Exception:
+        return []
+
+
+def _annotation_index(annotations: list) -> dict:
+    """有效标注按指纹 (sword_catalog_id, kiwame_date) 归组。
+
+    候选池合并与刀帐档案（sword_archive）共用这套挂接规则：指纹是标注
+    挂到具体某一振的唯一依据（显现日期终身不变），撞组的不自动裁决。
+    """
+    index = {}
+    for ann in annotations or []:
+        if not ann or ann.get("revoked"):
+            continue
+        key = (ann.get("sword_catalog_id"), ann.get("kiwame_date"))
+        index.setdefault(key, []).append(ann)
+    return index
+
+
+def _confirm_day(updated_at) -> str | None:
+    try:
+        return datetime.fromtimestamp(float(updated_at)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _apply_human_confirmations(entries: list, annotations: list) -> None:
+    """人工标注合并进候选池（原地标注）：机器 unknown + 人工确认形态 →
+    以人工为准，证据追加「人工确认（日期）」；ambiguous/kiwame/normal
+    的机器结论一律不动。
+
+    只有指纹唯一命中（一标注对一行、一行对一标注）才合并；同名多振同日
+    显现等撞车情形保持 unknown，交给刀帐档案标 stale/duplicate 让人处理。
+    """
+    if not entries or not annotations:
+        return
+    index = _annotation_index(annotations)
+    row_counts = {}
+    for entry in entries:
+        key = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        row_counts[key] = row_counts.get(key, 0) + 1
+    for entry in entries:
+        key = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        anns = index.get(key) or []
+        if len(anns) != 1 or row_counts.get(key, 0) != 1:
+            continue
+        form = anns[0].get("form_confirmed")
+        if entry.get("form_status") == "unknown" and form in ("kiwame", "normal"):
+            entry["form_status"] = form
+            day = _confirm_day(anns[0].get("updated_at"))
+            entry["form_evidence"] = (entry.get("form_evidence") or []) + [
+                f"人工确认（{day}）" if day else "人工确认"]
 
 
 def build_roster(store, entries: list[dict]) -> dict:

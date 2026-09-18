@@ -2246,6 +2246,44 @@ async def api_honmaru_profile():
     return get_honmaru_profile()
 
 
+@app.get("/api/data/sword-archive")
+async def api_sword_archive():
+    """刀帐档案：机器盘点 + 人工标注的合并视图（形态确认/要练的刀），
+    只读生成，契约见 docs/telemetry-data.md「刀帐档案」。"""
+    from touken.sword_archive import get_sword_archive
+    return get_sword_archive()
+
+
+@app.post("/api/data/sword-archive/annotations")
+async def api_save_sword_annotation(request: Request):
+    """保存一条刀帐人工标注；同指纹已存在时更新传入的非空字段。"""
+    body = await request.json()
+    from touken.telemetry import get_telemetry_store
+    keeper = body.get("keeper")
+    try:
+        annotation = get_telemetry_store().save_sword_annotation(
+            sword_catalog_id=body.get("sword_catalog_id"),
+            kiwame_date=body.get("kiwame_date"),
+            level_at_mark=body.get("level_at_mark"),
+            form_confirmed=body.get("form_confirmed"),
+            keeper=None if keeper is None else int(bool(keeper)),
+            note=body.get("note"))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "annotation": annotation}
+
+
+@app.delete("/api/data/sword-archive/annotations/{annotation_id}")
+async def api_revoke_sword_annotation(annotation_id: int):
+    """软删一条人工标注（撤销形态确认/要练标记），历史保留不丢。"""
+    from touken.telemetry import get_telemetry_store
+    try:
+        get_telemetry_store().revoke_sword_annotation(annotation_id)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True}
+
+
 @app.get("/api/data/runs")
 async def api_data_runs(limit: int = 20, script: str = "",
                         before_started_at: float | None = None,

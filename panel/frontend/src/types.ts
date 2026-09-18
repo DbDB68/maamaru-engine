@@ -619,3 +619,76 @@ export interface FormationSwapEvent {
     missing_evidence?: string[]
   }
 }
+
+// ---- 刀帐档案（/api/data/sword-archive）----
+
+export type SwordFormStatus = 'kiwame' | 'normal' | 'ambiguous' | 'unknown'
+
+export interface SwordArchiveHuman {
+  id: number
+  form: 'kiwame' | 'normal' | null
+  keeper: boolean
+  note: string | null
+  confirmed_at: number
+  stale: boolean
+}
+
+export interface SwordArchiveEntry {
+  observation_id: string
+  sword_catalog_id: string | null
+  name_zh: string | null
+  sword_type: string | null
+  level: number | null
+  tou_level: number | null
+  /** 历史字段名，实为「显现日期」（获得日期），展示必须叫显现日期 */
+  kiwame_date: string | null
+  form_status: SwordFormStatus
+  form_evidence: string[]
+  unknown_fields: string[]
+  human: SwordArchiveHuman | null
+  hints: string[]
+}
+
+export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicate_fingerprint' | 'stale_annotation'
+
+export interface SwordArchiveAttentionItem {
+  observation_id: string | null
+  sword_catalog_id: string | null
+  name_zh: string | null
+  level: number | null
+  kiwame_date: string | null
+  reasons: SwordAttentionReason[]
+  hints: string[]
+}
+
+export interface SwordArchiveSummary {
+  total: number
+  human_confirmed: number
+  keepers: number
+  attention_count: number
+}
+
+export interface SwordArchiveResponse {
+  done: boolean
+  reason: string | null
+  observed_at: number | null
+  snapshot_id: number | null
+  summary: SwordArchiveSummary
+  entries: SwordArchiveEntry[]
+  attention: SwordArchiveAttentionItem[]
+}
+
+export interface SwordAnnotationBody {
+  sword_catalog_id: string | null
+  kiwame_date: string | null
+  level_at_mark?: number
+  form_confirmed?: 'kiwame' | 'normal' | null
+  keeper?: boolean | null
+  note?: string | null
+}
+
+export interface SwordArchiveAnnotation {
+  id: number
+  sword_catalog_id: string
+  [key: string]: unknown
+}

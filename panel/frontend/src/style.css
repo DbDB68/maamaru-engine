@@ -115,7 +115,7 @@ button { cursor: pointer; }
 .sidebar button.active { background: #fffaf0; border-color: #bd8b47; box-shadow: 3px 3px 0 #d6c7ad; }
 .sidebar small { color: #9d3028; }
 .content { position: relative; padding: 30px; }
-.content > .lists-panel, .content > .schedule-panel, .content > .formation-panel { width: min(1080px, 100%); height: auto; min-height: 100%; margin: 0 auto; overflow: visible; }
+.content > .lists-panel, .content > .schedule-panel, .content > .formation-panel, .content > .archive-panel { width: min(1080px, 100%); height: auto; min-height: 100%; margin: 0 auto; overflow: visible; }
 .overview-layout { display: grid; flex: 1; grid-template-columns: 210px minmax(0, 1fr) 280px; gap: 12px; min-height: 0; padding: 14px 36px 36px; height: auto; overflow: hidden; background: var(--paper-panel); border: 1px solid var(--paper-line); border-top: 0; border-radius: 0 0 12px 12px; }
 .home-functions, .home-dashboard, .home-center { min-width: 0; min-height: 0; }
 .home-functions { overflow: auto; padding: 0; background: transparent; border: 0; }

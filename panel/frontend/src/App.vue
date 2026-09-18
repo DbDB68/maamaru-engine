@@ -21,6 +21,7 @@ import NotificationCenter from './components/NotificationCenter.vue'
 import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
+import SwordArchivePanel from './components/SwordArchivePanel.vue'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
@@ -537,6 +538,10 @@ watch(tab, value => {
         <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
           <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
         </SideNavItem>
+        <h3>刀帐</h3>
+        <SideNavItem :active="selected === '$archive'" @click="selected = '$archive'">
+          <span><img class="task-menu-icon" :src="'/static/img/ui/scrollVertical.png'" alt="">刀帐档案</span>
+        </SideNavItem>
         <h3>名单设置</h3>
         <SideNavItem :active="selected === '$repair-list'" @click="selected = '$repair-list'">
           <span><img class="task-menu-icon" :src="'/static/img/ui/repair-tools.png'" alt="">手入黑名单</span>
@@ -585,6 +590,7 @@ watch(tab, value => {
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
         <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />
+        <SwordArchivePanel v-else-if="selected === '$archive'" />
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>

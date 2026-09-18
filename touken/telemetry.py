@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 11
+TELEMETRY_SCHEMA_VERSION = 12
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -258,6 +258,20 @@ class TelemetryStore:
                 locked INTEGER,
                 page_no INTEGER
             );
+            -- v12 新表：刀帐人工标注（形态确认/要练的刀）。原地 CREATE 即可，
+            -- 老库打开自动补表；标注是人工事实，不做历史回填。
+            CREATE TABLE IF NOT EXISTS sword_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sword_catalog_id TEXT NOT NULL,
+                kiwame_date TEXT NOT NULL,
+                level_at_mark INTEGER,
+                form_confirmed TEXT,
+                keeper INTEGER NOT NULL DEFAULT 0,
+                note TEXT,
+                created_at REAL,
+                updated_at REAL,
+                revoked INTEGER NOT NULL DEFAULT 0
+            );
             CREATE INDEX IF NOT EXISTS idx_observations_ts ON observations(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_observations_run ON observations(run_id);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
@@ -273,6 +287,8 @@ class TelemetryStore:
                 ON sword_snapshots(captured_at DESC);
             CREATE INDEX IF NOT EXISTS idx_sword_rows_snapshot
                 ON sword_snapshot_rows(snapshot_id);
+            CREATE INDEX IF NOT EXISTS idx_sword_annotations_fp
+                ON sword_annotations(sword_catalog_id, kiwame_date);
         """)
         conn.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
@@ -968,6 +984,109 @@ class TelemetryStore:
                           "form_fact": _loads(row["form_fact"], None)}
                          for row in rows]
         return out
+
+    # ---------- 刀帐人工标注（sword_annotations，schema v12） ----------
+
+    def save_sword_annotation(self, sword_catalog_id, kiwame_date,
+                              level_at_mark=None, form_confirmed=None,
+                              keeper=None, note=None) -> dict:
+        """保存一条人工标注；同指纹（目录 id + 显现日期）已存在有效标注时更新。
+
+        更新只覆盖传入的非 None 字段（updated_at 随刷新），软删的指纹视为
+        不存在、直接新建。指纹是标注挂到「具体某一振」的唯一依据：
+        显现日期每振终身不变，同名多振靠它区分。
+        """
+        sword_catalog_id = str(sword_catalog_id or "").strip()
+        kiwame_date = str(kiwame_date or "").strip()
+        if not sword_catalog_id:
+            raise ValueError("刀剑目录 id 不能为空")
+        if not kiwame_date:
+            raise ValueError("显现日期不能为空")
+        if form_confirmed not in (None, "kiwame", "normal"):
+            raise ValueError("形态确认只能是 kiwame 或 normal")
+        if level_at_mark is not None:
+            if (isinstance(level_at_mark, bool)
+                    or not isinstance(level_at_mark, (int, float))
+                    or int(level_at_mark) != level_at_mark):
+                raise ValueError("标记等级要填整数")
+            level_at_mark = int(level_at_mark)
+        keeper_value = None if keeper is None else int(bool(keeper))
+        note = str(note).strip()[:300] if note is not None else None
+        conn = self._conn()
+        now = time.time()
+        row = conn.execute(
+            "SELECT id FROM sword_annotations "
+            "WHERE sword_catalog_id = ? AND kiwame_date = ? AND revoked = 0",
+            (sword_catalog_id, kiwame_date),
+        ).fetchone()
+        if row:
+            sets, args = [], []
+            if level_at_mark is not None:
+                sets.append("level_at_mark = ?")
+                args.append(level_at_mark)
+            if form_confirmed is not None:
+                sets.append("form_confirmed = ?")
+                args.append(form_confirmed)
+            if keeper_value is not None:
+                sets.append("keeper = ?")
+                args.append(keeper_value)
+            if note is not None:
+                sets.append("note = ?")
+                args.append(note)
+            sets.append("updated_at = ?")
+            args.append(now)
+            args.append(row["id"])
+            conn.execute(
+                f"UPDATE sword_annotations SET {', '.join(sets)} WHERE id = ?",
+                args)
+            conn.commit()
+            return self._sword_annotation_dict(row["id"])
+        cursor = conn.execute(
+            "INSERT INTO sword_annotations(sword_catalog_id, kiwame_date, "
+            "level_at_mark, form_confirmed, keeper, note, created_at, "
+            "updated_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (sword_catalog_id, kiwame_date, level_at_mark, form_confirmed,
+             keeper_value or 0, note, now, now),
+        )
+        conn.commit()
+        return self._sword_annotation_dict(cursor.lastrowid)
+
+    def _sword_annotation_dict(self, annotation_id: int) -> dict:
+        row = self._conn().execute(
+            "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
+            "form_confirmed, keeper, note, created_at, updated_at, revoked "
+            "FROM sword_annotations WHERE id = ?", (int(annotation_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("找不到这条人工标注")
+        return {**dict(row), "keeper": bool(row["keeper"]),
+                "revoked": bool(row["revoked"])}
+
+    def sword_annotations(self, include_revoked: bool = False) -> list[dict]:
+        where = "" if include_revoked else " WHERE revoked = 0"
+        rows = self._conn().execute(
+            "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
+            "form_confirmed, keeper, note, created_at, updated_at, revoked "
+            f"FROM sword_annotations{where} ORDER BY updated_at DESC, id DESC",
+        ).fetchall()
+        return [{**dict(row), "keeper": bool(row["keeper"]),
+                 "revoked": bool(row["revoked"])} for row in rows]
+
+    def revoke_sword_annotation(self, annotation_id) -> dict:
+        """软删一条标注（revoked=1），历史保留不丢；不存在或已撤销抛
+        ValueError——重复撤销说明界面状态和库已经不一致，如实报错。"""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT id FROM sword_annotations WHERE id = ? AND revoked = 0",
+            (int(annotation_id),),
+        ).fetchone()
+        if not row:
+            raise ValueError("找不到这条人工标注")
+        conn.execute(
+            "UPDATE sword_annotations SET revoked = 1, updated_at = ? "
+            "WHERE id = ?", (time.time(), row["id"]))
+        conn.commit()
+        return self._sword_annotation_dict(row["id"])
 
     def inventory_gaps(self, limit: int = 50) -> list[dict]:
         """Return resource changes between a prior closing snapshot and next run start."""
