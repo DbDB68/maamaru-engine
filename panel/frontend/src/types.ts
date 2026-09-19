@@ -697,3 +697,70 @@ export interface SwordArchiveAnnotation {
   sword_catalog_id: string
   [key: string]: unknown
 }
+
+// ---- 模板工坊 /api/template-lab（开发专用，打包版不启用）----
+
+export interface TemplateLabStatus {
+  enabled: boolean
+  ledger_mode: boolean
+  adb_ready: boolean
+}
+
+export interface TemplateLabFrame {
+  idx: number
+  name: string
+  width: number
+  height: number
+  mtime?: number
+}
+
+export interface TemplateLabCaptureResult {
+  session: string
+  frames: TemplateLabFrame[]
+  errors: string[]
+}
+
+export interface TemplateLabSession {
+  id: string
+  frames: TemplateLabFrame[]
+}
+
+export interface TemplateLabDraft {
+  name: string
+  width: number
+  height: number
+  mtime?: number
+}
+
+export interface TemplateLabCropResult {
+  draft: { name: string; width: number; height: number }
+}
+
+export interface TemplateLabVerifyRow {
+  session: string
+  frame: number
+  score: number
+  loc: { x: number; y: number }
+  hit: boolean
+}
+
+export interface TemplateLabConfusionRow {
+  session: string
+  frame: number
+  other_draft: string
+  other_score: number
+  margin: number
+}
+
+export interface TemplateLabVerifyResult {
+  draft: string
+  threshold: number
+  results: TemplateLabVerifyRow[]
+  confusion: TemplateLabConfusionRow[]
+}
+
+export interface TemplateLabAdoptResult {
+  ok: boolean
+  path: string
+  backup: string | null
+}

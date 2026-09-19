@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, WorkflowNodeDef, WorkflowPreset } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCropResult, TemplateLabDraft, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 import type { FormationSwapEvent, HonmaruFormationProfile } from './types'
@@ -172,4 +172,24 @@ export const api = {
   incidents: () => request<{ items: Incident[]; unread: number }>('/api/incidents'),
   ackIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/ack`, { method: 'POST' }),
   resolveIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/resolve`, { method: 'POST' }),
+  templateLabStatus: () => request<TemplateLabStatus>('/api/template-lab/status'),
+  templateLabCapture: (count: number, intervalMs: number) => request<TemplateLabCaptureResult>('/api/template-lab/capture', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ count, interval_ms: intervalMs }),
+  }),
+  templateLabSessions: () => request<{ sessions: TemplateLabSession[] }>('/api/template-lab/sessions'),
+  templateLabFrameUrl: (session: string, idx: number) => `/api/template-lab/frame?session=${encodeURIComponent(session)}&idx=${idx}`,
+  templateLabDraftUrl: (name: string) => `/api/template-lab/draft?name=${encodeURIComponent(name)}`,
+  templateLabCrop: (value: { session: string; frame: number; x: number; y: number; w: number; h: number; name: string }) => request<TemplateLabCropResult>('/api/template-lab/crop', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  templateLabDrafts: () => request<{ drafts: TemplateLabDraft[] }>('/api/template-lab/drafts'),
+  templateLabVerify: (draft: string, sessions: string[], threshold: number) => request<TemplateLabVerifyResult>('/api/template-lab/verify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft, sessions, threshold }),
+  }),
+  templateLabAdopt: (draft: string, target: string) => request<TemplateLabAdoptResult>('/api/template-lab/adopt', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft, target }),
+  }),
 }
