@@ -217,7 +217,10 @@ sword_catalog_id；身份未知保持 null，不拿名字/徽章硬猜）。
 **人工标注合并（telemetry schema v12 起）**：候选池输出行在
 `form_status` 为 `unknown` 时合并 `sword_annotations` 的人工形态确认
 （以人工为准，证据追加「人工确认（YYYY-MM-DD）」）；机器
-ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补人工
+kiwame/normal/ambiguous + 人工确认且与机器不同 → 人工改判，以人工为准
+（`form_overridden=true`，机器原值留在 `machine_form_status`，机器证据
+保留，追加「人工改判（YYYY-MM-DD）：原识别=极/普通/存疑」）；人工与机器
+一致只追加确认证据，不算改判。机器 `level` 读不出（None）时补人工
 确认等级（v13 起），并把它从 `unknown_fields` 摘掉；机器有值一律信
 机器——等级会随练级涨，人填的会过期，只补空缺永不覆盖。只有指纹唯一
 命中（一标注对一行、一行对一标注）才合并；同名多振同日显现等撞车
@@ -232,7 +235,8 @@ ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补�
 某一振，合成「机器观察 + 人工确认」的固定档案，供界面确认形态、补等级、
 标记要练的刀。没有可信盘点时如实返回 `done=false` 骨架（summary 全 0）。
 
-**人工标注表（sword_annotations，telemetry schema v12 建表 / v13 加列）**：
+**人工标注表（sword_annotations，telemetry schema v12 建表 /
+v13 加列 / v14 加列）**：
 
 | 列 | 类型 | 说明 |
 |---|---|---|
@@ -243,6 +247,8 @@ ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补�
 | level_confirmed | INTEGER NULL | v13 起：人工确认的等级（1~99）；只补机器读不出的空缺，永不覆盖机器读数 |
 | form_confirmed | TEXT NULL | `kiwame` / `normal` |
 | keeper | INTEGER NOT NULL DEFAULT 0 | 要练的刀 |
+| favorite | INTEGER NOT NULL DEFAULT 0 | v14 起：常用（玩家偏好，后端零消费） |
+| watch | INTEGER NOT NULL DEFAULT 0 | v14 起：特别关心（玩家偏好，后端零消费） |
 | note | TEXT NULL | 备注（≤300 字） |
 | created_at / updated_at | REAL | 创建 / 最近更新时间 |
 | revoked | INTEGER NOT NULL DEFAULT 0 | 软删标记 |
@@ -254,13 +260,15 @@ ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补�
   标注匹配不到任何行（刀解了/快照过期）→ 不进 entries，attention 记
   `stale_annotation`，`name_zh` 按 sword_db 目录反查。
 
-**端点**（`keeper` 布尔出入，confirmed_at 为标注 updated_at epoch）：
+**端点**（`keeper` / `favorite` / `watch` 布尔出入，confirmed_at 为标注
+updated_at epoch）：
 
 - `GET /api/data/sword-archive` → 档案本体，契约如下。
 - `POST /api/data/sword-archive/annotations`，body：
   `{"sword_catalog_id": str, "kiwame_date": str, "level_at_mark": int|null,
     "level_confirmed": int|null, "form_confirmed": "kiwame"|"normal"|null,
-    "keeper": bool|null, "note": str|null}`
+    "keeper": bool|null, "favorite": bool|null, "watch": bool|null,
+    "note": str|null}`
   → `{"ok": true, "annotation": {...}}`；校验失败（空指纹/形态值非法/
   等级非整数/确认等级不在 1~99）→ 400。
 - `DELETE /api/data/sword-archive/annotations/{annotation_id}` →
@@ -276,10 +284,13 @@ ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补�
  "entries": [{"observation_id": "19:12", "sword_catalog_id": "touken_xxx",
               "name_zh": "包丁藤四郎", "sword_type": "短刀",
               "level": 99, "tou_level": 5, "kiwame_date": "2024/5/1",
-              "form_status": "unknown", "form_evidence": ["..."],
+              "form_status": "unknown",
+              "machine_form_status": null, "form_overridden": false,
+              "form_evidence": ["..."],
               "unknown_fields": ["..."],
               "human": {"id": 3, "form": "kiwame", "level": 88,
-                        "keeper": true, "note": "...",
+                        "keeper": true, "favorite": false, "watch": false,
+                        "note": "...",
                         "confirmed_at": 1787219985.79, "stale": false},
               "hints": ["同名 2 振中等级最高", "同名中显现最早"]}],
  "attention": [{"observation_id": "19:12", "sword_catalog_id": "touken_xxx",
@@ -294,9 +305,12 @@ ambiguous/kiwame/normal 结论不动。机器 `level` 读不出（None）时补�
   不算确认下来）；`attention_count` = attention 条数。
 - `form_status` 合并口径：机器 unknown + 人工确认 → 以人工为准
   （`form_evidence` 追加「人工确认（YYYY-MM-DD）」，日期取标注
-  updated_at 本地格式化）；机器 ambiguous（两处直读打架/图鉴分不清
-  哪振）不被人工自动覆盖，进 attention 等人在界面上点；机器
-  kiwame/normal 保持不变。
+  updated_at 本地格式化）；机器 kiwame/normal/ambiguous + 人工确认且与
+  机器不同 → 人工改判（`form_overridden=true`，机器原值留在
+  `machine_form_status`，机器证据保留，追加「人工改判（YYYY-MM-DD）：
+  原识别=极/普通/存疑」）；人工与机器一致只追加确认证据、不改结论。
+  改判后 `form_status` 是确定值，attention 的 form_unknown/form_ambiguous
+  自然不再触发。
 - `level` 合并口径：机器读出等级（非 None）一律信机器；机器空缺且
   人工有 `level_confirmed` → 用人工值，`unknown_fields` 摘掉 `"level"`；
   合并后仍空缺 → 进 attention（`level_unknown`）。`human.level` 恒带

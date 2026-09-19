@@ -630,12 +630,19 @@ export interface SwordArchiveHuman {
   id: number
   form: 'kiwame' | 'normal' | null
   keeper: boolean
+  /** 常用：顺手就要用的刀 */
+  favorite: boolean
+  /** 特别关心：置顶盯着的刀（组件里注意别和 vue 的 watch API 撞名解构） */
+  watch: boolean
   note: string | null
   /** 人工确认的等级（只补机器读不出的空缺）；没有为 null */
   level: number | null
   confirmed_at: number
   stale: boolean
 }
+
+/** 机器独立形态结论（不受人工改判影响，撤销回退就靠它） */
+export type SwordMachineFormStatus = SwordFormStatus | null
 
 export interface SwordArchiveEntry {
   observation_id: string
@@ -647,6 +654,10 @@ export interface SwordArchiveEntry {
   /** 历史字段名，实为「显现日期」（获得日期），展示必须叫显现日期 */
   kiwame_date: string | null
   form_status: SwordFormStatus
+  /** 机器自己的形态结论；没人工的行展示「盘点识别」，改判行拿它当「原识别」 */
+  machine_form_status: SwordMachineFormStatus
+  /** 人工结论和机器结论冲突（你改判了），徽标从「你确认过」升级成「你改判的」 */
+  form_overridden: boolean
   form_evidence: string[]
   unknown_fields: string[]
   human: SwordArchiveHuman | null
@@ -689,6 +700,8 @@ export interface SwordAnnotationBody {
   level_confirmed?: number | null
   form_confirmed?: 'kiwame' | 'normal' | null
   keeper?: boolean | null
+  favorite?: boolean | null
+  watch?: boolean | null
   note?: string | null
 }
 

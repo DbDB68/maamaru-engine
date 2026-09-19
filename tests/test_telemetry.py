@@ -921,7 +921,7 @@ class SchemaV12MigrationTests(unittest.TestCase):
             # 版本号原地升级，老数据原样可读
             self.assertEqual(store.summary()["schema_version"],
                              TELEMETRY_SCHEMA_VERSION)
-            self.assertEqual(TELEMETRY_SCHEMA_VERSION, 13)
+            self.assertEqual(TELEMETRY_SCHEMA_VERSION, 14)
             self.assertEqual(store.run_summary("old-run")["label"], "老任务")
             self.assertEqual(store.human_reports()[0]["note"], "老报备")
             detail = store.sword_snapshot_detail(1)

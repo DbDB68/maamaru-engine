@@ -2,15 +2,17 @@
 """刀帐档案：机器盘点 + 人工标注的合并视图（build_sword_archive）。
 
 与「当前本丸共用档案」同一份最新完整盘点做地基；人工标注
-（telemetry schema v12 的 sword_annotations）按指纹
+（telemetry schema v12 建表、v13/v14 补列的 sword_annotations）按指纹
 (sword_catalog_id, kiwame_date) 挂到具体某一振上，形态合并、要练
 标记、待人工清单（attention）都在这里合成。只读生成，不写库。
 
 铁律（与 honmaru_profile 同一套）：
   - 一振一行，同名多振保留；指纹撞车（一标注多行/一行多标注）不自动
     裁决，标 stale/duplicate_fingerprint 交回给人点；
-  - 人工确认的 form 只覆盖机器的 unknown；机器 ambiguous（两处直读
-    打架/图鉴分不清哪振）不被人工自动覆盖，进 attention 等人在界面上点；
+  - 人工 form 与机器结论不同才算改判（form_overridden=True，机器原值
+    留在 machine_form_status，机器证据保留）；一致只追加确认证据；
+    改判后 form_status 是确定值，attention 的 form_unknown/form_ambiguous
+    自然不再触发；
   - 人工等级只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）；
   - 标注匹配不到任何行（刀解了/快照过期）不进 entries，进 attention
     记 stale_annotation。
@@ -124,9 +126,10 @@ def build_sword_archive(store) -> dict:
     """生成刀帐档案（纯函数，不写库）。
 
     机器形态结论直接复用 honmaru_profile 的完整管线（盘点落盘事实 +
-    编队页直读 + 图鉴极标），人工合并（unknown ← 人工确认）在候选池
-    输出前已完成；本层负责挂 human 字段、stale/duplicate 判定、
-    attention 清单与同名提示。
+    编队页直读 + 图鉴极标），人工合并在候选池输出前已完成（unknown ←
+    人工确认；与机器不同的人工值改判机器结论，见 honmaru_profile
+    _apply_human_confirmations）；本层负责挂 human 字段、stale/duplicate
+    判定、attention 清单与同名提示。
     """
     profile = build_honmaru_profile(store)
     pool = profile.get("candidate_pool") or {}
@@ -168,6 +171,10 @@ def build_sword_archive(store) -> dict:
                      "form": anns[0].get("form_confirmed"),
                      "level": anns[0].get("level_confirmed"),
                      "keeper": bool(anns[0].get("keeper")),
+                     # favorite/watch 与 keeper 一样是玩家偏好契约，本层
+                     # 只透传，编队消费留待后续批次
+                     "favorite": bool(anns[0].get("favorite")),
+                     "watch": bool(anns[0].get("watch")),
                      "note": anns[0].get("note"),
                      "confirmed_at": anns[0].get("updated_at"),
                      "stale": collision}
@@ -182,6 +189,8 @@ def build_sword_archive(store) -> dict:
             "tou_level": entry.get("tou_level"),
             "kiwame_date": entry.get("kiwame_date"),
             "form_status": form_status,
+            "machine_form_status": entry.get("machine_form_status"),
+            "form_overridden": bool(entry.get("form_overridden")),
             "form_evidence": entry.get("form_evidence") or [],
             "unknown_fields": entry.get("unknown_fields") or [],
             "human": human,

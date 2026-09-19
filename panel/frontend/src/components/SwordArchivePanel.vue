@@ -10,21 +10,27 @@ import {
   ARCHIVE_ALL_TYPES,
   SWORD_TYPE_OPTIONS,
   archiveFormLabel,
+  archiveFormSource,
   archiveName,
   attentionReasonTexts,
   attentionTarget,
   duplicateOrdinals,
+  favoriteBody,
   filterArchiveEntries,
   formConfirmBody,
+  groupAttentionItems,
   keeperBody,
   levelConfirmBody,
   parseLevelInput,
+  partitionWatchEntries,
   sortArchiveEntries,
+  watchBody,
 } from '../archive'
 
-// 刀帐档案：整本刀帐 + 玩家确认过的固定档案。编号/筛选/请求体全在
-// archive.ts，这里只做展示和递请求；写操作成功后整页重新翻档（数据量小，
-// 不做局部 patch）。布局一条中轴线：三块同宽对齐，卡片铺满容器。
+// 刀帐档案：概要 + 整本刀帐（每振都能改判形态/打三种标记/撤销标注）+
+// 默认收起的「待核对」。编号/筛选/分组/置顶/请求体全在 archive.ts，
+// 这里只做展示和递请求；写操作成功后整页重新翻档（数据量小，不做局部 patch）。
+// entry.human?.watch 全程点属性访问，别解构——和 vue 的 watch API 撞名。
 
 const data = ref<SwordArchiveResponse | null>(null)
 const loading = ref(true)
@@ -32,6 +38,8 @@ const error = ref('')
 const saving = ref(false)
 const query = ref('')
 const swordType = ref<string>(ARCHIVE_ALL_TYPES)
+// 待核对降为次级板块：默认折叠，点了标题再展开
+const attentionOpen = ref(false)
 // 每条「等级没读出来」的等级草稿，按 attentionKey 各自独立绑定，互不串行
 const levelDrafts = ref<Record<string, string>>({})
 
@@ -44,6 +52,26 @@ const sortedEntries = computed(() => sortArchiveEntries(entries.value))
 const ordinals = computed(() => duplicateOrdinals(entries.value))
 const visibleEntries = computed(() => filterArchiveEntries(sortedEntries.value, query.value, swordType.value))
 
+// 特别关心置顶：搜完筛完再切，特别关心的一组顶在整本前面，中间画分隔线
+const watchSplit = computed(() => partitionWatchEntries(visibleEntries.value))
+const displayEntries = computed(() => [...watchSplit.value.watched, ...watchSplit.value.rest])
+const watchedCount = computed(() => watchSplit.value.watched.length)
+const attentionGroups = computed(() => groupAttentionItems(attention.value))
+
+// 行的形态来源徽标：算一次按 observation_id 查，别在模板里反复调
+interface RowSource { kind: 'machine' | 'human' | 'overridden'; text: string; origin: string | null }
+function rowSourceOf(entry: SwordArchiveEntry): RowSource {
+  const source = archiveFormSource(entry)
+  if (source.kind === 'machine') return { kind: 'machine', text: '盘点识别', origin: null }
+  if (source.kind === 'human') return { kind: 'human', text: '你确认过', origin: null }
+  return { kind: 'overridden', text: '你改判的', origin: `原识别：${source.machineText}` }
+}
+const sourceById = computed(() => {
+  const map = new Map<string, RowSource>()
+  for (const entry of entries.value) map.set(entry.observation_id, rowSourceOf(entry))
+  return map
+})
+
 const typeItems = computed(() => [
   { value: ARCHIVE_ALL_TYPES, label: ARCHIVE_ALL_TYPES, badge: entries.value.length },
   ...SWORD_TYPE_OPTIONS.map(type => ({
@@ -54,7 +82,7 @@ const typeItems = computed(() => [
 ])
 
 const overviewSubtitle = computed(() => {
-  if (!data.value) return '整本刀帐 + 你确认过的固定档案'
+  if (!data.value) return '整本刀帐 + 你亲手记下的标注'
   const parts = [`档案时间 ${data.value.observed_at ? fmtTime(data.value.observed_at) : '—'}`]
   if (data.value.snapshot_id != null) parts.push(`第 ${data.value.snapshot_id} 号盘点`)
   return parts.join(' · ')
@@ -105,7 +133,41 @@ async function annotate(body: SwordAnnotationBody): Promise<boolean> {
   }
 }
 
-// 等你拿主意：是极 / 是普通 / 是要练的刀。旧标注从同 observation_id
+// ---- 整本刀帐行操作：改判形态 / 三个标记开关 / 撤销标注 ----
+
+// 每行都能改判：只翻 form 一位，旧标注其余字段由 formConfirmBody 递回
+function confirmEntryForm(entry: SwordArchiveEntry, form: 'kiwame' | 'normal') {
+  annotate(formConfirmBody(entry, form, entry.human))
+}
+
+function toggleKeeper(entry: SwordArchiveEntry) {
+  annotate(keeperBody(entry, !(entry.human?.keeper ?? false), entry.human))
+}
+function toggleFavorite(entry: SwordArchiveEntry) {
+  annotate(favoriteBody(entry, !(entry.human?.favorite ?? false), entry.human))
+}
+function toggleWatch(entry: SwordArchiveEntry) {
+  annotate(watchBody(entry, !(entry.human?.watch ?? false), entry.human))
+}
+
+// 撤销：软删整条人工标注，这振回到机器盘点的识别结果，三种标记也一起放下
+async function revokeEntry(entry: SwordArchiveEntry) {
+  const human = entry.human
+  if (!human || saving.value) return
+  if (!window.confirm(`撤销对「${archiveName(entry)}」的亲手标注吗？\n撤销后这振会回到机器盘点的识别结果，常用/特别关心/要练的标记也会一起放下。`)) return
+  saving.value = true
+  error.value = ''
+  try {
+    await api.revokeSwordAnnotation(human.id)
+    await load()
+  } catch (cause) {
+    error.value = cause instanceof Error ? `这次没能撤销：${cause.message}` : '这次没能撤销，请重试'
+  } finally {
+    saving.value = false
+  }
+}
+
+// 待核对区：是极 / 是普通 / 是要练的刀。旧标注从同 observation_id
 // 的档案行里找回来，改一位、其余原样带回。
 function confirmAttention(item: SwordArchiveAttentionItem, form: 'kiwame' | 'normal') {
   annotate(formConfirmBody(attentionTarget(item), form, entryOf(item.observation_id)?.human))
@@ -132,10 +194,6 @@ async function confirmLevel(item: SwordArchiveAttentionItem) {
   }
 }
 
-function toggleKeeper(entry: SwordArchiveEntry) {
-  annotate(keeperBody(entry, !(entry.human?.keeper ?? false), entry.human))
-}
-
 onMounted(load)
 </script>
 
@@ -151,7 +209,7 @@ onMounted(load)
         <div><small>共</small><b>{{ summary.total }} 振</b></div>
         <div><small>你确认过</small><b>{{ summary.human_confirmed }} 振</b></div>
         <div><small>要练的刀</small><b>{{ summary.keepers }} 振</b></div>
-        <div class="archive-summary-attention"><small>等你拿主意</small><b>{{ summary.attention_count }} 条</b></div>
+        <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
       <p v-if="!done && data" class="archive-notice">
         这份档案还不可信{{ data.reason ? `：${data.reason}` : '' }}。先去「配置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来对档案。
@@ -162,50 +220,6 @@ onMounted(load)
     <div v-else-if="loading && !data" class="archive-empty">正在翻刀帐……</div>
 
     <template v-else-if="data">
-      <PaperCard variant="task" tag="section" class="archive-attention">
-        <h3 class="archive-sub">等你拿主意 · {{ attention.length }} 条</h3>
-        <p v-if="!attention.length" class="archive-clean">现在没有要你拿主意的条目，刀帐清清爽爽。</p>
-        <ul v-else class="archive-attention-list">
-          <li v-for="item in attention" :key="attentionKey(item)" class="archive-attention-row">
-            <div class="archive-row-head">
-              <b>{{ item.name_zh || '没认出名字' }}</b>
-              <small v-if="item.observation_id && ordinals.get(item.observation_id)">第 {{ ordinals.get(item.observation_id) }} 振</small>
-              <span class="archive-facts">
-                <template v-if="item.level != null">Lv.{{ item.level }}</template>
-                <template v-if="item.kiwame_date"> · 显现 {{ item.kiwame_date }}</template>
-              </span>
-            </div>
-            <div class="archive-badges">
-              <i v-for="text in attentionReasonTexts(item.reasons)" :key="text" class="archive-reason">{{ text }}</i>
-              <i v-for="hint in item.hints" :key="hint" class="archive-hint">{{ hint }}</i>
-            </div>
-            <div class="archive-actions">
-              <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'kiwame')">是极</button>
-              <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'normal')">是普通</button>
-              <button type="button" class="secondary" :disabled="saving" @click="keepAttention(item)">是要练的刀</button>
-            </div>
-            <div v-if="item.reasons.includes('level_unknown')" class="archive-level">
-              <PixelControl
-                v-model="levelDrafts[attentionKey(item)]"
-                type="number"
-                :min="1"
-                :max="99"
-                placeholder="等级"
-                aria-label="填等级（1 到 99）"
-                @keyup.enter="confirmLevel(item)"
-              />
-              <button
-                type="button"
-                class="secondary"
-                :disabled="saving || parseLevelInput(levelDrafts[attentionKey(item)] || '') == null"
-                @click="confirmLevel(item)"
-              >记下等级</button>
-              <small v-if="(levelDrafts[attentionKey(item)] || '').trim() && parseLevelInput(levelDrafts[attentionKey(item)] || '') == null" class="archive-level-bad">要填 1～99 的整数</small>
-            </div>
-          </li>
-        </ul>
-      </PaperCard>
-
       <PaperCard variant="task" tag="section" class="archive-book">
         <h3 class="archive-sub">整本刀帐 · {{ entries.length }} 振</h3>
         <div class="archive-toolbar">
@@ -213,33 +227,128 @@ onMounted(load)
           <em>{{ visibleEntries.length }} 振</em>
         </div>
         <SegmentedControl v-model="swordType" :items="typeItems" label="按刀种筛选" variant="wide" />
-        <ul v-if="visibleEntries.length" class="archive-list">
-          <li v-for="entry in visibleEntries" :key="entry.observation_id" class="archive-entry">
-            <div class="archive-entry-name">
-              <b>{{ archiveName(entry) }}</b>
-              <small v-if="ordinals.get(entry.observation_id)">第 {{ ordinals.get(entry.observation_id) }} 振</small>
-              <i v-if="entry.human?.form" class="archive-confirmed">你确认过</i>
-              <i v-if="entry.human?.stale" class="archive-stale">待复核</i>
-            </div>
-            <div class="archive-entry-facts">
-              <i class="archive-form" :class="entry.form_status" :title="(entry.form_evidence || []).join('；')">{{ archiveFormLabel(entry) }}</i>
-              <span>Lv.{{ entry.level ?? '—' }}<i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="机器没读出来，这个等级是你填的">你填的</i></span>
-              <span>乱舞 Lv.{{ entry.tou_level ?? '—' }}</span>
-              <span>显现 {{ entry.kiwame_date || '—' }}</span>
-              <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
-            </div>
-            <button
-              type="button"
-              class="archive-keeper"
-              :class="{ active: entry.human?.keeper }"
-              :aria-pressed="Boolean(entry.human?.keeper)"
-              :disabled="saving"
-              title="点了就是要练的刀，再点取消"
-              @click="toggleKeeper(entry)"
-            >{{ entry.human?.keeper ? '要练 ✓' : '要练' }}</button>
-          </li>
+        <ul v-if="displayEntries.length" class="archive-list">
+          <template v-for="(entry, index) in displayEntries" :key="entry.observation_id">
+            <li v-if="index === watchedCount && watchedCount > 0" class="archive-watch-divider" aria-hidden="true"><span>整本刀帐</span></li>
+            <li class="archive-entry">
+              <div class="archive-entry-name">
+                <b>{{ archiveName(entry) }}</b>
+                <small v-if="ordinals.get(entry.observation_id)">第 {{ ordinals.get(entry.observation_id) }} 振</small>
+                <i class="archive-source" :class="sourceById.get(entry.observation_id)?.kind">{{ sourceById.get(entry.observation_id)?.text }}</i>
+                <small v-if="sourceById.get(entry.observation_id)?.origin" class="archive-source-origin">{{ sourceById.get(entry.observation_id)?.origin }}</small>
+                <i v-if="entry.human?.stale" class="archive-stale">待复核</i>
+              </div>
+              <div class="archive-entry-actions">
+                <span class="archive-form-confirm" role="group" aria-label="改判形态">
+                  <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'kiwame')">是极</button>
+                  <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'normal')">是普通</button>
+                </span>
+                <button
+                  type="button"
+                  class="archive-pill favorite"
+                  :class="{ active: entry.human?.favorite }"
+                  :aria-pressed="Boolean(entry.human?.favorite)"
+                  :disabled="saving"
+                  title="顺手就要用的刀，再点取消"
+                  @click="toggleFavorite(entry)"
+                >{{ entry.human?.favorite ? '常用 ✓' : '常用' }}</button>
+                <button
+                  type="button"
+                  class="archive-pill watch"
+                  :class="{ active: entry.human?.watch }"
+                  :aria-pressed="Boolean(entry.human?.watch)"
+                  :disabled="saving"
+                  title="置顶特别盯着，再点取消"
+                  @click="toggleWatch(entry)"
+                >{{ entry.human?.watch ? '特别关心 ✓' : '特别关心' }}</button>
+                <button
+                  type="button"
+                  class="archive-pill keeper"
+                  :class="{ active: entry.human?.keeper }"
+                  :aria-pressed="Boolean(entry.human?.keeper)"
+                  :disabled="saving"
+                  title="点了就是要练的刀，再点取消"
+                  @click="toggleKeeper(entry)"
+                >{{ entry.human?.keeper ? '要练 ✓' : '要练' }}</button>
+                <button
+                  v-if="entry.human"
+                  type="button"
+                  class="archive-revoke"
+                  :disabled="saving"
+                  title="撤销亲手标注，回到机器盘点的识别结果"
+                  @click="revokeEntry(entry)"
+                >撤销</button>
+              </div>
+              <div class="archive-entry-facts">
+                <i class="archive-form" :class="entry.form_status" :title="(entry.form_evidence || []).join('；')">{{ archiveFormLabel(entry) }}</i>
+                <span>Lv.{{ entry.level ?? '—' }}<i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="机器没读出来，这个等级是你填的">你填的</i></span>
+                <span>乱舞 Lv.{{ entry.tou_level ?? '—' }}</span>
+                <span>显现 {{ entry.kiwame_date || '—' }}</span>
+                <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
+              </div>
+              <small v-if="entry.human?.stale" class="archive-stale-note">同名同日有多振，标记挂在这一组上，不保证选中具体哪一振</small>
+            </li>
+          </template>
         </ul>
         <p v-else class="archive-clean">没有找到这样的刀。</p>
+      </PaperCard>
+
+      <PaperCard variant="task" tag="section" class="archive-attention">
+        <button
+          type="button"
+          class="archive-attention-toggle"
+          :aria-expanded="attentionOpen"
+          :disabled="!attention.length"
+          @click="attentionOpen = !attentionOpen"
+        >
+          <span class="archive-sub">待核对 <b class="archive-attention-count">{{ attention.length }}</b></span>
+          <small>{{ attention.length ? (attentionOpen ? '收起来' : '展开看看') : '' }}</small>
+        </button>
+        <p v-if="!attention.length" class="archive-clean">现在没有要核对的条目，刀帐清清爽爽。</p>
+        <template v-else-if="attentionOpen">
+          <div v-for="group in attentionGroups" :key="group.reason" class="archive-attention-group">
+            <h4 class="archive-group-title">{{ group.title }} · {{ group.items.length }} 条</h4>
+            <ul class="archive-attention-list">
+              <li v-for="item in group.items" :key="attentionKey(item)" class="archive-attention-row">
+                <div class="archive-row-head">
+                  <b>{{ item.name_zh || '没认出名字' }}</b>
+                  <small v-if="item.observation_id && ordinals.get(item.observation_id)">第 {{ ordinals.get(item.observation_id) }} 振</small>
+                  <span class="archive-facts">
+                    <template v-if="item.level != null">Lv.{{ item.level }}</template>
+                    <template v-if="item.kiwame_date"> · 显现 {{ item.kiwame_date }}</template>
+                  </span>
+                </div>
+                <div class="archive-badges">
+                  <i v-for="text in attentionReasonTexts(item.reasons)" :key="text" class="archive-reason">{{ text }}</i>
+                  <i v-for="hint in item.hints" :key="hint" class="archive-hint">{{ hint }}</i>
+                </div>
+                <div class="archive-actions">
+                  <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'kiwame')">是极</button>
+                  <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'normal')">是普通</button>
+                  <button type="button" class="secondary" :disabled="saving" @click="keepAttention(item)">是要练的刀</button>
+                </div>
+                <div v-if="item.reasons.includes('level_unknown')" class="archive-level">
+                  <PixelControl
+                    v-model="levelDrafts[attentionKey(item)]"
+                    type="number"
+                    :min="1"
+                    :max="99"
+                    placeholder="等级"
+                    aria-label="填等级（1 到 99）"
+                    @keyup.enter="confirmLevel(item)"
+                  />
+                  <button
+                    type="button"
+                    class="secondary"
+                    :disabled="saving || parseLevelInput(levelDrafts[attentionKey(item)] || '') == null"
+                    @click="confirmLevel(item)"
+                  >记下等级</button>
+                  <small v-if="(levelDrafts[attentionKey(item)] || '').trim() && parseLevelInput(levelDrafts[attentionKey(item)] || '') == null" class="archive-level-bad">要填 1～99 的整数</small>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </template>
       </PaperCard>
     </template>
   </section>
@@ -256,15 +365,61 @@ onMounted(load)
 .archive-summary > div:first-child { border-left: 0; }
 .archive-summary small { color: var(--ink-dim); font-size: 10px; }
 .archive-summary b { font-size: 18px; font-variant-numeric: tabular-nums; }
-.archive-summary-attention b { color: #9f3d28; }
 .archive-notice { margin: 12px 16px 14px; padding: 10px 13px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 8px; font-size: 12px; }
 .archive-error { margin: 0; padding: 12px 14px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 9px; font-size: 12px; }
 .archive-sub { margin: 2px 0 10px; color: var(--ink-dim); font-size: 12px; letter-spacing: .06em; }
 .archive-clean { margin: 0; padding: 14px; color: var(--ink-dim); background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 9px; font-size: 12px; text-align: center; }
 .archive-empty { display: grid; gap: 3px; margin: 0; padding: 18px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; font-size: 13px; }
 
-/* 「等你拿主意」是全页最显眼的一块：金框压边，逐条列清理由和指认按钮。 */
+/* 整本刀帐：每行 = 名字带来源徽标 / 操作组 / 事实行，操作组窄屏自动换行。
+   特别关心置顶，和其余刀之间隔一条金色分隔线。 */
+.archive-toolbar { display: grid; grid-template-columns: minmax(170px, 330px) auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-dim); font-size: 12px; }
+.archive-toolbar :deep(.pixel-control) { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; }
+.archive-toolbar em { font-style: normal; white-space: nowrap; }
+.archive-list { display: grid; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
+/* 列表长就内部限高滚动，且全页只此一层内滚；窄屏取消内滚整页滚动。 */
+@media (min-width: 901px) {
+  .archive-list { max-height: 620px; overflow: auto; padding-right: 4px; }
+}
+.archive-watch-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; color: var(--fox-gold-deep); font-size: 11px; letter-spacing: .08em; }
+.archive-watch-divider::before, .archive-watch-divider::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--fox-gold) 55%, var(--paper-line)); }
+.archive-watch-divider span { white-space: nowrap; }
+.archive-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; padding: 9px 12px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; font-size: 12px; }
+.archive-entry-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.archive-entry-name b { font-size: 13px; }
+.archive-entry-name small { color: var(--fox-gold-deep); font-size: 10px; }
+.archive-source { padding: 1px 7px; border: 1px solid var(--paper-line); border-radius: 999px; font-size: 10px; font-style: normal; }
+.archive-source.machine { color: var(--ink-dim); background: var(--paper-card); }
+.archive-source.human { color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-color: #b2caa8; }
+.archive-source.overridden { color: #7a5312; background: color-mix(in srgb, #f4e8cf 75%, var(--paper-card)); border-color: #d9bd84; }
+.archive-source-origin { color: var(--ink-dim); font-size: 10px; }
+.archive-confirmed { padding: 1px 7px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #b2caa8; border-radius: 999px; font-size: 10px; font-style: normal; }
+.archive-level-tag { margin-left: 5px; }
+.archive-stale { padding: 1px 7px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 999px; font-size: 10px; font-style: normal; }
+.archive-stale-note { grid-column: 1 / -1; color: #9f3d28; font-size: 10px; }
+.archive-entry-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.archive-form-confirm { display: inline-flex; gap: 5px; }
+.archive-entry-actions button { min-height: 28px; padding: 3px 11px; font-size: 11px; }
+.archive-pill { color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; }
+.archive-pill.favorite.active { color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-color: #b2caa8; font-weight: 700; }
+.archive-pill.watch.active { color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border-color: #d8a195; font-weight: 700; }
+.archive-pill.keeper.active { color: #75560b; background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
+.archive-revoke { color: var(--ink-dim); background: transparent; border: 1px dashed var(--paper-line); border-radius: 999px; }
+.archive-revoke:hover:not(:disabled) { color: #9f3d28; border-color: #d8a195; }
+.archive-entry-facts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.archive-form { padding: 2px 8px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 10px; font-style: normal; }
+.archive-form.kiwame { color: #8a5a18; border-color: color-mix(in srgb, var(--fox-gold) 65%, var(--paper-line)); }
+.archive-form.ambiguous { color: #9f3d28; border-color: #d8a195; }
+
+/* 待核对：默认折叠的次级板块，点开再分组细看。 */
 .archive-attention { border-left: 5px solid var(--fox-gold-deep); }
+.archive-attention-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; padding: 0; color: inherit; background: transparent; border: 0; cursor: pointer; text-align: left; }
+.archive-attention-toggle:disabled { cursor: default; }
+.archive-attention-toggle .archive-sub { margin: 0; }
+.archive-attention-count { display: inline-grid; min-width: 20px; height: 20px; place-items: center; margin-left: 4px; padding: 0 5px; color: #7a5312; background: color-mix(in srgb, #f4e8cf 75%, var(--paper-card)); border: 1px solid #d9bd84; border-radius: 999px; font-size: 11px; letter-spacing: 0; }
+.archive-attention-toggle small { color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
+.archive-attention-group { display: grid; gap: 8px; margin-top: 10px; }
+.archive-group-title { margin: 0; color: var(--ink-dim); font-size: 11px; font-weight: 600; letter-spacing: .05em; }
 .archive-attention-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .archive-attention-row { display: grid; gap: 8px; padding: 11px 13px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; }
 .archive-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
@@ -281,37 +436,15 @@ onMounted(load)
 .archive-level button { min-height: 30px; padding: 4px 13px; font-size: 12px; }
 .archive-level-bad { color: #9f3d28; font-size: 11px; }
 
-.archive-toolbar { display: grid; grid-template-columns: minmax(170px, 330px) auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-dim); font-size: 12px; }
-.archive-toolbar :deep(.pixel-control) { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; }
-.archive-toolbar em { font-style: normal; white-space: nowrap; }
-.archive-list { display: grid; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
-/* 列表长就内部限高滚动，且全页只此一层内滚；窄屏取消内滚整页滚动。 */
-@media (min-width: 901px) {
-  .archive-list { max-height: 620px; overflow: auto; padding-right: 4px; }
-}
-.archive-entry { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 2fr) auto; gap: 6px 12px; align-items: center; padding: 9px 12px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; font-size: 12px; }
-.archive-entry-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
-.archive-entry-name b { font-size: 13px; }
-.archive-entry-name small { color: var(--fox-gold-deep); font-size: 10px; }
-.archive-confirmed { padding: 1px 7px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #b2caa8; border-radius: 999px; font-size: 10px; font-style: normal; }
-.archive-level-tag { margin-left: 5px; }
-.archive-stale { padding: 1px 7px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 999px; font-size: 10px; font-style: normal; }
-.archive-entry-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
-.archive-form { padding: 2px 8px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 10px; font-style: normal; }
-.archive-form.kiwame { color: #8a5a18; border-color: color-mix(in srgb, var(--fox-gold) 65%, var(--paper-line)); }
-.archive-form.ambiguous { color: #9f3d28; border-color: #d8a195; }
-.archive-keeper { min-height: 30px; padding: 4px 13px; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; font-size: 12px; }
-.archive-keeper.active { color: #75560b; background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
-
 @media (max-width: 900px) {
   .archive-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .archive-summary > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--paper-line); }
   .archive-summary > div:nth-child(4) { border-top: 1px solid var(--paper-line); }
   .archive-toolbar { grid-template-columns: 1fr auto; }
   .archive-entry { grid-template-columns: 1fr; }
-  .archive-keeper { justify-self: start; }
+  .archive-entry-actions { justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .archive-keeper, .archive-actions button { transition: none; }
+  .archive-pill, .archive-revoke, .archive-actions button { transition: none; }
 }
 </style>

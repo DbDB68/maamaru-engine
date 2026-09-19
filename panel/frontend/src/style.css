@@ -84,7 +84,7 @@ button { cursor: pointer; }
 .topnav .nav-lists { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-schedule { --nav-icon: url('/static/img/ui/expedition.png'); }
 .topnav .nav-workflow { --nav-icon: url('/static/img/ui/workflow.svg'); }
-.topnav .nav-chat { --nav-icon: url('/static/img/ui/singleplayer.png'); }
+.topnav .nav-archive { --nav-icon: url('/static/img/ui/scrollVertical.png'); }
 .topnav .nav-system { --nav-icon: url('/static/img/ui/wrench.png'); }
 .topnav button:hover { color: var(--ink); background: var(--fox-gold-pale); }
 .topnav button.active { color: var(--ink); background: var(--paper-panel); border-color: var(--fox-gold); font-weight: 700; }

@@ -11,12 +11,18 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from touken.honmaru_profile import (PROFILE_SCHEMA_VERSION,
+                                    _apply_human_confirmations,
                                     build_candidate_pool, build_honmaru_profile,
                                     formation_conflicts)
 from touken.telemetry import TelemetryStore
+
+# 固定 epoch，让「人工确认（日期）」「人工改判（日期）」可断言
+CONFIRM_TS = 1750000000.0
+EXPECTED_DAY = datetime.fromtimestamp(CONFIRM_TS).strftime("%Y-%m-%d")
 
 
 def _store() -> TelemetryStore:
@@ -37,6 +43,16 @@ def _owned_snapshot(store, rows, *, captured_at, owned=None, missing=0,
     return store.save_sword_snapshot(
         rows, owned=owned if owned is not None else len(rows), capacity=300,
         missing=missing, captured_at=captured_at, source=source)
+
+
+def _annotate(store, catalog_id, kiwame_date, **kw):
+    """存标注并把 updated_at 钉成固定值，让证据日期可断言。"""
+    ann = store.save_sword_annotation(catalog_id, kiwame_date, **kw)
+    store._conn().execute(
+        "UPDATE sword_annotations SET updated_at = ? WHERE id = ?",
+        (CONFIRM_TS, ann["id"]))
+    store._conn().commit()
+    return ann
 
 
 def _roster_event(store, team_no, slots, ts):
@@ -577,6 +593,138 @@ class FormConclusionTests(unittest.TestCase):
         entry = profile["candidate_pool"]["entries"][0]
         self.assertEqual(entry["form_status"], "unknown")
         self.assertEqual(entry["form_evidence"], [])
+
+
+class HumanFormOverrideTests(unittest.TestCase):
+    """人工可覆盖机器的极/普判定（刀帐升级·第一批）：
+    机器 unknown 照旧以人工为准；机器 kiwame/normal/ambiguous + 人工
+    确认且与机器不同 → 人工改判（form_overridden=True，机器原值留在
+    machine_form_status，机器证据保留）；人工与机器一致只追加确认证据
+    不算改判；指纹撞车不合并；撤销后回落机器结论；等级仍只补空缺。"""
+
+    HASEBE = "touken_118_heshikiri_hasebe"
+
+    def _pool(self, form_fact=None, **row_kw):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", kiwame_date="2024-5-1",
+                 form_fact=form_fact, **row_kw)], captured_at=100)
+        return store
+
+    def test_machine_kiwame_overridden_by_human_normal(self):
+        store = self._pool(form_fact={"status": "kiwame",
+                                      "evidence": ["花数3/基线2"]})
+        _annotate(store, self.HASEBE, "2024-5-1", form_confirmed="normal")
+
+        entry = build_candidate_pool(store)["entries"][0]
+        self.assertEqual(entry["form_status"], "normal")
+        self.assertEqual(entry["machine_form_status"], "kiwame")
+        self.assertIs(entry["form_overridden"], True)
+        # 机器原证据保留，追加人工改判证据
+        self.assertTrue(any("刀帐盘点徽章直读" in e for e in
+                            entry["form_evidence"]))
+        self.assertIn(f"人工改判（{EXPECTED_DAY}）：原识别=极",
+                      entry["form_evidence"])
+
+    def test_machine_normal_overridden_by_human_kiwame(self):
+        store = self._pool(form_fact={"status": "normal",
+                                      "evidence": ["花数2/基线2"]})
+        _annotate(store, self.HASEBE, "2024-5-1", form_confirmed="kiwame")
+
+        entry = build_candidate_pool(store)["entries"][0]
+        self.assertEqual(entry["form_status"], "kiwame")
+        self.assertEqual(entry["machine_form_status"], "normal")
+        self.assertIs(entry["form_overridden"], True)
+        self.assertIn(f"人工改判（{EXPECTED_DAY}）：原识别=普通",
+                      entry["form_evidence"])
+
+    def test_machine_ambiguous_overridden_by_human(self):
+        """候选池生成期机器形态只有 kiwame/normal/unknown（_stored_form_status
+        不收 ambiguous），ambiguous 是档案管线后段（编队打架/图鉴极标）才
+        出的结论——改判分支对 ambiguous 的验证直接调合并函数。"""
+        entry = {"sword_catalog_id": self.HASEBE, "kiwame_date": "2024-5-1",
+                 "form_status": "ambiguous",
+                 "form_evidence": ["两处直读结论冲突，分不清，存疑"],
+                 "machine_form_status": None, "form_overridden": False,
+                 "level": 99, "unknown_fields": []}
+        ann = {"sword_catalog_id": self.HASEBE, "kiwame_date": "2024-5-1",
+               "form_confirmed": "normal", "updated_at": CONFIRM_TS,
+               "revoked": 0}
+        _apply_human_confirmations([entry], [ann])
+        self.assertEqual(entry["form_status"], "normal")
+        self.assertEqual(entry["machine_form_status"], "ambiguous")
+        self.assertIs(entry["form_overridden"], True)
+        self.assertIn("两处直读结论冲突，分不清，存疑", entry["form_evidence"])
+        self.assertIn(f"人工改判（{EXPECTED_DAY}）：原识别=存疑",
+                      entry["form_evidence"])
+
+    def test_human_matching_machine_is_confirmation_not_override(self):
+        store = self._pool(form_fact={"status": "kiwame",
+                                      "evidence": ["花数3/基线2"]})
+        _annotate(store, self.HASEBE, "2024-5-1", form_confirmed="kiwame")
+
+        entry = build_candidate_pool(store)["entries"][0]
+        self.assertEqual(entry["form_status"], "kiwame")
+        self.assertIsNone(entry["machine_form_status"])
+        self.assertIs(entry["form_overridden"], False)
+        self.assertIn(f"人工确认（{EXPECTED_DAY}）", entry["form_evidence"])
+        self.assertFalse(any("人工改判" in e for e in entry["form_evidence"]))
+
+    def test_fingerprint_collision_rows_are_not_overridden(self):
+        """同名同日两行（一标注对不上唯一行）→ 不合并不改判，保持机器结论。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=99,
+                 kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+            _row(self.HASEBE, "压切长谷部", level=35,
+                 kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+        ], captured_at=100)
+        _annotate(store, self.HASEBE, "2024-5-1", form_confirmed="normal")
+
+        entries = build_candidate_pool(store)["entries"]
+        for entry in entries:
+            self.assertEqual(entry["form_status"], "kiwame")  # 机器结论不动
+            self.assertIsNone(entry["machine_form_status"])
+            self.assertIs(entry["form_overridden"], False)
+            self.assertFalse(any("人工改判" in e for e in
+                                 entry["form_evidence"]))
+
+    def test_revoked_annotation_falls_back_to_machine(self):
+        store = self._pool(form_fact={"status": "normal",
+                                      "evidence": ["花数2/基线2"]})
+        ann = _annotate(store, self.HASEBE, "2024-5-1",
+                        form_confirmed="kiwame")
+        store.revoke_sword_annotation(ann["id"])
+
+        entry = build_candidate_pool(store)["entries"][0]
+        self.assertEqual(entry["form_status"], "normal")  # 回落机器结论
+        self.assertIsNone(entry["machine_form_status"])
+        self.assertIs(entry["form_overridden"], False)
+        self.assertEqual(entry["form_evidence"],
+                         ["刀帐盘点徽章直读（花数2/基线2）"])
+
+    def test_level_rules_unchanged_by_override(self):
+        """改判形态不碰等级铁律：机器有值信机器，机器空缺才补人工。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(self.HASEBE, "压切长谷部", level=67,
+                 kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+            _row("touken_003_mikazuki", "三日月宗近", level=None,
+                 kiwame_date="2024-5-1"),
+        ], captured_at=100)
+        _annotate(store, self.HASEBE, "2024-5-1", form_confirmed="normal",
+                  level_confirmed=88)
+        _annotate(store, "touken_003_mikazuki", "2024-5-1",
+                  level_confirmed=88)
+
+        overridden, gap = build_candidate_pool(store)["entries"]
+        self.assertEqual(overridden["form_status"], "normal")  # 形态被改判
+        self.assertEqual(overridden["level"], 67)  # 机器读数不被盖
+        self.assertEqual(gap["level"], 88)  # 空缺补人工
+        self.assertNotIn("level", gap["unknown_fields"])
 
 
 if __name__ == "__main__":

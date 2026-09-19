@@ -3,16 +3,21 @@ import type { SwordArchiveAttentionItem, SwordArchiveEntry, SwordArchiveHuman } 
 import {
   ARCHIVE_ALL_TYPES,
   ATTENTION_REASON_TEXT,
+  archiveFormLabel,
+  archiveFormSource,
   attentionReasonTexts,
   attentionTarget,
-  archiveFormLabel,
   duplicateOrdinals,
+  favoriteBody,
   filterArchiveEntries,
   formConfirmBody,
+  groupAttentionItems,
   keeperBody,
   levelConfirmBody,
   parseLevelInput,
+  partitionWatchEntries,
   sortArchiveEntries,
+  watchBody,
 } from './archive'
 
 function entry(over: Partial<SwordArchiveEntry> = {}): SwordArchiveEntry {
@@ -25,6 +30,8 @@ function entry(over: Partial<SwordArchiveEntry> = {}): SwordArchiveEntry {
     tou_level: 4,
     kiwame_date: '2026-01-01',
     form_status: 'unknown',
+    machine_form_status: null,
+    form_overridden: false,
     form_evidence: [],
     unknown_fields: [],
     human: null,
@@ -51,6 +58,8 @@ function human(over: Partial<SwordArchiveHuman> = {}): SwordArchiveHuman {
     id: 7,
     form: 'kiwame',
     keeper: true,
+    favorite: false,
+    watch: false,
     note: '修行回来的',
     level: null,
     confirmed_at: 1700000000,
@@ -150,18 +159,18 @@ describe('搜索与刀种筛选', () => {
 
 describe('reason 人话', () => {
   it('五种 reason 各归各的说法', () => {
-    expect(ATTENTION_REASON_TEXT.form_unknown).toBe('分不清极/普通')
+    expect(ATTENTION_REASON_TEXT.form_unknown).toBe('形态没读出来')
     expect(ATTENTION_REASON_TEXT.form_ambiguous).toBe('两处证据打架')
-    expect(ATTENTION_REASON_TEXT.duplicate_fingerprint).toBe('同名同日多振，要你指认')
-    expect(ATTENTION_REASON_TEXT.stale_annotation).toBe('之前的确认对不上号了')
+    expect(ATTENTION_REASON_TEXT.duplicate_fingerprint).toBe('同名同日多振，指纹撞车')
+    expect(ATTENTION_REASON_TEXT.stale_annotation).toBe('标注对不上号')
     expect(ATTENTION_REASON_TEXT.level_unknown).toBe('等级没读出来')
   })
 
   it('reasons 可多值并存，逐条翻译、保留顺序；不认识的 reason 原样透出，不炸页面', () => {
     expect(attentionReasonTexts(['form_unknown', 'level_unknown']))
-      .toEqual(['分不清极/普通', '等级没读出来'])
+      .toEqual(['形态没读出来', '等级没读出来'])
     expect(attentionReasonTexts(['duplicate_fingerprint', 'stale_annotation']))
-      .toEqual(['同名同日多振，要你指认', '之前的确认对不上号了'])
+      .toEqual(['同名同日多振，指纹撞车', '标注对不上号'])
     expect(attentionReasonTexts(['some_new_reason' as never])).toEqual(['some_new_reason'])
   })
 })
@@ -247,6 +256,8 @@ describe('等级填写', () => {
       level_confirmed: 42,
       form_confirmed: 'kiwame',
       keeper: true,
+      favorite: false,
+      watch: false,
       note: '修行回来的',
     })
   })
@@ -259,5 +270,141 @@ describe('等级填写', () => {
     expect(levelConfirmBody(attentionTarget(attention()), 55.5)).toBeNull()
     expect(levelConfirmBody(attentionTarget(attention()), Number.NaN)).toBeNull()
     expect(levelConfirmBody(attentionTarget(attention()), Number('x'))).toBeNull()
+  })
+})
+
+
+describe('常用/特别关心开关', () => {
+  it('favoriteBody：没标注时只递 favorite 新建', () => {
+    expect(favoriteBody(attentionTarget(attention()), true)).toEqual({
+      sword_catalog_id: '00003',
+      kiwame_date: '2026-01-01',
+      favorite: true,
+    })
+  })
+
+  it('favoriteBody：只翻 favorite 一位，旧标注的形态/要练/特别关心/备注/等级原样递回', () => {
+    const body = favoriteBody(attentionTarget(attention()), true, human({ favorite: false, watch: true, level: 55 }))
+    expect(body.favorite).toBe(true)
+    expect(body.form_confirmed).toBe('kiwame')
+    expect(body.keeper).toBe(true)
+    expect(body.watch).toBe(true)
+    expect(body.note).toBe('修行回来的')
+    expect(body.level_confirmed).toBe(55)
+  })
+
+  it('watchBody：没标注时只递 watch 新建', () => {
+    expect(watchBody(attentionTarget(attention()), true)).toEqual({
+      sword_catalog_id: '00003',
+      kiwame_date: '2026-01-01',
+      watch: true,
+    })
+  })
+
+  it('watchBody：只翻 watch 一位，旧标注的其余字段原样递回（取反点亮/熄灭都对）', () => {
+    const on = watchBody(attentionTarget(attention()), true, human({ keeper: false, favorite: true }))
+    expect(on.watch).toBe(true)
+    expect(on.favorite).toBe(true)
+    expect(on.keeper).toBe(false)
+    expect(on.form_confirmed).toBe('kiwame')
+    const off = watchBody(attentionTarget(attention()), false, human({ watch: true }))
+    expect(off.watch).toBe(false)
+    // 没有等级的旧标注不递 level_confirmed
+    expect(off.level_confirmed).toBeUndefined()
+  })
+
+  it('翻别的位时三个标记互不牵连：form/keeper/level 确认都原样递回 favorite/watch', () => {
+    const byForm = formConfirmBody(attentionTarget(attention()), 'normal', human({ favorite: true, watch: true }))
+    expect(byForm.favorite).toBe(true)
+    expect(byForm.watch).toBe(true)
+    const byKeeper = keeperBody(attentionTarget(attention()), false, human({ favorite: true }))
+    expect(byKeeper.favorite).toBe(true)
+    expect(byKeeper.watch).toBe(false)
+    const byLevel = levelConfirmBody(attentionTarget(attention()), 42, human({ watch: true }))
+    expect(byLevel?.favorite).toBe(false)
+    expect(byLevel?.watch).toBe(true)
+  })
+})
+
+describe('形态来源徽标', () => {
+  it('没人碰过 → machine（盘点识别），哪怕档案形态已经有机器结论', () => {
+    expect(archiveFormSource(entry({ human: null, machine_form_status: 'kiwame', form_overridden: false })))
+      .toEqual({ kind: 'machine' })
+  })
+
+  it('有人工结论且和机器不冲突 → human（你确认过）', () => {
+    expect(archiveFormSource(entry({ human: human(), machine_form_status: 'kiwame', form_overridden: false })))
+      .toEqual({ kind: 'human' })
+  })
+
+  it('人工与机器冲突 → overridden（你改判的），附带机器原识别：极/普通/存疑', () => {
+    expect(archiveFormSource(entry({ human: human(), machine_form_status: 'kiwame', form_overridden: true })))
+      .toEqual({ kind: 'overridden', machineText: '极' })
+    expect(archiveFormSource(entry({ human: human({ form: 'normal' }), machine_form_status: 'normal', form_overridden: true })))
+      .toEqual({ kind: 'overridden', machineText: '普通' })
+    expect(archiveFormSource(entry({ human: human(), machine_form_status: 'ambiguous', form_overridden: true })))
+      .toEqual({ kind: 'overridden', machineText: '存疑' })
+  })
+
+  it('form_overridden 但机器没结论（null/unknown）→ 兜底「未确认」，不炸页面', () => {
+    expect(archiveFormSource(entry({ human: human(), machine_form_status: null, form_overridden: true })))
+      .toEqual({ kind: 'overridden', machineText: '未确认' })
+    expect(archiveFormSource(entry({ human: human(), machine_form_status: 'unknown', form_overridden: true })))
+      .toEqual({ kind: 'overridden', machineText: '未确认' })
+  })
+})
+
+describe('特别关心置顶', () => {
+  it('watch 的刀单独成组排最前，组内和其余都保持整本排序不变', () => {
+    const rows = [
+      entry({ observation_id: '9:1', sword_catalog_id: 'touken_003_mikazuki' }),
+      entry({ observation_id: '9:2', sword_catalog_id: 'touken_005_kogitsunemaru', human: human({ watch: true }) }),
+      entry({ observation_id: '9:3', sword_catalog_id: 'touken_007_ishikiri' }),
+      entry({ observation_id: '9:4', sword_catalog_id: 'touken_009_iwatooshi', human: human({ watch: true }) }),
+    ]
+    const sorted = sortArchiveEntries(rows)
+    const { watched, rest } = partitionWatchEntries(sorted)
+    const sortedIds = sorted.map(row => row.observation_id)
+    // 切分不是重排：两组各自保持整本排序里的相对顺序
+    expect(watched.map(row => row.observation_id))
+      .toEqual(sortedIds.filter(id => ['9:2', '9:4'].includes(id)))
+    expect(rest.map(row => row.observation_id))
+      .toEqual(sortedIds.filter(id => !['9:2', '9:4'].includes(id)))
+  })
+
+  it('没人标 watch 时 watched 为空，rest 是全部；human 为 null 的行不炸', () => {
+    const rows = [entry({ observation_id: '9:1' }), entry({ observation_id: '9:2', human: null })]
+    const { watched, rest } = partitionWatchEntries(rows)
+    expect(watched).toHaveLength(0)
+    expect(rest.map(row => row.observation_id)).toEqual(['9:1', '9:2'])
+  })
+})
+
+describe('待核对分组', () => {
+  it('按首条 reason 分组，组标题用人话，组间按上手优先级排序', () => {
+    const items = [
+      attention({ observation_id: '9:1', reasons: ['level_unknown'] }),
+      attention({ observation_id: '9:2', reasons: ['duplicate_fingerprint'] }),
+      attention({ observation_id: '9:3', reasons: ['form_unknown', 'level_unknown'] }),
+      attention({ observation_id: '9:4', reasons: ['stale_annotation'] }),
+      attention({ observation_id: '9:5', reasons: ['form_ambiguous'] }),
+      attention({ observation_id: '9:6', reasons: ['form_unknown'] }),
+    ]
+    const groups = groupAttentionItems(items)
+    expect(groups.map(group => group.reason))
+      .toEqual(['form_unknown', 'form_ambiguous', 'duplicate_fingerprint', 'stale_annotation', 'level_unknown'])
+    expect(groups.map(group => group.title))
+      .toEqual(['形态没读出来', '两处证据打架', '同名同日多振，指纹撞车', '标注对不上号', '等级没读出来'])
+    // 多因条目归首条 reason 那一组，不跨组重复
+    expect(groups[0].items.map(item => item.observation_id)).toEqual(['9:3', '9:6'])
+    expect(groups.reduce((sum, group) => sum + group.items.length, 0)).toBe(items.length)
+  })
+
+  it('空清单返回空数组；认不出的 reason 也能兜出组来', () => {
+    expect(groupAttentionItems([])).toEqual([])
+    const groups = groupAttentionItems([attention({ observation_id: '9:1', reasons: ['some_new_reason' as never] })])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].title).toBe('some_new_reason')
+    expect(groups[0].items).toHaveLength(1)
   })
 })

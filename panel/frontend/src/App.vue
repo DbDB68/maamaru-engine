@@ -6,7 +6,6 @@ import TaskForm from './components/TaskForm.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
-import ChatPanel from './components/ChatPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import FormationPanel from './components/FormationPanel.vue'
@@ -56,7 +55,7 @@ function workflowSaved(preset: WorkflowPreset) {
 }
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'chat' | 'system'>('home')
+const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'archive' | 'system'>('home')
 const ledgerMode = ref(false)
 const reportEntry = ref<'report' | 'records' | 'planning'>('report')
 const launcherAvailable = ref(false)
@@ -423,7 +422,7 @@ async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarni
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
 function openIncidentEntry(entry: { tab?: string; script?: string }) {
   const target = String(entry.tab || 'report')
-  if (['home', 'tasks', 'workflow', 'report', 'chat', 'system'].includes(target)) tab.value = target as typeof tab.value
+  if (['home', 'tasks', 'workflow', 'report', 'archive', 'system'].includes(target)) tab.value = target as typeof tab.value
   if (entry.script && scripts.value[entry.script]) selected.value = entry.script
 }
 
@@ -508,7 +507,7 @@ watch(tab, value => {
           <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); tab = 'tasks'">配置</button>
           <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
-          <button class="nav-chat" :class="{ active: tab === 'chat' }" @click="tab = 'chat'">近侍</button>
+          <button class="nav-archive" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀帐</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
         </template>
       </nav>
@@ -537,10 +536,6 @@ watch(tab, value => {
         <h3>队伍</h3>
         <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
           <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
-        </SideNavItem>
-        <h3>刀帐</h3>
-        <SideNavItem :active="selected === '$archive'" @click="selected = '$archive'">
-          <span><img class="task-menu-icon" :src="'/static/img/ui/scrollVertical.png'" alt="">刀帐档案</span>
         </SideNavItem>
         <h3>名单设置</h3>
         <SideNavItem :active="selected === '$repair-list'" @click="selected = '$repair-list'">
@@ -590,7 +585,6 @@ watch(tab, value => {
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
         <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />
-        <SwordArchivePanel v-else-if="selected === '$archive'" />
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
@@ -673,7 +667,7 @@ watch(tab, value => {
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'chat'" variant="single" page-class="single-layout chat-page"><ChatPanel /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page"><SwordArchivePanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->

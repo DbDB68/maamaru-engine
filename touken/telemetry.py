@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 13
+TELEMETRY_SCHEMA_VERSION = 14
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -268,6 +268,8 @@ class TelemetryStore:
                 level_confirmed INTEGER,
                 form_confirmed TEXT,
                 keeper INTEGER NOT NULL DEFAULT 0,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                watch INTEGER NOT NULL DEFAULT 0,
                 note TEXT,
                 created_at REAL,
                 updated_at REAL,
@@ -370,6 +372,16 @@ class TelemetryStore:
         if "level_confirmed" not in ann_cols:
             conn.execute(
                 "ALTER TABLE sword_annotations ADD COLUMN level_confirmed INTEGER")
+        # v14 原地补列：常用（favorite）/特别关心（watch）的玩家偏好标记。
+        # 与 keeper 一样是玩家偏好契约，旧标注保持 0，不回填不猜测。
+        if "favorite" not in ann_cols:
+            conn.execute(
+                "ALTER TABLE sword_annotations ADD COLUMN favorite "
+                "INTEGER NOT NULL DEFAULT 0")
+        if "watch" not in ann_cols:
+            conn.execute(
+                "ALTER TABLE sword_annotations ADD COLUMN watch "
+                "INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
     def close(self) -> None:
@@ -992,11 +1004,12 @@ class TelemetryStore:
                          for row in rows]
         return out
 
-    # ---------- 刀帐人工标注（sword_annotations，schema v12/v13） ----------
+    # ---------- 刀帐人工标注（sword_annotations，v12 建表、v13/v14 补列） ----------
 
     def save_sword_annotation(self, sword_catalog_id, kiwame_date,
                               level_at_mark=None, form_confirmed=None,
-                              keeper=None, note=None, level_confirmed=None) -> dict:
+                              keeper=None, note=None, level_confirmed=None,
+                              favorite=None, watch=None) -> dict:
         """保存一条人工标注；同指纹（目录 id + 显现日期）已存在有效标注时更新。
 
         更新只覆盖传入的非 None 字段（updated_at 随刷新），软删的指纹视为
@@ -1025,6 +1038,8 @@ class TelemetryStore:
                 raise ValueError("确认等级必须是 1 到 99 的整数")
             level_confirmed = int(level_confirmed)
         keeper_value = None if keeper is None else int(bool(keeper))
+        favorite_value = None if favorite is None else int(bool(favorite))
+        watch_value = None if watch is None else int(bool(watch))
         note = str(note).strip()[:300] if note is not None else None
         conn = self._conn()
         now = time.time()
@@ -1047,6 +1062,12 @@ class TelemetryStore:
             if keeper_value is not None:
                 sets.append("keeper = ?")
                 args.append(keeper_value)
+            if favorite_value is not None:
+                sets.append("favorite = ?")
+                args.append(favorite_value)
+            if watch_value is not None:
+                sets.append("watch = ?")
+                args.append(watch_value)
             if note is not None:
                 sets.append("note = ?")
                 args.append(note)
@@ -1060,11 +1081,12 @@ class TelemetryStore:
             return self._sword_annotation_dict(row["id"])
         cursor = conn.execute(
             "INSERT INTO sword_annotations(sword_catalog_id, kiwame_date, "
-            "level_at_mark, level_confirmed, form_confirmed, keeper, note, "
-            "created_at, updated_at, revoked) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            "level_at_mark, level_confirmed, form_confirmed, keeper, "
+            "favorite, watch, note, created_at, updated_at, revoked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
             (sword_catalog_id, kiwame_date, level_at_mark, level_confirmed,
-             form_confirmed, keeper_value or 0, note, now, now),
+             form_confirmed, keeper_value or 0, favorite_value or 0,
+             watch_value or 0, note, now, now),
         )
         conn.commit()
         return self._sword_annotation_dict(cursor.lastrowid)
@@ -1072,24 +1094,28 @@ class TelemetryStore:
     def _sword_annotation_dict(self, annotation_id: int) -> dict:
         row = self._conn().execute(
             "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
-            "level_confirmed, form_confirmed, keeper, note, created_at, "
-            "updated_at, revoked "
+            "level_confirmed, form_confirmed, keeper, favorite, watch, note, "
+            "created_at, updated_at, revoked "
             "FROM sword_annotations WHERE id = ?", (int(annotation_id),),
         ).fetchone()
         if not row:
             raise ValueError("找不到这条人工标注")
         return {**dict(row), "keeper": bool(row["keeper"]),
+                "favorite": bool(row["favorite"]),
+                "watch": bool(row["watch"]),
                 "revoked": bool(row["revoked"])}
 
     def sword_annotations(self, include_revoked: bool = False) -> list[dict]:
         where = "" if include_revoked else " WHERE revoked = 0"
         rows = self._conn().execute(
             "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
-            "level_confirmed, form_confirmed, keeper, note, created_at, "
-            "updated_at, revoked "
+            "level_confirmed, form_confirmed, keeper, favorite, watch, note, "
+            "created_at, updated_at, revoked "
             f"FROM sword_annotations{where} ORDER BY updated_at DESC, id DESC",
         ).fetchall()
         return [{**dict(row), "keeper": bool(row["keeper"]),
+                 "favorite": bool(row["favorite"]),
+                 "watch": bool(row["watch"]),
                  "revoked": bool(row["revoked"])} for row in rows]
 
     def revoke_sword_annotation(self, annotation_id) -> dict:

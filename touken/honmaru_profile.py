@@ -26,6 +26,11 @@ from datetime import datetime
 
 PROFILE_SCHEMA_VERSION = 1
 
+# 机器形态结论的人读标签（人工改判证据里「原识别=」用）：
+# kiwame→极、normal→普通、ambiguous→存疑、unknown→未识别
+_FORM_STATUS_LABELS = {"kiwame": "极", "normal": "普通",
+                       "ambiguous": "存疑", "unknown": "未识别"}
+
 # 候选行里参与 unknown_fields 盘点的可空字段
 _ENTRY_NULLABLE_FIELDS = ("level", "tou_level", "survival", "survival_max",
                           "fatigue", "fatigue_max", "kiwame_date", "locked")
@@ -125,6 +130,8 @@ def _pool_entry(row: dict, head: dict) -> dict:
         # 形态事实来自盘点快照落盘的 form_fact（一览行徽章刀种+花数同帧
         # 观测，规则与编队页同一套）；老快照没有该列 → unknown，不猜。
         "form_status": form_status,
+        "machine_form_status": None,  # 人工改判机器结论时回填机器原值
+        "form_overridden": False,
         "form_evidence": _stored_form_evidence(row),
         "locked": row.get("locked"),
         "page_no": row.get("page_no"),
@@ -170,7 +177,10 @@ def _confirm_day(updated_at) -> str | None:
 def _apply_human_confirmations(entries: list, annotations: list) -> None:
     """人工标注合并进候选池（原地标注）：
     - 形态：机器 unknown + 人工确认 → 以人工为准，证据追加
-      「人工确认（日期）」；ambiguous/kiwame/normal 的机器结论一律不动；
+      「人工确认（日期）」；机器 kiwame/normal/ambiguous + 人工确认且
+      与机器不同 → 人工改判，以人工为准（form_overridden=True，机器原值
+      留在 machine_form_status，机器证据保留，追加「人工改判（日期）：
+      原识别=极/普通/存疑」）；人工与机器一致不算改判，只追加确认证据；
     - 等级：只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）。
       机器 level 读不出（None）才用人工确认值，并把 "level" 从
       unknown_fields 里摘掉。
@@ -191,11 +201,27 @@ def _apply_human_confirmations(entries: list, annotations: list) -> None:
         if len(anns) != 1 or row_counts.get(key, 0) != 1:
             continue
         form = anns[0].get("form_confirmed")
-        if entry.get("form_status") == "unknown" and form in ("kiwame", "normal"):
-            entry["form_status"] = form
+        machine_form = entry.get("form_status") or "unknown"
+        if form in ("kiwame", "normal"):
             day = _confirm_day(anns[0].get("updated_at"))
-            entry["form_evidence"] = (entry.get("form_evidence") or []) + [
-                f"人工确认（{day}）" if day else "人工确认"]
+            if machine_form == "unknown":
+                entry["form_status"] = form
+                entry["form_evidence"] = (entry.get("form_evidence") or []) + [
+                    f"人工确认（{day}）" if day else "人工确认"]
+            elif form != machine_form:
+                # 人工改判机器结论：以人工为准；机器原值留在
+                # machine_form_status，机器证据原样保留，追加改判记录
+                label = _FORM_STATUS_LABELS.get(machine_form, machine_form)
+                entry["form_status"] = form
+                entry["machine_form_status"] = machine_form
+                entry["form_overridden"] = True
+                entry["form_evidence"] = (entry.get("form_evidence") or []) + [
+                    f"人工改判（{day}）：原识别={label}" if day
+                    else f"人工改判：原识别={label}"]
+            else:
+                # 人工与机器一致：不算改判，只追加确认证据
+                entry["form_evidence"] = (entry.get("form_evidence") or []) + [
+                    f"人工确认（{day}）" if day else "人工确认"]
         level = anns[0].get("level_confirmed")
         if entry.get("level") is None and level is not None:
             entry["level"] = level

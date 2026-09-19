@@ -2262,6 +2262,8 @@ async def api_save_sword_annotation(request: Request):
     body = await request.json()
     from touken.telemetry import get_telemetry_store
     keeper = body.get("keeper")
+    favorite = body.get("favorite")
+    watch = body.get("watch")
     try:
         annotation = get_telemetry_store().save_sword_annotation(
             sword_catalog_id=body.get("sword_catalog_id"),
@@ -2269,6 +2271,8 @@ async def api_save_sword_annotation(request: Request):
             level_at_mark=body.get("level_at_mark"),
             form_confirmed=body.get("form_confirmed"),
             keeper=None if keeper is None else int(bool(keeper)),
+            favorite=None if favorite is None else int(bool(favorite)),
+            watch=None if watch is None else int(bool(watch)),
             note=body.get("note"),
             level_confirmed=body.get("level_confirmed"))
     except (TypeError, ValueError) as exc:

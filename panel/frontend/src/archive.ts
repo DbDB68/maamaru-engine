@@ -1,4 +1,4 @@
-import type { SwordAnnotationBody, SwordArchiveAttentionItem, SwordArchiveEntry, SwordArchiveHuman, SwordAttentionReason } from './types'
+import type { SwordAnnotationBody, SwordArchiveAttentionItem, SwordArchiveEntry, SwordArchiveHuman, SwordAttentionReason, SwordMachineFormStatus } from './types'
 
 // 刀帐档案页的纯逻辑：同名编号、整本排序、搜索/刀种筛选、reason 人话、
 // 标注请求体。组件只负责渲染和递请求；凡是「怎么算」的都收在这里好测。
@@ -18,6 +18,27 @@ export function archiveFormLabel(entry: Pick<SwordArchiveEntry, 'form_status'>):
   if (entry.form_status === 'normal') return '普通'
   if (entry.form_status === 'ambiguous') return '存疑'
   return '未确认'
+}
+
+// 机器原始形态结论的人话（改判行拿它当「原识别」小字；unknown 只能算没读出来）。
+export const MACHINE_FORM_TEXT: Record<Exclude<SwordMachineFormStatus, null>, string> = {
+  kiwame: '极',
+  normal: '普通',
+  ambiguous: '存疑',
+  unknown: '未确认',
+}
+
+export type ArchiveFormSource =
+  | { kind: 'machine' }
+  | { kind: 'human' }
+  | { kind: 'overridden'; machineText: string }
+
+// 形态来源徽标：没人碰过 → 盘点识别；有人工结论且和机器不冲突 → 你确认过；
+// 人工和机器打架（form_overridden）→ 你改判的，附带机器原来的说法。
+export function archiveFormSource(entry: Pick<SwordArchiveEntry, 'human' | 'form_overridden' | 'machine_form_status'>): ArchiveFormSource {
+  if (!entry.human?.form) return { kind: 'machine' }
+  if (!entry.form_overridden) return { kind: 'human' }
+  return { kind: 'overridden', machineText: MACHINE_FORM_TEXT[entry.machine_form_status ?? 'unknown'] }
 }
 
 function byAcquisitionDate(a: string | null, b: string | null): number {
@@ -74,6 +95,19 @@ export function duplicateOrdinals(entries: SwordArchiveEntry[]): Map<string, num
   return ordinals
 }
 
+// 特别关心置顶：整本列表里把 watch 的刀单独切出来排最前（组内仍按整本
+// 排序），组件在两组之间画分隔线。搜索/刀种筛选先做完再切，搜出来的
+// 特别关心同样置顶。允许打标（stale 组的标记挂在整组上，行内另给提示）。
+export function partitionWatchEntries(entries: SwordArchiveEntry[]): { watched: SwordArchiveEntry[]; rest: SwordArchiveEntry[] } {
+  const watched: SwordArchiveEntry[] = []
+  const rest: SwordArchiveEntry[] = []
+  for (const entry of entries) {
+    if (entry.human?.watch) watched.push(entry)
+    else rest.push(entry)
+  }
+  return { watched, rest }
+}
+
 // 搜索（按刀名，认不出名字时按刀帐编号兜底）+ 刀种筛选。
 // 刀种选「全部」不挑；挑具体刀种时，认不出刀种的不算。
 export function filterArchiveEntries(
@@ -91,15 +125,45 @@ export function filterArchiveEntries(
 }
 
 export const ATTENTION_REASON_TEXT: Record<SwordAttentionReason, string> = {
-  form_unknown: '分不清极/普通',
+  form_unknown: '形态没读出来',
   form_ambiguous: '两处证据打架',
-  duplicate_fingerprint: '同名同日多振，要你指认',
-  stale_annotation: '之前的确认对不上号了',
+  duplicate_fingerprint: '同名同日多振，指纹撞车',
+  stale_annotation: '标注对不上号',
   level_unknown: '等级没读出来',
 }
 
 export function attentionReasonTexts(reasons: SwordAttentionReason[]): string[] {
   return reasons.map(reason => ATTENTION_REASON_TEXT[reason] || reason)
+}
+
+// 待核对分组的展示顺序（跟着上手优先级走：先认形态，再指认多振，最后补等级）。
+export const ATTENTION_REASON_ORDER: SwordAttentionReason[] = ['form_unknown', 'form_ambiguous', 'duplicate_fingerprint', 'stale_annotation', 'level_unknown']
+
+export interface ArchiveAttentionGroup {
+  reason: SwordAttentionReason
+  title: string
+  items: SwordArchiveAttentionItem[]
+}
+
+function reasonRank(reason: SwordAttentionReason): number {
+  const index = ATTENTION_REASON_ORDER.indexOf(reason)
+  return index < 0 ? ATTENTION_REASON_ORDER.length : index
+}
+
+// 按首条 reason 分组：一条一般就一个主因；多因的归第一条，免得同一张卡片
+// 在好几个组里重复出现。组间按 ATTENTION_REASON_ORDER 排，认不出的 reason 殿后。
+export function groupAttentionItems(items: SwordArchiveAttentionItem[]): ArchiveAttentionGroup[] {
+  const groups: ArchiveAttentionGroup[] = []
+  for (const item of items) {
+    const reason = item.reasons[0] ?? 'form_unknown'
+    let group = groups.find(candidate => candidate.reason === reason)
+    if (!group) {
+      group = { reason, title: ATTENTION_REASON_TEXT[reason] || reason, items: [] }
+      groups.push(group)
+    }
+    group.items.push(item)
+  }
+  return groups.sort((a, b) => reasonRank(a.reason) - reasonRank(b.reason))
 }
 
 // ---- 标注请求体 ----
@@ -112,7 +176,7 @@ export interface ArchiveAnnotationTarget {
   reasons?: SwordAttentionReason[]
 }
 
-export type ArchiveHumanLike = Pick<SwordArchiveHuman, 'form' | 'keeper' | 'note' | 'level'>
+export type ArchiveHumanLike = Pick<SwordArchiveHuman, 'form' | 'keeper' | 'favorite' | 'watch' | 'note' | 'level'>
 
 function baseBody(target: ArchiveAnnotationTarget): SwordAnnotationBody {
   return { sword_catalog_id: target.sword_catalog_id, kiwame_date: target.kiwame_date }
@@ -124,7 +188,15 @@ function preserveLevel(body: SwordAnnotationBody, human?: ArchiveHumanLike | nul
   if (human && human.level != null) body.level_confirmed = human.level
 }
 
-// 确认形态：只翻 form 这一位，旧标注的 keeper/note/等级原样递回，
+// 旧标注的三个标记位（keeper/favorite/watch）原样递回——单字段翻位时
+// 别把别的标记顺手清掉。没标注（human 为 null）就不递，干净新建。
+function preserveMarks(body: SwordAnnotationBody, human: ArchiveHumanLike) {
+  body.keeper = human.keeper
+  body.favorite = human.favorite
+  body.watch = human.watch
+}
+
+// 确认形态：只翻 form 这一位，旧标注的标记/备注/等级原样递回，
 // 免得后端整行覆盖时把确认过的信息顺手清掉。
 export function formConfirmBody(
   target: ArchiveAnnotationTarget,
@@ -137,7 +209,7 @@ export function formConfirmBody(
     body.level_at_mark = target.level
   }
   if (human) {
-    body.keeper = human.keeper
+    preserveMarks(body, human)
     body.note = human.note
   }
   preserveLevel(body, human)
@@ -145,7 +217,7 @@ export function formConfirmBody(
 }
 
 // 要练开关：只翻 keeper 这一位（next 由调用方算好取反），
-// 旧标注的形态结论/备注/等级原样递回。没标注时就只递 keeper 新建。
+// 旧标注的形态结论/其余标记/备注/等级原样递回。没标注时就只递 keeper 新建。
 export function keeperBody(
   target: ArchiveAnnotationTarget,
   next: boolean,
@@ -155,6 +227,45 @@ export function keeperBody(
   body.keeper = next
   if (human) {
     body.form_confirmed = human.form
+    body.favorite = human.favorite
+    body.watch = human.watch
+    body.note = human.note
+  }
+  preserveLevel(body, human)
+  return body
+}
+
+// 常用开关：只翻 favorite 这一位，其余照 keeperBody 的纪律原样递回。
+export function favoriteBody(
+  target: ArchiveAnnotationTarget,
+  next: boolean,
+  human?: ArchiveHumanLike | null,
+): SwordAnnotationBody {
+  const body = baseBody(target)
+  body.favorite = next
+  if (human) {
+    body.form_confirmed = human.form
+    body.keeper = human.keeper
+    body.watch = human.watch
+    body.note = human.note
+  }
+  preserveLevel(body, human)
+  return body
+}
+
+// 特别关心开关：只翻 watch 这一位，其余照 keeperBody 的纪律原样递回。
+// 组件里别解构 human.watch——和 vue 的 watch API 撞名，全程走 entry.human?.watch。
+export function watchBody(
+  target: ArchiveAnnotationTarget,
+  next: boolean,
+  human?: ArchiveHumanLike | null,
+): SwordAnnotationBody {
+  const body = baseBody(target)
+  body.watch = next
+  if (human) {
+    body.form_confirmed = human.form
+    body.keeper = human.keeper
+    body.favorite = human.favorite
     body.note = human.note
   }
   preserveLevel(body, human)
@@ -170,7 +281,7 @@ export function parseLevelInput(raw: string): number | null {
   return value
 }
 
-// 记下等级：只翻 level_confirmed 这一位，旧标注的 form/keeper/note 原样递回。
+// 记下等级：只翻 level_confirmed 这一位，旧标注的 form/标记/note 原样递回。
 // 等级限 1~99 整数，非法返回 null（组件据 null 拒绝提交并提示）。
 export function levelConfirmBody(
   target: ArchiveAnnotationTarget,
@@ -182,7 +293,7 @@ export function levelConfirmBody(
   body.level_confirmed = level
   if (human) {
     body.form_confirmed = human.form
-    body.keeper = human.keeper
+    preserveMarks(body, human)
     body.note = human.note
   }
   return body

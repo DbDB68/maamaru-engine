@@ -4,7 +4,10 @@
 钉死的规矩：
 - 人工标注按指纹 (sword_catalog_id, kiwame_date) 挂行；机器 unknown +
   人工确认 → 以人工为准，form_evidence 追加「人工确认（YYYY-MM-DD）」
-- 机器 ambiguous 不被人工自动覆盖，进 attention 等人在界面上点
+- 机器 kiwame/normal/ambiguous + 人工确认且与机器不同 → 人工改判
+  （form_overridden=True，机器原值留在 machine_form_status，机器证据
+  保留，追加「人工改判（YYYY-MM-DD）：原识别=…」）；人工与机器一致
+  只追加确认证据不算改判；改判后 attention 的 form_ambiguous 不再触发
 - 一标注多行（同名多振同日显现）→ 每行 human 都带且 stale=true，
   不合并形态，attention 记 duplicate_fingerprint
 - 标注匹配不到任何行 → 不进 entries，attention 记 stale_annotation
@@ -13,6 +16,7 @@
 - attention 排序：按刀帐番号升序（对齐游戏「刀帐顺序」，方便对照
   游戏翻页核对），番号认不出的殿后，同番号按显现日期老的在前
 """
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -21,7 +25,7 @@ from pathlib import Path
 
 from touken.honmaru_profile import build_candidate_pool
 from touken.sword_archive import build_sword_archive
-from touken.telemetry import TelemetryStore
+from touken.telemetry import TELEMETRY_SCHEMA_VERSION, TelemetryStore
 
 # 固定 epoch（2025-06-15 晚 9 点 UTC+8），让「人工确认（日期）」可断言
 CONFIRM_TS = 1750000000.0
@@ -102,7 +106,8 @@ class SwordArchiveMergeTests(unittest.TestCase):
         self.assertEqual(entry["sword_type"], "短刀")
         self.assertEqual(entry["human"], {
             "id": ann["id"], "form": "kiwame", "level": None,
-            "keeper": True, "note": "要练",
+            "keeper": True, "favorite": False, "watch": False,
+            "note": "要练",
             "confirmed_at": CONFIRM_TS, "stale": False,
         })
         self.assertEqual(archive["summary"], {
@@ -121,7 +126,9 @@ class SwordArchiveMergeTests(unittest.TestCase):
         self.assertEqual(entry["form_status"], "unknown")  # 没确认形态
         self.assertEqual(archive_reasons(store), ["form_unknown"])
 
-    def test_machine_form_is_not_overwritten_by_annotation(self):
+    def test_machine_form_overridden_by_conflicting_annotation(self):
+        """机器 normal + 人工确认 kiwame → 人工改判：以人工为准，机器
+        原值留在 machine_form_status，机器证据保留并追加改判记录。"""
         store = _store()
         _owned_snapshot(store, [
             _row(IMA_GIRI, "今剑",
@@ -131,12 +138,19 @@ class SwordArchiveMergeTests(unittest.TestCase):
         _annotate(store, IMA_GIRI, "2024-5-1", form_confirmed="kiwame")
 
         entry = build_sword_archive(store)["entries"][0]
-        self.assertEqual(entry["form_status"], "normal")  # 机器正面结论不动
+        self.assertEqual(entry["form_status"], "kiwame")  # 人工改判生效
+        self.assertEqual(entry["machine_form_status"], "normal")
+        self.assertIs(entry["form_overridden"], True)
+        self.assertTrue(any("刀帐盘点徽章直读" in e for e in
+                            entry["form_evidence"]))  # 机器证据保留
+        self.assertIn(f"人工改判（{EXPECTED_DAY}）：原识别=普通",
+                      entry["form_evidence"])
         self.assertEqual(entry["human"]["form"], "kiwame")
 
     def test_machine_ambiguous_not_overridden_by_human(self):
-        """两处机器直读打架（盘点 kiwame × 编队页 normal）→ ambiguous，
-        人工标注不自动盖，进 attention 等人在界面上点。"""
+        """两处机器直读打架（盘点 kiwame × 编队页 normal）且人工与盘点
+        一致 → 不算改判（只追加确认证据），编队冲突照旧降级 ambiguous，
+        进 attention 等人在界面上点。"""
         store = _store()
         _owned_snapshot(store, [
             _row(IMA_GIRI, "今剑",
@@ -150,6 +164,7 @@ class SwordArchiveMergeTests(unittest.TestCase):
         archive = build_sword_archive(store)
         entry = archive["entries"][0]
         self.assertEqual(entry["form_status"], "ambiguous")
+        self.assertIs(entry["form_overridden"], False)
         self.assertEqual(entry["human"]["form"], "kiwame")
         self.assertFalse(entry["human"]["stale"])
         self.assertEqual([a["reasons"] for a in archive["attention"]],
@@ -480,6 +495,194 @@ class CandidatePoolHumanMergeTests(unittest.TestCase):
         entries = build_candidate_pool(store)["entries"]
         for entry in entries:
             self.assertEqual(entry["form_status"], "unknown")
+
+
+class FormOverrideArchiveTests(unittest.TestCase):
+    """人工改判的档案层契约：entry 透传 machine_form_status/form_overridden
+    （无覆盖给 None/False）；ambiguous 被人工裁决后自然出 attention 清单。"""
+
+    def test_override_fields_passthrough_with_defaults(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+            _row(HIRANO, "平野藤四郎", kiwame_date="2024-5-1",
+                 form_fact={"status": "normal", "evidence": ["花数2/基线2"]}),
+        ], captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", form_confirmed="normal")
+
+        entries = build_sword_archive(store)["entries"]
+        overridden, untouched = entries
+        self.assertEqual(overridden["form_status"], "normal")
+        self.assertEqual(overridden["machine_form_status"], "kiwame")
+        self.assertIs(overridden["form_overridden"], True)
+        # 无覆盖的行给默认值
+        self.assertEqual(untouched["form_status"], "normal")
+        self.assertIsNone(untouched["machine_form_status"])
+        self.assertIs(untouched["form_overridden"], False)
+        # 改判后形态/等级都齐 → 不占 attention
+        self.assertEqual(build_sword_archive(store)["attention"], [])
+
+    def test_ambiguous_overridden_by_human_leaves_attention(self):
+        """盘点徽章 kiwame × 编队页直读 normal 本会打成 ambiguous；人工
+        裁决 normal 后 form_status 是确定值，form_ambiguous 不再触发，
+        自然出 attention 清单。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+        ], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, IMA_GIRI, "今剑", kiwame_status="normal")], ts=200)
+        _annotate(store, IMA_GIRI, "2024-5-1", form_confirmed="normal")
+
+        archive = build_sword_archive(store)
+        entry = archive["entries"][0]
+        self.assertEqual(entry["form_status"], "normal")
+        self.assertEqual(entry["machine_form_status"], "kiwame")
+        self.assertIs(entry["form_overridden"], True)
+        # 机器徽章证据、人工改判、编队页直读全部保留
+        joined = "；".join(entry["form_evidence"])
+        self.assertIn("刀帐盘点徽章直读", joined)
+        self.assertIn(f"人工改判（{EXPECTED_DAY}）：原识别=极", joined)
+        self.assertIn("编队页", joined)
+        self.assertEqual(archive["attention"], [])
+
+    def test_conflicting_roster_read_after_override_stays_ambiguous(self):
+        """改判成 normal 后编队页直读仍说 kiwame → 照旧降级 ambiguous，
+        如实进 attention（改判字段原样保留，证据不丢）。"""
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", kiwame_date="2024-5-1",
+                 form_fact={"status": "kiwame", "evidence": ["花数3/基线2"]}),
+        ], captured_at=100)
+        _roster_event(store, 1, [
+            _slot(1, IMA_GIRI, "今剑", kiwame_status="kiwame")], ts=200)
+        _annotate(store, IMA_GIRI, "2024-5-1", form_confirmed="normal")
+
+        archive = build_sword_archive(store)
+        entry = archive["entries"][0]
+        self.assertEqual(entry["form_status"], "ambiguous")
+        self.assertEqual(entry["machine_form_status"], "kiwame")
+        self.assertIs(entry["form_overridden"], True)
+        self.assertEqual([a["reasons"] for a in archive["attention"]],
+                         [["form_ambiguous"]])
+
+
+class PreferenceFlagTests(unittest.TestCase):
+    """favorite/watch（v14）与 keeper 同为玩家偏好契约：档案 human 字典
+    透传布尔，更新只动传入的非 None 字段（前端单字段递回）。"""
+
+    def test_human_dict_passes_favorite_watch(self):
+        store = _store()
+        _owned_snapshot(store, [
+            _row(IMA_GIRI, "今剑", kiwame_date="2024-5-1",
+                 form_fact={"status": "normal", "evidence": ["花数2/基线2"]}),
+            _row(HIRANO, "平野藤四郎", kiwame_date="2024-5-1",
+                 form_fact={"status": "normal", "evidence": ["花数2/基线2"]}),
+        ], captured_at=100)
+        _annotate(store, IMA_GIRI, "2024-5-1", favorite=True, watch=True)
+        _annotate(store, HIRANO, "2024-5-1", note="只留个备注")  # 没标偏好
+
+        entries = build_sword_archive(store)["entries"]
+        flagged, plain = entries
+        self.assertIs(flagged["human"]["favorite"], True)
+        self.assertIs(flagged["human"]["watch"], True)
+        self.assertIsNotNone(plain["human"])  # 有标注但没带偏好标记
+        self.assertIs(plain["human"]["favorite"], False)
+        self.assertIs(plain["human"]["watch"], False)
+        # summary 不加新计数，字段保持原样
+        self.assertEqual(set(build_sword_archive(store)["summary"]),
+                         {"total", "human_confirmed", "keepers",
+                          "attention_count"})
+
+    def test_single_field_write_does_not_touch_other_flags(self):
+        """前端单字段递回：只传 favorite 时 watch/keeper 不被动。"""
+        store = _store()
+        _annotate(store, IMA_GIRI, "2024-5-1", keeper=True)
+        _annotate(store, IMA_GIRI, "2024-5-1", favorite=True)
+        _annotate(store, IMA_GIRI, "2024-5-1", watch=True)
+
+        ann = store.sword_annotations()[0]
+        self.assertTrue(ann["keeper"])
+        self.assertTrue(ann["favorite"])
+        self.assertTrue(ann["watch"])
+        # 只递回一个字段时另一个不被清掉
+        _annotate(store, IMA_GIRI, "2024-5-1", favorite=False)
+        ann = store.sword_annotations()[0]
+        self.assertFalse(ann["favorite"])
+        self.assertTrue(ann["watch"])
+
+
+class SchemaV14MigrationTests(unittest.TestCase):
+    """v13 老库（sword_annotations 没有 favorite/watch 列）原地升级：
+    ALTER 补列默认 0，老标注一条不丢，照常 upsert 新偏好标记。"""
+
+    def _v13_db(self) -> Path:
+        db = Path(tempfile.mkdtemp()) / "telemetry.db"
+        conn = sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE sword_annotations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sword_catalog_id TEXT NOT NULL,
+                kiwame_date TEXT NOT NULL,
+                level_at_mark INTEGER,
+                level_confirmed INTEGER,
+                form_confirmed TEXT,
+                keeper INTEGER NOT NULL DEFAULT 0,
+                note TEXT,
+                created_at REAL,
+                updated_at REAL,
+                revoked INTEGER NOT NULL DEFAULT 0);
+            INSERT INTO metadata(key, value) VALUES('schema_version', '13');
+            INSERT INTO sword_annotations(sword_catalog_id, kiwame_date,
+                level_confirmed, form_confirmed, keeper, note,
+                created_at, updated_at, revoked)
+                VALUES ('touken_011_imagiri_no_toshiro', '2024-5-1',
+                        88, 'kiwame', 1, '老标注', 100, 100, 0);
+        """)
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_v13_database_gains_favorite_watch_without_data_loss(self):
+        db = self._v13_db()
+        store = TelemetryStore(db)
+        try:
+            # 库内版本号原地升级（summary() 返回的是常量，以 metadata 为准）
+            version = store._conn().execute(
+                "SELECT value FROM metadata WHERE key = 'schema_version'"
+            ).fetchone()["value"]
+            self.assertEqual(version, str(TELEMETRY_SCHEMA_VERSION))
+            cols = {row["name"]: row for row in store._conn().execute(
+                "PRAGMA table_info(sword_annotations)").fetchall()}
+            self.assertIn("favorite", cols)
+            self.assertIn("watch", cols)
+            self.assertEqual(cols["favorite"]["dflt_value"], "0")
+            self.assertEqual(cols["watch"]["dflt_value"], "0")
+            # 老标注原样在，新列补成 0，不回填不猜测
+            old = store.sword_annotations()[0]
+            self.assertEqual(old["note"], "老标注")
+            self.assertTrue(old["keeper"])
+            self.assertFalse(old["favorite"])
+            self.assertFalse(old["watch"])
+            self.assertEqual(old["level_confirmed"], 88)
+            # 老行照常 upsert 补偏好标记，别的字段不动
+            updated = store.save_sword_annotation(
+                "touken_011_imagiri_no_toshiro", "2024-5-1", favorite=True)
+            self.assertTrue(updated["favorite"])
+            self.assertFalse(updated["watch"])
+            self.assertEqual(updated["form_confirmed"], "kiwame")
+            self.assertEqual(updated["note"], "老标注")
+        finally:
+            store.close()
+        # 重复打开幂等：列不重复加、补的值不丢
+        store2 = TelemetryStore(db)
+        try:
+            self.assertTrue(store2.sword_annotations()[0]["favorite"])
+        finally:
+            store2.close()
 
 
 def archive_reasons(store):
