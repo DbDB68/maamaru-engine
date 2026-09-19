@@ -33,6 +33,16 @@ const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
 function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
 function openExpeditionPlanning() { selected.value = '$schedule'; tab.value = 'tasks' }
+function openActivityTask(script: 'hanafuda', loops: number) {
+  if (!scripts.value[script]) {
+    message.value = '当前模式不能直接打开秘宝之里配置'
+    return
+  }
+  params.value[script] = { ...(params.value[script] || {}), runs: loops }
+  selected.value = script
+  tab.value = 'tasks'
+  message.value = `已带入本轮 ${loops} 圈，确认队伍后就能开工`
+}
 const runningWorkflow = ref<WorkflowIdentity | null>(null)
 const startingWorkflow = ref(false)
 let statusRevision = 0
@@ -666,7 +676,7 @@ watch(tab, value => {
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page"><SwordArchivePanel /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>

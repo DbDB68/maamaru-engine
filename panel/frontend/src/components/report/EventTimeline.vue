@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ActivityPace, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
-import { dailyRunTarget } from './eventTimelineModel'
+import { dailyRunTarget, immediateBatchPlan } from './eventTimelineModel'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (event: 'add-goal', abacus: EventAbacus): void
   (event: 'add-stock-goal', abacus: EventAbacus, target: number): void
   (event: 'save-tama-target', name: string, target: number): void
+  (event: 'open-activity', script: 'hanafuda', loops: number): void
 }>()
 
 const estimateInputs = ref<Record<string, string>>({})
@@ -254,6 +255,38 @@ function tamaTimeText(entry: EventTimelineEntry) {
   return `离收摊还有 ${paceDuration(secondsToEnd)}，按现在的效率，${action}。`
 }
 
+function tamaBatchPlan(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (!budget) return null
+  const pace = paceFor(entry)?.secondsPerLoop ?? budget.seconds_per_loop
+  return immediateBatchPlan(
+    budget.runs_needed,
+    pace,
+    budget.seconds_to_end,
+    nowMs.value,
+  )
+}
+
+function shanghaiClock(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai',
+  }).format(new Date(timestamp))
+}
+
+function tamaBatchNote(entry: EventTimelineEntry) {
+  const plan = tamaBatchPlan(entry)
+  if (!plan) return ''
+  const horizon = plan.horizon === 'daily-reset' ? '4:00 日课刷新' : '活动收摊'
+  if (!plan.runs) return `${horizon}快到了，这一锅先别开；回本丸收尾后再继续。`
+  const reserve = Math.round(plan.reserveSeconds / 60)
+  return `预计 ${shanghaiClock(plan.finishAtMs)} 收工 · 给 ${horizon}留约 ${reserve} 分钟`
+}
+
+function openTamaBatch(entry: EventTimelineEntry) {
+  const plan = tamaBatchPlan(entry)
+  if (plan?.runs) emit('open-activity', 'hanafuda', plan.runs)
+}
+
 function tamaTicketText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget || budget.runs_needed === 0 || budget.free_tickets_remaining == null) return ''
@@ -350,6 +383,15 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="entry.budget.tama_remaining === 0">{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}已经拿到啦 🎉 剩下的手形想刷就刷。</p>
                 <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} 玉。</p>
                 <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
+                <section v-if="tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
+                  <span>
+                    <small>现在这一锅</small>
+                    <b v-if="tamaBatchPlan(entry)!.runs">先挂 {{ fmt(tamaBatchPlan(entry)!.runs) }} 圈</b>
+                    <b v-else>先别开新一锅</b>
+                  </span>
+                  <p>{{ tamaBatchNote(entry) }}</p>
+                  <button v-if="tamaBatchPlan(entry)!.runs" type="button" class="primary" @click="openTamaBatch(entry)">带着 {{ fmt(tamaBatchPlan(entry)!.runs) }} 圈去开工</button>
+                </section>
                 <p v-if="tamaTimeText(entry)">{{ tamaTimeText(entry) }}</p>
                 <p v-if="tamaTicketText(entry)">{{ tamaTicketText(entry) }}</p>
                 <p v-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
@@ -506,6 +548,13 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .tama-target-editor > small { display: block; margin-top: 6px; color: var(--ink-dim); font-weight: 400; }
 .tama-progress { height: 6px; overflow: hidden; background: color-mix(in srgb, var(--paper-line) 70%, transparent); border-radius: 999px; }
 .tama-progress i { display: block; height: 100%; background: #5b813f; border-radius: inherit; transition: width .25s ease; }
+.tama-now-plan { display: grid; grid-template-columns: minmax(130px, auto) minmax(180px, 1fr) auto; align-items: center; gap: 8px 16px; padding: 12px; background: color-mix(in srgb, var(--fox-gold-pale) 82%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 58%, var(--paper-line)); border-radius: 8px; }
+.tama-now-plan > span { display: grid; gap: 1px; }
+.tama-now-plan small { color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; }
+.tama-now-plan b { color: var(--ink); font-size: 18px; }
+.tama-now-plan p { margin: 0; color: var(--ink-dim); font-size: 11px; }
+.tama-now-plan button { white-space: nowrap; }
+.tama-now-plan.waiting { grid-template-columns: minmax(130px, auto) 1fr; background: color-mix(in srgb, var(--paper) 72%, var(--paper-card)); border-style: dashed; }
 .event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
 .event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-pace-calculator > header > span { display: grid; gap: 1px; }
@@ -596,6 +645,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
   .event-tama-plan > header span:last-child { text-align: left; }
   .tama-target-editor > div { align-items: stretch; flex-direction: column; }
   .tama-target-editor input, .tama-target-editor button { width: 100%; max-width: none; }
+  .tama-now-plan, .tama-now-plan.waiting { grid-template-columns: 1fr; align-items: stretch; }
+  .tama-now-plan button { width: 100%; white-space: normal; }
   .event-pace-calculator > header { align-items: flex-start; flex-direction: column; gap: 7px; }
   .event-pace-calculator > header > span:last-child { text-align: left; }
   .event-estimate input, .event-estimate button, .event-stock-target input, .event-stock-target button { width: 100%; max-width: none; }

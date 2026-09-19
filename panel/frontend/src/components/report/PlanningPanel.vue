@@ -13,7 +13,11 @@ import FragmentGoalGuide from './FragmentGoalGuide.vue'
 import GameplayPlanner from './GameplayPlanner.vue'
 import PlanningOverview from './PlanningOverview.vue'
 
-const emit = defineEmits<{ goalSaved: []; openExpedition: [] }>()
+const emit = defineEmits<{
+  goalSaved: []
+  openExpedition: []
+  openActivity: [script: 'hanafuda', loops: number]
+}>()
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const loading = ref(false)
@@ -477,6 +481,7 @@ onMounted(load)
       @save-tama-target="saveTamaTarget"
       @add-goal="goalFromAbacus"
       @add-stock-goal="goalFromStockTarget"
+      @open-activity="(script, loops) => emit('openActivity', script, loops)"
     />
 
   </section>
