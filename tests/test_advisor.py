@@ -410,8 +410,8 @@ class GetPlanningTests(unittest.TestCase):
         self.assertIsNone(abacus["sufficient"])
         self.assertIsNone(abacus["shortfall"])
 
-    def test_hanafuda_target_is_fixed_at_top_tier(self):
-        # 目标只此一档（最高档 300,000 玉），玩家没有填写路径
+    def test_hanafuda_target_defaults_to_top_tier(self):
+        # 没有自定时仍默认按最高档 300,000 玉规划
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             planning = advisor.get_planning(
@@ -885,7 +885,7 @@ def _hanafuda_ts(text: str) -> float:
 
 
 class HanafudaPlanTests(unittest.TestCase):
-    """秘宝之里行动规划：目标固定 300000 玉，账全由本期实测算。"""
+    """秘宝之里行动规划：默认最高档，也支持仅对本期生效的自定目标。"""
 
     CARD = {"mechanics": "hanafuda",
             "start_at": "2026-09-10T10:00:00+08:00",
@@ -933,6 +933,46 @@ class HanafudaPlanTests(unittest.TestCase):
         self.assertEqual(plan["free_tickets_remaining"], 66)
         self.assertEqual(plan["paid_tickets"], 357)
         self.assertEqual(plan["koban_cost"], 357 * 300)
+
+    def test_custom_tama_target_recalculates_whole_plan(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 500, "tama_total": 10000}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 500, "tama_total": 10500}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 500, "tama_total": 11000}},
+        ]
+        card = {**self.CARD, "tama_target": 20_000,
+                "tama_target_period": "秘宝之里@2026-09-10"}
+        plan = self._plan(events, card=card)
+        self.assertEqual(plan["tama_target"], 20_000)
+        self.assertTrue(plan["tama_target_custom"])
+        self.assertEqual(plan["tama_remaining"], 9_000)
+        self.assertEqual(plan["runs_needed"], 18)
+
+    def test_custom_tama_target_does_not_leak_into_next_period(self):
+        card = {**self.CARD, "start_at": "2026-10-10T10:00:00+08:00",
+                "end_at": "2026-10-24T05:00:00+08:00",
+                "tama_target": 100_000,
+                "tama_target_period": "秘宝之里@2026-09-10"}
+        plan = advisor.hanafuda_plan(
+            self._store([]), card,
+            now_dt=datetime.fromisoformat("2026-10-12T20:00:00+08:00"))
+        self.assertEqual(plan["tama_target"], 300_000)
+        self.assertFalse(plan["tama_target_custom"])
+
+    def test_save_custom_tama_target_preserves_other_local_overrides(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status_dir = Path(tmp)
+            (status_dir / advisor.EVENTS_META_LOCAL).write_text(json.dumps({
+                "秘宝之里": {"unrelated": "kept"},
+            }, ensure_ascii=False), encoding="utf-8")
+            saved = advisor.save_hanafuda_tama_target(
+                status_dir, "秘宝之里", 120_000)
+            local = json.loads((status_dir / advisor.EVENTS_META_LOCAL)
+                               .read_text(encoding="utf-8"))
+        self.assertEqual(saved["tama_target"], 120_000)
+        self.assertEqual(local["秘宝之里"]["tama_target"], 120_000)
+        self.assertEqual(local["秘宝之里"]["unrelated"], "kept")
+        self.assertTrue(local["秘宝之里"]["tama_target_period"])
 
     def test_too_few_samples_means_no_estimate(self):
         events = [

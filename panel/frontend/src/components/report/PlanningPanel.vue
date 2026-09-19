@@ -214,6 +214,7 @@ function goalAction(goal: PlanningGoalAdvice) {
 
 const estimateSaving = ref('')
 const abacusGoalSaving = ref('')
+const tamaTargetSaving = ref('')
 
 async function saveEstimate(event: string, value: number) {
   if (!Number.isFinite(value) || value <= 0) {
@@ -261,6 +262,22 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
     await scrollToElement('.planning-success')
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标保存失败' }
   finally { abacusGoalSaving.value = '' }
+}
+
+async function saveTamaTarget(event: string, target: number) {
+  goalNotice.value = ''
+  if (!Number.isInteger(target) || target < 1 || target > 10_000_000) {
+    error.value = '目标玉数请填 1 到 10,000,000 之间的整数。'
+    return
+  }
+  error.value = ''
+  tamaTargetSaving.value = event
+  try {
+    await api.saveHanafudaTarget(event, target)
+    await load()
+    goalNotice.value = `「${event}」本期目标已改为 ${target.toLocaleString()} 玉。`
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '玉目标保存失败' }
+  finally { tamaTargetSaving.value = '' }
 }
 
 
@@ -454,8 +471,10 @@ onMounted(load)
       :error="timelineError"
       :estimate-saving="estimateSaving"
       :goal-saving="abacusGoalSaving"
+      :target-saving="tamaTargetSaving"
       :activity-paces="activityPaces"
       @save-estimate="saveEstimate"
+      @save-tama-target="saveTamaTarget"
       @add-goal="goalFromAbacus"
       @add-stock-goal="goalFromStockTarget"
     />

@@ -2772,6 +2772,19 @@ async def api_save_event_estimate(request: Request):
     return {"ok": True, "card": card}
 
 
+@app.post("/api/planning/hanafuda-target")
+async def api_save_hanafuda_target(request: Request):
+    """保存玩家给本期秘宝之里定下的玉目标。"""
+    body = await request.json()
+    from touken import advisor
+    try:
+        card = advisor.save_hanafuda_tama_target(
+            STATUS_DIR, str(body.get("event") or ""), body.get("target"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "card": card}
+
+
 @app.post("/api/planning/event-goals")
 async def api_add_event_goal(request: Request):
     """把活动准备立成目标。预算和活动截止时间都由服务端知识卡决定。"""

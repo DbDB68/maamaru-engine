@@ -386,6 +386,7 @@ export interface EventAbacus {
   tama_current?: number | null
   tama_observed_at?: number | null
   tama_target?: number | null
+  tama_target_custom?: boolean
   tama_remaining?: number | null
   tama_per_loop?: number | null
   tama_samples?: number | null
@@ -423,6 +424,7 @@ export interface EventTimelineBudget {
   tama_current?: number | null
   tama_observed_at?: number | null
   tama_target?: number | null
+  tama_target_custom?: boolean
   tama_remaining?: number | null
   tama_per_loop?: number | null
   tama_samples?: number | null
