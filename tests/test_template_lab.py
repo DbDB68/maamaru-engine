@@ -398,6 +398,22 @@ class AdoptTests(TemplateLabTestBase):
                                         json={"draft": "采纳目标", "target": bad})
             self.assertEqual(response.status_code, 400, repr(bad))
 
+    def test_adopt_into_existing_subdirectory(self):
+        sub = self.dir / "resource" / "image" / "刀种"
+        sub.mkdir(parents=True)
+        body = self._adopt(target="刀种/一花短刀")
+        dest = Path(body["path"])
+        self.assertEqual(dest, sub / "一花短刀.png")
+        self.assertTrue(dest.is_file())
+        # 覆盖子目录目标时备份文件名里的 / 会被压平成 _
+        again = self._adopt(target="刀种/一花短刀")
+        self.assertIsNotNone(again["backup"])
+        self.assertNotIn("/", Path(again["backup"]).name)
+
+    def test_adopt_missing_subdirectory_is_400(self):
+        self._adopt(target="不存在目录/一花短刀", expect=400)
+        self._adopt(target="刀种/../../evil", expect=400)
+
     def test_adopt_missing_draft_is_404(self):
         self._adopt(draft="不存在", expect=404)
 

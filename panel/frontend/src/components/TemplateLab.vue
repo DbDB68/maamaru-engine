@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
         </ul>
       </div>
       <div class="lab-row">
-        <label>目标文件名<PixelControl v-model="adoptTarget" placeholder="落盘到模板目录的文件名" /></label>
+        <label>目标文件名<PixelControl v-model="adoptTarget" placeholder="如 刀种/一花短刀（可带一级子目录）" /></label>
         <button class="primary" :disabled="adoptBusy" @click="adopt">{{ adoptBusy ? '采用中……' : '采用为正式模板' }}</button>
       </div>
       <p v-if="adoptPath" class="lab-ok">{{ adoptPath }}</p>

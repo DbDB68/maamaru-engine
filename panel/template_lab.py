@@ -82,6 +82,26 @@ def _validate_name(name, label: str = "名称") -> str:
     return stem
 
 
+def _validate_target(target) -> str:
+    """采用目标名：允许「子目录/名称」形式（如 刀种/一花短刀），
+    子目录必须是 image/ 下已存在的目录，防路径穿越。"""
+    if not isinstance(target, str):
+        raise HTTPException(400, "目标名必须是字符串。")
+    parts = target.replace("\\", "/").split("/")
+    if len(parts) > 2 or any(not p for p in parts):
+        raise HTTPException(400, "目标名格式不正确，最多带一级子目录（如 刀种/一花短刀）。")
+    stem = _validate_name(parts[-1], "目标名")
+    if len(parts) == 1:
+        return stem
+    sub = parts[0]
+    image_dir = (RESOURCE_DIR / "image").resolve()
+    sub_dir = (image_dir / sub).resolve()
+    if not _NAME_RE.fullmatch(sub) or not sub_dir.is_dir() \
+            or not sub_dir.is_relative_to(image_dir):
+        raise HTTPException(400, f"模板目录下没有「{sub}」这个子目录。")
+    return f"{sub}/{stem}"
+
+
 def _frame_name(idx: int) -> str:
     return f"frame_{idx:03d}.png"
 
@@ -325,13 +345,14 @@ def _adopt_sync(draft_stem: str, target: str) -> dict:
     image_dir = RESOURCE_DIR / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
     dest = image_dir / f"{target}.png"
+    dest.parent.mkdir(parents=True, exist_ok=True)
     backup = None
     if dest.exists():
         # 覆盖正式资源前先把旧的留底，回头不满意还能找回来
         backup_dir = _adopt_backup_dir()
         backup_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        backup = _unique_draft_path(backup_dir, f"{stamp}_{target}")
+        backup = _unique_draft_path(backup_dir, f"{stamp}_{target.replace('/', '_')}")
         shutil.copy2(dest, backup)
     shutil.copy2(draft_path, dest)
     return {"ok": True, "path": str(dest),
@@ -443,7 +464,7 @@ def create_template_lab_router() -> APIRouter:
     async def adopt(request: Request):
         body = await _json_body(request)
         stem = _validate_name(body.get("draft"), "草稿名")
-        target = _validate_name(body.get("target"), "目标名")
+        target = _validate_target(body.get("target"))
         return await asyncio.to_thread(_adopt_sync, stem, target)
 
     return router
