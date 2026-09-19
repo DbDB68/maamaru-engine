@@ -36,6 +36,10 @@ _SCRIPTS: dict[str, dict] = {}
 # 子进程多久一行输出都没有 = 判定卡死
 SILENCE_TIMEOUT_SEC = 300
 
+# 看门狗自己一轮睡了超过这个数 = 整台电脑刚休眠过，静默计时清零不冤枉工人
+# （电脑睡着时工人和看门狗一起被冻，醒来墙上时钟跳一大截，不是工人卡死）
+SUSPEND_GAP_SEC = 60
+
 # 工人进程约定退出码：玩法安全中止 / MAA 连续识别超时后自我了断
 EXIT_FLOW_ABORTED = 42
 EXIT_MAA_DEAD = 43
@@ -258,11 +262,26 @@ class ScriptRunner:
 
     def _watchdog(self, proc: subprocess.Popen, run_id: str, script_name: str):
         """只数秒数 + 杀进程，绝不碰 MAA（碰 MAA 的线程看门狗已经咬死过人）"""
+        last_tick = time.time()
         while True:
             time.sleep(5)
+            now = time.time()
+            if now - last_tick > SUSPEND_GAP_SEC:
+                # 看门狗自己都被冻了这么久 → 整台电脑刚休眠过，
+                # 工人和输出也一起冻着，不是卡死；静默计时清零重来
+                gap = int(now - last_tick)
+                self._last_output = now
+                last_tick = now
+                note = (f"[看门狗] 检测到系统休眠 {gap} 秒（工人只是陪电脑睡了一觉），"
+                        "静默计时已清零，继续盯梢")
+                get_store().append(run_id, script_name, note)
+                self._emit(run_id, script_name, note)
+                print(note)
+                continue
+            last_tick = now
             if proc.poll() is not None:
                 return  # 正常/异常退出都归 _pump 收尾
-            silent = time.time() - self._last_output
+            silent = now - self._last_output
             if silent <= SILENCE_TIMEOUT_SEC:
                 continue
             self._stop_reason = "watchdog"
