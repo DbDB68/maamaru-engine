@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ActivityPace, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
+import { dailyRunTarget } from './eventTimelineModel'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -246,7 +247,11 @@ function tamaTimeText(entry: EventTimelineEntry) {
   if (!budget.can_finish) return `离收摊只剩 ${paceDuration(secondsToEnd)}，照现在的圈速，即使全天挂机也来不及。`
   const daysLeft = secondsToEnd / 86400
   const dailySeconds = daysLeft > 0 ? budget.estimated_seconds / daysLeft : budget.estimated_seconds
-  return `离收摊还有 ${paceDuration(secondsToEnd)}，按现在的效率，平均每天要留约 ${paceDuration(dailySeconds)}。`
+  const dailyRuns = dailyRunTarget(budget.runs_needed, secondsToEnd)
+  const action = dailyRuns == null
+    ? `平均每天要留约 ${paceDuration(dailySeconds)}`
+    : `平均每天挂约 ${fmt(dailyRuns)} 圈（约 ${paceDuration(dailySeconds)}）就来得及`
+  return `离收摊还有 ${paceDuration(secondsToEnd)}，按现在的效率，${action}。`
 }
 
 function tamaTicketText(entry: EventTimelineEntry) {
