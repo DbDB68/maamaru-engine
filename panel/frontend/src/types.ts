@@ -788,6 +788,14 @@ export interface TemplateLabRoi {
   updated: number
 }
 
+export interface TemplateLabOcrRoi {
+  name: string | null
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface TemplateLabOcrRow {
   session: string
   frame: number
@@ -795,6 +803,19 @@ export interface TemplateLabOcrRow {
 }
 
 export interface TemplateLabOcrTestResult {
-  roi: TemplateLabRoi
+  roi: TemplateLabOcrRoi
   results: TemplateLabOcrRow[]
+}
+
+export type TemplateLabRectXyxy = [number, number, number, number]
+
+export interface TemplateLabCodeRoi {
+  id: string
+  label: string
+  used_in: string
+  purpose: string
+  default: TemplateLabRectXyxy
+  override: TemplateLabRectXyxy | null
+  effective: TemplateLabRectXyxy
+  overridden: boolean
 }

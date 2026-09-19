@@ -27,6 +27,7 @@ from pathlib import Path
 
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
+from ..roi_overrides import get_roi
 from .team_roster import (load_flower_templates, match_badge_flowers,
                           conclude_kiwame, norm_sword_type)
 
@@ -39,9 +40,13 @@ _SWORD_MENU_POINT = (28, 172)      # 本丸左侧栏「刀剑男士」
 _FILTER_BTN = (810, 112)           # 「筛选/排序」
 _SORT_ROSTER_BTN = (1010, 377)     # 排序菜单「刀帐顺序」
 _SORT_CONFIRM = (640, 625)         # 菜单「确定」
-_TITLE_ROI = (400, 15, 880, 50)    # 「刀剑男士一览」标题
-_OWNED_ROI = (640, 15, 1065, 50)   # 「所持刀剑 196/200」
-_LIST_ROI = (130, 145, 1120, 660)  # 列表区（含显现日期块 x≈1062，避开按钮 x≥1134）
+# 读取型 ROI 走注册表 + 覆盖（面板「代码 ROI」页可临时改，存用户数据目录
+# DEBUG_DIR/template_lab/code-rois.json）：工人民工进程一跑一 import，改完
+# 覆盖要等下次跑任务才生效；坏覆盖在 roi_overrides 里静默回落这里的默认。
+_TITLE_ROI = get_roi("sword_inventory.title", (400, 15, 880, 50))    # 「刀剑男士一览」标题
+_OWNED_ROI = get_roi("sword_inventory.owned", (640, 15, 1065, 50))   # 「所持刀剑 196/200」
+# 列表区（含显现日期块 x≈1062，避开按钮 x≥1134）
+_LIST_ROI = get_roi("sword_inventory.list", (130, 145, 1120, 660))
 _ROWS_PER_PAGE = 5
 
 _NEXT_PAGE_SWIPE = ((1100, 400), (200, 400), 2500)  # 右→左慢拖 = 下一页

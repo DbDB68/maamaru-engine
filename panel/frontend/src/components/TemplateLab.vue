@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { TemplateLabDraft, TemplateLabFrame, TemplateLabOcrTestResult, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult } from '../types'
+import type { TemplateLabCodeRoi, TemplateLabDraft, TemplateLabFrame, TemplateLabOcrTestResult, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult } from '../types'
 import PixelControl from './PixelControl.vue'
 import SegmentedControl from './SegmentedControl.vue'
 
@@ -73,6 +73,13 @@ const selValid = computed(() => {
   return !!sel && sel.w > 0 && sel.h > 0
 })
 
+// ---- 代码里的 ROI ----
+const codeRois = ref<TemplateLabCodeRoi[]>([])
+const codeRoiPick = ref('')
+const codeRoiSaveBusy = ref(false)
+const codeRoiResetBusy = ref(false)
+const pickedCodeRoi = computed(() => codeRois.value.find(r => r.id === codeRoiPick.value) ?? null)
+
 function fail(e: unknown) {
   errorMsg.value = e instanceof Error && e.message ? e.message : '操作失败，请检查后端连接'
 }
@@ -140,6 +147,14 @@ async function loadRois() {
     const data = await api.templateLabRois()
     rois.value = data.rois
     if (roiPick.value && !data.rois.some(r => r.name === roiPick.value)) roiPick.value = ''
+  } catch (e) { fail(e) }
+}
+
+async function loadCodeRois() {
+  try {
+    const data = await api.templateLabCodeRois()
+    codeRois.value = data.rois
+    if (codeRoiPick.value && !data.rois.some(r => r.id === codeRoiPick.value)) codeRoiPick.value = ''
   } catch (e) { fail(e) }
 }
 
@@ -425,6 +440,49 @@ async function runOcr() {
   } catch (e) { fail(e) } finally { ocrBusy.value = false }
 }
 
+// ---- 代码里的 ROI：保存修改 / 恢复默认 / 试读 ----
+async function saveCodeRoi() {
+  const roi = pickedCodeRoi.value
+  const sel = selection.value
+  if (!roi) return
+  if (!sel || sel.w < 1 || sel.h < 1) { errorMsg.value = '先在图上框一块区域'; return }
+  codeRoiSaveBusy.value = true
+  errorMsg.value = ''
+  try {
+    await api.templateLabSaveCodeRoi(roi.id, [sel.x, sel.y, sel.x + sel.w, sel.y + sel.h])
+    message.value = `「${roi.label}」已保存，下次跑任务生效`
+    await loadCodeRois()
+  } catch (e) { fail(e) } finally { codeRoiSaveBusy.value = false }
+}
+
+async function resetCodeRoi() {
+  const roi = pickedCodeRoi.value
+  if (!roi) return
+  if (!window.confirm(`确认把「${roi.label}」恢复成代码默认？`)) return
+  codeRoiResetBusy.value = true
+  errorMsg.value = ''
+  try {
+    await api.templateLabDeleteCodeRoi(roi.id)
+    message.value = `「${roi.label}」已恢复默认`
+    await loadCodeRois()
+    const [x1, y1, x2, y2] = roi.default
+    selection.value = clampSel({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 })
+  } catch (e) { fail(e) } finally { codeRoiResetBusy.value = false }
+}
+
+async function runCodeOcr() {
+  const roi = pickedCodeRoi.value
+  const sel = selection.value
+  if (!roi) { errorMsg.value = '先在「代码里的 ROI」里选一条'; return }
+  if (!sel || sel.w < 1 || sel.h < 1) { errorMsg.value = '先在图上框一块区域'; return }
+  if (!verifySessions.value.length) { errorMsg.value = '至少勾一个会话'; return }
+  ocrBusy.value = true
+  errorMsg.value = ''
+  try {
+    ocrResult.value = await api.templateLabOcrTestRect([sel.x, sel.y, sel.w, sel.h], verifySessions.value)
+  } catch (e) { fail(e) } finally { ocrBusy.value = false }
+}
+
 // 选中已存 ROI 时把矩形画回画布（设置 selection 即触发 watch 重绘）
 watch(roiPick, (name) => {
   if (!name) return
@@ -433,12 +491,21 @@ watch(roiPick, (name) => {
   selection.value = clampSel({ x: roi.x, y: roi.y, w: roi.w, h: roi.h })
 })
 
+// 选中代码 ROI 时把 effective 矩形（xyxy → xywh）画回画布
+watch(codeRoiPick, (id) => {
+  if (!id) return
+  const roi = codeRois.value.find(r => r.id === id)
+  if (!roi) return
+  const [x1, y1, x2, y2] = roi.effective
+  selection.value = clampSel({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 })
+})
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
   try {
     status.value = await api.templateLabStatus()
   } catch { /* 后端没上线时状态条留空 */ }
-  await Promise.all([loadSessions(), loadDrafts(), loadRois()])
+  await Promise.all([loadSessions(), loadDrafts(), loadRois(), loadCodeRois()])
   if (sessions.value.length) {
     historyPick.value = sessions.value[0].id
     applySession(sessions.value[0])
@@ -592,6 +659,25 @@ onBeforeUnmount(() => {
           <button :disabled="!roiPick || roiDeleteBusy" @click="deleteRoi">{{ roiDeleteBusy ? '删除中……' : '删除' }}</button>
           <p v-if="!rois.length" class="lab-hint">还没有存过 ROI。</p>
         </div>
+        <fieldset class="lab-code-rois">
+          <legend>代码里的 ROI</legend>
+          <div class="lab-row">
+            <label>代码 ROI<PixelControl v-model="codeRoiPick" as="select">
+              <option value="" disabled>选一条，矩形会画到图上</option>
+              <option v-for="r in codeRois" :key="r.id" :value="r.id">{{ r.overridden ? '改·' : '' }}{{ r.label }}</option>
+            </PixelControl></label>
+          </div>
+          <p v-if="pickedCodeRoi" class="lab-hint">
+            {{ pickedCodeRoi.purpose }}　出处：{{ pickedCodeRoi.used_in }}<template v-if="pickedCodeRoi.overridden">（改过，可恢复默认）</template>
+          </p>
+          <p v-else class="lab-hint">选一条后矩形会画到图上，可微调再保存。</p>
+          <div class="lab-row">
+            <button class="primary" :disabled="codeRoiSaveBusy || !pickedCodeRoi || !selValid" @click="saveCodeRoi">{{ codeRoiSaveBusy ? '保存中……' : '保存修改' }}</button>
+            <button :disabled="codeRoiResetBusy || !pickedCodeRoi || !selValid" @click="resetCodeRoi">{{ codeRoiResetBusy ? '恢复中……' : '恢复默认' }}</button>
+            <button :disabled="ocrBusy || !pickedCodeRoi || !selValid || !verifySessions.length" @click="runCodeOcr">{{ ocrBusy ? '试读中……' : '试读这个区域' }}</button>
+            <span v-if="pickedCodeRoi && !selValid" class="lab-hint">先在图上框一块区域</span>
+          </div>
+        </fieldset>
         <fieldset class="lab-sessions">
           <legend>拿去试读的会话</legend>
           <span v-for="s in sessions" :key="s.id" class="lab-check">
@@ -609,7 +695,7 @@ onBeforeUnmount(() => {
           <span v-else-if="!verifySessions.length" class="lab-hint">至少勾一个会话</span>
         </div>
         <div v-if="ocrResult" class="lab-table-scroll">
-          <p class="lab-hint">「{{ ocrResult.roi.name }}」（{{ ocrResult.roi.w }}×{{ ocrResult.roi.h }}）试读结果：</p>
+          <p class="lab-hint">{{ ocrResult.roi.name ? `「${ocrResult.roi.name}」` : '临时框选区' }}（{{ ocrResult.roi.w }}×{{ ocrResult.roi.h }}）试读结果：</p>
           <table class="lab-table">
             <thead><tr><th>会话</th><th>帧</th><th>读到的文字</th></tr></thead>
             <tbody>
@@ -666,6 +752,8 @@ onBeforeUnmount(() => {
 .lab-draft-preview { height: 40px; border: 1px solid var(--paper-line); border-radius: 4px; image-rendering: pixelated; }
 .lab-sessions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 8px 12px 10px; border: 1px solid var(--paper-line); border-radius: var(--r-sm); }
 .lab-sessions legend { padding: 0 6px; font-size: 12px; color: var(--ink-dim); }
+.lab-code-rois { display: grid; gap: 8px; margin: 0; padding: 8px 12px 10px; border: 1px solid var(--paper-line); border-radius: var(--r-sm); }
+.lab-code-rois legend { padding: 0 6px; font-size: 12px; color: var(--ink-dim); }
 .lab-table-scroll { overflow-x: auto; }
 .lab-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .lab-table th, .lab-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--paper-line); font-variant-numeric: tabular-nums; }

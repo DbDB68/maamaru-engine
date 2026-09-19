@@ -26,7 +26,9 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _module_tmp.name}):
     from panel import template_lab
     from fastapi.testclient import TestClient
 
+from touken import roi_overrides  # noqa: E402
 from touken.maa_adapter import Point, Region  # noqa: E402  (假 OCR 的返回类型)
+from touken.roi_registry import ROI_REGISTRY  # noqa: E402
 
 
 def _noise(width=320, height=180, seed=42):
@@ -611,6 +613,134 @@ class OcrTestTests(TemplateLabTestBase):
             body, adapter = self._ocr_test()
         self.assertEqual(body["results"], [])
         self.assertEqual(adapter.calls, [])
+
+
+class CodeRoiEndpointTests(TemplateLabTestBase):
+    def setUp(self):
+        super().setUp()
+        # code-rois 走 roi_overrides 自己的 DEBUG_DIR，指到同一棵临时树
+        p = patch.object(roi_overrides, "DEBUG_DIR", self.dir / "debug")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_list_shape_and_defaults(self):
+        response = self.client.get("/api/template-lab/code-rois")
+        self.assertEqual(response.status_code, 200, response.text)
+        rois = response.json()["rois"]
+        self.assertEqual(len(rois), len(ROI_REGISTRY))
+        by_id = {item["id"]: item for item in rois}
+        title = by_id["sword_inventory.title"]
+        self.assertEqual(set(title),
+                         {"id", "label", "used_in", "purpose", "default",
+                          "override", "effective", "overridden"})
+        self.assertEqual(title["default"], [400, 15, 880, 50])
+        self.assertIsNone(title["override"])
+        self.assertEqual(title["effective"], title["default"])
+        self.assertIs(title["overridden"], False)
+
+    def test_save_override_then_list_and_delete(self):
+        response = self.client.post("/api/template-lab/code-rois", json={
+            "id": "sword_inventory.title", "rect": [410, 20, 890, 60]})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertIs(body["ok"], True)
+        roi = body["roi"]
+        self.assertEqual(roi["override"], [410, 20, 890, 60])
+        self.assertEqual(roi["effective"], [410, 20, 890, 60])
+        self.assertIs(roi["overridden"], True)
+        # 真落盘了，且列表读回来还是覆盖态
+        self.assertEqual(roi_overrides.get_roi("sword_inventory.title", None),
+                         (410, 20, 890, 60))
+        listed = {i["id"]: i for i in
+                  self.client.get("/api/template-lab/code-rois").json()["rois"]}
+        self.assertEqual(listed["sword_inventory.title"]["effective"],
+                         [410, 20, 890, 60])
+        # 删掉即恢复默认
+        deleted = self.client.delete("/api/template-lab/code-rois/sword_inventory.title")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertIs(deleted.json()["ok"], True)
+        listed = {i["id"]: i for i in
+                  self.client.get("/api/template-lab/code-rois").json()["rois"]}
+        self.assertIs(listed["sword_inventory.title"]["overridden"], False)
+        self.assertEqual(listed["sword_inventory.title"]["effective"],
+                         listed["sword_inventory.title"]["default"])
+
+    def test_save_unknown_id_is_404(self):
+        response = self.client.post("/api/template-lab/code-rois", json={
+            "id": "不存在.id", "rect": [1, 2, 3, 4]})
+        self.assertEqual(response.status_code, 404, response.text)
+
+    def test_save_bad_rect_is_400(self):
+        for rect in ([500, 10, 100, 60], [-1, 0, 10, 10], [0, 0, 1281, 10],
+                     [0, 0, 10], [0, 0, 10, 720.5],
+                     "abcd", [0, 0, 10, True], None):
+            response = self.client.post("/api/template-lab/code-rois", json={
+                "id": "sword_inventory.title", "rect": rect})
+            self.assertEqual(response.status_code, 400, repr(rect))
+
+    def test_delete_unknown_id_is_404(self):
+        response = self.client.delete("/api/template-lab/code-rois/不存在.id")
+        self.assertEqual(response.status_code, 404, response.text)
+
+    def test_delete_without_override_is_ok(self):
+        # 幂等恢复默认：注册表里有这个 id、从没存过覆盖也算成功
+        response = self.client.delete("/api/template-lab/code-rois/formation_editor.list")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIs(response.json()["ok"], True)
+
+
+class OcrTestRectModeTests(TemplateLabTestBase):
+    """ocr-test 直传 rect 模式：xywh 不查存储，name/rect 互斥。"""
+
+    def setUp(self):
+        super().setUp()
+        _put_session("20250101-010203", [_noise(seed=1), _noise(seed=2)])
+
+    def _fake_ocr_adapter(self):
+        class FakeAdapter:
+            def __init__(self):
+                self.calls = []
+
+            def ocr_all(self, roi, image=None):
+                self.calls.append((roi, image))
+                return [("生存 48/48", Point(160, 55))]
+
+        return FakeAdapter()
+
+    def test_rect_direct_mode_reads_every_frame(self):
+        adapter = self._fake_ocr_adapter()
+        with patch.object(template_lab, "_create_ocr_adapter", return_value=adapter):
+            response = self.client.post("/api/template-lab/ocr-test", json={
+                "rect": [100, 40, 120, 30], "sessions": ["20250101-010203"]})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        # 直传模式 roi 原样回 {name: null, x, y, w, h}
+        self.assertEqual(body["roi"],
+                         {"name": None, "x": 100, "y": 40, "w": 120, "h": 30})
+        self.assertEqual([item["texts"] for item in body["results"]],
+                         [["生存 48/48"], ["生存 48/48"]])
+        roi, _image = adapter.calls[0]
+        self.assertEqual(roi.to_tuple(), (100, 40, 120, 30))
+
+    def test_name_and_rect_both_is_400(self):
+        self.client.post("/api/template-lab/rois", json={
+            "name": "生存栏", "x": 100, "y": 40, "w": 120, "h": 30})
+        response = self.client.post("/api/template-lab/ocr-test", json={
+            "name": "生存栏", "rect": [100, 40, 120, 30],
+            "sessions": ["20250101-010203"]})
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_neither_name_nor_rect_is_400(self):
+        response = self.client.post("/api/template-lab/ocr-test", json={
+            "sessions": ["20250101-010203"]})
+        self.assertEqual(response.status_code, 400, response.text)
+
+    def test_bad_rect_is_400(self):
+        for rect in ([100, 40, 1, 30], [100, 40, 120, 700], [-1, 0, 10, 10],
+                     [100, 40, 120], [100.5, 40, 120, 30], "xywh"):
+            response = self.client.post("/api/template-lab/ocr-test", json={
+                "rect": rect, "sessions": ["20250101-010203"]})
+            self.assertEqual(response.status_code, 400, repr(rect))
 
 
 if __name__ == "__main__":

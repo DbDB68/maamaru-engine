@@ -29,6 +29,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from touken import roi_overrides
+from touken.roi_registry import ROI_REGISTRY
 from touken.runtime_paths import DEBUG_DIR, RESOURCE_DIR
 
 _SESSION_ID_RE = re.compile(r"\d{8}-\d{6}")
@@ -195,6 +197,44 @@ def _validate_roi_rect(body: dict) -> tuple[int, int, int, int]:
     if x + w > _FRAME_W or y + h > _FRAME_H:
         raise HTTPException(400, f"ROI 超出画面（画面 {_FRAME_W}×{_FRAME_H}）。")
     return x, y, w, h
+
+
+def _int_rect_values(value, shape: str) -> list[int]:
+    """矩形列表的四条整数化：与 _rect_int 同款语义（浮点要整数值、bool 不算）。"""
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise HTTPException(400, f"rect 必须是 {shape} 四个数。")
+    rect = []
+    for v in value:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise HTTPException(400, f"rect 必须是 {shape} 四个数。")
+        if isinstance(v, float) and not v.is_integer():
+            raise HTTPException(400, "rect 必须是整数坐标。")
+        rect.append(int(v))
+    return rect
+
+
+def _validate_xyxy(value) -> list[int]:
+    """代码 ROI 的 xyxy 矩形：0≤x1<x2≤1280、0≤y1<y2≤720。"""
+    x1, y1, x2, y2 = _int_rect_values(value, "[x1, y1, x2, y2]")
+    if not (0 <= x1 < x2 <= _FRAME_W and 0 <= y1 < y2 <= _FRAME_H):
+        raise HTTPException(400, "rect 不合法：要满足 "
+                                 f"0≤x1<x2≤{_FRAME_W}、0≤y1<y2≤{_FRAME_H}。")
+    return [x1, y1, x2, y2]
+
+
+def _validate_xywh(value) -> list[int]:
+    """ocr-test 直传模式的 xywh 矩形：与存档 ROI 同款边界（宽高至少 2）。"""
+    x, y, w, h = _int_rect_values(value, "[x, y, w, h]")
+    if x < 0 or y < 0 or w < 2 or h < 2:
+        raise HTTPException(400, "rect 宽高至少为 2，起点不能是负数。")
+    if x + w > _FRAME_W or y + h > _FRAME_H:
+        raise HTTPException(400, f"rect 超出画面（画面 {_FRAME_W}×{_FRAME_H}）。")
+    return [x, y, w, h]
+
+
+def _registry_ids() -> set:
+    """注册表 id 集合：code-rois 端点拿来判 404。"""
+    return {entry["id"] for entry in ROI_REGISTRY}
 
 
 def _save_bgr_png(image, path: Path) -> None:
@@ -580,12 +620,8 @@ def _create_ocr_adapter():
     raise RuntimeError("离线绑定和完整 init 都没能起 OCR 通道。")
 
 
-def _ocr_test_sync(name: str, sessions: list) -> dict:
-    rois = _load_rois()
-    if name not in rois:
-        raise HTTPException(404, f"ROI「{name}」不存在。")
-    roi = dict(rois[name])
-
+def _ocr_test_sync(roi: dict, sessions: list) -> dict:
+    """对已解析好的 ROI（{"name","x","y","w","h"}）逐帧 OCR 试读。"""
     # 会话先全验一遍再起 OCR 通道，免得白加载一遍模型
     plans = []
     for session in sessions:
@@ -616,7 +652,14 @@ def _ocr_test_sync(name: str, sessions: list) -> dict:
             found = adapter.ocr_all(region, image=image)
             results.append({"session": session, "frame": frame["idx"],
                             "texts": [text for text, _point in found]})
-    return {"roi": {"name": name, **roi}, "results": results}
+    return {"roi": roi, "results": results}
+
+
+def _ocr_test_sync_stored(name: str, sessions: list) -> dict:
+    rois = _load_rois()
+    if name not in rois:
+        raise HTTPException(404, f"ROI「{name}」不存在。")
+    return _ocr_test_sync({"name": name, **rois[name]}, sessions)
 
 
 def create_template_lab_router() -> APIRouter:
@@ -757,11 +800,48 @@ def create_template_lab_router() -> APIRouter:
     @router.post("/ocr-test")
     async def ocr_test(request: Request):
         body = await _json_body(request)
-        name = _validate_name(body.get("name"), "ROI 名")
         sessions = body.get("sessions")
         if not isinstance(sessions, list) \
                 or not all(isinstance(s, str) for s in sessions):
             raise HTTPException(400, "sessions 必须是会话编号列表。")
-        return await asyncio.to_thread(_ocr_test_sync, name, sessions)
+        name, rect = body.get("name"), body.get("rect")
+        if name is not None and rect is not None:
+            raise HTTPException(400, "name 和 rect 只能给一个。")
+        if rect is not None:
+            # 直传模式：xywh 不查存储，roi 原样回 {name: null, x, y, w, h}
+            x, y, w, h = _validate_xywh(rect)
+            roi = {"name": None, "x": x, "y": y, "w": w, "h": h}
+            return await asyncio.to_thread(_ocr_test_sync, roi, sessions)
+        if name is None:
+            raise HTTPException(400, "必须给 name 或 rect 之一。")
+        stem = _validate_name(name, "ROI 名")
+        return await asyncio.to_thread(_ocr_test_sync_stored, stem, sessions)
+
+    @router.get("/code-rois")
+    async def list_code_rois():
+        return {"rois": roi_overrides.effective_rois()}
+
+    @router.post("/code-rois")
+    async def save_code_roi(request: Request):
+        body = await _json_body(request)
+        roi_id = body.get("id")
+        if not isinstance(roi_id, str) or roi_id not in _registry_ids():
+            raise HTTPException(404, f"代码 ROI「{roi_id}」不在注册表里。")
+        rect = _validate_xyxy(body.get("rect"))
+        try:
+            roi_overrides.save_override(roi_id, rect)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        roi = next(item for item in roi_overrides.effective_rois()
+                   if item["id"] == roi_id)
+        return {"ok": True, "roi": roi}
+
+    @router.delete("/code-rois/{roi_id}")
+    async def delete_code_roi(roi_id: str):
+        if roi_id not in _registry_ids():
+            raise HTTPException(404, f"代码 ROI「{roi_id}」不在注册表里。")
+        # 没覆盖也算成功：幂等恢复默认
+        roi_overrides.delete_override(roi_id)
+        return {"ok": True}
 
     return router
