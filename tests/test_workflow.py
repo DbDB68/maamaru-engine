@@ -10,7 +10,9 @@ logout_stream 参数覆盖。
 
 import json
 import tempfile
+import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -538,6 +540,148 @@ class LogoutOverrideTests(unittest.TestCase):
         self.assertFalse(any("force-stop" in cmd for cmd in cmds))
         self.assertTrue(any("taskkill" in cmd for cmd in cmds))
         self.assertFalse(any("游戏进程已杀" in m for m in messages))
+
+
+class WaitUntilNodeTests(unittest.TestCase):
+    """定时唤醒积木：时刻解析、下一刻计算（跨零点/刚错过宽限）、
+    心跳间隔压看门狗红线、话术不撞翻车词表。"""
+
+    def _ts(self, hhmm, day="2026-09-20"):
+        return datetime.strptime(f"{day} {hhmm}", "%Y-%m-%d %H:%M").timestamp()
+
+    def test_parse_hhmm(self):
+        self.assertEqual(workflow._parse_hhmm("04:05"), 245)
+        self.assertEqual(workflow._parse_hhmm("4:05"), 245)
+        self.assertEqual(workflow._parse_hhmm(" 04:05 "), 245)
+        self.assertEqual(workflow._parse_hhmm("00:00"), 0)
+        self.assertEqual(workflow._parse_hhmm("23:59"), 1439)
+        for bad in ("", None, "abc", "25:00", "12:60", "4:5", "04:05:00",
+                    "04:05x"):
+            self.assertIsNone(workflow._parse_hhmm(bad), bad)
+
+    def test_wait_seconds_today(self):
+        seconds, mode = workflow._wait_seconds(245, now=self._ts("02:34"))
+        self.assertEqual(mode, "today")
+        self.assertEqual(seconds, 91 * 60)
+
+    def test_wait_seconds_tomorrow(self):
+        # 04:05 已过 15 分钟宽限 → 睡明天同刻
+        seconds, mode = workflow._wait_seconds(245, now=self._ts("04:21"))
+        self.assertEqual(mode, "tomorrow")
+        self.assertEqual(seconds, (24 * 60 - 16) * 60)
+
+    def test_wait_seconds_just_passed_grace(self):
+        for hhmm in ("04:05", "04:10", "04:19"):
+            seconds, mode = workflow._wait_seconds(245, now=self._ts(hhmm))
+            self.assertEqual(mode, "just_passed", hhmm)
+            self.assertEqual(seconds, 0)
+
+    def test_wait_seconds_grace_boundary(self):
+        # 恰好过 15 分钟 = 宽限内；多 1 秒就睡到明天
+        _, mode = workflow._wait_seconds(245, now=self._ts("04:05") + 900)
+        self.assertEqual(mode, "just_passed")
+        _, mode = workflow._wait_seconds(245, now=self._ts("04:05") + 901)
+        self.assertEqual(mode, "tomorrow")
+
+    def test_node_registered_with_time_category(self):
+        self.assertIn("wait_until", workflow.NODE_REGISTRY)
+        self.assertEqual(workflow.NODE_REGISTRY["wait_until"]["category"], "time")
+        entry = next(n for n in workflow.node_catalog()
+                     if n["type"] == "wait_until")
+        self.assertEqual(entry["category"], "time")
+        self.assertEqual(entry["params"][0]["key"], "time")
+        node = workflow.normalize_nodes(
+            [{"type": "wait_until", "params": {"time": "04:05"}}])[0]
+        self.assertEqual(node["type"], "wait_until")
+
+    def test_invalid_time_fails_loud(self):
+        msgs = list(workflow._run_wait_until(None, {"time": "25:00"}, "cfg"))
+        self.assertEqual(len(msgs), 1)
+        # ✗ 开头即失败（workflow._run_node 的双保险），不许假绿
+        self.assertTrue(msgs[0].lstrip().startswith("✗"))
+
+    def test_just_passed_skips_sleep(self):
+        clock = _FakeClock(self._ts("04:10"))
+        with patch.object(workflow, "time", clock):
+            msgs = list(workflow._run_wait_until(None, {"time": "04:05"}, "cfg"))
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("不睡了", msgs[0])
+        self.assertEqual(clock.now, self._ts("04:10"))  # 一秒没睡
+
+    def test_sleeps_with_heartbeats_under_watchdog(self):
+        clock = _FakeClock(self._ts("02:30"))
+        with patch.object(workflow, "time", clock):
+            gen = workflow._run_wait_until(None, {"time": "04:05"}, "cfg")
+            stamps = []
+            for msg in gen:
+                stamps.append((clock.now, msg))
+        self.assertIn("闹钟定好了", stamps[0][1])
+        self.assertIn("04:05", stamps[0][1])
+        self.assertIn("到点", stamps[-1][1])
+        self.assertTrue(any("还在睡" in m for _, m in stamps))
+        # 相邻两条消息的墙钟间隔必须压在 300s 沉默看门狗红线内
+        gaps = [b[0] - a[0] for a, b in zip(stamps, stamps[1:])]
+        self.assertTrue(gaps)
+        self.assertTrue(all(0 < g <= 120.0 for g in gaps), gaps)
+        # 一路睡到 04:05（5 秒一片，最后一片可能不满）
+        self.assertGreaterEqual(clock.now, self._ts("04:05"))
+        self.assertLess(clock.now, self._ts("04:05") + 5.0)
+
+    def test_tomorrow_mode_announced(self):
+        clock = _FakeClock(self._ts("23:50"))
+        with patch.object(workflow, "time", clock):
+            msgs = list(workflow._run_wait_until(None, {"time": "04:05"}, "cfg"))
+        self.assertIn("明天 04:05", msgs[0])
+
+    def test_wording_stays_off_fail_list(self):
+        """闹钟的正常播报一个词都不许撞翻车词表（假红红线）。"""
+        for msg in (
+            "[闹钟] ⏰ 闹钟定好了：今天 04:05 起床（还要睡 1 小时 26 分钟），zzZ…",
+            "[闹钟] ⏰ 闹钟定好了：明天 04:05 起床（还要睡 4 小时 15 分钟），zzZ…",
+            "[闹钟] ⏰ 还在睡，04:05 起床（还有 40 分钟）…",
+            "[闹钟] ⏰ 04:05 到点，起床接着干活",
+            "[闹钟] ⏰ 04:05 刚过没几分钟，不睡了，直接接着干活",
+        ):
+            self.assertFalse(report_judge._is_fail(msg), msg)
+
+    def test_wait_node_in_workflow_run(self):
+        """拼进完整工作流：闹钟块全绿、后续积木照跑、成绩单落盘。"""
+        tmp = tempfile.TemporaryDirectory(prefix="workflow_wait_test_")
+        self.addCleanup(tmp.cleanup)
+        clock = _FakeClock(self._ts("03:58"))
+        agent = _FakeAgent()
+        with patch.object(workflow, "STATUS_DIR", Path(tmp.name)), \
+                patch.object(workflow, "time", clock), \
+                patch("touken.notify.notify_destination", return_value=None):
+            messages = list(workflow.run_workflow(
+                "fake-config.json",
+                [{"type": "wait_until", "params": {"time": "04:05"}},
+                 {"type": "signin", "params": {}, "on_error": "stop"}],
+                make_agent=lambda path: agent))
+        report = json.loads(
+            (Path(tmp.name) / "latest_report.json").read_text("utf-8"))
+        self.assertEqual(report["steps"], [
+            {"name": "定时唤醒", "status": "✓"},
+            {"name": "签到", "status": "✓"},
+        ])
+        self.assertTrue(report["all_green"])
+        self.assertIn(("signin_stream", (), {}), agent.calls)
+
+
+class _FakeClock:
+    """钉死墙钟的假 time 模块：sleep 直接拨快指针。"""
+
+    def __init__(self, start):
+        self.now = start
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    def strftime(self, *args, **kwargs):
+        return time.strftime(*args, **kwargs)
 
 
 if __name__ == "__main__":

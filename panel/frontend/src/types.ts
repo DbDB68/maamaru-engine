@@ -82,7 +82,7 @@ export interface WorkflowPreset {
   daily_mode?: boolean
 }
 
-export type WorkflowNodeCategory = 'cold' | 'chore' | 'battle' | 'finish'
+export type WorkflowNodeCategory = 'cold' | 'time' | 'chore' | 'battle' | 'finish'
 
 export interface WorkflowNodeDef {
   type: string

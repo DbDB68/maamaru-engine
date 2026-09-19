@@ -14,8 +14,8 @@ const emit = defineEmits<{ started: [identity: WorkflowIdentity]; saved: [preset
 // Keep the draft in the parent so switching pages does not discard edits.
 const draft = defineModel<WorkflowPreset | null>('draft', { default: null })
 const maxNodes = 30 // panel/workflow.py: MAX_NODES
-const categoryOrder: WorkflowNodeCategory[] = ['cold', 'chore', 'battle']
-const categoryLabels: Record<WorkflowNodeCategory, string> = { cold: '准备', chore: '后勤', battle: '出阵', finish: '收尾' }
+const categoryOrder: WorkflowNodeCategory[] = ['cold', 'time', 'chore', 'battle']
+const categoryLabels: Record<WorkflowNodeCategory, string> = { cold: '准备', time: '定时', chore: '后勤', battle: '出阵', finish: '收尾' }
 const presets = ref<WorkflowPreset[]>([])
 const defs = ref<WorkflowNodeDef[]>([])
 const expanded = ref<WorkflowNode | null>(null)

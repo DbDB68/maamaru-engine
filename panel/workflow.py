@@ -18,11 +18,13 @@
 import json
 import copy
 import os
+import re
 import shutil
 import queue
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from touken.flows.report_judge import (
@@ -81,7 +83,7 @@ def _stream_node(type_, label, desc, category, method, detail=None):
 
 def node_catalog() -> list[dict]:
     """节点目录（前端渲染积木选择器和参数表单用）。"""
-    order = {"cold": 0, "chore": 1, "battle": 2, "finish": 3}
+    order = {"cold": 0, "time": 1, "chore": 2, "battle": 3, "finish": 4}
     nodes = [{
         "type": d["type"], "label": d["label"], "desc": d.get("desc", ""),
         "category": d["category"], "params": d.get("params") or [],
@@ -158,6 +160,100 @@ _node("boot_emulator", "开模拟器",
 _node("login", "登录游戏",
       "开游戏、点登录、清扫登录弹窗到本丸，并过一遍更新门卫。后续积木的前置。",
       "cold", _run_login)
+
+
+# ── 定时 ──
+
+# 目标时刻刚过去这么久以内算「刚错过」：不睡了，直接接着干活
+# （防前置积木超时分把钟，结果一睡睡到明天同刻的事故）。
+_WAIT_JUST_PASSED_GRACE = 15 * 60
+
+# 子进程沉默看门狗 300s 无输出即强杀（script_runner.SILENCE_TIMEOUT_SEC），
+# 睡眠心跳必须显著更勤。
+_WAIT_HEARTBEAT_SEC = 120.0
+
+
+def _parse_hhmm(text) -> int | None:
+    """严格解析 HH:MM → 当天分钟数；非法返回 None。"""
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", str(text or "").strip())
+    if not m:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2))
+    if hour > 23 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _wait_seconds(target_min: int, now: float = None) -> tuple[float, str]:
+    """距下一个 target_min（当天分钟数）还要等多久。
+
+    返回 (秒数, mode)：
+    - today：今天还没到点；
+    - tomorrow：今天已过点，睡明天同一时刻；
+    - just_passed：刚错过（≤15 分钟），不用等。
+    """
+    now_dt = datetime.fromtimestamp(now if now is not None else time.time())
+    target = now_dt.replace(hour=target_min // 60, minute=target_min % 60,
+                            second=0, microsecond=0)
+    delta = (target - now_dt).total_seconds()
+    if delta > 0:
+        return delta, "today"
+    if delta >= -_WAIT_JUST_PASSED_GRACE:
+        return 0.0, "just_passed"
+    return (target + timedelta(days=1) - now_dt).total_seconds(), "tomorrow"
+
+
+def _fmt_sleep_duration(seconds: float) -> str:
+    minutes = max(1, int((seconds + 30) // 60))
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} 小时 {minutes} 分钟" if hours else f"{minutes} 分钟"
+
+
+def _run_wait_until(agent, params, config_path):
+    """定时唤醒：睡到指定墙钟时刻再往下走。
+
+    睡眠期间只按墙钟睡 + 周期心跳，全程不碰游戏画面——过日课刷新、
+    扫地、更新门卫是后面「登录游戏」积木的活。睡觉期间 runner 被
+    占用，远征时刻表调度会让路，醒来后恢复。
+    """
+    raw = str((params or {}).get("time") or "").strip()
+    target_min = _parse_hhmm(raw)
+    if target_min is None:
+        yield (f"✗ [闹钟] 「睡到几点」这时间我看不懂：「{raw or '（空）'}」"
+               "——要 24 小时制 HH:MM，比如 04:05")
+        return
+    label = f"{target_min // 60:02d}:{target_min % 60:02d}"
+    seconds, mode = _wait_seconds(target_min)
+    if mode == "just_passed":
+        yield f"[闹钟] ⏰ {label} 刚过没几分钟，不睡了，直接接着干活"
+        return
+    when = "今天" if mode == "today" else "明天"
+    # 截止时刻一次钉死，之后每片睡完都拿墙钟重算剩余——电脑中途休眠
+    # 醒来墙上时钟跳变也能睡够/及时醒，绝不按睡眠次数递减。
+    deadline = time.time() + seconds
+    yield (f"[闹钟] ⏰ 闹钟定好了：{when} {label} 起床"
+           f"（还要睡 {_fmt_sleep_duration(seconds)}），zzZ…")
+    last_beat = time.time()
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        now = time.time()
+        if now - last_beat >= _WAIT_HEARTBEAT_SEC:
+            last_beat = now
+            yield (f"[闹钟] ⏰ 还在睡，{label} 起床"
+                   f"（还有 {_fmt_sleep_duration(remaining)}）…")
+        time.sleep(min(5.0, remaining))
+    yield f"[闹钟] ⏰ {label} 到点，起床接着干活"
+
+
+_node("wait_until", "定时唤醒",
+      "睡到指定时刻再往下跑，适合跨日课刷新（如 04:00）排队；后面记得接「登录游戏」过刷新。",
+      "time", _run_wait_until, needs_agent=False,
+      params=[{"key": "time", "type": "text", "label": "睡到几点（24小时制）",
+               "default": "04:05",
+               "help": "HH:MM，比如 04:05。今天的点已经过了就睡到明天同一时刻；"
+                       "刚过不到 15 分钟算刚错过，直接醒不睡。"}])
 
 
 # ── 后勤 ──
