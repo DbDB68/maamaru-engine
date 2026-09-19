@@ -148,13 +148,16 @@ function applySession(session: TemplateLabSession) {
   selection.value = null
 }
 
-function loadHistory() {
-  const picked = sessions.value.find(s => s.id === historyPick.value)
-  if (!picked) return
+function loadHistory(id: string) {
+  const picked = sessions.value.find(s => s.id === id)
+  if (!picked || picked.id === currentSession.value) return
   applySession(picked)
   verifySessions.value = [picked.id]
   message.value = `已加载会话 ${fmtSession(picked)}（${picked.frames.length} 帧）`
 }
+// 不能用 @change 联动：PixelControl 里 $attrs 的 change 监听先于 v-model 回写触发，
+// 会拿到旧值（看着 A 会话、画布还是 B 会话的惨案）。watch 一定在赋值之后跑。
+watch(historyPick, (id) => { if (id) loadHistory(id) })
 
 function pickFrame(i: number) {
   if (i === currentIdx.value) return
@@ -398,7 +401,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="captureErrors.length" class="lab-warn">抓取有缺帧：{{ captureErrors.join('；') }}</p>
       <div class="lab-row">
-        <label>历史会话<PixelControl v-model="historyPick" as="select" @change="loadHistory">
+        <label>历史会话<PixelControl v-model="historyPick" as="select">
           <option value="" disabled>选一个会话重新加载</option>
           <option v-for="s in sessions" :key="s.id" :value="s.id">{{ fmtSession(s) }}（{{ s.frames.length }} 帧）</option>
         </PixelControl></label>
@@ -413,7 +416,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-if="frameMeta" class="lab-card">
-      <h3>框选 <small>第 {{ frameMeta.idx }} 帧 · {{ frameMeta.width }}×{{ frameMeta.height }}</small></h3>
+      <h3>框选 <small>会话 {{ fmtSessionId(currentSession) }} · 第 {{ frameMeta.idx }} 帧 · {{ frameMeta.width }}×{{ frameMeta.height }}</small></h3>
       <div class="lab-row">
         <div class="lab-zoom" role="group" aria-label="缩放">
           <button v-for="z in [1, 2, 4]" :key="z" type="button" :class="{ active: zoom === z }" @click="zoom = z">{{ z * 100 }}%</button>
