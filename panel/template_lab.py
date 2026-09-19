@@ -230,7 +230,32 @@ def _ensure_capture_available() -> None:
         raise HTTPException(503, "模板工坊仅开发版可用。")
 
 
-def _capture_sync(count: int, interval_ms: int) -> dict:
+def _sanitize_memo(memo) -> str:
+    """会话备注：去首尾空白、去掉换行和控制字符，最多 50 字。"""
+    if not isinstance(memo, str):
+        return ""
+    cleaned = "".join(ch for ch in memo if ch.isprintable()).strip()
+    return cleaned[:50]
+
+
+def _session_meta_path(session_dir: Path) -> Path:
+    return session_dir / "meta.json"
+
+
+def _read_session_memo(session_dir: Path):
+    try:
+        meta = json.loads(_session_meta_path(session_dir).read_text(encoding="utf-8"))
+        return meta.get("memo") or None
+    except Exception:
+        return None
+
+
+def _write_session_memo(session_dir: Path, memo: str) -> None:
+    _session_meta_path(session_dir).write_text(
+        json.dumps({"memo": memo}, ensure_ascii=False), encoding="utf-8")
+
+
+def _capture_sync(count: int, interval_ms: int, memo: str = "") -> dict:
     try:
         adapter = _create_adapter()
         if not adapter.init():
@@ -259,6 +284,8 @@ def _capture_sync(count: int, interval_ms: int) -> dict:
             errors.append(f"第 {idx + 1} 帧存盘失败：{exc}")
         if idx < count - 1:
             _sleep(interval_ms / 1000)
+    if memo:
+        _write_session_memo(session_dir, memo)
     return {"session": session_id, "frames": frames, "errors": errors}
 
 
@@ -389,8 +416,9 @@ def create_template_lab_router() -> APIRouter:
         count = _clamp_int(body.get("count"), 10, _COUNT_MIN, _COUNT_MAX, "连拍张数")
         interval_ms = _clamp_int(body.get("interval_ms"), 500,
                                  _INTERVAL_MIN, _INTERVAL_MAX, "间隔毫秒")
+        memo = _sanitize_memo(body.get("memo", ""))
         try:
-            return await asyncio.to_thread(_capture_sync, count, interval_ms)
+            return await asyncio.to_thread(_capture_sync, count, interval_ms, memo)
         except HTTPException:
             raise
         except Exception as exc:
@@ -403,9 +431,22 @@ def create_template_lab_router() -> APIRouter:
         if root.is_dir():
             for child in root.iterdir():
                 if child.is_dir() and _SESSION_ID_RE.fullmatch(child.name):
-                    sessions.append({"id": child.name, "frames": _scan_session(child)})
+                    sessions.append({"id": child.name,
+                                     "memo": _read_session_memo(child),
+                                     "frames": _scan_session(child)})
         sessions.sort(key=lambda item: item["id"], reverse=True)
         return {"sessions": sessions}
+
+    @router.post("/session-memo")
+    async def set_session_memo(request: Request):
+        body = await _json_body(request)
+        session = _validate_session_id(body.get("session"))
+        session_dir = _sessions_dir() / session
+        if not session_dir.is_dir():
+            raise HTTPException(404, f"会话 {session} 不存在。")
+        memo = _sanitize_memo(body.get("memo", ""))
+        _write_session_memo(session_dir, memo)
+        return {"ok": True, "session": session, "memo": memo or None}
 
     @router.get("/frame")
     async def get_frame(session: str, idx: int):

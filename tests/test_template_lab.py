@@ -150,6 +150,21 @@ class CaptureTests(TemplateLabTestBase):
         self.assertEqual(len(response.json()["frames"]), 50)
         self.assertEqual(adapter.shots, 50)
 
+    def test_capture_with_memo_writes_meta(self):
+        response, _adapter = self._capture([_noise()], memo="一花短刀正面\n")
+        self.assertEqual(response.status_code, 200, response.text)
+        session = response.json()["session"]
+        session_dir = template_lab._sessions_dir() / session
+        self.assertEqual(template_lab._read_session_memo(session_dir), "一花短刀正面")
+        listed = self.client.get("/api/template-lab/sessions").json()["sessions"]
+        self.assertEqual(listed[0]["memo"], "一花短刀正面")
+
+    def test_capture_without_memo_has_no_meta(self):
+        response, _adapter = self._capture([_noise()])
+        session = response.json()["session"]
+        session_dir = template_lab._sessions_dir() / session
+        self.assertIsNone(template_lab._read_session_memo(session_dir))
+
     def test_capture_bad_body_is_400(self):
         adapter = self._fake_adapter([_noise()])
         with patch.object(template_lab, "_create_adapter", return_value=adapter), \
@@ -187,6 +202,26 @@ class SessionAndTraversalTests(TemplateLabTestBase):
         response = self.client.get("/api/template-lab/frame",
                                    params={"session": "20250101-010203", "idx": 9})
         self.assertEqual(response.status_code, 404, response.text)
+
+    def test_session_memo_set_and_clear(self):
+        _put_session("20250101-010203", [_noise()])
+        response = self.client.post("/api/template-lab/session-memo", json={
+            "session": "20250101-010203", "memo": "二花短刀反面"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["memo"], "二花短刀反面")
+        listed = self.client.get("/api/template-lab/sessions").json()["sessions"]
+        self.assertEqual(listed[0]["memo"], "二花短刀反面")
+        # 留空清除
+        cleared = self.client.post("/api/template-lab/session-memo", json={
+            "session": "20250101-010203", "memo": "  "})
+        self.assertIsNone(cleared.json()["memo"])
+
+    def test_session_memo_missing_session_is_404_and_bad_id_400(self):
+        for body, expect in (
+                ({"session": "20990101-000000", "memo": "x"}, 404),
+                ({"session": "../..", "memo": "x"}, 400)):
+            response = self.client.post("/api/template-lab/session-memo", json=body)
+            self.assertEqual(response.status_code, expect, repr(body))
 
     def test_crop_rejects_traversal_session(self):
         _put_session("20250101-010203", [_noise()])

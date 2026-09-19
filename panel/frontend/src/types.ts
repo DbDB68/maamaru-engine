@@ -722,6 +722,7 @@ export interface TemplateLabCaptureResult {
 
 export interface TemplateLabSession {
   id: string
+  memo?: string | null
   frames: TemplateLabFrame[]
 }
 

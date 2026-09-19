@@ -173,11 +173,15 @@ export const api = {
   ackIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/ack`, { method: 'POST' }),
   resolveIncident: (code: string) => request<{ ok: boolean }>(`/api/incidents/${encodeURIComponent(code)}/resolve`, { method: 'POST' }),
   templateLabStatus: () => request<TemplateLabStatus>('/api/template-lab/status'),
-  templateLabCapture: (count: number, intervalMs: number) => request<TemplateLabCaptureResult>('/api/template-lab/capture', {
+  templateLabCapture: (count: number, intervalMs: number, memo = '') => request<TemplateLabCaptureResult>('/api/template-lab/capture', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ count, interval_ms: intervalMs }),
+    body: JSON.stringify({ count, interval_ms: intervalMs, memo }),
   }),
   templateLabSessions: () => request<{ sessions: TemplateLabSession[] }>('/api/template-lab/sessions'),
+  templateLabSessionMemo: (session: string, memo: string) => request<{ ok: boolean; memo: string | null }>('/api/template-lab/session-memo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session, memo }),
+  }),
   templateLabFrameUrl: (session: string, idx: number) => `/api/template-lab/frame?session=${encodeURIComponent(session)}&idx=${idx}`,
   templateLabDraftUrl: (name: string) => `/api/template-lab/draft?name=${encodeURIComponent(name)}`,
   templateLabCrop: (value: { session: string; frame: number; x: number; y: number; w: number; h: number; name: string }) => request<TemplateLabCropResult>('/api/template-lab/crop', {

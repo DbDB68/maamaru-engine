@@ -13,6 +13,7 @@ const errorMsg = ref('')
 // ---- 抓帧 ----
 const captureCount = ref(10)
 const captureInterval = ref(500)
+const captureMemo = ref('')
 const capturing = ref(false)
 const captureNote = ref('')
 const captureErrors = ref<string[]>([])
@@ -82,6 +83,27 @@ function loadFrameImage(session: string, idx: number): Promise<HTMLImageElement>
 }
 
 // ---- 数据加载 ----
+function fmtSessionTime(id: string) {
+  const m = id.match(/^\d{4}(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}$/)
+  return m ? `${m[1]}-${m[2]} ${m[3]}:${m[4]}` : id
+}
+function fmtSession(s: TemplateLabSession) {
+  const time = fmtSessionTime(s.id)
+  return s.memo ? `${time} · ${s.memo}` : time
+}
+function fmtSessionId(id: string) {
+  const s = sessions.value.find(x => x.id === id)
+  return s ? fmtSession(s) : fmtSessionTime(id)
+}
+async function editMemo(s: TemplateLabSession) {
+  const memo = window.prompt('给这组帧写个备注（如「一花短刀正面」「二花短刀反面」），留空清除', s.memo ?? '')
+  if (memo === null) return
+  try {
+    await api.templateLabSessionMemo(s.id, memo.trim())
+    await loadSessions()
+  } catch (e) { fail(e) }
+}
+
 async function loadSessions() {
   try {
     const data = await api.templateLabSessions()
@@ -105,10 +127,11 @@ async function capture() {
   captureErrors.value = []
   errorMsg.value = ''
   try {
-    const result = await api.templateLabCapture(count, interval)
+    const result = await api.templateLabCapture(count, interval, captureMemo.value.trim())
     captureErrors.value = result.errors
-    message.value = `抓到 ${result.frames.length} 帧（会话 ${result.session}）`
+    captureMemo.value = ''
     await loadSessions()
+    message.value = `抓到 ${result.frames.length} 帧（${fmtSessionId(result.session)}）`
     await applySession({ id: result.session, frames: result.frames })
     historyPick.value = result.session
     verifySessions.value = [result.session]
@@ -130,7 +153,7 @@ function loadHistory() {
   if (!picked) return
   applySession(picked)
   verifySessions.value = [picked.id]
-  message.value = `已加载会话 ${picked.id}（${picked.frames.length} 帧）`
+  message.value = `已加载会话 ${fmtSession(picked)}（${picked.frames.length} 帧）`
 }
 
 function pickFrame(i: number) {
@@ -369,6 +392,7 @@ onBeforeUnmount(() => {
       <div class="lab-row">
         <label>数量<PixelControl v-model="captureCount" type="number" numeric :min="1" :max="120" /></label>
         <label>间隔毫秒<PixelControl v-model="captureInterval" type="number" numeric :min="50" /></label>
+        <label>备注<PixelControl v-model="captureMemo" placeholder="如「一花短刀正面」，可留空" /></label>
         <button class="primary" :disabled="capturing" @click="capture">{{ capturing ? '抓取中……' : '抓一组原图' }}</button>
         <span v-if="captureNote" class="lab-note">{{ captureNote }}</span>
       </div>
@@ -376,7 +400,7 @@ onBeforeUnmount(() => {
       <div class="lab-row">
         <label>历史会话<PixelControl v-model="historyPick" as="select" @change="loadHistory">
           <option value="" disabled>选一个会话重新加载</option>
-          <option v-for="s in sessions" :key="s.id" :value="s.id">{{ s.id }}（{{ s.frames.length }} 帧）</option>
+          <option v-for="s in sessions" :key="s.id" :value="s.id">{{ fmtSession(s) }}（{{ s.frames.length }} 帧）</option>
         </PixelControl></label>
       </div>
       <div v-if="frames.length" class="lab-thumbs">
@@ -435,10 +459,13 @@ onBeforeUnmount(() => {
       </div>
       <fieldset class="lab-sessions">
         <legend>拿去验分的会话</legend>
-        <label v-for="s in sessions" :key="s.id" class="lab-check">
-          <input type="checkbox" :checked="verifySessions.includes(s.id)" @change="toggleVerifySession(s.id, ($event.target as HTMLInputElement).checked)" />
-          {{ s.id }}（{{ s.frames.length }} 帧）
-        </label>
+        <span v-for="s in sessions" :key="s.id" class="lab-check">
+          <label>
+            <input type="checkbox" :checked="verifySessions.includes(s.id)" @change="toggleVerifySession(s.id, ($event.target as HTMLInputElement).checked)" />
+            {{ fmtSession(s) }}（{{ s.frames.length }} 帧）
+          </label>
+          <button class="lab-memo-edit" title="改备注" @click="editMemo(s)">✎</button>
+        </span>
         <p v-if="!sessions.length" class="lab-hint">还没有会话。</p>
       </fieldset>
       <div v-if="verifyResult" class="lab-verify">
@@ -448,7 +475,7 @@ onBeforeUnmount(() => {
             <thead><tr><th>会话</th><th>帧</th><th>分数</th><th>位置</th><th>命中</th></tr></thead>
             <tbody>
               <tr v-for="(r, i) in verifyResult.results" :key="i">
-                <td>{{ r.session }}</td>
+                <td>{{ fmtSessionId(r.session) }}</td>
                 <td>#{{ r.frame }}</td>
                 <td :class="r.hit ? 'lab-score-hit' : 'lab-score-miss'">{{ r.score.toFixed(3) }}</td>
                 <td>({{ r.loc.x }}, {{ r.loc.y }})</td>
@@ -459,7 +486,7 @@ onBeforeUnmount(() => {
         </div>
         <ul v-if="verifyResult.confusion.length" class="lab-confusion">
           <li v-for="(c, i) in verifyResult.confusion" :key="i">
-            撞车：会话 {{ c.session }} 第 {{ c.frame }} 帧被「{{ c.other_draft }}」以 {{ c.other_score.toFixed(3) }} 分抢走（高出 {{ c.margin.toFixed(3) }}）
+            撞车：会话 {{ fmtSessionId(c.session) }} 第 {{ c.frame }} 帧被「{{ c.other_draft }}」以 {{ c.other_score.toFixed(3) }} 分抢走（高出 {{ c.margin.toFixed(3) }}）
           </li>
         </ul>
       </div>
@@ -489,6 +516,9 @@ onBeforeUnmount(() => {
 .lab-row label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 700; }
 .lab-row label :deep(.pixel-control) { width: 170px; }
 .lab-check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 400; }
+.lab-check label { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.lab-memo-edit { padding: 1px 6px; font-size: 11px; color: var(--ink-dim); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 4px; cursor: pointer; }
+.lab-memo-edit:hover { color: var(--fox-gold-deep); border-color: var(--fox-gold-deep); }
 .lab-zoom { display: flex; gap: 0; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; }
 .lab-zoom button { padding: 7px 12px; background: var(--paper); border: 0; border-right: 1px solid var(--line-strong); }
 .lab-zoom button:last-child { border-right: 0; }
