@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 模板工坊 —— 截图采样 → 裁草稿 → 验证匹配 → 采纳进正式资源目录
+         → ROI 存档 → 离线 OCR 试读
 
 开发版调试工具：给做模板的人一条不用手搓 ADB 截图的活路。
 会话帧/草稿只写用户数据目录 DEBUG_DIR/template_lab/，采纳时才落 RESOURCE_DIR/image/。
@@ -34,6 +35,8 @@ _SESSION_ID_RE = re.compile(r"\d{8}-\d{6}")
 _NAME_RE = re.compile(r"[A-Za-z0-9一-鿿._-]+")  # 一-鿿 即 \u4e00-\u9fff（基本汉字）
 _COUNT_MIN, _COUNT_MAX = 1, 50
 _INTERVAL_MIN, _INTERVAL_MAX = 100, 5000
+_FRAME_W, _FRAME_H = 1280, 720  # 游戏画面固定尺寸（MuMu 1280×720），ROI 不许越界
+_OCR_MAX_FRAMES = 100  # 一次 OCR 试读最多扫的帧总数，防手滑点成全库跑飞
 
 
 def _sessions_dir() -> Path:
@@ -42,6 +45,10 @@ def _sessions_dir() -> Path:
 
 def _drafts_dir() -> Path:
     return DEBUG_DIR / "template_lab" / "drafts"
+
+
+def _rois_file() -> Path:
+    return DEBUG_DIR / "template_lab" / "rois.json"
 
 
 def _adopt_backup_dir() -> Path:
@@ -144,6 +151,50 @@ def _threshold(value) -> float:
     if not 0.0 <= value <= 1.0:
         raise HTTPException(400, "threshold 必须在 0~1 之间。")
     return value
+
+
+def _load_rois() -> dict:
+    """ROI 存档：{name: {x, y, w, h, updated}}。缺文件/坏 JSON/字段烂都当空的，
+    下次保存会整体重写，顺带修掉写坏的条目。"""
+    try:
+        data = json.loads(_rois_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    rois = {}
+    for name, rect in data.items():
+        if not isinstance(name, str) or not isinstance(rect, dict):
+            continue
+        try:
+            rois[name] = {"x": int(rect["x"]), "y": int(rect["y"]),
+                          "w": int(rect["w"]), "h": int(rect["h"]),
+                          "updated": float(rect.get("updated") or 0.0)}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return rois
+
+
+def _save_rois(rois: dict) -> None:
+    path = _rois_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rois, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+
+
+def _validate_roi_rect(body: dict) -> tuple[int, int, int, int]:
+    """ROI 矩形：整数坐标、宽高至少 2、不许超出帧画面（1280×720）。"""
+    x = _rect_int(body.get("x"), "x")
+    y = _rect_int(body.get("y"), "y")
+    w = _rect_int(body.get("w"), "w")
+    h = _rect_int(body.get("h"), "h")
+    if x < 0 or y < 0:
+        raise HTTPException(400, "ROI 起点不能是负数。")
+    if w < 2 or h < 2:
+        raise HTTPException(400, "ROI 宽高至少为 2。")
+    if x + w > _FRAME_W or y + h > _FRAME_H:
+        raise HTTPException(400, f"ROI 超出画面（画面 {_FRAME_W}×{_FRAME_H}）。")
+    return x, y, w, h
 
 
 def _save_bgr_png(image, path: Path) -> None:
@@ -400,6 +451,174 @@ def _adb_ready() -> bool:
         return False
 
 
+def _synthetic_ocr_probe_image():
+    """白底黑字合成图，专门喂给离线绑定的试读：OCR 通道坏了不抛异常、
+    只会安静回空表，所以必须真读出字才算通道可用。"""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+    image = Image.new("RGB", (320, 80), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    font = None
+    for candidate in ("msyh.ttc", "arial.ttf"):  # 微软雅黑/Arial，Windows 面板必有
+        try:
+            font = ImageFont.truetype(candidate, 40)
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    draw.text((12, 18), "48/48", fill=(0, 0, 0), font=font)
+    return np.array(image)[:, :, ::-1].copy()
+
+
+def _try_bind_offline_ocr(adapter) -> bool:
+    """照 maa_adapter.init() 复刻资源加载 + Tasker 绑定，跳过 ADB 连接等待：
+    OCR 是本地推理、帧直接喂图，用不上 controller 的截图/点击。
+    MaaFW 的 Tasker 只认「controller 已连接」的 inited（实测绑未连接的
+    AdbController 返回 inited=False，post_recognition 直接拒），所以用
+    全桩 CustomController 顶包，connected 默认 True。"""
+    try:
+        import numpy as np  # noqa: F401  桩回调 screencap 的返回类型要用
+        from maa.controller import CustomController
+        from maa.resource import Resource
+        from maa.tasker import Tasker
+        from touken.maa_adapter import Region
+    except ImportError:
+        return False
+
+    class StubController(CustomController):
+        """全桩：OCR 喂图识别不碰这些回调，只为让 Tasker 的 inited 过检。"""
+
+        def connect(self):
+            return True
+
+        def request_uuid(self):
+            return "template-lab-offline-ocr"
+
+        def start_app(self, intent):
+            return False
+
+        def stop_app(self, intent):
+            return False
+
+        def screencap(self):
+            return np.zeros((0, 0, 3), dtype=np.uint8)
+
+        def click(self, x, y):
+            return False
+
+        def swipe(self, x1, y1, x2, y2, duration):
+            return False
+
+        def touch_down(self, contact, x, y, pressure):
+            return False
+
+        def touch_move(self, contact, x, y, pressure):
+            return False
+
+        def touch_up(self, contact):
+            return False
+
+        def click_key(self, keycode):
+            return False
+
+        def input_text(self, text):
+            return False
+
+        def key_down(self, keycode):
+            return False
+
+        def key_up(self, keycode):
+            return False
+
+        def scroll(self, dx, dy):
+            return False
+
+        def shell(self, cmd, timeout):
+            return None
+
+    try:
+        # 与 init() 同款：日志目录 + 资源包加载（这两步都是本地的，不碰 ADB）
+        log_dir = Path(adapter.project_root) / "debug"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        Tasker.set_log_dir(str(log_dir))
+        resource = Resource()
+        job = adapter._wait_job(resource.post_bundle(adapter.resource_dir),
+                                timeout=adapter.BUNDLE_TIMEOUT, label="资源加载")
+        if job is None or not job.succeeded:
+            return False
+        tasker = Tasker()
+        controller = StubController()
+        if not tasker.bind(resource, controller) or not tasker.inited:
+            return False
+
+        adapter.resource = resource
+        adapter.controller = controller
+        adapter.tasker = tasker
+        adapter._maa_timeouts = 0
+        probe = _synthetic_ocr_probe_image()
+        found = adapter.ocr_all(Region(0, 0, probe.shape[1], probe.shape[0]),
+                                image=probe)
+        if not found:
+            return False
+        # 试读过了才挂牌 initialized（init() 开头拿它当「已就绪」的短路标志），
+        # 没过的 adapter 原样还给 init() 走完整重连
+        adapter._initialized = True
+        return True
+    except Exception:
+        return False
+
+
+def _create_ocr_adapter():
+    """离线 OCR 通道：优先不连 ADB 只绑 tasker；不行再回落完整 init。
+    测试 patch 本函数注入假 OCR adapter。"""
+    adapter = _create_adapter()
+    if _try_bind_offline_ocr(adapter):
+        return adapter
+    if adapter.init():
+        return adapter
+    raise RuntimeError("离线绑定和完整 init 都没能起 OCR 通道。")
+
+
+def _ocr_test_sync(name: str, sessions: list) -> dict:
+    rois = _load_rois()
+    if name not in rois:
+        raise HTTPException(404, f"ROI「{name}」不存在。")
+    roi = dict(rois[name])
+
+    # 会话先全验一遍再起 OCR 通道，免得白加载一遍模型
+    plans = []
+    for session in sessions:
+        _validate_session_id(session)
+        session_dir = _sessions_dir() / session
+        if not session_dir.is_dir():
+            raise HTTPException(404, f"会话 {session} 不存在。")
+        plans.append((session, session_dir, _scan_session(session_dir)))
+
+    try:
+        adapter = _create_ocr_adapter()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"OCR 通道起不来：{exc}") from exc
+
+    from touken.maa_adapter import Region
+    region = Region(roi["x"], roi["y"], roi["w"], roi["h"])
+    results = []
+    scanned = 0
+    for session, session_dir, frames in plans:
+        # 帧总数钳到上限，超出的整段不扫（会话按传入顺序，帧按编号）
+        for frame in frames[:max(0, _OCR_MAX_FRAMES - scanned)]:
+            scanned += 1
+            image = _read_png(session_dir / frame["name"], color=True)
+            if image is None:
+                continue
+            found = adapter.ocr_all(region, image=image)
+            results.append({"session": session, "frame": frame["idx"],
+                            "texts": [text for text, _point in found]})
+    return {"roi": {"name": name, **roi}, "results": results}
+
+
 def create_template_lab_router() -> APIRouter:
     router = APIRouter(prefix="/api/template-lab")
 
@@ -507,5 +726,42 @@ def create_template_lab_router() -> APIRouter:
         stem = _validate_name(body.get("draft"), "草稿名")
         target = _validate_target(body.get("target"))
         return await asyncio.to_thread(_adopt_sync, stem, target)
+
+    @router.get("/rois")
+    async def list_rois():
+        rois = [{"name": name, **rect} for name, rect in _load_rois().items()]
+        rois.sort(key=lambda item: item["name"])
+        return {"rois": rois}
+
+    @router.post("/rois")
+    async def save_roi(request: Request):
+        body = await _json_body(request)
+        name = _validate_name(body.get("name"), "ROI 名")
+        x, y, w, h = _validate_roi_rect(body)
+        rois = _load_rois()
+        roi = {"x": x, "y": y, "w": w, "h": h, "updated": time.time()}
+        rois[name] = roi
+        _save_rois(rois)
+        return {"ok": True, "roi": {"name": name, **roi}}
+
+    @router.delete("/rois/{name}")
+    async def delete_roi(name: str):
+        stem = _validate_name(name, "ROI 名")
+        rois = _load_rois()
+        if stem not in rois:
+            raise HTTPException(404, f"ROI「{stem}」不存在。")
+        del rois[stem]
+        _save_rois(rois)
+        return {"ok": True}
+
+    @router.post("/ocr-test")
+    async def ocr_test(request: Request):
+        body = await _json_body(request)
+        name = _validate_name(body.get("name"), "ROI 名")
+        sessions = body.get("sessions")
+        if not isinstance(sessions, list) \
+                or not all(isinstance(s, str) for s in sessions):
+            raise HTTPException(400, "sessions 必须是会话编号列表。")
+        return await asyncio.to_thread(_ocr_test_sync, name, sessions)
 
     return router

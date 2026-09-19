@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCropResult, TemplateLabDraft, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 import type { FormationSwapEvent, HonmaruFormationProfile } from './types'
@@ -195,5 +195,14 @@ export const api = {
   templateLabAdopt: (draft: string, target: string) => request<TemplateLabAdoptResult>('/api/template-lab/adopt', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ draft, target }),
+  }),
+  templateLabRois: () => request<{ rois: TemplateLabRoi[] }>('/api/template-lab/rois'),
+  templateLabSaveRoi: (value: { name: string; x: number; y: number; w: number; h: number }) => request<{ ok: boolean; roi: TemplateLabRoi }>('/api/template-lab/rois', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  templateLabDeleteRoi: (name: string) => request<{ ok: boolean }>(`/api/template-lab/rois/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  templateLabOcrTest: (name: string, sessions: string[]) => request<TemplateLabOcrTestResult>('/api/template-lab/ocr-test', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, sessions }),
   }),
 }

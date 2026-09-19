@@ -26,6 +26,8 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _module_tmp.name}):
     from panel import template_lab
     from fastapi.testclient import TestClient
 
+from touken.maa_adapter import Point, Region  # noqa: E402  (假 OCR 的返回类型)
+
 
 def _noise(width=320, height=180, seed=42):
     """合成 BGR 噪声帧（固定种子，结果可复现）。"""
@@ -451,6 +453,164 @@ class AdoptTests(TemplateLabTestBase):
 
     def test_adopt_missing_draft_is_404(self):
         self._adopt(draft="不存在", expect=404)
+
+
+class RoiTests(TemplateLabTestBase):
+    def _save(self, name="生存栏", x=10, y=20, w=200, h=40, expect=200):
+        response = self.client.post("/api/template-lab/rois", json={
+            "name": name, "x": x, "y": y, "w": w, "h": h})
+        self.assertEqual(response.status_code, expect,
+                         f"{response.status_code} {response.text}")
+        return response.json() if expect == 200 else response
+
+    def test_save_then_list_roundtrip(self):
+        saved = self._save()
+        self.assertIs(saved["ok"], True)
+        roi = saved["roi"]
+        self.assertEqual({k: roi[k] for k in ("name", "x", "y", "w", "h")},
+                         {"name": "生存栏", "x": 10, "y": 20, "w": 200, "h": 40})
+        self.assertGreater(roi["updated"], 0)
+        # 存档确实落在 rois.json，列表能原样读回来
+        self.assertTrue(template_lab._rois_file().is_file())
+        listed = self.client.get("/api/template-lab/rois").json()["rois"]
+        self.assertEqual(listed, [roi])
+
+    def test_list_sorted_by_name(self):
+        self._save(name="刀装栏", x=0, y=0, w=10, h=10)
+        self._save(name="生存栏", x=0, y=0, w=10, h=10)
+        self._save(name="HP栏-2", x=0, y=0, w=10, h=10)
+        names = [r["name"] for r in self.client.get("/api/template-lab/rois").json()["rois"]]
+        self.assertEqual(names, sorted(names))
+
+    def test_same_name_overwrites_with_fresh_updated(self):
+        first = self._save(x=10, y=20, w=200, h=40)
+        second = self._save(x=1, y=2, w=50, h=60)
+        self.assertGreaterEqual(second["roi"]["updated"], first["roi"]["updated"])
+        listed = self.client.get("/api/template-lab/rois").json()["rois"]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual({k: listed[0][k] for k in ("x", "y", "w", "h")},
+                         {"x": 1, "y": 2, "w": 50, "h": 60})
+
+    def test_delete_roi(self):
+        self._save()
+        response = self.client.delete("/api/template-lab/rois/生存栏")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIs(response.json()["ok"], True)
+        self.assertEqual(self.client.get("/api/template-lab/rois").json()["rois"], [])
+        self.assertNotIn("生存栏", template_lab._load_rois())
+
+    def test_delete_missing_roi_is_404(self):
+        response = self.client.delete("/api/template-lab/rois/不存在")
+        self.assertEqual(response.status_code, 404, response.text)
+
+    def test_save_invalid_names_are_400(self):
+        for bad in ("../evil", "a/b", "a\\b", "", "..", ".", "x" * 81, 123):
+            self._save(name=bad, expect=400)
+        self.assertEqual(template_lab._load_rois(), {})
+
+    def test_save_bad_rects_are_400(self):
+        good = {"x": 10, "y": 20, "w": 100, "h": 40}
+        for patch_rect in ({"w": 1}, {"h": 0}, {"x": -1}, {"y": -5},
+                           {"x": 1270, "w": 11},          # 右缘 1281 > 1280
+                           {"y": 700, "h": 21},           # 下缘 721 > 720
+                           {"w": 1280, "h": 720},         # 从 (10,20) 起必然越界
+                           {"x": 0.5}, {"y": "20"}, {"w": True}, {"h": None}):
+            response = self.client.post("/api/template-lab/rois",
+                                        json={"name": "越界测试", **good, **patch_rect})
+            self.assertEqual(response.status_code, 400, repr(patch_rect))
+        self.assertEqual(template_lab._load_rois(), {})
+
+    def test_png_suffix_in_roi_name_is_stripped(self):
+        saved = self._save(name="生存栏.png")
+        self.assertEqual(saved["roi"]["name"], "生存栏")
+        listed = self.client.get("/api/template-lab/rois").json()["rois"]
+        self.assertEqual([r["name"] for r in listed], ["生存栏"])
+
+
+class OcrTestTests(TemplateLabTestBase):
+    def setUp(self):
+        super().setUp()
+        _put_session("20250101-010203", [_noise(seed=1), _noise(seed=2)])
+        _put_session("20250102-030405", [_noise(seed=3)])
+        self.client.post("/api/template-lab/rois", json={
+            "name": "生存栏", "x": 100, "y": 40, "w": 120, "h": 30})
+
+    def _fake_ocr_adapter(self):
+        class FakeAdapter:
+            def __init__(self):
+                self.calls = []
+
+            def ocr_all(self, roi, image=None):
+                self.calls.append((roi, image))
+                return [("生存 48/48", Point(160, 55))]
+
+        return FakeAdapter()
+
+    def _ocr_test(self, expect=200, sessions=None, name="生存栏"):
+        adapter = self._fake_ocr_adapter()
+        with patch.object(template_lab, "_create_ocr_adapter", return_value=adapter):
+            response = self.client.post("/api/template-lab/ocr-test", json={
+                "name": name,
+                "sessions": sessions if sessions is not None else ["20250101-010203"],
+            })
+        self.assertEqual(response.status_code, expect,
+                         f"{response.status_code} {response.text}")
+        return (response.json() if expect == 200 else response), adapter
+
+    def test_reads_every_frame_with_roi_echoed(self):
+        body, adapter = self._ocr_test(
+            sessions=["20250101-010203", "20250102-030405"])
+        self.assertEqual(body["roi"]["name"], "生存栏")
+        self.assertEqual({k: body["roi"][k] for k in ("x", "y", "w", "h")},
+                         {"x": 100, "y": 40, "w": 120, "h": 30})
+        by_key = {(r["session"], r["frame"]): r["texts"] for r in body["results"]}
+        self.assertEqual(by_key, {
+            ("20250101-010203", 0): ["生存 48/48"],
+            ("20250101-010203", 1): ["生存 48/48"],
+            ("20250102-030405", 0): ["生存 48/48"],
+        })
+        # 每帧都喂给 ocr_all，且 ROI 矩形原样传入
+        self.assertEqual(len(adapter.calls), 3)
+        roi, image = adapter.calls[0]
+        self.assertIsInstance(roi, Region)
+        self.assertEqual(roi.to_tuple(), (100, 40, 120, 30))
+        self.assertEqual(image.shape[:2], (180, 320))  # 合成帧默认 320×180
+
+    def test_frame_count_is_capped_at_100(self):
+        _put_session("20250103-050607", [_noise(width=32, height=18, seed=i)
+                                         for i in range(120)])
+        body, adapter = self._ocr_test(sessions=["20250103-050607"])
+        self.assertEqual(len(body["results"]), 100)
+        self.assertEqual(len(adapter.calls), 100)
+
+    def test_bad_session_is_400_and_missing_is_404(self):
+        self._ocr_test(sessions=["../.."], expect=400)
+        self._ocr_test(sessions=["20990101-000000"], expect=404)
+        self._ocr_test(sessions="20250101-010203", expect=400)
+        self._ocr_test(sessions=[123], expect=400)
+
+    def test_missing_roi_is_404_without_starting_ocr(self):
+        factory = unittest.mock.Mock(
+            side_effect=AssertionError("ROI 不存在就不该起 OCR 通道"))
+        with patch.object(template_lab, "_create_ocr_adapter", factory):
+            response = self.client.post("/api/template-lab/ocr-test", json={
+                "name": "不存在", "sessions": ["20250101-010203"]})
+        self.assertEqual(response.status_code, 404, response.text)
+        factory.assert_not_called()
+
+    def test_ocr_channel_failure_is_503(self):
+        with patch.object(template_lab, "_create_ocr_adapter",
+                          side_effect=RuntimeError("maa 炸了")):
+            response = self.client.post("/api/template-lab/ocr-test", json={
+                "name": "生存栏", "sessions": ["20250101-010203"]})
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn("OCR 通道起不来", response.text)
+
+    def test_unreadable_frame_is_skipped(self):
+        with patch.object(template_lab, "_read_png", return_value=None):
+            body, adapter = self._ocr_test()
+        self.assertEqual(body["results"], [])
+        self.assertEqual(adapter.calls, [])
 
 
 if __name__ == "__main__":

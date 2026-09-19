@@ -778,3 +778,23 @@ export interface TemplateLabAdoptResult {
   path: string
   backup: string | null
 }
+
+export interface TemplateLabRoi {
+  name: string
+  x: number
+  y: number
+  w: number
+  h: number
+  updated: number
+}
+
+export interface TemplateLabOcrRow {
+  session: string
+  frame: number
+  texts: string[]
+}
+
+export interface TemplateLabOcrTestResult {
+  roi: TemplateLabRoi
+  results: TemplateLabOcrRow[]
+}

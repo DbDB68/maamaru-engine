@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { TemplateLabDraft, TemplateLabFrame, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult } from '../types'
+import type { TemplateLabDraft, TemplateLabFrame, TemplateLabOcrTestResult, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult } from '../types'
 import PixelControl from './PixelControl.vue'
+import SegmentedControl from './SegmentedControl.vue'
 
 interface SelRect { x: number; y: number; w: number; h: number }
+type LabMode = 'crop' | 'roi'
 
 const status = ref<TemplateLabStatus | null>(null)
 const message = ref('')
@@ -45,6 +47,7 @@ const selText = computed(() => {
 })
 
 // ---- 导出与验分 ----
+const labMode = ref<LabMode>('crop')
 const draftName = ref('')
 const drafts = ref<TemplateLabDraft[]>([])
 const draftPick = ref('')
@@ -56,6 +59,19 @@ const adoptTarget = ref('')
 const adoptBusy = ref(false)
 const adoptPath = ref('')
 const cropBusy = ref(false)
+
+// ---- ROI / OCR 试读 ----
+const rois = ref<TemplateLabRoi[]>([])
+const roiName = ref('')
+const roiPick = ref('')
+const roiSaveBusy = ref(false)
+const roiDeleteBusy = ref(false)
+const ocrBusy = ref(false)
+const ocrResult = ref<TemplateLabOcrTestResult | null>(null)
+const selValid = computed(() => {
+  const sel = selection.value
+  return !!sel && sel.w > 0 && sel.h > 0
+})
 
 function fail(e: unknown) {
   errorMsg.value = e instanceof Error && e.message ? e.message : '操作失败，请检查后端连接'
@@ -116,6 +132,14 @@ async function loadDrafts() {
     const data = await api.templateLabDrafts()
     drafts.value = data.drafts
     if (draftPick.value && !data.drafts.some(d => d.name === draftPick.value)) draftPick.value = ''
+  } catch (e) { fail(e) }
+}
+
+async function loadRois() {
+  try {
+    const data = await api.templateLabRois()
+    rois.value = data.rois
+    if (roiPick.value && !data.rois.some(r => r.name === roiPick.value)) roiPick.value = ''
   } catch (e) { fail(e) }
 }
 
@@ -360,12 +384,61 @@ async function adopt() {
   } catch (e) { fail(e) } finally { adoptBusy.value = false }
 }
 
+// ---- ROI 保存 / 删除 / 试读 ----
+async function saveRoi() {
+  const name = roiName.value.trim()
+  const sel = selection.value
+  if (!name) { errorMsg.value = '先给 ROI 起个名字'; return }
+  if (!sel || sel.w < 1 || sel.h < 1) { errorMsg.value = '先在图上框一块区域'; return }
+  roiSaveBusy.value = true
+  errorMsg.value = ''
+  try {
+    const result = await api.templateLabSaveRoi({ name, x: sel.x, y: sel.y, w: sel.w, h: sel.h })
+    message.value = `ROI「${result.roi.name}」已保存（${result.roi.w}×${result.roi.h}）`
+    roiPick.value = result.roi.name
+    await loadRois()
+  } catch (e) { fail(e) } finally { roiSaveBusy.value = false }
+}
+
+async function deleteRoi() {
+  const name = roiPick.value
+  if (!name) return
+  if (!window.confirm(`确认删除 ROI「${name}」？`)) return
+  roiDeleteBusy.value = true
+  errorMsg.value = ''
+  try {
+    await api.templateLabDeleteRoi(name)
+    message.value = `ROI「${name}」已删除`
+    roiPick.value = ''
+    await loadRois()
+  } catch (e) { fail(e) } finally { roiDeleteBusy.value = false }
+}
+
+async function runOcr() {
+  const name = roiPick.value
+  if (!name) { errorMsg.value = '先选一个 ROI'; return }
+  if (!verifySessions.value.length) { errorMsg.value = '至少勾一个会话'; return }
+  ocrBusy.value = true
+  errorMsg.value = ''
+  try {
+    ocrResult.value = await api.templateLabOcrTest(name, verifySessions.value)
+  } catch (e) { fail(e) } finally { ocrBusy.value = false }
+}
+
+// 选中已存 ROI 时把矩形画回画布（设置 selection 即触发 watch 重绘）
+watch(roiPick, (name) => {
+  if (!name) return
+  const roi = rois.value.find(r => r.name === name)
+  if (!roi) return
+  selection.value = clampSel({ x: roi.x, y: roi.y, w: roi.w, h: roi.h })
+})
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
   try {
     status.value = await api.templateLabStatus()
   } catch { /* 后端没上线时状态条留空 */ }
-  await Promise.all([loadSessions(), loadDrafts()])
+  await Promise.all([loadSessions(), loadDrafts(), loadRois()])
   if (sessions.value.length) {
     historyPick.value = sessions.value[0].id
     applySession(sessions.value[0])
@@ -445,59 +518,113 @@ onBeforeUnmount(() => {
 
     <section class="lab-card">
       <h3>导出与验分</h3>
-      <div class="lab-row">
-        <label>模板名<PixelControl v-model="draftName" placeholder="例如 battle_result_victory" /></label>
-        <button class="primary" :disabled="cropBusy" @click="saveDraft">{{ cropBusy ? '保存中……' : '保存草稿' }}</button>
-      </div>
-      <div class="lab-row">
-        <label>草稿<PixelControl v-model="draftPick" as="select">
-          <option value="" disabled>选草稿</option>
-          <option v-for="d in drafts" :key="d.name" :value="d.name">{{ d.name }}（{{ d.width }}×{{ d.height }}）</option>
-        </PixelControl></label>
-        <img v-if="draftPick" class="lab-draft-preview" :src="api.templateLabDraftUrl(draftPick)" :alt="draftPick" />
-      </div>
-      <div class="lab-row">
-        <label>阈值<PixelControl v-model="threshold" type="number" numeric :min="0" :max="1" :step="0.05" /></label>
-        <button class="primary" :disabled="verifying" @click="runVerify">{{ verifying ? '验分中……' : '批量验分' }}</button>
-      </div>
-      <fieldset class="lab-sessions">
-        <legend>拿去验分的会话</legend>
-        <span v-for="s in sessions" :key="s.id" class="lab-check">
-          <label>
-            <input type="checkbox" :checked="verifySessions.includes(s.id)" @change="toggleVerifySession(s.id, ($event.target as HTMLInputElement).checked)" />
-            {{ fmtSession(s) }}（{{ s.frames.length }} 帧）
-          </label>
-          <button class="lab-memo-edit" title="改备注" @click="editMemo(s)">✎</button>
-        </span>
-        <p v-if="!sessions.length" class="lab-hint">还没有会话。</p>
-      </fieldset>
-      <div v-if="verifyResult" class="lab-verify">
-        <p class="lab-hint">「{{ verifyResult.draft }}」在阈值 {{ verifyResult.threshold }} 下：{{ verifyResult.results.filter(r => r.hit).length }}/{{ verifyResult.results.length }} 帧命中</p>
-        <div v-if="verifyResult.results.length" class="lab-table-scroll">
+      <SegmentedControl
+        v-model="labMode"
+        label="工坊模式"
+        :items="[{ value: 'crop', label: '裁剪模板', caption: '框选裁图、验分、采用' }, { value: 'roi', label: '标记 ROI', caption: '圈识别区、OCR 试读' }]"
+      />
+      <template v-if="labMode === 'crop'">
+        <div class="lab-row">
+          <label>模板名<PixelControl v-model="draftName" placeholder="例如 battle_result_victory" /></label>
+          <button class="primary" :disabled="cropBusy" @click="saveDraft">{{ cropBusy ? '保存中……' : '保存草稿' }}</button>
+        </div>
+        <div class="lab-row">
+          <label>草稿<PixelControl v-model="draftPick" as="select">
+            <option value="" disabled>选草稿</option>
+            <option v-for="d in drafts" :key="d.name" :value="d.name">{{ d.name }}（{{ d.width }}×{{ d.height }}）</option>
+          </PixelControl></label>
+          <img v-if="draftPick" class="lab-draft-preview" :src="api.templateLabDraftUrl(draftPick)" :alt="draftPick" />
+        </div>
+        <div class="lab-row">
+          <label>阈值<PixelControl v-model="threshold" type="number" numeric :min="0" :max="1" :step="0.05" /></label>
+          <button class="primary" :disabled="verifying" @click="runVerify">{{ verifying ? '验分中……' : '批量验分' }}</button>
+        </div>
+        <fieldset class="lab-sessions">
+          <legend>拿去验分的会话</legend>
+          <span v-for="s in sessions" :key="s.id" class="lab-check">
+            <label>
+              <input type="checkbox" :checked="verifySessions.includes(s.id)" @change="toggleVerifySession(s.id, ($event.target as HTMLInputElement).checked)" />
+              {{ fmtSession(s) }}（{{ s.frames.length }} 帧）
+            </label>
+            <button class="lab-memo-edit" title="改备注" @click="editMemo(s)">✎</button>
+          </span>
+          <p v-if="!sessions.length" class="lab-hint">还没有会话。</p>
+        </fieldset>
+        <div v-if="verifyResult" class="lab-verify">
+          <p class="lab-hint">「{{ verifyResult.draft }}」在阈值 {{ verifyResult.threshold }} 下：{{ verifyResult.results.filter(r => r.hit).length }}/{{ verifyResult.results.length }} 帧命中</p>
+          <div v-if="verifyResult.results.length" class="lab-table-scroll">
+            <table class="lab-table">
+              <thead><tr><th>会话</th><th>帧</th><th>分数</th><th>位置</th><th>命中</th></tr></thead>
+              <tbody>
+                <tr v-for="(r, i) in verifyResult.results" :key="i">
+                  <td>{{ fmtSessionId(r.session) }}</td>
+                  <td>#{{ r.frame }}</td>
+                  <td :class="r.hit ? 'lab-score-hit' : 'lab-score-miss'">{{ r.score.toFixed(3) }}</td>
+                  <td>({{ r.loc.x }}, {{ r.loc.y }})</td>
+                  <td>{{ r.hit ? '✓' : '✗' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <ul v-if="verifyResult.confusion.length" class="lab-confusion">
+            <li v-for="(c, i) in verifyResult.confusion" :key="i">
+              撞车：会话 {{ fmtSessionId(c.session) }} 第 {{ c.frame }} 帧被「{{ c.other_draft }}」以 {{ c.other_score.toFixed(3) }} 分抢走（高出 {{ c.margin.toFixed(3) }}）
+            </li>
+          </ul>
+        </div>
+        <div class="lab-row">
+          <label>目标文件名<PixelControl v-model="adoptTarget" placeholder="如 刀种/一花短刀（可带一级子目录）" /></label>
+          <button class="primary" :disabled="adoptBusy" @click="adopt">{{ adoptBusy ? '采用中……' : '采用为正式模板' }}</button>
+        </div>
+        <p v-if="adoptPath" class="lab-ok">{{ adoptPath }}</p>
+      </template>
+      <template v-else>
+        <div class="lab-row">
+          <label>ROI 名字<PixelControl v-model="roiName" placeholder="例如 battle_title" /></label>
+          <button class="primary" :disabled="roiSaveBusy || !selValid" @click="saveRoi">{{ roiSaveBusy ? '保存中……' : '保存 ROI' }}</button>
+          <span v-if="!selValid" class="lab-hint">先在图上框一块区域</span>
+        </div>
+        <div class="lab-row">
+          <label>已存 ROI<PixelControl v-model="roiPick" as="select">
+            <option value="" disabled>选 ROI，矩形会画回图上</option>
+            <option v-for="r in rois" :key="r.name" :value="r.name">{{ r.name }}（{{ r.w }}×{{ r.h }}）</option>
+          </PixelControl></label>
+          <button :disabled="!roiPick || roiDeleteBusy" @click="deleteRoi">{{ roiDeleteBusy ? '删除中……' : '删除' }}</button>
+          <p v-if="!rois.length" class="lab-hint">还没有存过 ROI。</p>
+        </div>
+        <fieldset class="lab-sessions">
+          <legend>拿去试读的会话</legend>
+          <span v-for="s in sessions" :key="s.id" class="lab-check">
+            <label>
+              <input type="checkbox" :checked="verifySessions.includes(s.id)" @change="toggleVerifySession(s.id, ($event.target as HTMLInputElement).checked)" />
+              {{ fmtSession(s) }}（{{ s.frames.length }} 帧）
+            </label>
+            <button class="lab-memo-edit" title="改备注" @click="editMemo(s)">✎</button>
+          </span>
+          <p v-if="!sessions.length" class="lab-hint">还没有会话。</p>
+        </fieldset>
+        <div class="lab-row">
+          <button class="primary" :disabled="ocrBusy || !roiPick || !verifySessions.length" @click="runOcr">{{ ocrBusy ? '试读中……' : '批量试读' }}</button>
+          <span v-if="!roiPick" class="lab-hint">先选一个 ROI</span>
+          <span v-else-if="!verifySessions.length" class="lab-hint">至少勾一个会话</span>
+        </div>
+        <div v-if="ocrResult" class="lab-table-scroll">
+          <p class="lab-hint">「{{ ocrResult.roi.name }}」（{{ ocrResult.roi.w }}×{{ ocrResult.roi.h }}）试读结果：</p>
           <table class="lab-table">
-            <thead><tr><th>会话</th><th>帧</th><th>分数</th><th>位置</th><th>命中</th></tr></thead>
+            <thead><tr><th>会话</th><th>帧</th><th>读到的文字</th></tr></thead>
             <tbody>
-              <tr v-for="(r, i) in verifyResult.results" :key="i">
+              <tr v-for="(r, i) in ocrResult.results" :key="i">
                 <td>{{ fmtSessionId(r.session) }}</td>
                 <td>#{{ r.frame }}</td>
-                <td :class="r.hit ? 'lab-score-hit' : 'lab-score-miss'">{{ r.score.toFixed(3) }}</td>
-                <td>({{ r.loc.x }}, {{ r.loc.y }})</td>
-                <td>{{ r.hit ? '✓' : '✗' }}</td>
+                <td>
+                  <span v-if="r.texts.length">{{ r.texts.join('、') }}</span>
+                  <span v-else class="lab-ocr-empty">（没读到字）</span>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <ul v-if="verifyResult.confusion.length" class="lab-confusion">
-          <li v-for="(c, i) in verifyResult.confusion" :key="i">
-            撞车：会话 {{ fmtSessionId(c.session) }} 第 {{ c.frame }} 帧被「{{ c.other_draft }}」以 {{ c.other_score.toFixed(3) }} 分抢走（高出 {{ c.margin.toFixed(3) }}）
-          </li>
-        </ul>
-      </div>
-      <div class="lab-row">
-        <label>目标文件名<PixelControl v-model="adoptTarget" placeholder="如 刀种/一花短刀（可带一级子目录）" /></label>
-        <button class="primary" :disabled="adoptBusy" @click="adopt">{{ adoptBusy ? '采用中……' : '采用为正式模板' }}</button>
-      </div>
-      <p v-if="adoptPath" class="lab-ok">{{ adoptPath }}</p>
+      </template>
     </section>
 
     <p v-if="message" class="inline-message">{{ message }}</p>
@@ -545,6 +672,7 @@ onBeforeUnmount(() => {
 .lab-table th { color: var(--ink-dim); font-weight: 700; }
 .lab-score-hit { color: #426047; font-weight: 700; }
 .lab-score-miss { color: #9f3d28; }
+.lab-ocr-empty { color: var(--ink-dim); }
 .lab-confusion { margin: 0; padding: 9px 12px 9px 26px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 8px; font-size: 12px; }
 .lab-verify { display: grid; gap: 8px; }
 
