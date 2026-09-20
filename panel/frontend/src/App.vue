@@ -81,6 +81,7 @@ const configStageCollapsed = ref(false)
 const reportStageCollapsed = ref(false)
 const systemStageCollapsed = ref(false)
 const workflowStageCollapsed = ref(false)
+const systemMounted = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
@@ -498,6 +499,7 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
 watch(tab, value => {
   if (value !== 'tasks') configStageCollapsed.value = false
   if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
+  if (value === 'system') systemMounted.value = true
   if (value !== 'system') systemStageCollapsed.value = false
   if (value !== 'workflow') workflowStageCollapsed.value = false
 })
@@ -684,8 +686,9 @@ watch(tab, value => {
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page"><SwordArchivePanel /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onSystemScroll"><SystemPanel @scroll="onSystemScroll" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
+    <!-- 开发工具里的框选、命名等是未保存草稿；切去看日志时保留组件，回来继续。 -->
+    <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onSystemScroll"><SystemPanel @scroll="onSystemScroll" /></MaamaruFrame>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
     <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" :busy="startingWorkflow" :running-workflow="runningWorkflow" @started="workflowStarted" @saved="workflowSaved" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
