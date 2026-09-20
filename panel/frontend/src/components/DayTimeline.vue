@@ -152,6 +152,38 @@ const runBlocks = computed(() => {
   })
 })
 
+const suggestionBlocks = computed(() => {
+  const suggestions = data.value?.suggestions
+  if (!suggestions) return []
+  return suggestions.map((s, i) => {
+    const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
+    const detail = `挂 ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
+    return {
+      key: `suggest-${i}`,
+      minute: s.start_min,
+      left: pct(s.start_min),
+      width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
+      cls: 'is-suggest',
+      title: `建议 ${range} ${detail}`,
+      text: '建议',
+      rowTitle: '挂机建议',
+      rowDetail: `${range} ${detail}`,
+      time: fmtMin(s.start_min),
+      tone: 'is-suggest',
+      current: false,
+      durationMin: s.duration_min,
+    }
+  })
+})
+
+const shortfallText = computed(() => {
+  const shortfall = data.value?.shortfall_seconds
+  if (!shortfall || shortfall <= 0) return ''
+  const covered = suggestionBlocks.value.reduce((sum, b) => sum + b.durationMin, 0)
+  const lacking = Math.ceil(shortfall / 60)
+  return `今天空窗只够约 ${durationText(covered)}，还差约 ${durationText(lacking)} 排不下。`
+})
+
 const compactRows = computed(() => {
   const expeditions = expeditionBlocks.value.map((b) => ({
     key: `exp-${b.key}`,
@@ -173,7 +205,17 @@ const compactRows = computed(() => {
     current: b.current,
     enabled: true,
   }))
-  const rows = [...expeditions, ...runs]
+  const suggestions = suggestionBlocks.value.map((b) => ({
+    key: b.key,
+    minute: b.minute,
+    time: b.time,
+    title: b.rowTitle,
+    detail: b.rowDetail,
+    tone: b.tone,
+    current: false,
+    enabled: true,
+  }))
+  const rows = [...expeditions, ...runs, ...suggestions]
   const current = rows.filter((row) => row.current)
   const futureEnabled = rows
     .filter((row) => !row.current && row.minute >= nowMin.value && row.enabled)
@@ -244,11 +286,16 @@ const caption = computed(() => {
             <div v-for="b in runBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
             <span v-if="!runBlocks.length" class="tl-lane-empty">今天还没有任务记录</span>
           </div>
+          <div v-if="data.suggestions" class="tl-lane">
+            <span class="tl-lane-tag">建议</span>
+            <div v-for="b in suggestionBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
+            <span v-if="!suggestionBlocks.length" class="tl-lane-empty">今天排不出合适的挂机空窗</span>
+          </div>
         </div>
       </div>
       <div class="tl-compact">
         <div class="tl-mini-meta">
-          <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务</span>
+          <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务<template v-if="suggestionBlocks.length"> <i class="is-suggest"></i>建议</template></span>
           <span>04:00 日课刷新</span>
         </div>
         <div class="tl-mini-axis" aria-label="今天二十四小时概览">
@@ -257,6 +304,7 @@ const caption = computed(() => {
           <span class="tl-mini-now" :style="{ left: pct(nowMin) + '%' }" title="现在"></span>
           <span v-for="b in expeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in suggestionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
         </div>
         <div class="tl-mini-ticks">
           <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`">{{ t === DAY ? '24' : t / 60 }}</span>
@@ -273,6 +321,7 @@ const caption = computed(() => {
         <p v-else class="empty">今天的时间表还空着</p>
       </div>
       <p v-if="data.hint" class="tl-hint">{{ data.hint }}</p>
+      <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
     </template>
     <p v-else class="empty">时间表加载中…</p>
   </PaperCard>

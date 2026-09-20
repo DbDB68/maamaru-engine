@@ -204,8 +204,9 @@ class DayTimelineMiscTests(unittest.TestCase):
     def test_hint_none_when_advisor_blows_up(self):
         with patch("touken.advisor.load_event_cards",
                    side_effect=RuntimeError("boom")):
-            hint = dtl._hanafuda_hint(_today_at(12, 0), self.store)
-        self.assertIsNone(hint)
+            plan = dtl._hanafuda_active_plan(_today_at(12, 0), self.store)
+        self.assertIsNone(plan)
+        self.assertIsNone(dtl._hanafuda_hint(plan))
 
     def test_hint_text_when_hanafuda_active(self):
         fake_plan = {"estimated_seconds": 5400, "seconds_to_end": 99999,
@@ -213,9 +214,9 @@ class DayTimelineMiscTests(unittest.TestCase):
         with patch("touken.advisor.load_event_cards",
                    return_value={"秘宝之里": {"mechanics": "hanafuda"}}), \
              patch("touken.advisor.hanafuda_plan", return_value=fake_plan):
-            hint = dtl._hanafuda_hint(_today_at(12, 0), self.store)
-        self.assertIsNotNone(hint)
-        self.assertIn("秘宝之里", hint)
+            plan = dtl._hanafuda_active_plan(_today_at(12, 0), self.store)
+        self.assertEqual(plan, fake_plan)
+        self.assertIn("秘宝之里", dtl._hanafuda_hint(plan))
 
     def test_hint_none_when_event_over(self):
         fake_plan = {"estimated_seconds": 5400, "seconds_to_end": 0,
@@ -223,8 +224,138 @@ class DayTimelineMiscTests(unittest.TestCase):
         with patch("touken.advisor.load_event_cards",
                    return_value={"秘宝之里": {"mechanics": "hanafuda"}}), \
              patch("touken.advisor.hanafuda_plan", return_value=fake_plan):
-            hint = dtl._hanafuda_hint(_today_at(12, 0), self.store)
-        self.assertIsNone(hint)
+            plan = dtl._hanafuda_active_plan(_today_at(12, 0), self.store)
+        self.assertIsNone(plan)
+
+
+class DayTimelineSuggestWindowsTests(unittest.TestCase):
+    """suggest_windows 纯函数：占用段手工注入。"""
+
+    def test_fills_earliest_free_window(self):
+        blocks, shortfall = dtl.suggest_windows(480, [], 3600)
+        self.assertEqual(shortfall, 0)
+        self.assertEqual(blocks, [{"start_min": 480, "duration_min": 60,
+                                   "note": ""}])
+
+    def test_avoids_action_window_and_splits(self):
+        occupied = [{"start_min": 540, "end_min": 547,
+                     "label": "10:00 部队二派遣"}]
+        blocks, shortfall = dtl.suggest_windows(480, occupied, 90 * 60)
+        self.assertEqual(shortfall, 0)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual((blocks[0]["start_min"], blocks[0]["duration_min"]),
+                         (480, 60))
+        self.assertIn("部队二派遣", blocks[0]["note"])
+        self.assertEqual((blocks[1]["start_min"], blocks[1]["duration_min"]),
+                         (547, 30))
+
+    def test_fragment_shorter_than_30min_skipped(self):
+        occupied = [{"start_min": 480, "end_min": 605, "label": "a"},
+                    {"start_min": 630, "end_min": 1440, "label": "b"}]
+        blocks, shortfall = dtl.suggest_windows(480, occupied, 3600)
+        self.assertEqual(blocks, [])
+        self.assertEqual(shortfall, 3600)
+
+    def test_max_two_blocks_then_shortfall(self):
+        occupied = [{"start_min": 60, "end_min": 120, "label": "a"},
+                    {"start_min": 300, "end_min": 360, "label": "b"}]
+        blocks, shortfall = dtl.suggest_windows(0, occupied, 10 * 3600)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual((blocks[0]["start_min"], blocks[0]["duration_min"]), (0, 60))
+        self.assertEqual((blocks[1]["start_min"], blocks[1]["duration_min"]), (120, 180))
+        self.assertGreater(shortfall, 0)
+
+    def test_shortfall_honest_when_no_room(self):
+        blocks, shortfall = dtl.suggest_windows(23 * 60, [], 2 * 3600)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(shortfall, 3600)
+
+    def test_zero_needed_no_blocks(self):
+        blocks, shortfall = dtl.suggest_windows(480, [], 0)
+        self.assertEqual(blocks, [])
+        self.assertEqual(shortfall, 0)
+
+
+class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
+    """build_day_timeline 的建议层：占用段组装 + 每日配额口径。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TelemetryStore(Path(self.tmp.name) / "t.db")
+        patcher = patch.object(scheduler, "map_options", lambda: _FAKE_MAPS)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _plan(estimated, seconds_to_end):
+        return {"estimated_seconds": estimated,
+                "seconds_to_end": seconds_to_end,
+                "tama_remaining": 300}
+
+    def _build(self, now, cfg, plan, team_no=None):
+        with patch.object(dtl, "_hanafuda_active_plan", return_value=plan):
+            return dtl.build_day_timeline(now, cfg=cfg, store=self.store,
+                                          script_labels={},
+                                          hanafuda_team_no=team_no)
+
+    def test_daily_quota_spread_over_days_left(self):
+        """口径：estimated_seconds 按剩余天数平摊（和活动卡前端一致）。"""
+        plan = self._plan(7200, 2 * 86400)  # 摊 2 天 → 今天 1 小时
+        out = self._build(_today_at(8, 0), _cfg([]), plan)
+        self.assertEqual(out["shortfall_seconds"], 0)
+        self.assertEqual(out["suggestions"],
+                         [{"start_min": 480, "duration_min": 60, "note": ""}])
+
+    def test_quota_capped_by_estimated_seconds(self):
+        plan = self._plan(7200, 12 * 3600)  # 只剩半天 → 平摊超标，卡回 7200
+        out = self._build(_today_at(8, 0), _cfg([]), plan)
+        self.assertEqual(sum(b["duration_min"] for b in out["suggestions"]), 120)
+
+    def test_no_plan_no_suggestions(self):
+        out = self._build(_today_at(8, 0), _cfg([]), None)
+        self.assertIsNone(out["suggestions"])
+        self.assertIsNone(out["shortfall_seconds"])
+
+    def test_skips_daily_reset_window(self):
+        plan = self._plan(3600, 86400)
+        out = self._build(_today_at(3, 30), _cfg([]), plan)
+        # 03:30→03:50 只有 20 分钟碎片，跳过；建议从 04:10 开始
+        self.assertEqual(out["suggestions"][0]["start_min"], 250)
+
+    def test_managed_hanafuda_team_blocks_whole_shift(self):
+        """活动队在排班管理内：它的远征时段整段避让，不只是动作窗口。"""
+        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
+                     "enabled": True}])  # B3 = 90 分钟
+        plan = self._plan(4 * 3600, 86400)
+        out = self._build(_today_at(8, 0), cfg, plan, team_no=3)
+        blocks = out["suggestions"]
+        self.assertEqual(out["shortfall_seconds"], 0)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual((blocks[0]["start_min"], blocks[0]["duration_min"]),
+                         (480, 118))  # 08:00 → 09:58 动作窗口前
+        # 只避让动作窗口的话第二块会从 10:05 开始；整段避让必须等 11:30
+        self.assertEqual(blocks[1]["start_min"], 690)
+
+    def test_unmanaged_hanafuda_team_only_action_window(self):
+        """活动队不在排班管理内：只占动作窗口。"""
+        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
+                     "enabled": True}])
+        plan = self._plan(4 * 3600, 86400)
+        out = self._build(_today_at(8, 0), cfg, plan, team_no=4)
+        blocks = out["suggestions"]
+        self.assertEqual(blocks[1]["start_min"], 605)  # 10:05 就能续
+
+    def test_disabled_shift_not_avoided(self):
+        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
+                     "enabled": False}])
+        plan = self._plan(2 * 3600, 86400)
+        out = self._build(_today_at(8, 0), cfg, plan, team_no=3)
+        self.assertEqual(out["suggestions"],
+                         [{"start_min": 480, "duration_min": 120, "note": ""}])
 
 
 if __name__ == "__main__":

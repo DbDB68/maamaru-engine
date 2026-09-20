@@ -906,6 +906,12 @@ export interface DayTimelineRun {
   tone: 'ok' | 'failed' | 'stopped' | 'running'
 }
 
+export interface DayTimelineSuggestion {
+  start_min: number
+  duration_min: number
+  note: string
+}
+
 export interface DayTimeline {
   now: number
   day_start: number
@@ -913,4 +919,6 @@ export interface DayTimeline {
   expeditions: DayTimelineExpedition[]
   runs: DayTimelineRun[]
   hint: string | null
+  suggestions: DayTimelineSuggestion[] | null
+  shortfall_seconds: number | null
 }
