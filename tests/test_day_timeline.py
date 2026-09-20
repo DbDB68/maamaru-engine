@@ -141,8 +141,8 @@ class DayTimelineRunTests(unittest.TestCase):
         self.assertEqual(run["tone"], "running")
         self.assertIsNone(run["ended_at"])
 
-    def test_zombie_running_run_not_shown_as_running(self):
-        """面板挂掉留下的 running 尸体记录不许画成「正在跑」。"""
+    def test_old_zombie_run_is_omitted_and_today_zombie_is_stopped(self):
+        """往日尸体不挤进今天零点；今日尸体也不许画成「正在跑」。"""
         day_start = _today_at(0, 0)
         self.store.start_run("z1", "osaka", started_at=day_start - 3600)
         self.store.start_run("z2", "daily", started_at=day_start + 7200)
@@ -150,8 +150,19 @@ class DayTimelineRunTests(unittest.TestCase):
             _today_at(12, 0), cfg=_cfg([]), store=self.store,
             script_labels={}, active=None)
         tones = {r["script"]: r["tone"] for r in out["runs"]}
-        self.assertEqual(tones["osaka"], "stopped")
+        self.assertNotIn("osaka", tones)
         self.assertEqual(tones["daily"], "stopped")
+
+    def test_active_cross_midnight_run_is_kept(self):
+        day_start = _today_at(0, 0)
+        started = day_start - 3600
+        self.store.start_run("r1", "dispatch", started_at=started)
+        out = dtl.build_day_timeline(
+            _today_at(1, 0), cfg=_cfg([]), store=self.store,
+            script_labels={"dispatch": "远征"},
+            active={"script": "dispatch", "started": started})
+        self.assertEqual(len(out["runs"]), 1)
+        self.assertEqual(out["runs"][0]["tone"], "running")
 
     def test_cross_midnight_run_included(self):
         day_start = _today_at(0, 0)

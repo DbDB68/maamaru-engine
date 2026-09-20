@@ -102,7 +102,14 @@ def _run_items(store, active: dict | None, day_start: float, day_end: float,
         ended_at = float(ended_at) if ended_at else None
         status = row.get("status") or ""
         tone = _RUN_TONES.get(status, "stopped")
-        if active_script and script == active_script and abs(started_at - active_started) < 2:
+        is_active = bool(
+            active_script and script == active_script
+            and abs(started_at - active_started) < 2)
+        # runs_between 会把所有 ended_at=NULL 的旧记录当作跨日记录返回。
+        # 它们只是往日面板异常退出留下的尸体，不属于“今天”，也不能全挤在 0 点。
+        if started_at < day_start and ended_at is None and not is_active:
+            continue
+        if is_active:
             tone = "running"
             ended_at = None
         elif status == "running":
