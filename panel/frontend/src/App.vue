@@ -77,6 +77,7 @@ let pollTimer = 0
 let toastTimer = 0
 const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
+const configStageCollapsed = ref(false)
 const reportStageCollapsed = ref(false)
 const workflowStageCollapsed = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
@@ -427,6 +428,7 @@ function onStageScroll(event: Event, state: Ref<boolean>) {
 }
 function onReportScroll(event: Event) { onStageScroll(event, reportStageCollapsed) }
 function onWorkflowScroll(event: Event) { onStageScroll(event, workflowStageCollapsed) }
+function onConfigScroll(event: Event) { onStageScroll(event, configStageCollapsed) }
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
@@ -492,13 +494,14 @@ onMounted(async () => {
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
 watch(tab, value => {
+  if (value !== 'tasks') configStageCollapsed.value = false
   if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
   if (value !== 'workflow') workflowStageCollapsed.value = false
 })
 </script>
 
 <template>
-  <div class="shell" :class="{ 'report-stage-collapsed': reportStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
+  <div class="shell" :class="{ 'config-stage-collapsed': configStageCollapsed, 'report-stage-collapsed': reportStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
       <StageActors :active="stageActive" />
@@ -529,7 +532,7 @@ watch(tab, value => {
         <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
       </div>
     </header>
-    <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout">
+    <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onConfigScroll">
       <nav class="sidebar">
         <template v-for="group in scriptGroups" :key="group.label">
           <h3>{{ group.label }}</h3>
