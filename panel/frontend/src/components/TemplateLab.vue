@@ -4,8 +4,9 @@ import { api } from '../api'
 import type { TemplateLabCodeRoi, TemplateLabDraft, TemplateLabFrame, TemplateLabOcrTestResult, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult } from '../types'
 import PixelControl from './PixelControl.vue'
 import SegmentedControl from './SegmentedControl.vue'
+import { applyResize, clampRect, HANDLE_CURSORS, HANDLE_SCREEN_PX, handlePoints, hitHandle } from './templateLabSelection'
+import type { HandleId, SelRect } from './templateLabSelection'
 
-interface SelRect { x: number; y: number; w: number; h: number }
 type LabMode = 'crop' | 'roi'
 
 const status = ref<TemplateLabStatus | null>(null)
@@ -31,8 +32,13 @@ const lockSelection = ref(false)
 const selection = ref<SelRect | null>(null)
 const dragging = ref(false)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const scrollRef = ref<HTMLElement | null>(null)
 const previewRef = ref<HTMLCanvasElement | null>(null)
 let dragStart: { x: number; y: number } | null = null
+let resizeHandle: HandleId | null = null
+let resizeBase: SelRect | null = null
+let lastPointer: { x: number; y: number } | null = null
+let scrollRaf = 0
 let renderToken = 0
 
 const frameMeta = computed(() => frames.value[currentIdx.value] ?? null)
@@ -238,6 +244,15 @@ async function renderCanvas() {
       ctx.strokeStyle = '#d4a017'
       ctx.lineWidth = Math.max(1, 1.5)
       ctx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w - 1, sel.h - 1)
+      // 八向微调手柄：屏幕尺寸恒定，图像坐标里边长随 zoom 换算
+      const hs = HANDLE_SCREEN_PX / zoom.value
+      ctx.fillStyle = '#d4a017'
+      ctx.strokeStyle = '#fffaf0'
+      ctx.lineWidth = Math.max(1 / zoom.value, 0.5)
+      for (const p of Object.values(handlePoints(sel))) {
+        ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
+        ctx.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
+      }
     }
   } catch (e) { fail(e) }
 }
@@ -266,55 +281,127 @@ async function renderPreview() {
 
 watch([currentIdx, currentSession], () => { renderCanvas() })
 watch(selection, () => { renderCanvas(); renderPreview() })
+// 手柄是屏幕尺寸恒定的，zoom 变了要重画
+watch(zoom, () => { renderCanvas() })
 
 // ---- 鼠标框选 ----
-function toImageCoords(e: MouseEvent) {
+function toImageCoords(clientX: number, clientY: number) {
   const canvas = canvasRef.value
   if (!canvas || !canvas.width) return { x: 0, y: 0 }
   const rect = canvas.getBoundingClientRect()
   return {
-    x: (e.clientX - rect.left) * (canvas.width / rect.width),
-    y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    x: (clientX - rect.left) * (canvas.width / rect.width),
+    y: (clientY - rect.top) * (canvas.height / rect.height),
   }
 }
 
 function clampSel(sel: SelRect): SelRect {
   const meta = frameMeta.value
   if (!meta) return sel
-  const x = Math.min(Math.max(0, Math.round(sel.x)), meta.width)
-  const y = Math.min(Math.max(0, Math.round(sel.y)), meta.height)
-  return {
-    x,
-    y,
-    w: Math.min(Math.round(sel.w), meta.width - x),
-    h: Math.min(Math.round(sel.h), meta.height - y),
+  return clampRect(sel, meta.width, meta.height)
+}
+
+function applyDrag() {
+  if (!dragging.value || !lastPointer) return
+  const p = toImageCoords(lastPointer.x, lastPointer.y)
+  if (resizeHandle && resizeBase) {
+    const meta = frameMeta.value
+    selection.value = applyResize(resizeBase, resizeHandle, p,
+      meta ? { width: meta.width, height: meta.height } : undefined)
+  } else if (dragStart) {
+    selection.value = clampSel({
+      x: Math.min(dragStart.x, p.x),
+      y: Math.min(dragStart.y, p.y),
+      w: Math.abs(p.x - dragStart.x),
+      h: Math.abs(p.y - dragStart.y),
+    })
   }
+}
+
+// 拖拽中指针贴近容器边缘就自动滚动（每帧最多 24px，约 1440px/s 封顶），
+// 滚动后画布在指针下挪了位置，要按原指针位置重算框
+const SCROLL_EDGE_PX = 24
+
+function autoScrollTick() {
+  const el = scrollRef.value
+  if (el && lastPointer) {
+    const r = el.getBoundingClientRect()
+    let dx = 0
+    let dy = 0
+    if (lastPointer.x < r.left + SCROLL_EDGE_PX) dx = lastPointer.x - (r.left + SCROLL_EDGE_PX)
+    else if (lastPointer.x > r.right - SCROLL_EDGE_PX) dx = lastPointer.x - (r.right - SCROLL_EDGE_PX)
+    if (lastPointer.y < r.top + SCROLL_EDGE_PX) dy = lastPointer.y - (r.top + SCROLL_EDGE_PX)
+    else if (lastPointer.y > r.bottom - SCROLL_EDGE_PX) dy = lastPointer.y - (r.bottom - SCROLL_EDGE_PX)
+    dx = Math.max(-SCROLL_EDGE_PX, Math.min(SCROLL_EDGE_PX, dx))
+    dy = Math.max(-SCROLL_EDGE_PX, Math.min(SCROLL_EDGE_PX, dy))
+    if (dx || dy) {
+      el.scrollLeft += dx
+      el.scrollTop += dy
+      applyDrag()
+    }
+  }
+  scrollRaf = window.requestAnimationFrame(autoScrollTick)
+}
+
+function onWindowMouseMove(e: MouseEvent) {
+  lastPointer = { x: e.clientX, y: e.clientY }
+  applyDrag()
+}
+
+function onWindowMouseUp(e: MouseEvent) {
+  if (!dragging.value) return
+  lastPointer = { x: e.clientX, y: e.clientY }
+  applyDrag()
+  stopWindowDrag()
+}
+
+function stopWindowDrag() {
+  window.removeEventListener('mousemove', onWindowMouseMove)
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  if (scrollRaf) window.cancelAnimationFrame(scrollRaf)
+  scrollRaf = 0
+  dragging.value = false
+  dragStart = null
+  resizeHandle = null
+  resizeBase = null
+  lastPointer = null
 }
 
 function onMouseDown(e: MouseEvent) {
   if (!frameMeta.value) return
-  const p = toImageCoords(e)
-  dragStart = p
-  selection.value = { x: Math.round(p.x), y: Math.round(p.y), w: 0, h: 0 }
+  if (dragging.value) stopWindowDrag() // 异常情况（上次没收到 mouseup）先复位
+  const p = toImageCoords(e.clientX, e.clientY)
+  const sel = selection.value
+  const handle = sel && sel.w > 0 && sel.h > 0 ? hitHandle(sel, p, zoom.value) : null
+  if (handle && sel) {
+    // 命中手柄：进入拉边微调，对边/对角锚定
+    resizeHandle = handle
+    resizeBase = { ...sel }
+    dragStart = null
+  } else {
+    resizeHandle = null
+    resizeBase = null
+    dragStart = p
+    selection.value = { x: Math.round(p.x), y: Math.round(p.y), w: 0, h: 0 }
+  }
   dragging.value = true
+  lastPointer = { x: e.clientX, y: e.clientY }
+  // 拖拽期间监听挂到 window 上：指针拖出画布/可视区也不断线，松手即移除
+  window.addEventListener('mousemove', onWindowMouseMove)
+  window.addEventListener('mouseup', onWindowMouseUp)
+  scrollRaf = window.requestAnimationFrame(autoScrollTick)
 }
 
-function onMouseMove(e: MouseEvent) {
-  if (!dragging.value || !dragStart) return
-  const p = toImageCoords(e)
-  selection.value = clampSel({
-    x: Math.min(dragStart.x, p.x),
-    y: Math.min(dragStart.y, p.y),
-    w: Math.abs(p.x - dragStart.x),
-    h: Math.abs(p.y - dragStart.y),
-  })
-}
-
-function onMouseUp(e: MouseEvent) {
-  if (!dragging.value) return
-  onMouseMove(e)
-  dragging.value = false
-  dragStart = null
+// 非拖拽状态：指针经过手柄时换成对应的 resize 光标
+function onCanvasHover(e: MouseEvent) {
+  if (dragging.value) return
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const sel = selection.value
+  const handle = sel && sel.w > 0 && sel.h > 0
+    ? hitHandle(sel, toImageCoords(e.clientX, e.clientY), zoom.value)
+    : null
+  canvas.style.cursor = handle ? HANDLE_CURSORS[handle] : 'crosshair'
 }
 
 function nudgeSelection(dx: number, dy: number) {
@@ -516,6 +603,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
+  stopWindowDrag()
 })
 </script>
 
@@ -563,19 +651,17 @@ onBeforeUnmount(() => {
         </div>
         <label class="lab-check"><input v-model="lockSelection" type="checkbox" />锁定框选（←/→ 翻帧框不动）</label>
       </div>
-      <div class="lab-canvas-scroll">
+      <div class="lab-canvas-scroll" ref="scrollRef">
         <canvas
           ref="canvasRef"
           class="lab-canvas"
           :style="canvasStyle"
           @mousedown.prevent="onMouseDown"
-          @mousemove="onMouseMove"
-          @mouseup="onMouseUp"
-          @mouseleave="onMouseUp"
+          @mousemove="onCanvasHover"
         />
       </div>
       <div class="lab-row lab-row-bottom">
-        <p class="lab-hint">框：{{ selText }}。方向键微调 1px（Shift=10px）<template v-if="lockSelection">；锁定中，←/→ 直接翻帧</template></p>
+        <p class="lab-hint">框：{{ selText }}。框完可以拉四边四角微调；方向键微调 1px（Shift=10px）<template v-if="lockSelection">；锁定中，←/→ 直接翻帧</template></p>
         <div class="lab-preview-box">
           <span class="lab-hint">框内预览</span>
           <canvas ref="previewRef" class="lab-preview" />
