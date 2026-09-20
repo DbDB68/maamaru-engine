@@ -160,6 +160,14 @@ def _row_key(row: dict) -> tuple:
             row.get("survival"), row.get("kiwame_date"))
 
 
+def _strip_row_scratch(rows) -> None:
+    """落库前清掉行上的流程暂存键（重读定位用，不进快照）。"""
+    for row in rows:
+        row.pop("_base_y", None)
+        row.pop("_badge_rect", None)
+        row.pop("_date_roi", None)
+
+
 def _strip_changed(prev, cur) -> bool:
     """页码条像素是否变了（当前页高亮块随翻页移动）。任一帧缺失返回 False。"""
     if prev is None or cur is None:
@@ -481,7 +489,11 @@ def stats_from_cells(cell_texts: list) -> dict:
 
 def parse_date_cell(tokens) -> str | None:
     """显现日期格：「显现」「2026」「2/12」三个 token → "2026-2-12"。
-    输出形状与 _parse_kiwame 一致；名字沿旧是误命名，禁止拿去推极化。"""
+    输出形状与 _parse_kiwame 一致；名字沿旧是误命名，禁止拿去推极化。
+
+    窄格（宽≈80px）里两行小字偶发被 OCR 粘成一个 token（「20262/12」
+    「2026 2/12」，快照 #22 有 7 把刀日期留空的最大嫌疑），分立 token
+    抓不到时把整格拼起来在拼接串上搜。"""
     year = day = None
     for t, _p in tokens:
         t = str(t).strip()
@@ -491,12 +503,23 @@ def parse_date_cell(tokens) -> str | None:
             m = re.fullmatch(r"(\d{1,2})\s*/\s*(\d{1,2})", t)
             if m and year:
                 day = f"{m.group(1)}-{m.group(2)}"
-    return f"{year}-{day}" if year and day else None
+    if year and day:
+        return f"{year}-{day}"
+    joined = _joined(tokens)
+    m = re.search(r"(20\d{2})\D{0,4}(\d{1,2})/(\d{1,2})", joined)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    ym = re.search(r"20\d{2}", joined)
+    dm = re.search(r"(\d{1,2})/(\d{1,2})", joined)
+    if ym and dm:
+        return f"{ym.group()}-{dm.group(1)}-{dm.group(2)}"
+    return None
 
 
 def read_page_cells(ocr_fn) -> dict:
     """逐格精读一页：5 行 × (名字/等级/日期 OCR 格 + 数值带 9 等分)，
-    徽章 ROI 挂进 row["_badge_rect"] 由调用方同帧读。
+    徽章 ROI 挂进 row["_badge_rect"] 由调用方同帧读，日期 ROI 挂进
+    row["_date_roi"] 供缺日期重读定位（落库前统一 pop）。
 
     ocr_fn(roi_xyxy) -> [(text, (x, y)) ...]。返回形状与 parse_list_tokens
     相同：{"rows", "fail_rows"}。名字格有字却过不了名册 → fail 行
@@ -517,7 +540,8 @@ def read_page_cells(ocr_fn) -> dict:
                "stats": stats_from_cells(stats_texts),
                "kiwame_date": parse_date_cell(ocr_fn(rois["date"])),
                "locked": None,
-               "_badge_rect": rois["badge"]}
+               "_badge_rect": rois["badge"],
+               "_date_roi": rois["date"]}
         rows.append(row)
     return {"rows": rows, "fail_rows": fail_rows}
 
@@ -691,6 +715,7 @@ class SwordInventoryMixin:
                            f"改用整列读法")
             fail_rows_total += parsed["fail_rows"]
             self._retry_missing_levels(parsed["rows"])
+            self._retry_missing_dates(parsed["rows"])
             # 同帧读行首徽章（刀种+花数）→ 形态事实随快照落盘
             self._read_row_form_facts(img, parsed["rows"])
 
@@ -753,9 +778,7 @@ class SwordInventoryMixin:
         # ── 4. 对账 + 落库 ──
         # 不去重：同名刀有多把（锻刀堆出来的），同属性同日期的行也是真行；
         # 翻页扫描每页只处理一次，行即身份
-        for row in all_rows:
-            row.pop("_base_y", None)
-            row.pop("_badge_rect", None)
+        _strip_row_scratch(all_rows)
         missing = (owned - len(all_rows)) if owned else None
         if owned and missing > 0:
             yield (f"[刀帐] ⚠️ 对账差 {missing} 把（所持 {owned}，认出 {len(all_rows)}），"
@@ -767,6 +790,11 @@ class SwordInventoryMixin:
                       in ("kiwame", "normal"))
         yield (f"[刀帐] 形态确认 {form_ok}/{len(all_rows)} 振"
                f"（未确认的存原始观测，证据随档案落盘）")
+        no_date = sum(1 for r in all_rows
+                      if r.get("sword_id") and not r.get("kiwame_date"))
+        if no_date:
+            yield (f"[刀帐] ⚠️ 有 {no_date} 把刀的显现日期留空了"
+                   f"（名字等级都在），刀帐页待核对里能人工补")
         snapshot_id = self.telemetry_save_swords(
             all_rows, owned=owned, capacity=capacity, missing=missing,
             source="owned_inventory")
@@ -893,6 +921,31 @@ class SwordInventoryMixin:
                 row["level"] = levels[0]
             if len(levels) > 1 and 1 <= levels[1] <= 15:
                 row["tou_level"] = levels[1]
+
+    def _retry_missing_dates(self, rows):
+        """日期格偶发漏读（快照 #22 有 7 把）：强制刷新帧单独重读该格，
+        第二次把格子四边放宽 6px 防数字贴边被裁。只处理逐格路径的行
+        （整列兜底的行没有 _date_roi）。必须在翻页之前调用——重读定位
+        靠的是当前页还没翻走。"""
+        for row in rows:
+            if row.get("kiwame_date") or not row.get("sword_id"):
+                continue
+            roi = row.get("_date_roi")
+            if not roi:
+                continue
+            for attempt in range(2):
+                if attempt:
+                    time.sleep(1.0)
+                    roi = (max(0, roi[0] - 6), max(0, roi[1] - 6),
+                           min(1280, roi[2] + 6), min(720, roi[3] + 6))
+                self.maa.screenshot(force=True)
+                img = self.maa.screenshot()
+                tokens = [(t, (p.x, p.y)) for t, p in
+                          self.maa.ocr_all(roi_4to4(*roi), img) or []]
+                date = parse_date_cell(tokens)
+                if date:
+                    row["kiwame_date"] = date
+                    break
 
     def _wait_list_page(self, timeout_s: float = 15.0) -> bool:
         """等「刀剑男士一览」标题出现（转场樱花可能要几秒）"""

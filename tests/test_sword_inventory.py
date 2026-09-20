@@ -6,12 +6,13 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from touken.flows import sword_inventory as _inv_mod  # noqa: E402
 from touken.flows.sword_inventory import (  # noqa: E402
-    _STAT_NAMES, _parse_row, _row_key,
+    _STAT_NAMES, _parse_row, _row_key, _strip_row_scratch,
     match_name_text, parse_album_tokens,
     parse_collected, parse_date_cell, parse_levels_cell,
     parse_list_tokens, parse_owned, read_page_cells, read_row_form_fact,
@@ -26,6 +27,12 @@ HIGEKIRI = "touken_107_higekiri"         # 髭切（太刀，动态涨花例外�
 
 def _tok(text, x, y):
     return (text, (x, y))
+
+
+class _Pt:
+    """仿 maa.ocr_all 结果里的点（.x/.y 属性）"""
+    def __init__(self, x, y):
+        self.x, self.y = x, y
 
 
 # 一览第 1 页「安宅切」一行的真实坐标样本（2026-09-12 运行帧 OCR）。
@@ -306,7 +313,25 @@ class CellParseTests(unittest.TestCase):
                                           _tok("2/12", 1061, 216)]),
                          "2026-2-12")
         self.assertIsNone(parse_date_cell([_tok("2/12", 1061, 216)]))
+        self.assertIsNone(parse_date_cell([_tok("2026", 1062, 193)]))
         self.assertIsNone(parse_date_cell([]))
+
+    def test_date_cell_glued_tokens(self):
+        # 快照 #22 的 7 把日期留空：窄格（宽≈80px）里两行小字被 OCR 粘成
+        # 一个 token，分立整匹配抓不到，拼接串兜底必须接住
+        self.assertEqual(parse_date_cell([_tok("20262/12", 1062, 200)]),
+                         "2026-2-12")
+        self.assertEqual(parse_date_cell([_tok("2026 2/12", 1062, 200)]),
+                         "2026-2-12")
+        self.assertEqual(parse_date_cell([_tok("显现2026", 1062, 180),
+                                          _tok("2/12", 1061, 216)]),
+                         "2026-2-12")
+        self.assertEqual(parse_date_cell([_tok("202612/3", 1062, 200)]),
+                         "2026-12-3")
+        # 缺年/缺日照旧 None，不许硬编
+        self.assertIsNone(parse_date_cell([_tok("2/12", 1061, 216),
+                                           _tok("显现", 1062, 165)]))
+        self.assertIsNone(parse_date_cell([_tok("2026", 1062, 193)]))
 
     def test_match_name_text(self):
         hit = match_name_text("安宅切")
@@ -340,6 +365,7 @@ class CellParseTests(unittest.TestCase):
                          [45, 46, 55, 52, 34, 42, 40, 29])
         self.assertEqual(row["kiwame_date"], "2026-7-29")
         self.assertEqual(row["_badge_rect"], rois["badge"])
+        self.assertEqual(row["_date_roi"], rois["date"])  # 缺日期重读定位用
 
     def test_read_page_cells_garbage_name_is_fail_row(self):
         rois = _inv_mod.ROW_CELL_ROIS[2]
@@ -357,6 +383,21 @@ class CellParseTests(unittest.TestCase):
     def test_fallback_message_not_fail_worded(self):
         """兜底话术是正常播报（如实上报但流程没翻车），不许撞翻车词表"""
         self.assertFalse(_is_fail("第 3 页逐格精读一行名字都没认出，改用整列读法"))
+
+    def test_missing_date_warning_not_fail_worded(self):
+        """日期留空的收尾提示是 ⚠️ 级播报（人工可补），不许撞翻车词表"""
+        self.assertFalse(_is_fail(
+            "⚠️ 有 7 把刀的显现日期留空了（名字等级都在），"
+            "刀帐页待核对里能人工补"))
+
+    def test_strip_row_scratch(self):
+        """落库前清掉流程暂存键：_base_y/_badge_rect/_date_roi 不进快照"""
+        rows = [{"sword_id": "x", "level": 99, "_base_y": 215,
+                 "_badge_rect": (1, 2, 3, 4), "_date_roi": (5, 6, 7, 8)},
+                {"sword_id": "y"}]
+        _strip_row_scratch(rows)
+        self.assertEqual(rows, [{"sword_id": "x", "level": 99},
+                                {"sword_id": "y"}])
 
 
 class SwordSnapshotStoreTests(unittest.TestCase):
@@ -590,17 +631,12 @@ class ScanListPageGateTests(unittest.TestCase):
     注意常量取值要走 _inv_mod 运行时属性：全量跑时模块可能被前面的
     漂移测试 reload（覆盖层清空），模块级 import 绑定的是旧对象。"""
 
-    class _Pt:
-        def __init__(self, x, y):
-            self.x, self.y = x, y
-
     class _FakeMaa:
         """cell/整列 OCR 走查表（Region 反解 xyxy），标题 OCR 走开关。"""
         def __init__(self, list_roi, cell_map, legacy_tokens, title_hit):
             self._list_roi = tuple(list_roi)
             self._cell_map = {tuple(k): v for k, v in cell_map.items()}
-            self._legacy = [(t, ScanListPageGateTests._Pt(x, y))
-                            for t, (x, y) in legacy_tokens]
+            self._legacy = [(t, _Pt(x, y)) for t, (x, y) in legacy_tokens]
             self._title_hit = title_hit
             self.list_ocr_calls = 0
 
@@ -609,7 +645,7 @@ class ScanListPageGateTests(unittest.TestCase):
             if xyxy == self._list_roi:
                 self.list_ocr_calls += 1
                 return self._legacy
-            return [(t, ScanListPageGateTests._Pt(x, y))
+            return [(t, _Pt(x, y))
                     for t, (x, y) in self._cell_map.get(xyxy, [])]
 
         def ocr(self, expected, roi, match_mode="contains"):
@@ -657,6 +693,75 @@ class ScanListPageGateTests(unittest.TestCase):
         self.assertFalse(fell_back)
         self.assertEqual(parsed["rows"], [])
         self.assertEqual(parsed["fail_rows"], 0)
+
+
+class RetryMissingDatesTests(unittest.TestCase):
+    """缺日期重读：强制刷帧重读该格，第二次四边放宽 6px，最多两次；
+    只处理逐格路径的行（整列兜底行没有 _date_roi）。"""
+
+    DATE_ROI = (1023, 141, 1103, 232)
+
+    class _FakeMaa:
+        def __init__(self, batches):
+            self._batches = list(batches)
+            self.rois = []
+            self.force_shots = 0
+
+        def screenshot(self, force=False):
+            if force:
+                self.force_shots += 1
+            return None
+
+        def ocr_all(self, roi, img=None):
+            self.rois.append((roi.x, roi.y, roi.x + roi.w, roi.y + roi.h))
+            batch = self._batches.pop(0) if self._batches else []
+            return [(t, _Pt(x, y)) for t, (x, y) in batch]
+
+    def _row(self, **kw):
+        row = {"sword_id": "touken_250_atagi_kiri", "name_zh": "安宅切",
+               "kiwame_date": None, "_date_roi": self.DATE_ROI}
+        row.update(kw)
+        return row
+
+    def _run(self, rows, batches):
+        maa = self._FakeMaa(batches)
+        inst = _inv_mod.SwordInventoryMixin.__new__(_inv_mod.SwordInventoryMixin)
+        inst.maa = maa
+        with patch("touken.flows.sword_inventory.time.sleep"):
+            inst._retry_missing_dates(rows)
+        return maa
+
+    def test_first_attempt_success_no_retry(self):
+        row = self._row()
+        maa = self._run([row], [[_tok("20262/12", 1062, 200)]])
+        self.assertEqual(row["kiwame_date"], "2026-2-12")
+        self.assertEqual(len(maa.rois), 1)
+        self.assertEqual(maa.rois[0], self.DATE_ROI)
+
+    def test_second_attempt_widens_roi(self):
+        row = self._row()
+        maa = self._run([row], [[],
+                                [_tok("2026", 1062, 193),
+                                 _tok("2/12", 1061, 216)]])
+        self.assertEqual(row["kiwame_date"], "2026-2-12")
+        self.assertEqual(maa.force_shots, 2)   # 每次都强制刷帧
+        self.assertEqual(maa.rois[0], self.DATE_ROI)
+        self.assertEqual(maa.rois[1], (1017, 135, 1109, 238))  # 四边放宽 6px
+
+    def test_gives_up_after_two_attempts(self):
+        row = self._row()
+        maa = self._run([row], [[], []])
+        self.assertIsNone(row["kiwame_date"])
+        self.assertEqual(len(maa.rois), 2)
+
+    def test_rows_without_date_roi_are_skipped(self):
+        # 整列兜底行没有 _date_roi、已有日期的行、fail 行：都不重读
+        legacy_row = {"sword_id": "x", "kiwame_date": None}
+        dated_row = self._row(kiwame_date="2026-2-12")
+        fail_row = {"sword_id": None, "kiwame_date": None,
+                    "_date_roi": self.DATE_ROI}
+        maa = self._run([legacy_row, dated_row, fail_row], [])
+        self.assertEqual(maa.rois, [])
 
 
 if __name__ == "__main__":
