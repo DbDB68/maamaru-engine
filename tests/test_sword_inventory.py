@@ -9,9 +9,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from touken.flows import sword_inventory as _inv_mod  # noqa: E402
 from touken.flows.sword_inventory import (  # noqa: E402
-    _parse_row, _row_key, parse_album_tokens, parse_collected,
-    parse_list_tokens, parse_owned, read_row_form_fact)
+    _STAT_NAMES, _parse_row, _row_key,
+    match_name_text, parse_album_tokens,
+    parse_collected, parse_date_cell, parse_levels_cell,
+    parse_list_tokens, parse_owned, read_page_cells, read_row_form_fact,
+    split_stats_roi, stats_from_cells)
+from touken.flows.report_judge import _is_fail  # noqa: E402
 from touken.flows.team_roster import load_flower_templates  # noqa: E402
 from touken.telemetry import TelemetryStore  # noqa: E402
 
@@ -155,11 +160,11 @@ class RowFormFactTests(unittest.TestCase):
     """一览行徽章形态事实（read_row_form_fact）：合成帧 + 仓库真模板验证
     白名单门禁与结论规则（规则本体与编队页同一套，team_roster）。
 
-    合成帧把模板原图贴进行 1（base_y=215）徽章位，匹配分必然接近 1.0，
-    专测「结论怎么走」，不测「真机能不能读出」——后者靠一览同源真帧
-    校准（_INV_PROVEN_FLOWER_COMBOS 注释里的流程）。"""
+    合成帧把模板原图贴进行 1 徽章格（逐格 ROI (170,143,231,205) 内），
+    匹配分必然接近 1.0，专测「结论怎么走」，不测「真机能不能读出」——
+    后者靠一览同源真帧校准（_INV_PROVEN_FLOWER_COMBOS 注释里的流程）。"""
 
-    BASE_Y = 215  # _ROW_NAME_YS[0]
+    BADGE_RECT = (170, 143, 231, 205)  # ROW_CELL_ROIS[1]["badge"]
 
     @classmethod
     def setUpClass(cls):
@@ -176,14 +181,15 @@ class RowFormFactTests(unittest.TestCase):
                 tpl = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8),
                                    cv2.IMREAD_COLOR)
                 h, w = tpl.shape[:2]
-                img[138:138 + h, 168:168 + w] = tpl  # 行 1 徽章实测位置
+                x0, y0 = self.BADGE_RECT[0] + 2, self.BADGE_RECT[1] + 2
+                img[y0:y0 + h, x0:x0 + w] = tpl
                 return img
         raise AssertionError(f"模板不存在 {template_stem}")
 
     def test_normal_when_flowers_equal_base(self):
         # 压切长谷部（打刀基线 2）+ 二花打刀徽章 → 普通
         img = self._frame_with_badge("二花打刀")
-        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+        fact = read_row_form_fact(img, self.BADGE_RECT, HASEBE, self.templates,
                                   {("打刀", 2)})
         self.assertEqual(fact["status"], "normal")
         self.assertEqual(fact["badge"]["flowers"], 2)
@@ -194,7 +200,7 @@ class RowFormFactTests(unittest.TestCase):
     def test_kiwame_when_flowers_above_base(self):
         # 压切长谷部（基线 2）+ 三花打刀徽章 → 极化
         img = self._frame_with_badge("三花打刀")
-        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+        fact = read_row_form_fact(img, self.BADGE_RECT, HASEBE, self.templates,
                                   {("打刀", 3)})
         self.assertEqual(fact["status"], "kiwame")
         self.assertEqual(fact["badge"]["flowers"], 3)
@@ -202,7 +208,7 @@ class RowFormFactTests(unittest.TestCase):
     def test_unproven_combo_stays_unknown_but_keeps_raw_observation(self):
         # 白名单外的达标匹配：不出结论，但原始观测（花数/分数）保留落盘
         img = self._frame_with_badge("二花打刀")
-        fact = read_row_form_fact(img, self.BASE_Y, HASEBE, self.templates,
+        fact = read_row_form_fact(img, self.BADGE_RECT, HASEBE, self.templates,
                                   frozenset())
         self.assertEqual(fact["status"], "unknown")
         self.assertEqual(fact["evidence"], [])
@@ -213,23 +219,144 @@ class RowFormFactTests(unittest.TestCase):
     def test_dynamic_flower_exception_never_concludes(self):
         # 髭切/膝丸普通形态随特阶段涨花：花数>基线也不区分极化
         img = self._frame_with_badge("三花太刀")
-        fact = read_row_form_fact(img, self.BASE_Y, HIGEKIRI, self.templates,
+        fact = read_row_form_fact(img, self.BADGE_RECT, HIGEKIRI, self.templates,
                                   {("太刀", 3)})
         self.assertEqual(fact["status"], "unknown")
         self.assertTrue(any("花数3/基线2" in e for e in fact["evidence"]))
 
     def test_no_frame_or_wrong_identity_gives_unknown(self):
         # 截图失明：不出证据
-        fact = read_row_form_fact(None, self.BASE_Y, HASEBE, self.templates,
+        fact = read_row_form_fact(None, self.BADGE_RECT, HASEBE, self.templates,
                                   {("打刀", 2)})
         self.assertEqual(fact["status"], "unknown")
         self.assertEqual(fact["badge"]["conclusion"], "low_score")
         # 名册没有的身份：没有确认刀种，不产生花数证据
         img = self._frame_with_badge("二花打刀")
-        fact = read_row_form_fact(img, self.BASE_Y, "touken_999_nobody",
+        fact = read_row_form_fact(img, self.BADGE_RECT, "touken_999_nobody",
                                   self.templates, {("打刀", 2)})
         self.assertEqual(fact["status"], "unknown")
         self.assertEqual(fact["badge"]["conclusion"], "no_confirmed_type")
+
+
+class CellParseTests(unittest.TestCase):
+    """逐格精读纯函数：等级格 join 解析、数值带 9 等分、日期格、整页装配。"""
+
+    def test_levels_cell_glued_and_split_forms_agree(self):
+        glued = parse_levels_cell(
+            [_tok("刀剑99级乱舞1级生存40/40疲劳85/100", 460, 180)])
+        self.assertEqual((glued["level"], glued["tou_level"]), (99, 1))
+        self.assertEqual((glued["survival"], glued["survival_max"]), (40, 40))
+        self.assertEqual((glued["fatigue"], glued["fatigue_max"]), (85, 100))
+        split = parse_levels_cell([
+            _tok("刀剑", 423, 157), _tok("99 级", 495, 158),
+            _tok("乱舞", 423, 174), _tok("1级", 495, 175),
+            _tok("生存", 424, 197), _tok("40/40", 492, 198),
+            _tok("疲劳", 425, 220), _tok("85/100", 488, 221)])
+        self.assertEqual(split, glued)
+
+    def test_levels_cell_scrambled_order_pairs_by_y(self):
+        # 2026-09-20 真机实测：小格 OCR 返回顺序会乱（刀剑 乱舞 1级 99级），
+        # join 正则会错配成 刀剑1级，y 锚定必须纠回来
+        out = parse_levels_cell([
+            _tok("生存 48/48", 460, 197), _tok("疲劳 58/100", 460, 220),
+            _tok("刀剑", 423, 157), _tok("乱舞", 423, 174),
+            _tok("1级", 495, 175), _tok("99 级", 495, 158)])
+        self.assertEqual((out["level"], out["tou_level"]), (99, 1))
+        self.assertEqual((out["survival"], out["survival_max"]), (48, 48))
+        self.assertEqual((out["fatigue"], out["fatigue_max"]), (58, 100))
+
+    def test_levels_cell_value_range_swap_insurance(self):
+        # 乱舞最多十几级：刀剑1级+乱舞99级必是读串，互换
+        out = parse_levels_cell([_tok("刀剑1级乱舞99级生存30/30", 460, 180)])
+        self.assertEqual((out["level"], out["tou_level"]), (99, 1))
+
+    def test_levels_cell_missing_fields_stay_none(self):
+        out = parse_levels_cell([_tok("刀剑30级生存30/30", 460, 180)])
+        self.assertEqual(out["level"], 30)
+        self.assertIsNone(out["tou_level"])
+        self.assertIsNone(out["fatigue"])
+        self.assertIsNone(out["fatigue_max"])
+        self.assertIsNone(parse_levels_cell([])["level"])
+
+    def test_split_stats_roi_nine_cells_with_inset(self):
+        cells = split_stats_roi((521, 144, 1026, 231))
+        self.assertEqual(len(cells), 9)
+        for prev, cur in zip(cells, cells[1:]):  # 内缩后相邻格不接壤
+            self.assertLess(prev[2], cur[0])
+        self.assertGreaterEqual(cells[0][0], 521)
+        self.assertLessEqual(cells[-1][2], 1026)
+        self.assertTrue(all(c[1] == 144 and c[3] == 231 for c in cells))
+
+    def test_stats_from_cells_eight_stats_ninth_ignored(self):
+        texts = ["48", "71", "67", "38", "51", "41", "28", "37", "狭"]
+        stats = stats_from_cells(texts)
+        self.assertEqual([stats[k] for k in _STAT_NAMES],
+                         [48, 71, 67, 38, 51, 41, 28, 37])
+        self.assertEqual(len(stats), 8)  # 范围格不进 stats
+
+    def test_stats_from_cells_tolerates_empty_cells(self):
+        stats = stats_from_cells(["48", "", "糊了", "38", "51", "41", "28", "37", "广"])
+        self.assertNotIn("打击", stats)
+        self.assertNotIn("防御", stats)
+        self.assertEqual(stats["机动"], 38)
+
+    def test_date_cell(self):
+        self.assertEqual(parse_date_cell([_tok("显现", 1062, 165),
+                                          _tok("2026", 1062, 193),
+                                          _tok("2/12", 1061, 216)]),
+                         "2026-2-12")
+        self.assertIsNone(parse_date_cell([_tok("2/12", 1061, 216)]))
+        self.assertIsNone(parse_date_cell([]))
+
+    def test_match_name_text(self):
+        hit = match_name_text("安宅切")
+        self.assertEqual(hit["sword_id"], "touken_250_atagi_kiri")
+        self.assertIsNone(match_name_text(""))
+        self.assertIsNone(match_name_text("裝备修行"))
+
+    @staticmethod
+    def _fake_ocr(mapping):
+        return lambda roi: mapping.get(tuple(roi), [])
+
+    def test_read_page_cells_full_row(self):
+        rois = _inv_mod.ROW_CELL_ROIS[1]
+        mapping = {
+            rois["name"]: [_tok("安宅切", 280, 217)],
+            rois["levels"]: [_tok("刀剑99级乱舞1级生存45/45疲劳100/100", 460, 180)],
+            rois["date"]: [_tok("显现", 1062, 165), _tok("2026", 1062, 193),
+                           _tok("7/29", 1061, 216)],
+        }
+        for cell, value in zip(split_stats_roi(rois["stats"]),
+                               ["45", "46", "55", "52", "34", "42", "40", "29", "狭"]):
+            mapping[cell] = [_tok(value, cell[0] + 5, cell[1] + 5)]
+        parsed = read_page_cells(self._fake_ocr(mapping))
+        self.assertEqual(parsed["fail_rows"], 0)
+        self.assertEqual(len(parsed["rows"]), 1)  # 其余四行名字格空白=空行
+        row = parsed["rows"][0]
+        self.assertEqual(row["sword_id"], "touken_250_atagi_kiri")
+        self.assertEqual((row["level"], row["tou_level"]), (99, 1))
+        self.assertEqual((row["survival"], row["survival_max"]), (45, 45))
+        self.assertEqual([row["stats"][k] for k in _STAT_NAMES],
+                         [45, 46, 55, 52, 34, 42, 40, 29])
+        self.assertEqual(row["kiwame_date"], "2026-7-29")
+        self.assertEqual(row["_badge_rect"], rois["badge"])
+
+    def test_read_page_cells_garbage_name_is_fail_row(self):
+        rois = _inv_mod.ROW_CELL_ROIS[2]
+        parsed = read_page_cells(self._fake_ocr({
+            rois["name"]: [_tok("选择部队", 280, 420)],  # 部队选择页的文字
+        }))
+        self.assertEqual(parsed["fail_rows"], 1)
+        self.assertIsNone(parsed["rows"][0]["sword_id"])
+
+    def test_read_page_cells_blank_page_is_silent(self):
+        parsed = read_page_cells(self._fake_ocr({}))
+        self.assertEqual(parsed["rows"], [])
+        self.assertEqual(parsed["fail_rows"], 0)
+
+    def test_fallback_message_not_fail_worded(self):
+        """兜底话术是正常播报（如实上报但流程没翻车），不许撞翻车词表"""
+        self.assertFalse(_is_fail("第 3 页逐格精读一行名字都没认出，改用整列读法"))
 
 
 class SwordSnapshotStoreTests(unittest.TestCase):
@@ -454,6 +581,82 @@ class PageTurnConfirmTests(unittest.TestCase):
         new_strip = self._strip(0)
         new_strip[0, :49] = 60               # 零星抖动 < 50 像素阈值
         self.assertFalse(_page_turned([], [], old_strip, new_strip, False))
+
+
+class ScanListPageGateTests(unittest.TestCase):
+    """逐格全落空时的整列兜底必须经过标题门禁：部队选择页（2026-09-20
+    离线验收 221316 实锤）也读得出刀名 token，无标题的整列结果是假行。
+
+    注意常量取值要走 _inv_mod 运行时属性：全量跑时模块可能被前面的
+    漂移测试 reload（覆盖层清空），模块级 import 绑定的是旧对象。"""
+
+    class _Pt:
+        def __init__(self, x, y):
+            self.x, self.y = x, y
+
+    class _FakeMaa:
+        """cell/整列 OCR 走查表（Region 反解 xyxy），标题 OCR 走开关。"""
+        def __init__(self, list_roi, cell_map, legacy_tokens, title_hit):
+            self._list_roi = tuple(list_roi)
+            self._cell_map = {tuple(k): v for k, v in cell_map.items()}
+            self._legacy = [(t, ScanListPageGateTests._Pt(x, y))
+                            for t, (x, y) in legacy_tokens]
+            self._title_hit = title_hit
+            self.list_ocr_calls = 0
+
+        def ocr_all(self, roi, img=None):
+            xyxy = (roi.x, roi.y, roi.x + roi.w, roi.y + roi.h)
+            if xyxy == self._list_roi:
+                self.list_ocr_calls += 1
+                return self._legacy
+            return [(t, ScanListPageGateTests._Pt(x, y))
+                    for t, (x, y) in self._cell_map.get(xyxy, [])]
+
+        def ocr(self, expected, roi, match_mode="contains"):
+            return object() if self._title_hit else None
+
+    def _scan(self, cell_map, legacy_tokens, title_hit):
+        maa = self._FakeMaa(_inv_mod._LIST_ROI, cell_map, legacy_tokens,
+                            title_hit)
+        inst = _inv_mod.SwordInventoryMixin.__new__(_inv_mod.SwordInventoryMixin)
+        inst.maa = maa
+        return inst._scan_list_page(img=None), maa
+
+    def test_named_cells_skip_legacy_entirely(self):
+        # 逐格有名字命中：不碰整列 OCR，不兜底
+        (parsed, fell_back), maa = self._scan(
+            {_inv_mod.ROW_CELL_ROIS[1]["name"]: [_tok("安宅切", 280, 217)]},
+            ROW_ATAGI, title_hit=True)
+        self.assertFalse(fell_back)
+        self.assertEqual(maa.list_ocr_calls, 0)
+        self.assertEqual([r["sword_id"] for r in parsed["rows"]],
+                         ["touken_250_atagi_kiri"])
+
+    def test_blank_cells_with_title_fall_back_to_legacy(self):
+        # 逐格全落空 + fail 行 + 标题在 → 退回整列老路径
+        (parsed, fell_back), maa = self._scan(
+            {_inv_mod.ROW_CELL_ROIS[2]["name"]: [_tok("选择部队", 280, 420)]},
+            ROW_ATAGI, title_hit=True)
+        self.assertTrue(fell_back)
+        self.assertEqual(maa.list_ocr_calls, 1)
+        self.assertEqual([r["sword_id"] for r in parsed["rows"]],
+                         ["touken_250_atagi_kiri"])
+
+    def test_blank_cells_without_title_stay_blank(self):
+        # 部队选择页情形：标题不在，整列读出的刀名是假行，不得采纳
+        (parsed, fell_back), maa = self._scan(
+            {_inv_mod.ROW_CELL_ROIS[2]["name"]: [_tok("选择部队", 280, 420)]},
+            ROW_ATAGI, title_hit=False)
+        self.assertFalse(fell_back)
+        self.assertEqual(maa.list_ocr_calls, 1)   # 整列读了但结果被门禁挡下
+        self.assertEqual([r["sword_id"] for r in parsed["rows"]], [None])
+
+    def test_double_blank_is_quiet_empty(self):
+        # 逐格、整列都空（真空页/转场帧）：不算兜底，安静按空页返回
+        (parsed, fell_back), _maa = self._scan({}, [], title_hit=True)
+        self.assertFalse(fell_back)
+        self.assertEqual(parsed["rows"], [])
+        self.assertEqual(parsed["fail_rows"], 0)
 
 
 if __name__ == "__main__":

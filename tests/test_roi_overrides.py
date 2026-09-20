@@ -147,13 +147,20 @@ class RegistryShapeTests(unittest.TestCase):
 class RegistryDriftTests(unittest.TestCase):
     def test_registry_defaults_match_code_constants(self):
         """注册表 default 与流程写死的常量逐一对齐，谁偷偷改了谁翻车。"""
+        import importlib
+        # 全量跑时 sword_inventory 可能已被前面的模块在真实数据目录下
+        # import，真实 code-rois.json 覆盖会烘进模块常量（2026-09-21 实锤：
+        # 模板工坊里的 title 覆盖让本测试全量翻车、单跑却绿）。reload 前
+        # 把覆盖层临时清空，常量回到代码写死的默认值，测的才是真漂移。
+        with patch.object(roi_overrides, "_load_overrides", lambda: {}):
+            inv = importlib.reload(sword_inventory)
         pairs = [
-            ("sword_inventory.title", sword_inventory._TITLE_ROI),
-            ("sword_inventory.owned", sword_inventory._OWNED_ROI),
-            ("sword_inventory.list", sword_inventory._LIST_ROI),
-            ("sword_inventory.album_title", sword_inventory._ALBUM_TITLE_ROI),
-            ("sword_inventory.album_collect", sword_inventory._COLLECT_ROI),
-            ("sword_inventory.album_grid", sword_inventory._GRID_ROI),
+            ("sword_inventory.title", inv._TITLE_ROI),
+            ("sword_inventory.owned", inv._OWNED_ROI),
+            ("sword_inventory.list", inv._LIST_ROI),
+            ("sword_inventory.album_title", inv._ALBUM_TITLE_ROI),
+            ("sword_inventory.album_collect", inv._COLLECT_ROI),
+            ("sword_inventory.album_grid", inv._GRID_ROI),
             ("formation_editor.list", formation_editor._LIST_ROI),
             ("smith.capacity", smith.SmithMixin._CAPACITY_ROI),
             ("smith.board_name", smith.SmithMixin._BOARD_NAME_ROI),
@@ -164,6 +171,12 @@ class RegistryDriftTests(unittest.TestCase):
         defaults = {entry["id"]: entry["default"] for entry in ROI_REGISTRY}
         for roi_id, constant in pairs:
             self.assertEqual(tuple(constant), defaults[roi_id], roi_id)
+        for row_no in range(1, 6):
+            for field in ("name", "levels", "date", "stats", "badge"):
+                roi_id = f"sword_inventory.row{row_no}.{field}"
+                self.assertEqual(
+                    tuple(inv.ROW_CELL_ROIS[row_no][field]),
+                    defaults[roi_id], roi_id)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,37 @@ _OWNED_ROI = get_roi("sword_inventory.owned", (640, 15, 1065, 50))   # 「所持
 _LIST_ROI = get_roi("sword_inventory.list", (130, 145, 1120, 660))
 _ROWS_PER_PAGE = 5
 
+# 逐格精读 ROI：2026-09-20 老大在模板工坊逐格手工框定（25 格注册进
+# roi_registry，离线实测见交接）。整列 token 汤在小 ROI 上会胶连（数值带
+# 第一行 8 个数字糊成一个 token），逐格读是唯一稳的路；整列读法留作兜底。
+ROW_CELL_ROIS = {
+    1: {"name": get_roi("sword_inventory.row1.name", (160, 202, 402, 233)),
+        "levels": get_roi("sword_inventory.row1.levels", (400, 141, 523, 234)),
+        "date": get_roi("sword_inventory.row1.date", (1023, 141, 1103, 232)),
+        "stats": get_roi("sword_inventory.row1.stats", (521, 144, 1026, 231)),
+        "badge": get_roi("sword_inventory.row1.badge", (170, 143, 231, 205))},
+    2: {"name": get_roi("sword_inventory.row2.name", (162, 303, 398, 335)),
+        "levels": get_roi("sword_inventory.row2.levels", (399, 242, 523, 333)),
+        "date": get_roi("sword_inventory.row2.date", (1023, 242, 1105, 333)),
+        "stats": get_roi("sword_inventory.row2.stats", (521, 244, 1025, 331)),
+        "badge": get_roi("sword_inventory.row2.badge", (170, 243, 232, 306))},
+    3: {"name": get_roi("sword_inventory.row3.name", (162, 403, 399, 434)),
+        "levels": get_roi("sword_inventory.row3.levels", (399, 343, 523, 435)),
+        "date": get_roi("sword_inventory.row3.date", (1023, 342, 1105, 434)),
+        "stats": get_roi("sword_inventory.row3.stats", (521, 345, 1024, 431)),
+        "badge": get_roi("sword_inventory.row3.badge", (170, 345, 233, 406))},
+    4: {"name": get_roi("sword_inventory.row4.name", (162, 504, 400, 534)),
+        "levels": get_roi("sword_inventory.row4.levels", (398, 443, 522, 536)),
+        "date": get_roi("sword_inventory.row4.date", (1023, 443, 1104, 533)),
+        "stats": get_roi("sword_inventory.row4.stats", (521, 446, 1024, 532)),
+        "badge": get_roi("sword_inventory.row4.badge", (169, 444, 232, 507))},
+    5: {"name": get_roi("sword_inventory.row5.name", (161, 604, 400, 637)),
+        "levels": get_roi("sword_inventory.row5.levels", (398, 544, 522, 637)),
+        "date": get_roi("sword_inventory.row5.date", (1025, 544, 1103, 636)),
+        "stats": get_roi("sword_inventory.row5.stats", (521, 546, 1025, 633)),
+        "badge": get_roi("sword_inventory.row5.badge", (171, 546, 232, 608))},
+}
+
 _NEXT_PAGE_SWIPE = ((1100, 400), (200, 400), 2500)  # 右→左慢拖 = 下一页
 _PAGE_TURN_WAIT_S = 3.0            # 翻页樱花转场实测 2~3s
 # 页码条 ROI（x0,y0,x1,y1）：列表底部「◀ 12 13 14 15 16 17 ▶」，当前页
@@ -315,15 +346,194 @@ def _parse_kiwame(texts) -> str | None:
     return f"{year}-{day.replace('/', '-')}" if year and day else None
 
 
+def _joined(tokens) -> str:
+    return re.sub(r"\s+", "", "".join(str(t).strip() for t, _p in tokens))
+
+
+def match_name_text(text: str) -> dict | None:
+    """拼接后的名字文本过名册；命中返回 {sword_id, name_zh}，否则 None。"""
+    if not text:
+        return None
+    found = sword_db.find_by_name(text, fuzzy=True)
+    if not found:
+        return None
+    sid, info = found
+    return {"sword_id": sid, "name_zh": info.get("name_zh") or info["name"]}
+
+
+def _split_label_tokens(tokens) -> list:
+    """把等级格 token 在标签边界切开：粘连巨 token（"刀剑99级乱舞1级…"）
+    摊成序列，原坐标保留（同格同坐标，顺序即语义，给顺序兜底用）。"""
+    items = []
+    for t, pt in tokens:
+        x, y = _as_xy(pt)
+        text = re.sub(r"\s+", "", str(t))
+        if not text:
+            continue
+        pos = 0
+        for m in re.finditer(r"刀[剑剣]|乱舞|生存|疲[劳労]", text):
+            if m.start() > pos:
+                items.append((None, text[pos:m.start()], x, y))
+            items.append((m.group(), m.group(), x, y))
+            pos = m.end()
+        if pos < len(text):
+            items.append((None, text[pos:], x, y))
+    return items
+
+
+def parse_levels_cell(tokens) -> dict:
+    """等级格（刀剑/乱舞/生存/疲劳四行标签+值）token → 行字段。
+
+    两条解析策略取并集（按字段 A 优先）：
+    A. y 锚定配对——2026-09-20 实测小格 OCR 返回的 token 顺序会乱
+       （「刀剑 乱舞 1级 99级」），顺序正则会把「乱舞1级」安给刀剑；
+       y 锚定与旧整列路径同源。
+    B. 标签序切分——整个格子糊成一个巨 token 时所有 token 同坐标，
+       A 无从配对，退回「标签后跟着的值归该标签」。
+    等级格本身就含四个标签，读不出就是 None，如实落库，不静默编数
+    （逐格路径下 _retry_missing_levels 是多余的）。
+    """
+    items = _split_label_tokens(tokens)
+    labels = [(kind, x, y) for kind, _t, x, y in items if kind]
+    levels = [(x, y, int(m.group(1))) for kind, t, x, y in items
+              if not kind and (m := re.fullmatch(r"(\d{1,2})级", t))]
+    bars = [(x, y, int(m.group(1)), int(m.group(2))) for kind, t, x, y in items
+            if not kind and (m := re.fullmatch(r"(\d{1,3})/(\d{1,3})", t))]
+
+    plan_a = {"level": None, "tou_level": None,
+              "survival": None, "survival_max": None,
+              "fatigue": None, "fatigue_max": None}
+    # y 没有区分度（巨 token 全同坐标）时 A 无从配对，交给 B 的顺序兜底
+    ys = [y for _k, _t, _x, y in items]
+    positional_ok = items and (max(ys) - min(ys) >= 5)
+    if positional_ok:
+        for kind, lx, ly in labels:
+            if kind in ("刀剑", "刀剣", "乱舞"):
+                if levels:
+                    _d, _vx, _vy, value = min(
+                        (abs(vy - ly), vx, vy, value) for vx, vy, value in levels)
+                    if kind in ("刀剑", "刀剣"):
+                        plan_a["level"] = value
+                    else:
+                        plan_a["tou_level"] = value
+            else:
+                if bars:
+                    _d, _bx, _by, cur, total = min(
+                        (abs(by - ly), bx, by, cur, total) for bx, by, cur, total in bars)
+                    if kind == "生存":
+                        plan_a["survival"], plan_a["survival_max"] = cur, total
+                    else:
+                        plan_a["fatigue"], plan_a["fatigue_max"] = cur, total
+
+    plan_b = {"level": None, "tou_level": None,
+              "survival": None, "survival_max": None,
+              "fatigue": None, "fatigue_max": None}
+    current = None
+    for kind, t, _x, _y in items:
+        if kind:
+            current = kind
+            continue
+        mv = re.fullmatch(r"(\d{1,2})级", t)
+        mb = re.fullmatch(r"(\d{1,3})/(\d{1,3})", t)
+        if mv and current in ("刀剑", "刀剣", "乱舞"):
+            field = "tou_level" if current == "乱舞" else "level"
+            if plan_b[field] is None:
+                plan_b[field] = int(mv.group(1))
+        elif mb and current in ("生存", "疲劳", "疲労"):
+            if current == "生存" and plan_b["survival"] is None:
+                plan_b["survival"], plan_b["survival_max"] = (int(mb.group(1)),
+                                                              int(mb.group(2)))
+            elif current in ("疲劳", "疲労") and plan_b["fatigue"] is None:
+                plan_b["fatigue"], plan_b["fatigue_max"] = (int(mb.group(1)),
+                                                            int(mb.group(2)))
+
+    out = {k: (plan_a[k] if plan_a[k] is not None else plan_b[k])
+           for k in plan_a}
+    level, tou_level = out["level"], out["tou_level"]
+    # 值域双保险：乱舞等级最多十几级，出现大数值必是刀剑等级被读串
+    if level is not None and tou_level is not None and level <= 15 < tou_level:
+        out["level"], out["tou_level"] = tou_level, level
+    return out
+
+
+def split_stats_roi(roi, inset: int = 2) -> list:
+    """数值带（xyxy）按宽 9 等分成 9 个子格，每格向内缩 inset 防串行。
+
+    小 ROI 的 OCR 会把紧贴的数字胶连成一个 token（真机实测第一行
+    8 个数字糊成「487167385141」），所以必须逐格分别 OCR。
+    第 9 格是「范围」（狭/广/横），不进 stats。
+    """
+    x1, y1, x2, y2 = roi
+    step = (x2 - x1) / 9
+    return [(round(x1 + i * step) + inset, y1,
+             round(x1 + (i + 1) * step) - inset, y2) for i in range(9)]
+
+
+def stats_from_cells(cell_texts: list) -> dict:
+    """9 个子格的 OCR 文本 → stats dict；前 8 格取数字入 _STAT_NAMES，第 9 格忽略。"""
+    stats = {}
+    for name, text in zip(_STAT_NAMES, cell_texts[:8]):
+        m = re.search(r"\d{1,3}", text or "")
+        if m:
+            stats[name] = int(m.group())
+    return stats
+
+
+def parse_date_cell(tokens) -> str | None:
+    """显现日期格：「显现」「2026」「2/12」三个 token → "2026-2-12"。
+    输出形状与 _parse_kiwame 一致；名字沿旧是误命名，禁止拿去推极化。"""
+    year = day = None
+    for t, _p in tokens:
+        t = str(t).strip()
+        if re.fullmatch(r"20\d{2}", t):
+            year = t
+        else:
+            m = re.fullmatch(r"(\d{1,2})\s*/\s*(\d{1,2})", t)
+            if m and year:
+                day = f"{m.group(1)}-{m.group(2)}"
+    return f"{year}-{day}" if year and day else None
+
+
+def read_page_cells(ocr_fn) -> dict:
+    """逐格精读一页：5 行 × (名字/等级/日期 OCR 格 + 数值带 9 等分)，
+    徽章 ROI 挂进 row["_badge_rect"] 由调用方同帧读。
+
+    ocr_fn(roi_xyxy) -> [(text, (x, y)) ...]。返回形状与 parse_list_tokens
+    相同：{"rows", "fail_rows"}。名字格有字却过不了名册 → fail 行
+    （如实上报语义不变）；名字格空白 → 空行（末页尾巴），不算 fail。
+    """
+    rows, fail_rows = [], 0
+    for rois in ROW_CELL_ROIS.values():
+        name_text = _joined(ocr_fn(rois["name"]))
+        name_hit = match_name_text(name_text)
+        if not name_hit:
+            if name_text:
+                fail_rows += 1
+                rows.append({"sword_id": None, "name_zh": None})
+            continue
+        stats_texts = [_joined(ocr_fn(cell))
+                       for cell in split_stats_roi(rois["stats"])]
+        row = {**name_hit, **parse_levels_cell(ocr_fn(rois["levels"])),
+               "stats": stats_from_cells(stats_texts),
+               "kiwame_date": parse_date_cell(ocr_fn(rois["date"])),
+               "locked": None,
+               "_badge_rect": rois["badge"]}
+        rows.append(row)
+    return {"rows": rows, "fail_rows": fail_rows}
+
+
 def parse_owned(text: str) -> tuple:
     """「196/200」→ (196, 200)；读不出返回 (None, None)"""
     m = re.search(r"(\d+)\s*/\s*(\d+)", text or "")
     return (int(m.group(1)), int(m.group(2))) if m else (None, None)
 
 
-def read_row_form_fact(img, base_y, sword_id, templates, proven_combos):
+def read_row_form_fact(img, badge_rect, sword_id, templates, proven_combos):
     """一览行徽章形态事实：同帧刀种+花数匹配 → 复用 team_roster 结论规则。
 
+    badge_rect: 行首徽章格 xyxy（逐格路径来自 ROW_CELL_ROIS，整列兜底
+    路径由调用方按行基线换算 _INV_BADGE_X/_INV_BADGE_DY）；None 或截图
+    失明 → 不出证据。
     确认刀种与名册基线取自 sword_db（一览行名已过名册匹配，身份可靠）；
     白樱花通道不在此页使用（编队页专属 ROI，未做一览同源校准）。
     返回 form_fact dict：status（kiwame/normal/unknown）+ evidence（人读
@@ -334,10 +544,9 @@ def read_row_form_fact(img, base_y, sword_id, templates, proven_combos):
     confirmed_type = norm_sword_type(info.get("type"))
     rarity_base = info.get("rarity")
     region = None
-    if img is not None and base_y:
-        y0, y1 = base_y + _INV_BADGE_DY[0], base_y + _INV_BADGE_DY[1]
-        x0, x1 = _INV_BADGE_X
-        if 0 <= y0 < y1 <= img.shape[0]:
+    if img is not None and badge_rect:
+        x0, y0, x1, y1 = (int(v) for v in badge_rect)
+        if 0 <= y0 < y1 <= img.shape[0] and 0 <= x0 < x1 <= img.shape[1]:
             region = img[y0:y1, x0:x1]
     badge = match_badge_flowers(region, templates, confirmed_type,
                                 proven_combos)
@@ -467,17 +676,19 @@ class SwordInventoryMixin:
             if debug_dir is not None:
                 from PIL import Image
                 Image.fromarray(img[:, :, ::-1]).save(debug_dir / f"page_{page_no:02d}.png")
-            tokens = [(t, (p.x, p.y)) for t, p in
-                      maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
-            parsed = parse_list_tokens(tokens)
+            parsed, fell_back = self._scan_list_page(img)
+            if fell_back:
+                yield (f"[刀帐] 第 {page_no} 页逐格精读一行名字都没认出，"
+                       f"改用整列读法")
             if not parsed["rows"] and page_no > 1:
                 # 整页读空：多半撞上翻页转场尾巴，等两秒重读一次再算数
                 time.sleep(2.0)
                 maa.screenshot(force=True)
                 img = maa.screenshot()
-                tokens = [(t, (p.x, p.y)) for t, p in
-                          maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
-                parsed = parse_list_tokens(tokens)
+                parsed, fell_back = self._scan_list_page(img)
+                if fell_back:
+                    yield (f"[刀帐] 第 {page_no} 页逐格精读一行名字都没认出，"
+                           f"改用整列读法")
             fail_rows_total += parsed["fail_rows"]
             self._retry_missing_levels(parsed["rows"])
             # 同帧读行首徽章（刀种+花数）→ 形态事实随快照落盘
@@ -544,6 +755,7 @@ class SwordInventoryMixin:
         # 翻页扫描每页只处理一次，行即身份
         for row in all_rows:
             row.pop("_base_y", None)
+            row.pop("_badge_rect", None)
         missing = (owned - len(all_rows)) if owned else None
         if owned and missing > 0:
             yield (f"[刀帐] ⚠️ 对账差 {missing} 把（所持 {owned}，认出 {len(all_rows)}），"
@@ -622,15 +834,46 @@ class SwordInventoryMixin:
         只处理身份已确认的行（名字过了名册匹配）；认不出的行没有确认
         刀种，不产生花数证据（规则本体在 team_roster，结论冲突/证据
         不足一律 unknown，原始观测照样落盘供审计与校准）。
+        逐格路径的行自带 _badge_rect；整列兜底路径的行按行基线换算老位置。
         """
         templates = load_flower_templates(
             getattr(self.maa, "resource_dir", "resource/base"))
         for row in rows:
             if not row.get("sword_id"):
                 continue
+            rect = row.get("_badge_rect")
+            if rect is None and row.get("_base_y"):
+                base_y = row["_base_y"]
+                rect = (_INV_BADGE_X[0], base_y + _INV_BADGE_DY[0],
+                        _INV_BADGE_X[1], base_y + _INV_BADGE_DY[1])
             row["form_fact"] = read_row_form_fact(
-                img, row.get("_base_y"), row["sword_id"],
-                templates, _INV_PROVEN_FLOWER_COMBOS)
+                img, rect, row["sword_id"], templates, _INV_PROVEN_FLOWER_COMBOS)
+
+    def _scan_list_page(self, img):
+        """逐格精读一页；整页一行名字都认不出时退回整列 token 汤（老路径）。
+
+        退回条件刻意收紧：逐格有名字命中就不混用；逐格全空且整列也全空
+        （真空页/转场帧）不算兜底，安静按空页处理。返回 (parsed, fell_back)。
+        """
+        maa = self.maa
+
+        def cell_ocr(roi):
+            return [(t, (p.x, p.y)) for t, p in
+                    maa.ocr_all(roi_4to4(*roi), img) or []]
+
+        parsed = read_page_cells(cell_ocr)
+        if any(r.get("sword_id") for r in parsed["rows"]):
+            return parsed, False
+        tokens = [(t, (p.x, p.y)) for t, p in
+                  maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
+        legacy = parse_list_tokens(tokens)
+        if parsed["fail_rows"] or any(r.get("sword_id") for r in legacy["rows"]):
+            # 标题门禁：部队选择页（2026-09-20 离线验收 221316 实锤）同样
+            # 能读出刀名 token，无标题时整列路径读出的全是假行，宁可空页。
+            # maa.ocr 用最近缓存帧（调用点都是刚 force 截图后，与 img 同源）。
+            if maa.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI)):
+                return legacy, True
+        return parsed, False
 
     def _retry_missing_levels(self, rows):
         """整列 OCR 偶发漏读等级：按行窄条单独重读"""
