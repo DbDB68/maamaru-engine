@@ -79,6 +79,7 @@ const stopping = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
 const configStageCollapsed = ref(false)
 const reportStageCollapsed = ref(false)
+const systemStageCollapsed = ref(false)
 const workflowStageCollapsed = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
@@ -429,6 +430,7 @@ function onStageScroll(event: Event, state: Ref<boolean>) {
 function onReportScroll(event: Event) { onStageScroll(event, reportStageCollapsed) }
 function onWorkflowScroll(event: Event) { onStageScroll(event, workflowStageCollapsed) }
 function onConfigScroll(event: Event) { onStageScroll(event, configStageCollapsed) }
+function onSystemScroll(event: Event) { onStageScroll(event, systemStageCollapsed) }
 async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarning.value = ''; message.value = '已暂停自动远征 30 分钟' }
 
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
@@ -496,12 +498,13 @@ watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top:
 watch(tab, value => {
   if (value !== 'tasks') configStageCollapsed.value = false
   if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
+  if (value !== 'system') systemStageCollapsed.value = false
   if (value !== 'workflow') workflowStageCollapsed.value = false
 })
 </script>
 
 <template>
-  <div class="shell" :class="{ 'config-stage-collapsed': configStageCollapsed, 'report-stage-collapsed': reportStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
+  <div class="shell" :class="{ 'config-stage-collapsed': configStageCollapsed, 'report-stage-collapsed': reportStageCollapsed, 'system-stage-collapsed': systemStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
       <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
       <StageActors :active="stageActive" />
@@ -681,7 +684,7 @@ watch(tab, value => {
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page"><SwordArchivePanel /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page"><SystemPanel /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onSystemScroll"><SystemPanel @scroll="onSystemScroll" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
     <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" :busy="startingWorkflow" :running-workflow="runningWorkflow" @started="workflowStarted" @saved="workflowSaved" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
