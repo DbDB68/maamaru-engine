@@ -346,8 +346,32 @@ button { cursor: pointer; }
 .tl-more { margin: 7px 0 0; color: var(--ink-dim); font-size: 9px; line-height: 1.45; }
 @container (min-width: 520px) {
   .tl-wide { display: block; }
-  .tl-compact { display: none; }
+  .tl-mini-meta, .tl-mini-axis, .tl-mini-ticks { display: none; }
+  .tl-agenda { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+  .tl-agenda-title, .tl-more, .tl-compact > .empty { grid-column: 1 / -1; }
+  .tl-agenda-row:nth-of-type(2) { border-top: 0; }
   .tl-card-head p { font-size: 12px; }
+}
+@container (min-width: 720px) {
+  .timeline-card { padding: 18px 20px; }
+  .tl-card-head { margin-bottom: 18px; }
+  .tl-card-head h3 { font-size: 18px; }
+  .tl-card-head > time { padding: 4px 9px; font-size: 11px; }
+  .tl-ticks { height: 19px; margin-left: 64px; }
+  .tl-tick { font-size: 11px; }
+  .tl-axis { margin-left: 64px; padding-top: 18px; }
+  .tl-gridline, .tl-marker, .tl-now { top: 16px; }
+  .tl-marker i { top: -16px; font-size: 11px; }
+  .tl-lane { height: 38px; margin-bottom: 9px; border-radius: 6px; }
+  .tl-lane-tag { left: -64px; width: 54px; font-size: 12px; font-weight: 650; }
+  .tl-lane-empty { font-size: 12px; }
+  .tl-block { top: 6px; bottom: 6px; padding: 0 7px; border-radius: 4px; font-size: 11px; line-height: 24px; }
+  .tl-agenda { margin-top: 17px; padding-top: 14px; }
+  .tl-agenda-title { margin-bottom: 3px; font-size: 12px; }
+  .tl-agenda-row { padding: 9px 0; grid-template-columns: 40px 8px minmax(0, 1fr); gap: 9px; }
+  .tl-agenda-row > time { font-size: 11px; }
+  .tl-agenda-copy b { font-size: 12px; }
+  .tl-agenda-copy small { font-size: 10px; }
 }
 @media (max-width: 720px) {
   .timeline-card { grid-column: auto; }
@@ -1473,6 +1497,7 @@ body[data-theme='pixel'] .home-dashboard .resource-icon {
 .report-page { overflow: auto; }
 .report-panel { --section-icon: url('/static/img/ui/menuList.png'); min-height: 100%; color: var(--ink); background: var(--paper-panel); }
 .report-content { padding: 10px 18px 18px; }
+.report-content > .timeline-card { margin-bottom: 14px; }
 .report-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .report-head h2, .report-head p, .report-events h3, .report-observation h3 { margin: 0; }
 .report-head p, .report-events header small { margin-top: 4px; color: var(--ink-dim); font-size: 12px; }

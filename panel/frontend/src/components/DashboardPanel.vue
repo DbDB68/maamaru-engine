@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
-import DayTimeline from './DayTimeline.vue'
 import { runTitle } from './report/reportModel'
 
 const emit = defineEmits<{ openReport: [] }>()
@@ -187,7 +186,6 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <p v-if="data?.naihanka?.started_at">🌱 {{ data.naihanka.started_at }} 开始</p>
         <p v-else class="empty">内番闲着呢</p>
       </PaperCard>
-      <DayTimeline />
     </div>
   </section>
 </template>

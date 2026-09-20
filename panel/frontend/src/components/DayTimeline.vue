@@ -96,6 +96,7 @@ const expeditionBlocks = computed(() => {
   return data.value.expeditions.map((e) => {
     const team = TEAM_NAMES[e.team_no] ?? String(e.team_no)
     const stateLabel = STATE_LABELS[e.state] ?? e.state
+    const visibleDuration = Math.min(Math.max(e.duration_min, 10), DAY - e.time_min)
     const bits = [`${fmtMin(e.time_min)} 部队${team} ${e.map_code}`]
     if (e.duration_min) bits[0] += `（${durationText(e.duration_min)}）`
     bits.push(stateLabel)
@@ -106,7 +107,7 @@ const expeditionBlocks = computed(() => {
       key: `${e.time_min}-${e.team_no}-${e.map_code}`,
       minute: e.time_min,
       left: pct(e.time_min),
-      width: Math.max(pct(Math.max(e.duration_min, 10)), 0.7),
+      width: Math.max(pct(visibleDuration), 0.7),
       cls: [STATE_CLASSES[e.state] ?? 'is-pending', e.enabled ? '' : 'is-disabled'],
       title: bits.join(' · '),
       text: e.map_code,

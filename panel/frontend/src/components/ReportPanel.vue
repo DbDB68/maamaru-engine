@@ -8,6 +8,7 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
+import DayTimeline from './DayTimeline.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
@@ -1153,6 +1154,7 @@ onMounted(async () => {
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
+      <DayTimeline />
 
       <div v-if="honmaruTab === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
