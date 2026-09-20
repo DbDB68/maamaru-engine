@@ -271,6 +271,43 @@ button { cursor: pointer; }
 .slot-chip.is-done { color: #2e6b34; background: #dff0da; border-color: #93c58a; }
 .slot-chip.is-expired, .slot-chip.is-missed { color: #7d7468; background: #e9e2d4; border-color: #c9bda9; }
 .slot-chip.is-failed { color: #a83226; background: #f6dcd7; border-color: #d8968b; font-weight: 700; }
+.slot-chip.is-ok { color: #2e6b34; background: #dff0da; border-color: #93c58a; }
+.slot-chip.is-stopped { color: #7d7468; background: #e9e2d4; border-color: #c9bda9; }
+.slot-chip.is-running { color: #1f5b8f; background: #dcebf7; border-color: #8fb8dd; }
+
+/* ── 仪表盘「今天的时间表」24h 时间轴 ── */
+.timeline-card { grid-column: 1 / -1; }
+.tl-chart { position: relative; }
+.tl-ticks { position: relative; height: 15px; margin-left: 46px; }
+.tl-tick { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--ink-soft); }
+.tl-tick:first-child { transform: none; }
+.tl-tick.tl-tick-end { transform: translateX(-100%); }
+.tl-axis { position: relative; margin-left: 46px; padding: 14px 0 2px; }
+.tl-gridline { position: absolute; top: 12px; bottom: 0; width: 1px; background: rgba(120, 105, 82, 0.14); }
+.tl-marker { position: absolute; top: 12px; bottom: 0; border-left: 1px dashed #b08d4f; pointer-events: none; }
+.tl-marker i { position: absolute; top: -13px; left: 3px; font-size: 10px; font-style: normal; color: #8a5a12; white-space: nowrap; }
+.tl-now { position: absolute; top: 12px; bottom: 0; border-left: 2px solid #a83226; pointer-events: none; }
+.tl-lane { position: relative; height: 24px; margin-bottom: 5px; background: rgba(255, 250, 241, 0.6); border: 1px solid var(--line); border-radius: 4px; }
+.tl-lane-tag { position: absolute; left: -46px; top: 50%; transform: translateY(-50%); width: 40px; text-align: right; font-size: 11px; color: var(--ink-soft); }
+.tl-lane-empty { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--ink-soft); }
+.tl-block { position: absolute; top: 3px; bottom: 3px; overflow: hidden; padding: 0 4px; border: 1px solid transparent; border-radius: 3px; font-size: 10px; line-height: 16px; white-space: nowrap; text-overflow: ellipsis; cursor: default; }
+.tl-block.is-pending { color: var(--ink-soft); background: #eee7d8; border-color: var(--line); }
+.tl-block.is-waiting { color: #8a5a12; background: #f7e8c4; border-color: #ddb46a; }
+.tl-block.is-ready { color: #1f5b8f; background: #dcebf7; border-color: #8fb8dd; }
+.tl-block.is-done, .tl-block.is-ok { color: #2e6b34; background: #dff0da; border-color: #93c58a; }
+.tl-block.is-expired, .tl-block.is-missed, .tl-block.is-stopped { color: #7d7468; background: #e9e2d4; border-color: #c9bda9; }
+.tl-block.is-failed { color: #a83226; background: #f6dcd7; border-color: #d8968b; }
+.tl-block.is-running { color: #1f5b8f; background: #dcebf7; border: 1px solid #4f86c6; }
+.tl-block.is-disabled { opacity: 0.45; border-style: dashed; }
+.tl-hint { margin: 8px 0 0; font-size: 12px; color: #8a5a12; }
+.tl-list { display: none; }
+@media (max-width: 720px) {
+  .timeline-card { grid-column: auto; }
+  .tl-chart { display: none; }
+  .tl-list { display: block; }
+  .tl-list-row { margin: 4px 0; }
+  .tl-list-row .slot-chip { margin-left: 0; white-space: normal; }
+}
 .custom-routes { min-width: 0; }
 .system-panel { width: 100%; max-width: none; height: 100%; margin: 0; overflow: auto; }
 .system-layout { display: grid; grid-template-columns: 190px 1fr; min-height: 520px; }

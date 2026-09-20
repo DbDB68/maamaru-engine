@@ -879,3 +879,38 @@ export interface ExpeditionSchedule {
   presets: Record<string, { lanes: Array<Array<{ offset_min: number; map_code: string; duration_min: number }>>; totals: string }>
   today?: ExpeditionToday
 }
+
+export interface DayTimelineMarker {
+  time_min: number
+  label: string
+  kind: string
+}
+
+export interface DayTimelineExpedition {
+  time_min: number
+  duration_min: number
+  team_no: number
+  map_code: string
+  state: string
+  blocked_reason: string
+  late_min: number
+  enabled: boolean
+}
+
+export interface DayTimelineRun {
+  script: string
+  label: string
+  started_at: number
+  ended_at: number | null
+  status: string
+  tone: 'ok' | 'failed' | 'stopped' | 'running'
+}
+
+export interface DayTimeline {
+  now: number
+  day_start: number
+  markers: DayTimelineMarker[]
+  expeditions: DayTimelineExpedition[]
+  runs: DayTimelineRun[]
+  hint: string | null
+}

@@ -431,6 +431,19 @@ class TelemetryStore:
         except Exception:
             pass
 
+    def runs_between(self, start_ts: float, end_ts: float) -> list[dict[str, Any]]:
+        """返回与 [start_ts, end_ts) 时间窗有重叠的运行记录（只读，供仪表盘时间轴用）。"""
+        try:
+            rows = self._conn().execute(
+                "SELECT run_id, script, started_at, ended_at, status FROM runs"
+                " WHERE started_at < ? AND (ended_at IS NULL OR ended_at >= ?)"
+                " ORDER BY started_at",
+                (end_ts, start_ts),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
     def record_ocr(self, *, kind: str, roi: list[int], tokens: list[dict],
                    expected: str | None = None, match_mode: str | None = None,
                    matched: bool | None = None, error: str | None = None) -> None:

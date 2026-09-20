@@ -1792,6 +1792,20 @@ async def api_get_schedule():
             "today": today_projection(cfg)}
 
 
+@app.get("/api/day-timeline")
+async def api_day_timeline():
+    """仪表盘 24 小时只读时间轴：远征班次 + 任务运行条 + 参考线。"""
+    from .day_timeline import build_day_timeline
+    runner = get_runner()
+    active = None
+    if runner.is_running and runner.current_script:
+        active = {"script": runner.current_script,
+                  "started": runner.current_started}
+    return build_day_timeline(
+        script_labels={k: v["label"] for k, v in _SCRIPTS.items()},
+        active=active)
+
+
 @app.post("/api/expedition-schedule")
 async def api_save_schedule(request: Request):
     from .scheduler import load_config, save_config
