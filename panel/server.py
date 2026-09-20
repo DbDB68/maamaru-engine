@@ -691,6 +691,14 @@ def _write_dispatch_result(key: str, outcome: str, detail: str = ""):
         pass
 
 
+def _dispatch_failure_detail(message: str) -> str:
+    """Turn the dispatch flow's terminal line into one player-facing reason."""
+    detail = str(message or "").strip()
+    if detail.startswith("[远征]"):
+        detail = detail[len("[远征]"):].strip()
+    return detail or "派遣流程提前停止，原因没有读清"
+
+
 def _build_dispatch(agent, config_path, params):
     """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。
 
@@ -727,12 +735,21 @@ def _build_dispatch(agent, config_path, params):
         time.sleep(min(5, remain))
         remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
     yield from agent.collect_expedition_stream(redispatch=None)
-    yield from agent.expedition_stream(
-        era=m["era"], map_slot=m["slot"],
-        team_no=team_no)
+    dispatch_messages = []
+    for message in agent.expedition_stream(
+            era=m["era"], map_slot=m["slot"], team_no=team_no):
+        dispatch_messages.append(str(message))
+        yield message
     if scheduled:
-        _write_dispatch_result(slot_key, "done", "派遣流程走完")
-        # 确认仍以 expeditions.json 的 dispatched_at 变化为准，结果文件只是辅助
+        terminal = dispatch_messages[-1] if dispatch_messages else ""
+        if "✅" in terminal and "已出发" in terminal:
+            _write_dispatch_result(slot_key, "done", "已看到部队出发")
+            # 确认仍以 expeditions.json 的 dispatched_at 变化为准，结果文件只是辅助
+        else:
+            # 流程自己已经明确停下时，不能再伪装成「流程走完」交给排班反复重试。
+            # 这里保留最后一句具体原因，排班将本班终止并醒目提醒玩家。
+            _write_dispatch_result(
+                slot_key, "failed", _dispatch_failure_detail(terminal))
 
 
 def _expedition_remaining(record: dict) -> int:

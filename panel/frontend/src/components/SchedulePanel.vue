@@ -23,7 +23,7 @@ function chipFor(item: ExpeditionSlotStatus | undefined): { text: string; cls: s
     case 'ready': return { text: '即将接管', cls: 'is-ready' }
     case 'dispatched': return { text: item.late_min ? `已派出（晚${item.late_min}分钟）` : '已派出', cls: 'is-done' }
     case 'expired': return { text: '已过期跳过', cls: 'is-expired' }
-    case 'failed_unknown': return { text: '未确认', cls: 'is-failed' }
+    case 'failed_unknown': return { text: `派遣停止${item.blocked_reason ? `（${item.blocked_reason}）` : ''}`, cls: 'is-failed' }
     case 'missed': return { text: '错过（面板没在线）', cls: 'is-missed' }
     default: return { text: '待点', cls: 'is-pending' }
   }

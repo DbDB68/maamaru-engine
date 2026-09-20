@@ -339,15 +339,54 @@ class GatekeeperTests(unittest.TestCase):
             agent = Mock()
             agent.maa.exists.return_value = True
             agent.collect_expedition_stream.return_value = iter(["收菜"])
-            agent.expedition_stream.return_value = iter(["派出"])
+            agent.expedition_stream.return_value = iter([
+                "[远征] ✅ 部队2已出发：时代2，收工"])
             messages = list(server._build_dispatch(
                 agent, "unused", self._params("k10")))
-            self.assertEqual(messages, ["收菜", "派出"])
+            self.assertEqual(messages, [
+                "收菜", "[远征] ✅ 部队2已出发：时代2，收工"])
             result = json.loads((Path(d) / "dispatch_result.json")
                                 .read_text(encoding="utf-8"))
             self.assertEqual(result["outcome"], "done")
             self.assertEqual(result["key"], "k10")
             agent.expedition_stream.assert_called_once()
+
+    def test_dispatch_flow_failure_is_written_with_reason(self):
+        from panel import server
+        with tempfile.TemporaryDirectory() as d, \
+                patch.object(server, "STATUS_DIR", Path(d)):
+            agent = Mock()
+            agent.maa.exists.return_value = True
+            agent.collect_expedition_stream.return_value = iter(["收菜"])
+            agent.expedition_stream.return_value = iter([
+                "[远征] 找不到可用的远征开始按钮；这支部队可能不满足该图条件，"
+                "或仍在远征，停止派遣"])
+            list(server._build_dispatch(
+                agent, "unused", self._params("k11")))
+            result = json.loads((Path(d) / "dispatch_result.json")
+                                .read_text(encoding="utf-8"))
+            self.assertEqual(result["outcome"], "failed")
+            self.assertEqual(result["key"], "k11")
+            self.assertIn("不满足该图条件", result["detail"])
+
+    def test_explicit_dispatch_failure_is_terminal_without_retry(self):
+        cfg = _custom_cfg()
+        now = _today_at(8, 10)
+        due = _due(cfg)
+        s.tick(cfg, due, now, runner_busy=False, emulator_ok=True, records={})
+        key = due[0]["key"]
+        slot = cfg["automation"]["slot_states"][key]
+
+        events, changed = s.resolve_inflight(
+            cfg, key, None, now + 20, {},
+            {"key": key, "outcome": "failed",
+             "detail": "这支部队可能不满足该图条件"})
+
+        self.assertTrue(changed)
+        self.assertEqual(slot["state"], s.SLOT_FAILED)
+        self.assertEqual(slot["next_retry_at"], 0)
+        self.assertIn("不再自动重试", events[0][1])
+        self.assertTrue(_is_fail(events[0][1]), events[0][1])
 
 
 class MessageWordlistTests(unittest.TestCase):

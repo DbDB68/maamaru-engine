@@ -436,6 +436,15 @@ def resolve_inflight(cfg: dict, slot_key: str, before, now: float,
     if not slot or slot.get("state") in TERMINAL_STATES:
         return [], False
     if (isinstance(result, dict) and result.get("key") == slot_key
+            and result.get("outcome") == "failed"):
+        detail = str(result.get("detail") or "派遣流程提前停止，原因没有读清")
+        slot["state"] = SLOT_FAILED
+        slot["blocked_reason"] = detail
+        slot["attempts"] = int(slot.get("attempts", 0)) + 1
+        slot["next_retry_at"] = 0
+        return [(slot_key, f"[排班] ✗ {_slot_label(slot)} 派遣已停止：{detail}。"
+                           "这班不再自动重试，请检查队伍条件")], True
+    if (isinstance(result, dict) and result.get("key") == slot_key
             and result.get("outcome") == "refused"):
         # 接管门卫拒了：画面多半主人在手动玩。冷却后重试，不猛试；
         # 门卫没动手点屏，不算一次派遣尝试（attempts 不加）。

@@ -196,9 +196,11 @@ class ExpeditionMixin:
         if not start:
             start_ocr = cfg["start_ocr"]
             start = self.maa.ocr(expected=start_ocr["expected"],
-                                 roi=roi_4to4(*start_ocr["roi"]))
+                                 roi=roi_4to4(*start_ocr["roi"]),
+                                 match_mode="exact")
         if not start:
-            yield "[远征] 找不到远征开始按钮（条件不满足/部队已在远征？），停"
+            yield ("[远征] 找不到可用的远征开始按钮；这支部队可能不满足该图条件，"
+                   "或仍在远征，停止派遣")
             return
         self.maa.click(start)
         time.sleep(1.5)

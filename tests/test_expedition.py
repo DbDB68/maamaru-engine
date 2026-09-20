@@ -103,6 +103,7 @@ class DispatchVerifyTests(unittest.TestCase):
         def __init__(self, map_visible=True):
             self.map_visible = map_visible
             self.ocr_clicks = []
+            self.ocr_modes = []
 
         def screenshot(self, force=False):
             pass
@@ -111,6 +112,7 @@ class DispatchVerifyTests(unittest.TestCase):
             self.ocr_clicks.append((pt.x, pt.y))
 
         def ocr(self, expected, roi, match_mode="contains"):
+            self.ocr_modes.append((expected, match_mode))
             return Point(1, 1)
 
         def ocr_all(self, roi):
@@ -179,6 +181,7 @@ class DispatchVerifyTests(unittest.TestCase):
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
 
         self.assertTrue(any("已出发" in m for m in logs))
+        self.assertIn(("远征开始", "exact"), maa.ocr_modes)
 
 
 # ==================== 结算观察哨（收菜/扫地/导航共用） ====================
