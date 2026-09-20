@@ -75,6 +75,9 @@ class OsakaFlow(OsakaMixin):
     def _deny_heavy_injury_warning(self, cfg):
         return False
 
+    def _expedition_takeover_requested(self, now=None):
+        return False
+
     # ---- 巡逻循环里的感知/操作：按剧本走 ----
     def _osaka_floor_done(self, cfg):
         if self._floor_done_seq:

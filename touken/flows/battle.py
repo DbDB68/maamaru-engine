@@ -4,10 +4,12 @@
 （从 touken_agent_engine_v2.py 原样搬家，逻辑未改）
 """
 
+import json
 import re
 import time
 
 from ..maa_adapter import roi_4to4, Point
+from ..runtime_paths import STATE_DIR
 
 
 def find_deploy_button(maa, cfg: dict):
@@ -40,6 +42,24 @@ def find_deploy_button(maa, cfg: dict):
 
 class BattleMixin:
     """地图/部队/阵形选择。依赖宿主类的 _click_point、_click_template_config。"""
+
+    # ==================== 远征排班接管旗标 ====================
+
+    def _expedition_takeover_requested(self, now: float = None) -> bool:
+        """远征排班有班次在等自家任务收工（waiting_busy）时落的旗标。
+
+        玩法主循环只在每圈之间查一次：命中就正常收工，把画面让给排班；
+        只读文件，绝不碰游戏画面，更不许在图内战斗中途响应。
+        旗标超过 2 小时没人认领按作废处理（落旗的面板多半已经关了）。
+        """
+        try:
+            raw = json.loads((STATE_DIR / "expedition_takeover.json")
+                             .read_text(encoding="utf-8"))
+            requested_at = float(raw.get("requested_at", 0))
+        except (OSError, ValueError, TypeError):
+            return False
+        age = (time.time() if now is None else now) - requested_at
+        return 0 <= age <= 2 * 3600
 
     def _cancel_equip_warning(self, cfg):
         """安全退出“刀装未满”弹窗；返回 None 表示当前没有该弹窗。"""

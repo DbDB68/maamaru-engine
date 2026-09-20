@@ -198,6 +198,10 @@ class SortieMixin:
         # auto_equip；若先检测到伤势，仍按 injury_action 处理并停止或续跑。
         auto_equip_active = bool(auto_equip)
         while loop_no <= max_loops:
+            if self._expedition_takeover_requested():
+                tag = "[异去]" if cfg_key == "yosari" else "[出阵]"
+                yield f"{tag} 🚩 远征排班请求接管：不开新圈，安全收工"
+                return
             if self.current_location != "出阵":
                 for nav_msg in self.navigate_to_stream("出阵"):
                     yield nav_msg

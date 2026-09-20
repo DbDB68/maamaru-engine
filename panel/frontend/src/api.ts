@@ -2,6 +2,7 @@ import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, 
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 import type { FormationSwapEvent, HonmaruFormationProfile } from './types'
+import type { ExpeditionSchedule } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -153,7 +154,7 @@ export const api = {
   saveEmulatorConfig: (value: { adb_address: string }) => request<{ ok: boolean; adb_address: string }>('/api/emulator-config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
-  expeditionSchedule: () => request<any>('/api/expedition-schedule'),
+  expeditionSchedule: () => request<ExpeditionSchedule>('/api/expedition-schedule'),
   saveExpeditionSchedule: (value: any) => request<{ ok: boolean }>('/api/expedition-schedule', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),

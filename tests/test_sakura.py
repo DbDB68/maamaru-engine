@@ -149,6 +149,7 @@ class SortieRotateHookTests(unittest.TestCase):
         host._click_point = lambda point: None
         host._wait_for_team_select = lambda cfg, attempts=12, open_after=2: True
         host._pick_team = lambda team_no: True
+        host._expedition_takeover_requested = lambda now=None: False
         host._team_injury_status = lambda cfg: None
         host.saved_records = []
         host._save_team_record = lambda cfg, record_no=1: (

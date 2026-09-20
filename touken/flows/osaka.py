@@ -276,14 +276,19 @@ class OsakaMixin:
                 injury_reached = bool(
                     injury and self._injury_reaches_threshold(
                         injury, repair_threshold))
+                # 远征排班在等画面：层末是挖地唯一的安全收工点（行军决策点），
+                # 绝不挖到一半响应；和「目标达成」走同一条回本丸收尾的路。
+                takeover = self._expedition_takeover_requested()
                 if injury and not injury_reached:
                     yield f"[挖地] 部队出现{injury}，尚未达到停止条件，继续向下挖"
-                if goal_reached or injury_reached:
+                if goal_reached or injury_reached or takeover:
                     reasons = []
                     if goal_reached:
                         reasons.append("目标层数已完成")
                     if injury_reached:
                         reasons.append(f"部队出现{injury}")
+                    if takeover:
+                        reasons.append("远征排班请求接管")
                     yield f"[挖地] {'，'.join(reasons)}，准备返回本丸收尾"
                     returned = self._return_home_from_march(cfg)
                     if returned:
@@ -295,6 +300,9 @@ class OsakaMixin:
                     if goal_reached:
                         yield (f"[挖地] 目标层数完成，收工；期间手入 {_repair_count} 次，"
                                f"累计使用加速符 {_speedups_used} 个")
+                        return
+                    if takeover:
+                        yield "[挖地] 🚩 远征排班请求接管：不开新层，安全收工"
                         return
 
                     action = str(injury_action or "continue")

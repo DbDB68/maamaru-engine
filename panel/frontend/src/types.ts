@@ -819,3 +819,63 @@ export interface TemplateLabCodeRoi {
   effective: TemplateLabRectXyxy
   overridden: boolean
 }
+
+// ── 远征排班：班次实况（automation.slot_states 的前端投影）──
+export type ExpeditionSlotState =
+  | 'pending'         // 还没到点
+  | 'waiting_busy'    // 到点但自家任务在跑
+  | 'waiting_unknown' // 接管门卫没过 / 游戏没在跑 / 上次派遣没确认
+  | 'ready'           // 即将接管（15 秒预告窗口）
+  | 'dispatched'      // 已确认派出
+  | 'expired'         // 超过最大延迟，明确跳过
+  | 'failed_unknown'  // 连续 3 次无法确认结果
+  | 'missed'          // 计划时间已过，但那会儿面板没在线
+
+export interface ExpeditionSlotStatus {
+  time: string
+  team_no: number
+  map_code: string
+  state: ExpeditionSlotState
+  blocked_reason?: string
+  next_retry_in_min?: number | null
+  late_min?: number
+}
+
+export interface ExpeditionToday {
+  preset: Array<ExpeditionSlotStatus & { lane: number; offset_min: number }>
+  custom: Array<ExpeditionSlotStatus & { index: number }>
+}
+
+export interface ExpeditionAutomation {
+  enabled: boolean
+  mode: 'preset' | 'custom'
+  preset: string
+  start_time: string
+  teams: number[]
+  capitalist: boolean
+  paused_until: string
+  /** 一班最多允许晚多少分钟；资本家模式补跑窗口是它的 4 倍封顶 */
+  max_delay_min: number
+  last_runs?: Record<string, string>
+  lane_shifts?: Record<string, number>
+  slot_states?: Record<string, unknown>
+}
+
+export interface ExpeditionScheduleEntry {
+  time: string
+  team_no: number
+  map_code: string
+  map_name?: string
+  enabled: boolean
+  last_fired?: string
+}
+
+export interface ExpeditionSchedule {
+  version: number
+  common_plan: Array<{ team_no: number; map_code: string; enabled: boolean }>
+  automation: ExpeditionAutomation
+  entries: ExpeditionScheduleEntry[]
+  maps: Array<{ code: string; era: number; slot: number; name: string; duration_min: number; duration_text: string }>
+  presets: Record<string, { lanes: Array<Array<{ offset_min: number; map_code: string; duration_min: number }>>; totals: string }>
+  today?: ExpeditionToday
+}

@@ -178,6 +178,10 @@ class PumpkinMixin:
                 yield f"[南瓜] ⚠️ 已 {int(time.time() - last_progress)} 秒无进展（出阵/换板/拿刀都没有），疑似卡死，强制停。你去看下模拟器画面"
                 return
 
+            if self._expedition_takeover_requested():
+                yield "[南瓜] 🚩 远征排班请求接管：不开新圈，安全收工"
+                break
+
             # 3.1 确保在活动界面（获得动画/弹窗可能盖着，点安全区扒拉掉）
             if not self._ensure_on_board(cfg):
                 yield "[南瓜] 回不到活动界面，卡在未知画面，停"

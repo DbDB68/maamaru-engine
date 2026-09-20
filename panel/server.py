@@ -680,18 +680,43 @@ def _build_repair(agent, config_path, params):
         speedup_teams=speedup_teams)
 
 
+def _write_dispatch_result(key: str, outcome: str, detail: str = ""):
+    """派遣结果落盘：排班靠它区分「门卫拒了（refused）」和「点了但没成」。"""
+    try:
+        (STATUS_DIR / "dispatch_result.json").write_text(json.dumps({
+            "key": key, "outcome": outcome,
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"), "detail": detail,
+        }, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _build_dispatch(agent, config_path, params):
-    """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。"""
+    """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。
+
+    scheduled（排班触发）先过接管门卫：只读认当前位置，认得出本丸才继续；
+    认不出（战斗中/未知界面 = 多半主人在手动玩）写 refused 结果文件后正常退出。
+    """
     from .scheduler import find_map
     code = params.get("map_code") or ""
     team_no = _i(params, "team_no", 2)
+    slot_key = str(params.get("slot_key") or "")
+    scheduled = bool(params.get("scheduled"))
     m = find_map(code)
     if not m:
         yield f"[远征] 不知道图 {code} 是哪张，没派"
         return
+    if scheduled:
+        agent.maa.screenshot(force=True)
+        if not agent.maa.exists("目录.png", threshold=0.7):
+            detail = "画面不在本丸，像主人在手动玩"
+            _write_dispatch_result(slot_key, "refused", detail)
+            yield f"[远征] {detail}，这班交回排班"
+            return
     records = _read_expedition_records()
     remain = _expedition_remaining(records.get(str(team_no), {}))
     if params.get("scheduled") and remain > 0:
+        _write_dispatch_result(slot_key, "refused", "队伍仍在外面远征")
         yield "[远征] 队伍仍在外面，交回排班等待，不占用任务位置"
         return
     if remain > 600:
@@ -705,6 +730,9 @@ def _build_dispatch(agent, config_path, params):
     yield from agent.expedition_stream(
         era=m["era"], map_slot=m["slot"],
         team_no=team_no)
+    if scheduled:
+        _write_dispatch_result(slot_key, "done", "派遣流程走完")
+        # 确认仍以 expeditions.json 的 dispatched_at 变化为准，结果文件只是辅助
 
 
 def _expedition_remaining(record: dict) -> int:
@@ -1758,9 +1786,10 @@ async def api_agent(request: Request):
 
 @app.get("/api/expedition-schedule")
 async def api_get_schedule():
-    from .scheduler import load_config, map_options, preset_payload
+    from .scheduler import load_config, map_options, preset_payload, today_projection
     cfg = load_config()
-    return {**cfg, "maps": map_options(), "presets": preset_payload()}
+    return {**cfg, "maps": map_options(), "presets": preset_payload(),
+            "today": today_projection(cfg)}
 
 
 @app.post("/api/expedition-schedule")
@@ -1793,6 +1822,10 @@ async def api_save_schedule(request: Request):
         })
     auto_in = body.get("automation", {})
     auto = cfg.get("automation", {})
+    try:
+        max_delay = int(auto_in.get("max_delay_min", auto.get("max_delay_min", 30)))
+    except (TypeError, ValueError):
+        max_delay = 30
     auto.update({
         "enabled": bool(auto_in.get("enabled", False)),
         "mode": auto_in.get("mode") if auto_in.get("mode") in ("preset", "custom") else "preset",
@@ -1801,6 +1834,7 @@ async def api_save_schedule(request: Request):
         "teams": [int(x) for x in auto_in.get("teams", [2, 3, 4])][:3],
         "capitalist": bool(auto_in.get("capitalist", False)),
         "paused_until": str(auto_in.get("paused_until", auto.get("paused_until", ""))),
+        "max_delay_min": min(1440, max(1, max_delay)),
     })
     cfg.update({"entries": clean, "common_plan": common, "automation": auto})
     save_config(cfg)

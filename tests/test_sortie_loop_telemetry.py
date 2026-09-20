@@ -93,6 +93,9 @@ class _LoopHost(SortieMixin):
     def _click_point(self, pt):
         pass
 
+    def _expedition_takeover_requested(self, now=None):
+        return False  # 测试宿主：默认没有远征排班等接管
+
     def _wait_for_team_select(self, cfg, attempts=12, open_after=2):
         return True
 

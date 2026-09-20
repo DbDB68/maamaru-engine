@@ -189,6 +189,9 @@ class HanafudaTelemetryTests(unittest.TestCase):
             def navigate_to_stream(self, target):
                 return iter(())
 
+            def _expedition_takeover_requested(self, now=None):
+                return False
+
             def set_progress(self, value):
                 pass
 

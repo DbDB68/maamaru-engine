@@ -39,6 +39,9 @@ class _Host(SortieMixin):
     def _click_point(self, pt):
         pass
 
+    def _expedition_takeover_requested(self, now=None):
+        return False
+
     def _wait_for_team_select(self, cfg, attempts=12, open_after=2):
         return True
 

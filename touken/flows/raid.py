@@ -91,6 +91,9 @@ class RaidMixin:
 
         # ========== 3. 逐圈跑 ==========
         for round_no in range(1, max_rounds + 1):
+            if self._expedition_takeover_requested():
+                yield "[RAID] 🚩 远征排班请求接管：不开新圈，安全收工"
+                return
             yield f"[RAID] ===== 第 {round_no}/{max_rounds} 圈 ====="
 
             # 3.1 选难度。旧配置只有图4坐标；其他图未标定时安全停止。

@@ -133,6 +133,9 @@ class SakuraMixin:
 
         # ========== 1-1 单曲循环 ==========
         for rd in range(1, max_rounds + 1):
+            if self._expedition_takeover_requested():
+                yield "[刷花] 🚩 远征排班请求接管：不开新圈，安全收工"
+                return
             yield f"[刷花] ===== 第 {rd} 圈 1-1（疲劳 {fatigue}/{target}） ====="
             round_done = False
             stop = False
