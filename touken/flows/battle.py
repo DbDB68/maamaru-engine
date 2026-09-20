@@ -4,6 +4,7 @@
 （从 touken_agent_engine_v2.py 原样搬家，逻辑未改）
 """
 
+import re
 import time
 
 from ..maa_adapter import roi_4to4, Point
@@ -252,7 +253,12 @@ class BattleMixin:
                 attribution="confirmed", **change)
 
     def _recover_ticket_stream(self, cfg: dict, tag: str = "[出阵]"):
-        """通用手形补充：补充 → 恢复1个 → 确定。"""
+        """通用手形补充。两种 UI 都支持：
+        - 联队战式：补充 → 恢复1个 → 确定（配了 recover_button）；
+        - 花札滑条式：补充 → 数量页确认 → 小判消耗确认 → 结果提示确认
+          （不配 recover_button；三连确认是同一张图，见到就点、消失
+          为止，最多 3 次防死循环。数量页默认补 1 个，可配
+          quantity_ocr 复核数量，读出来不是 1 就停手不点）。"""
         self._recover_ok = False
         rec_cfg = cfg["ticket_recover"]
 
@@ -264,24 +270,58 @@ class BattleMixin:
         self.maa.click(refill)
         time.sleep(1.5)
 
-        self.maa.screenshot(force=True)
-        recover = self._match_template_config(rec_cfg["recover_button"])
-        if not recover:
-            yield f"{tag} 找不到恢复1个按钮"
-            return
-        self.maa.click(recover)
-        time.sleep(1.5)
+        recover_cfg = rec_cfg.get("recover_button", {})
+        slider_style = not recover_cfg.get("template")
+        if not slider_style:
+            self.maa.screenshot(force=True)
+            recover = self._match_template_config(recover_cfg)
+            if not recover:
+                yield f"{tag} 找不到恢复1个按钮"
+                return
+            self.maa.click(recover)
+            time.sleep(1.5)
 
-        self.maa.screenshot(force=True)
-        confirm = self._match_template_config(rec_cfg["confirm_button"])
-        if not confirm:
+        qty_roi_raw = rec_cfg.get("quantity_ocr", {}).get("roi")
+        if qty_roi_raw:
+            self.maa.screenshot(force=True)
+            qty = self._ocr_refill_quantity(roi_4to4(*qty_roi_raw))
+            if qty is not None and qty != 1:
+                yield (f"{tag} 补充数量读出来是 {qty} 不是 1，"
+                       "停手没点确认，你去看一眼补充页")
+                return
+
+        max_clicks = 3 if slider_style else 1
+        clicks = 0
+        while clicks < max_clicks:
+            self.maa.screenshot(force=True)
+            confirm = self._match_template_config(rec_cfg["confirm_button"])
+            if not confirm:
+                break
+            self.maa.click(confirm)
+            clicks += 1
+            time.sleep(1.5)
+        if clicks == 0:
             yield f"{tag} 找不到恢复完毕的确定按钮"
             return
-        self.maa.click(confirm)
-        time.sleep(2.0)
+        if slider_style and clicks >= max_clicks:
+            self.maa.screenshot(force=True)
+            if self._match_template_config(rec_cfg["confirm_button"]):
+                yield f"{tag} 确认点了 {clicks} 次还在，停手防死循环"
+                return
+        time.sleep(0.5)
 
         self._recover_ok = True
         yield f"{tag} 手形补充完成"
+
+    def _ocr_refill_quantity(self, roi) -> int | None:
+        """读补充页数量框里的数字；读不出返回 None（不挡路）。"""
+        try:
+            tokens = self.maa.ocr_all(roi)
+            digits = "".join(
+                re.sub(r"\D", "", str(text)) for text, _ in tokens or [])
+            return int(digits) if digits else None
+        except Exception:
+            return None
 
     # ==================== 地图选择 ====================
 
@@ -540,6 +580,12 @@ class BattleMixin:
                     yield recover_msg
                 if not self._recover_ok:
                     yield f"{tag} 手形补充失败，停止出阵"
+                    close = self._match_template_config(
+                        recover.get("close_button", {}))
+                    if close:
+                        self.maa.click(close)
+                        time.sleep(1.0)
+                        yield f"{tag} 已顺手关闭补充弹窗"
                     return False, team_record_saved
                 refill_done = True
                 self._record_ticket_refill(cfg, tag)

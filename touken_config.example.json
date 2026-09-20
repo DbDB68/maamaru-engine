@@ -1393,7 +1393,26 @@
     "tama_total_ocr": {
       "roi": [890, 188, 1100, 235]
     },
-    "skip_tap": [775, 695]
+    "skip_tap": [775, 695],
+    "ticket_price": 300,
+    "ticket_recover": {
+      "popup_button": {
+        "template": "team/补充.png",
+        "roi": [350, 400, 650, 530],
+        "threshold": 0.9
+      },
+      "confirm_button": {
+        "template": "花札/令牌补充确认.png",
+        "threshold": 0.7
+      },
+      "close_button": {
+        "template": "花札/令牌补充关闭.png",
+        "threshold": 0.8
+      },
+      "quantity_ocr": {
+        "roi": [650, 446, 1030, 490]
+      }
+    }
   },
   "osaka": {
     "team_no": 3,

@@ -573,6 +573,86 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(flow.maa.clicks, [refill, recover, confirm])
         self.assertEqual(messages, ["[异去] 手形补充完成"])
 
+    class _SliderMaa(FakeMaa):
+        """花札滑条式补充页假人：确认按钮要点 confirm_left 次才消失
+        （数量页确认 → 小判消耗二次确认，同一张图）。"""
+
+        def __init__(self, confirm_left=2, **kwargs):
+            super().__init__(**kwargs)
+            self.confirm_left = confirm_left
+
+        def template_match(self, template, roi=None, threshold=0.7):
+            if template == "确认.png":
+                return Point(300, 300) if self.confirm_left > 0 else None
+            return self.templates.get(template)
+
+        def click(self, point):
+            self.clicks.append(point)
+            if point == Point(300, 300):
+                self.confirm_left -= 1
+
+    _SLIDER_CFG = {"ticket_recover": {
+        "popup_button": {"template": "补充.png"},
+        "confirm_button": {"template": "确认.png"},
+        "quantity_ocr": {"roi": [650, 446, 1030, 490]},
+    }}
+
+    def test_slider_style_refill_confirms_directly(self):
+        """花札滑条式补充页：没有“恢复一个”，补充→确认；数量页确认后
+        还有小判消耗二次确认（2026-09-20 真机），同一张确认图见到就点、
+        点到消失为止。"""
+        refill = Point(100, 100)
+        flow = Flow(self._SliderMaa(
+            templates={"补充.png": refill},
+            ocr_tokens=[[("1", None), ("个", None)]],
+        ))
+        with patch("touken.flows.battle.time.sleep"):
+            messages = list(flow._recover_ticket_stream(
+                self._SLIDER_CFG, tag="[花札]"))
+        self.assertTrue(flow._recover_ok)
+        self.assertEqual(flow.maa.clicks, [refill, Point(300, 300),
+                                           Point(300, 300)])
+        self.assertEqual(messages, ["[花札] 手形补充完成"])
+
+    def test_slider_refill_stops_when_quantity_is_not_one(self):
+        refill = Point(100, 100)
+        flow = Flow(self._SliderMaa(
+            templates={"补充.png": refill},
+            ocr_tokens=[[("5", None), ("个", None)]],
+        ))
+        with patch("touken.flows.battle.time.sleep"):
+            messages = list(flow._recover_ticket_stream(
+                self._SLIDER_CFG, tag="[花札]"))
+        self.assertFalse(flow._recover_ok)
+        self.assertEqual(flow.maa.clicks, [refill])
+        self.assertTrue(any("不是 1" in m for m in messages))
+
+    def test_slider_refill_proceeds_when_quantity_unreadable(self):
+        refill = Point(100, 100)
+        flow = Flow(self._SliderMaa(
+            templates={"补充.png": refill},
+            ocr_tokens=[[]],
+        ))
+        with patch("touken.flows.battle.time.sleep"):
+            list(flow._recover_ticket_stream(self._SLIDER_CFG, tag="[花札]"))
+        self.assertTrue(flow._recover_ok)
+        self.assertEqual(flow.maa.clicks, [refill, Point(300, 300),
+                                           Point(300, 300)])
+
+    def test_slider_refill_stops_looping_when_confirm_never_leaves(self):
+        refill = Point(100, 100)
+        flow = Flow(self._SliderMaa(
+            confirm_left=99,
+            templates={"补充.png": refill},
+            ocr_tokens=[[]],
+        ))
+        with patch("touken.flows.battle.time.sleep"):
+            messages = list(flow._recover_ticket_stream(
+                self._SLIDER_CFG, tag="[花札]"))
+        self.assertFalse(flow._recover_ok)
+        self.assertEqual(flow.maa.clicks, [refill] + [Point(300, 300)] * 3)
+        self.assertTrue(any("防死循环" in m for m in messages))
+
 
 class YosariRouteTests(unittest.TestCase):
     @staticmethod

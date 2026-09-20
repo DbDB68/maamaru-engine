@@ -58,6 +58,46 @@ class HanafudaConfigTests(unittest.TestCase):
                              "花札/ui秘宝之里.png")
             self.assertEqual(merged["pumpkin"]["team_no"], 9)
 
+    def test_slider_ticket_recover_config(self):
+        """花札补充页是滑条式（2026-09-20 真机）：补充→确认，默认补 1 个，
+        没有联队战的“恢复一个”按钮。"""
+        cfg = json.loads(EXAMPLE_PATH.read_text(encoding="utf-8-sig"))
+        hana = cfg["hanafuda"]
+        self.assertEqual(hana["ticket_price"], 300)
+        recover = hana["ticket_recover"]
+        self.assertNotIn("recover_button", recover)
+        self.assertEqual(recover["popup_button"]["template"], "team/补充.png")
+        self.assertEqual(recover["confirm_button"]["template"],
+                         "花札/令牌补充确认.png")
+        self.assertEqual(recover["close_button"]["template"],
+                         "花札/令牌补充关闭.png")
+        self.assertIn("quantity_ocr", recover)
+        for button in ("confirm_button", "close_button"):
+            template = IMAGE_DIR / recover[button]["template"]
+            self.assertTrue(template.is_file(), f"缺模板 {template}")
+
+    def test_keyfill_adds_ticket_recover_into_existing_hanafuda(self):
+        """老配置已有 hanafuda 段但没有 ticket_recover：递归补键要补进去，
+        且不动用户改过的值。"""
+        template = json.loads(EXAMPLE_PATH.read_text(encoding="utf-8-sig"))
+        old = json.loads(json.dumps(template))
+        del old["hanafuda"]["ticket_recover"]
+        del old["hanafuda"]["ticket_price"]
+        old["hanafuda"]["max_runs"] = 99  # 用户改过的值
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "touken_config.json"
+            target.write_text(json.dumps(old, ensure_ascii=False),
+                              encoding="utf-8")
+            added = _fill_missing_config_keys(EXAMPLE_PATH, target,
+                                              Path(tmp) / "backup")
+            self.assertIn("hanafuda.ticket_recover", added)
+            self.assertIn("hanafuda.ticket_price", added)
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(merged["hanafuda"]["max_runs"], 99)
+            self.assertEqual(
+                merged["hanafuda"]["ticket_recover"]["confirm_button"]
+                ["template"], "花札/令牌补充确认.png")
+
     def test_event_timeline_hides_hanafuda_off_season(self):
         self.assertEqual(SCRIPT_EVENT_MAP.get("hanafuda"), ["秘宝之里"])
 

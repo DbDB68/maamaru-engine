@@ -21,7 +21,8 @@
       * 重伤行军警告永远点否，然后停手让人看；
       * 断网走 recover_network_stream，恢复落本丸则本圈作废收工
   - 票尽不数令牌格：游戏自己弹补票窗，安全链按 auto_refill 处理
-    （确定补一张再出阵 / 关闭收工，联队战同款交互）
+    （花札补充页是滑条式：补充→数量页确认→小判消耗确认→结果确认，
+    默认补 1 个，OCR 复核数量不是 1 就停手；不补则点右上角 X 收工）
 """
 
 import re
@@ -206,8 +207,11 @@ class HanafudaMixin:
             return False, team_record_saved
 
         departure_cfg = dict(cfg)
-        departure_cfg["ticket_recover"] = self.config.get(
-            "raid", {}).get("ticket_recover", {})
+        # 花札自己的补充页是滑条式（补充→确认），优先用 hanafuda 段的
+        # ticket_recover；老配置还没有就退回联队战样式（恢复一个→确定）。
+        departure_cfg["ticket_recover"] = (
+            cfg.get("ticket_recover")
+            or self.config.get("raid", {}).get("ticket_recover", {}))
         ok, team_record_saved = yield from self._safe_depart_stream(
             departure_cfg, team_no, tag,
             repair_threshold=repair_threshold,
