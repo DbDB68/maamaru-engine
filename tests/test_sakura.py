@@ -3,7 +3,7 @@
 
 import unittest
 
-from touken.flows.sakura import SakuraMixin, _ROW_CY, _parse_fatigue_text
+from touken.flows.sakura import SakuraMixin, _parse_fatigue_text
 from touken.maa_adapter import Point
 
 
@@ -22,13 +22,19 @@ class ParseFatigueTests(unittest.TestCase):
         self.assertIsNone(_parse_fatigue_text("啥也没有"))
 
 
-class Maa:
-    """按 roi 分行回答疲劳/名字 OCR；swipe 后切换成 after_rows 模拟拖动结果。"""
+# 部队选择页实测的疲劳行 y（2026-09-21 模板工坊帧校准，行距 ~94.5px）
+_FY = {1: 199, 2: 293, 3: 388, 4: 483, 5: 577, 6: 672}
 
-    def __init__(self, rows, after_rows=None, names=None):
+
+class Maa:
+    """整列 OCR 假实现：疲劳列一把全给（带 y），名字列按 fy-32 归位；
+    swipe 后切换成 after_rows/after_names 模拟拖动结果。"""
+
+    def __init__(self, rows, after_rows=None, names=None, after_names=None):
         self.rows = rows
         self.after_rows = after_rows
         self.names = names or {}
+        self.after_names = after_names
         self.swipes = []
         self.clicks = []
 
@@ -42,17 +48,19 @@ class Maa:
         self.swipes.append((x1, y1, x2, y2, duration_ms))
         if self.after_rows is not None:
             self.rows = self.after_rows
+        if self.after_names is not None:
+            self.names = self.after_names
 
     def ocr_all(self, roi):
-        if roi.x == 290:  # 疲劳列：roi.y = cy + 28
-            slot = _ROW_CY.index(roi.y - 28) + 1
-            value = self.rows.get(slot)
-            return [(f"疲劳 {value}/100", Point(300, roi.y))] if value is not None else []
-        if roi.x == 100:  # 名字列：roi.y = cy + 8
-            slot = _ROW_CY.index(roi.y - 8) + 1
-            name = self.names.get(slot)
-            return [(name, Point(120, roi.y))] if name else []
-        return []
+        if roi.x == 285:  # 疲劳整列：一把全给
+            return [(f"疲劳 {v}/100", Point(300, _FY[s]))
+                    for s, v in sorted(self.rows.items())]
+        if roi.x == 100:  # 名字列：roi.y = 疲劳行y - 32
+            for slot, fy in _FY.items():
+                if abs(roi.y - (fy - 32)) <= 2:
+                    name = self.names.get(slot)
+                    return [(name, Point(120, roi.y))] if name else []
+            return []
 
 
 def _flow(maa):
@@ -64,50 +72,81 @@ def _flow(maa):
 FULL = {1: 80, 2: 60, 3: 90, 4: 30, 5: 70, 6: 85}
 
 
+def _rotate(maa, margin=10):
+    from unittest.mock import patch
+    with patch("touken.flows.sakura.time.sleep"):
+        return list(_flow(maa)._rotate_captain_here(margin=margin))
+
+
 class RotateCaptainTests(unittest.TestCase):
     def test_lowest_fatigue_is_dragged_to_captain(self):
         maa = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "小狐丸"})
-        messages = list(_flow(maa)._rotate_captain_here(margin=10))
+        messages = _rotate(maa)
 
-        # 从 4 号位（cy=455）拖到队长位（cy=160）
-        self.assertEqual(maa.swipes, [(200, 455, 200, 160, 1000)])
+        # 从 4 号位（fy=483 → 行心 447）拖到队长位（fy=199 → 行心 163）
+        self.assertEqual(maa.swipes, [(200, 447, 200, 163, 1000)])
         self.assertTrue(any("小狐丸" in m and "上任队长" in m for m in messages))
         self.assertTrue(any("全队疲劳" in m for m in messages))
 
     def test_captain_already_lowest_does_nothing(self):
         maa = Maa({**FULL, 1: 20})
-        messages = list(_flow(maa)._rotate_captain_here(margin=10))
+        messages = _rotate(maa)
 
         self.assertEqual(maa.swipes, [])
         self.assertTrue(any("位置没毛病" in m for m in messages))
 
     def test_gap_below_margin_is_not_worth_it(self):
         maa = Maa({**FULL, 1: 40, 4: 35})
-        messages = list(_flow(maa)._rotate_captain_here(margin=10))
+        messages = _rotate(maa)
 
         self.assertEqual(maa.swipes, [])
         self.assertTrue(any("不值得折腾" in m for m in messages))
 
-    def test_unreadable_captain_stops(self):
+    def test_missing_first_row_is_rejected(self):
+        # 首行漏读会让全队错号：顶 anchor 直接拒读，宁可不换也不拖错人
         rows = dict(FULL)
-        del rows[1]  # 队长位读不到（空位/OCR 瞎了）
-        messages = list(_flow(Maa(rows))._rotate_captain_here())
+        del rows[1]
+        maa = Maa(rows)
+        messages = _rotate(maa)
 
-        self.assertTrue(any("队长位读不到疲劳" in m for m in messages))
+        self.assertEqual(maa.swipes, [])
+        self.assertTrue(any("读不齐" in m for m in messages))
+
+    def test_missing_middle_row_is_rejected(self):
+        # 中间漏行会留下倍距空洞，同样拒读
+        rows = dict(FULL)
+        del rows[3]
+        maa = Maa(rows)
+        messages = _rotate(maa)
+
+        self.assertEqual(maa.swipes, [])
+        self.assertTrue(any("读不齐" in m for m in messages))
 
     def test_all_unreadable_stops(self):
-        messages = list(_flow(Maa({}))._rotate_captain_here())
+        messages = _rotate(Maa({}))
 
-        self.assertTrue(any("全队都读不到疲劳" in m for m in messages))
+        self.assertTrue(any("读不齐" in m for m in messages))
 
-    def test_swallowed_drag_is_reported(self):
-        # 拖完队长位还是原值 → 手势被吞，如实汇报
+    def test_swallowed_drag_is_retried_then_reported(self):
+        # 拖完队长位还是原值 → 手势被吞，按现位置再拖一次，仍不行就如实汇报
         maa = Maa(dict(FULL), after_rows=dict(FULL))
-        messages = list(_flow(maa)._rotate_captain_here(margin=10))
+        messages = _rotate(maa)
 
-        self.assertEqual(len(maa.swipes), 1)
+        self.assertEqual(maa.swipes, [(200, 447, 200, 163, 1000),
+                                      (200, 447, 200, 163, 1500)])
+        self.assertTrue(any("再拖一次" in m for m in messages))
         self.assertTrue(any("拖动可能没生效" in m for m in messages))
         self.assertFalse(any("上任队长" in m for m in messages))
+
+    def test_misread_fatigue_is_verified_by_captain_name(self):
+        # 疲劳复读 OCR 错字（30 认成 36）但队长位名字对得上 → 算换好了
+        maa = Maa(dict(FULL), after_rows={**FULL, 1: 36},
+                  names={4: "小狐丸"}, after_names={1: "小狐丸"})
+        messages = _rotate(maa)
+
+        self.assertEqual(len(maa.swipes), 1)
+        self.assertTrue(any("换好了" in m and "小狐丸" in m for m in messages))
+        self.assertFalse(any("拖动可能没生效" in m for m in messages))
 
 class SortieRotateHookTests(unittest.TestCase):
     """出阵流程的换队长钩子：开了才换，且每圈在部队选择步之后触发。"""

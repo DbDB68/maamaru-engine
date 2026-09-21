@@ -38,10 +38,19 @@ _SWAP_X = 1033            # 每行"替换"按钮
 _AUTO_EQUIP = (621, 96)   # 更换装备页"自动装备刀装"
 _EQUIP_BACK = (135, 25)   # 更换装备页返回箭头
 
-# 换队长拖拽：从成员卡片拖到队长位。起点 x 和时长是真机校准点——
-# 太快会被游戏吞（repair.py 实测 <400ms 失灵）；拖不动就加长 _DRAG_MS
+# 换队长拖拽：从成员卡片拖到队长位。起点 x 是真机校准点——
+# 太快会被游戏吞（repair.py 实测 <400ms 失灵）；adb input swipe 匀速
+# 插值，拖远了速度跟着变快，容易被当成列表滚动，所以时长按距离放大
 _DRAG_X = 200
-_DRAG_MS = 1000
+_DRAG_MS = 1000   # 起步时长，实际取 max(此值, 拖动距离×2.5)
+
+# 换队长读疲劳：成员信息列整列 OCR（x 覆盖"疲劳 xx/100"文本）后按 y
+# 归位。血泪（2026-09-21 六号位隐形事故）：编队页行距 ~98px、部队选择页
+# ~94.5px，写死六行坐标会在底部行累积 60px+ 偏差，5/6 号位疲劳整个
+# 读空——累的人对轮换隐形。两页不再共用行坐标假设。
+_FATIGUE_COL = (285, 100, 435, 710)      # 疲劳列整列 ROI（xyxy）
+_FIRST_ROW_Y = (140, 260)                # 首行疲劳 y 合理范围（两页均 ~196-199）
+_FATIGUE_TO_ROW_CY = 36                  # 疲劳行 y → 行中心（拖拽/名字定位用）
 
 
 def _parse_fatigue_text(text: str):
@@ -167,20 +176,23 @@ class SakuraMixin:
 
     def _rotate_captain_here(self, margin: int = 10):
         """
-        在当前页原地换队长：读全队疲劳，最低的拖到队长位，拖完复查。
+        在当前页原地换队长：整列 OCR 读全队疲劳，最低的拖到队长位，拖完复查。
 
-        调用前必须已停在目标部队的六行成员列表页（部队标签已切好）。
-        编队页和出阵前的部队选择页布局相同、都能拖人换位（用户实测），
-        所以出阵循环里每圈走到部队选择页时直接调用本方法，不用绕路。
+        调用前必须已停在目标部队的成员列表页（部队标签已切好）。
+        编队页和出阵前的部队选择页都能拖人换位，但两页行距不同
+        （编队 ~98px、部队选择 ~94.5px），所以读数走整列 OCR 按 y
+        归位，不写死行坐标——写死会在底部行累积偏差，2026-09-21
+        出过 5/6 号位疲劳读空、红脸队员对轮换隐形的事故。
 
         Yields:
             str: 执行状态消息
         """
-        values = self._read_rows_fatigue()
-        if not values:
-            yield "[换队长] 全队都读不到疲劳（在远征？界面不对？），跳过"
+        rows = self._read_rows_fatigue()
+        if not rows:
+            yield "[换队长] 全队疲劳读不齐（在远征？界面不对？），本轮不换"
             return
 
+        values = {slot: value for slot, (fy, value) in rows.items()}
         captain = values.get(1)
         if captain is None:
             yield "[换队长] 队长位读不到疲劳（空位？），跳过"
@@ -200,34 +212,86 @@ class SakuraMixin:
 
         # 读个名字好汇报（名字在疲劳行上方，同 _swap_tired_in 的相对位置）。
         # OCR 老眼昏花会漏字（"夜左文字"），过名册校正成标准名再上日志
-        cy = _ROW_CY[low_slot - 1]
-        name_tokens = self.maa.ocr_all(roi_4to4(100, cy + 8, 265, cy + 36))
+        low_fy = rows[low_slot][0]
+        cy_low = low_fy - _FATIGUE_TO_ROW_CY
+        cy_top = rows[1][0] - _FATIGUE_TO_ROW_CY
+        name_tokens = self.maa.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
         name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
         name = sword_db.display_name(name_raw)
         yield f"[换队长] {name} 疲劳 {low} 全队最低，拖去队长位（原队长 {captain}/100）"
 
-        self.maa.swipe(_DRAG_X, cy, _DRAG_X, _ROW_CY[0], _DRAG_MS)
-        time.sleep(1.5)
+        # adb input swipe 匀速插值：拖远了速度跟着变快，容易被游戏当成
+        # 列表滚动吞掉，时长按距离放大
+        duration = max(_DRAG_MS, int((cy_low - cy_top) * 2.5))
+        after_values = {}
+        for attempt in (1, 2):
+            self.maa.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top,
+                           duration if attempt == 1 else int(duration * 1.5))
+            time.sleep(2.0)
 
-        # 拖完复查：队长位的疲劳应该变成刚才那位最低值
-        after = self._read_rows_fatigue()
-        if after.get(1) == low:
-            yield f"[换队长] ✓ 换好了，{name} 上任队长，去吃疲劳加成吧"
-        else:
-            got = after.get(1, "读不到")
-            yield (f"[换队长] ⚠️ 拖完队长位疲劳是 {got}，不是预期的 {low}"
-                   "——拖动可能没生效（手势被吞？），你手动瞅一眼")
+            # 拖完复查：队长位的疲劳应该变成刚才那位最低值
+            after = self._read_rows_fatigue()
+            after_values = {s: v for s, (f, v) in after.items()}
+            if after_values.get(1) == low:
+                yield f"[换队长] ✓ 换好了，{name} 上任队长，去吃疲劳加成吧"
+                return
+            # 疲劳复读会 OCR 错字（88 认成 86）：用队长位的名字再核一遍
+            if after:
+                cap_fy = after[1][0]
+                cap_tokens = self.maa.ocr_all(
+                    roi_4to4(100, cap_fy - 32, 265, cap_fy - 4))
+                cap_name = sword_db.display_name(
+                    max((t for t, _ in cap_tokens), key=len, default=""))
+                if cap_name and cap_name == name:
+                    yield (f"[换队长] ✓ 换好了（疲劳复读 {after_values.get(1)} "
+                           f"对不上 {low}，但队长位已是 {name}），去吃疲劳加成吧")
+                    return
+            if attempt == 1:
+                # 手势若被当成滚动，行位置可能已经飘了：按现位置再拖一次
+                if after:
+                    cy_low = next((fy for fy, v in after.values() if v == low),
+                                  after[1][0]) - _FATIGUE_TO_ROW_CY
+                    cy_top = after[1][0] - _FATIGUE_TO_ROW_CY
+                yield "[换队长] 复查对不上，按当前位置再拖一次..."
+        got = after_values.get(1, "读不到")
+        yield (f"[换队长] ⚠️ 拖完队长位疲劳是 {got}，不是预期的 {low}"
+               "——拖动可能没生效（手势被吞？），你手动瞅一眼")
 
     def _read_rows_fatigue(self) -> dict:
-        """当前页截屏读 6 行疲劳。Returns: {位置: 疲劳值}（读不到的行跳过）"""
+        """当前页成员列表整列 OCR：抓所有"疲劳"行连同 y 坐标，按 y 排序
+        对号 1~N 号位（适配 3~6 人队伍，编队/部队选择两页通吃）。
+
+        Returns: {位置: (疲劳行y, 疲劳值)}；首行位置不对或相邻行距突变
+        说明整列错位/中间漏行，对号会错——返回 {}，宁可不读也不拖错人。
+        """
         self.maa.screenshot(force=True)
-        values = {}
-        for slot, cy in enumerate(_ROW_CY, start=1):
-            tokens = self.maa.ocr_all(roi_4to4(290, cy + 28, 425, cy + 52))
-            value = _parse_fatigue_text("".join(t for t, _ in tokens))
-            if value is not None:
-                values[slot] = value
-        return values
+        tokens = self.maa.ocr_all(roi_4to4(*_FATIGUE_COL))
+        lines = {}  # y 聚类 -> 该行 token（±12px 算同一行）
+        for t, p in tokens:
+            key = round(p.y / 12)
+            lines.setdefault(key, []).append((p.x, t, p.y))
+        rows = []  # (疲劳行y, 疲劳值)
+        for group in lines.values():
+            group.sort()
+            text = "".join(t for _, t, _ in group)
+            if "疲" not in text:  # "疲劳"偶发认成"疲务"，只看半边
+                continue
+            value = _parse_fatigue_text(text)
+            if value is None:
+                continue
+            rows.append((group[0][2], value))
+        rows.sort()
+        if not rows:
+            return {}
+        # 漏读首行会让全队错号（顶 anchor）；中间漏行会留下倍距空洞
+        if not (_FIRST_ROW_Y[0] <= rows[0][0] <= _FIRST_ROW_Y[1]):
+            return {}
+        if len(rows) >= 3:
+            gaps = [rows[i + 1][0] - rows[i][0] for i in range(len(rows) - 1)]
+            median = sorted(gaps)[len(gaps) // 2]
+            if any(g > median * 1.6 for g in gaps):
+                return {}
+        return {slot: row for slot, row in enumerate(rows, start=1)}
 
     # ==================== 读疲劳 ====================
 
