@@ -195,7 +195,8 @@ class _PresetHost(FormationEditorMixin):
                                   entry_context="auto", **kw):
         self.ensure_calls.append({"team_no": team_no, "slot_no": slot_no,
                                   "target": target,
-                                  "entry_context": entry_context})
+                                  "entry_context": entry_context,
+                                  "match_fields": kw.get("match_fields")})
         yield f"ensure@{slot_no}"
         return self._ensure_results.get(slot_no,
                                         {"result": CHANGED, "reason": ""})
@@ -240,6 +241,9 @@ class ApplyStreamTests(unittest.TestCase):
             self.assertEqual(c["team_no"], 3)
             self.assertEqual(c["entry_context"], "formation")
             self.assertIs(c["target"], SLOTS[str(c["slot_no"])])
+            # 选择列表无形态直读通道：预设应用必须收窄 match_fields，
+            # 否则槽位里的 form_status 会让每行都背证据缺口而必 ambiguous
+            self.assertEqual(c["match_fields"], ("name", "level"))
         # 切队标签点过
         self.assertIn(_TEAM_TAB[3], host.maa.clicks)
         self.assertEqual(host.nav_calls, ["编队"])

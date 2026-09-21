@@ -692,8 +692,13 @@ class FormationEditorMixin:
         changed = already = 0
         for slot_key in sorted(slots, key=_slot_no):
             slot_no = _slot_no(slot_key)
+            # 选择列表没有形态直读通道（行 form 恒 None）：预设槽位里的
+            # form_status 是档案结论，放进 match_fields 只会让每行都背上
+            # 证据缺口而必判 ambiguous。收窄到列表真正能出示证据的字段；
+            # 同名多振靠等级拉开，等级也拉不开就如实 ambiguous 停下。
             result = yield from self.ensure_team_member_stream(
-                team_no, slot_no, slots[slot_key], entry_context="formation")
+                team_no, slot_no, slots[slot_key], entry_context="formation",
+                match_fields=("name", "level"))
             verdict = result.get("result") if isinstance(result, dict) else None
             if verdict == ALREADY_CORRECT:
                 already += 1
