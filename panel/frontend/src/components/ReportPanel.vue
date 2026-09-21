@@ -1145,7 +1145,7 @@ onMounted(async () => {
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" title="本丸" subtitle="账目和接下来的打算">
+    <PanelHeader variant="page" title="本丸账" subtitle="账目和接下来的打算">
       <template #actions>
         <div class="report-toolbar-actions">
           <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
@@ -1154,8 +1154,6 @@ onMounted(async () => {
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
-      <DayTimeline />
-
       <div v-if="honmaruTab === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
@@ -1180,6 +1178,8 @@ onMounted(async () => {
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
           </footer>
         </section>
+
+        <DayTimeline collapsible />
 
         <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="openGapReport(unreportedGaps[0])">
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>

@@ -524,7 +524,7 @@ watch(tab, value => {
           <button class="nav-office" :class="{ active: tab === 'office' }" @click="tab = 'office'">执务</button>
           <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); tab = 'tasks'">配置</button>
           <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
-          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸</button>
+          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸账</button>
           <button class="nav-archive" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀帐</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
         </template>
@@ -546,9 +546,6 @@ watch(tab, value => {
           </SideNavItem>
           <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
             <span><img class="task-menu-icon" :src="'/static/img/ui/expedition.png'" alt="">自动排班</span>
-          </SideNavItem>
-          <SideNavItem v-if="group.label === '后勤配置'" :active="false" @click="tab = 'workflow'">
-            <span><img class="task-menu-icon" :src="taskIcon('workflow')" alt="">工作流</span>
           </SideNavItem>
         </template>
         <h3>队伍</h3>

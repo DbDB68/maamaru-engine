@@ -280,7 +280,12 @@ button { cursor: pointer; }
 .tl-card-head { display: flex; min-width: 0; margin-bottom: 12px; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .tl-card-head h3 { margin: 0 0 3px; }
 .tl-card-head p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.45; }
-.tl-card-head > time { flex: 0 0 auto; padding: 3px 6px; color: #7f4e18; background: #f2e7cf; border: 1px solid #dbc69d; border-radius: 999px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.tl-card-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.tl-card-actions > time { padding: 3px 6px; color: #7f4e18; background: #f2e7cf; border: 1px solid #dbc69d; border-radius: 999px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.tl-card-actions > button { min-height: 26px; padding: 3px 9px; color: var(--ink-soft); background: transparent; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; cursor: pointer; }
+.tl-card-actions > button:hover { color: var(--ink); border-color: var(--fox-gold); }
+.timeline-card.is-collapsed { padding-block: 12px; }
+.timeline-card.is-collapsed .tl-card-head { margin-bottom: 0; align-items: center; }
 .tl-chart { position: relative; }
 .tl-wide { display: none; }
 .tl-ticks { position: relative; height: 15px; margin-left: 46px; }
@@ -361,7 +366,7 @@ button { cursor: pointer; }
   .timeline-card { padding: 18px 20px; }
   .tl-card-head { margin-bottom: 18px; }
   .tl-card-head h3 { font-size: 18px; }
-  .tl-card-head > time { padding: 4px 9px; font-size: 11px; }
+  .tl-card-actions > time { padding: 4px 9px; font-size: 11px; }
   .tl-ticks { height: 19px; margin-left: 64px; }
   .tl-tick { font-size: 11px; }
   .tl-axis { margin-left: 64px; padding-top: 18px; }
