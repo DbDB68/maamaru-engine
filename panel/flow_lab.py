@@ -154,7 +154,8 @@ def create_flow_lab_router() -> APIRouter:
     @router.get("/flows")
     async def list_flows():
         _ensure_available()
-        return {"flows": flow_engine.load_flows()}
+        return {"flows": flow_engine.list_flows(),
+                "warnings": flow_engine.flow_conflicts()}
 
     @router.post("/flows")
     async def create_flow(request: Request):
@@ -169,6 +170,8 @@ def create_flow_lab_router() -> APIRouter:
     @router.put("/flows/{flow_id}")
     async def update_flow(flow_id: str, request: Request):
         _ensure_available()
+        if flow_engine.is_official_flow(flow_id):
+            raise HTTPException(403, "官方流程是随包发布的样板，只读。复制一条成自己的流程就能改。")
         body = await _json_body(request)
         try:
             flow = flow_engine.update_flow(flow_id, body)
@@ -181,9 +184,20 @@ def create_flow_lab_router() -> APIRouter:
     @router.delete("/flows/{flow_id}")
     async def delete_flow(flow_id: str):
         _ensure_available()
+        if flow_engine.is_official_flow(flow_id):
+            raise HTTPException(403, "官方流程是随包发布的样板，只读。复制一条成自己的流程就能改。")
         if not flow_engine.delete_flow(flow_id):
             raise HTTPException(404, "没有这个流程。")
         return {"ok": True}
+
+    @router.post("/flows/{flow_id}/copy")
+    async def copy_flow(flow_id: str):
+        """官方 → 复制成私货（流程工坊里改官方样板的唯一姿势）。"""
+        _ensure_available()
+        cloned = flow_engine.copy_flow(flow_id)
+        if cloned is None:
+            raise HTTPException(404, "没有这个流程。")
+        return {"ok": True, "flow": cloned}
 
     @router.post("/flows/{flow_id}/duplicate")
     async def duplicate_flow(flow_id: str):

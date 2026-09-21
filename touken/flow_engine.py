@@ -23,7 +23,7 @@ from pathlib import Path
 
 from .flows.report_judge import _is_fail
 from .maa_adapter import Point, Region, roi_4to4
-from .runtime_paths import STATUS_DIR
+from .runtime_paths import RESOURCE_DIR, STATUS_DIR
 
 MAX_STEPS = 50            # 单流程最多步数（保存时校验）
 MAX_EXEC_STEPS = 500      # 单轮最多执行步数（jump_if 死循环保险，超限按翻车停）
@@ -302,7 +302,7 @@ def _run_check(agent, params, ctx):
         hit = pt is not None
         detail = (f"认到「{ocr_expected}」@({pt.x}, {pt.y})" if pt
                   else f"没认到「{ocr_expected}」")
-    ctx["check"] = {"hit": hit}
+    ctx["check"] = {"hit": hit, "point": pt.to_list() if pt else None}
     yield f"{'✓' if hit else '·'} 判定：{detail}"
     return True, None
 
@@ -318,6 +318,26 @@ _step("check", "认一下（不点）",
                "help": "限定搜索范围，留空全屏。"},
               {"key": "threshold", "type": "number", "label": "模板阈值",
                "default": 0.7, "min": 0, "max": 1}])
+
+
+def _run_click_hit(agent, params, ctx):
+    """点击上一步「认一下」认到的位置——认+点分两步的玩法用它，省一次重复识别。"""
+    last = ctx.get("check")
+    point = (last or {}).get("point")
+    if not (last and last.get("hit") and point):
+        yield "✗ 上一步「认一下」没有认到可点的位置，没点"
+        return False, None
+    pt = Point(int(point[0]), int(point[1]))
+    if agent.maa.click(pt):
+        yield f"✓ 已点击上一步认到的位置 ({pt.x}, {pt.y})"
+        return True, None
+    yield f"✗ 点击 ({pt.x}, {pt.y}) 失败，没点成"
+    return False, None
+
+
+_step("click_hit", "点刚认到的",
+      "点击上一步「认一下」认到的位置。先认再分支、最后才点的玩法用它，不多认一次。",
+      "点", _run_click_hit, lambda params, i: {})
 
 
 # ── 「点」类 ──
@@ -492,6 +512,29 @@ _step("sleep", "等一会儿",
                "default": 1, "min": 0.1, "max": 120}])
 
 
+def _validate_note(params: dict, i: int) -> dict:
+    text = params.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise FlowError(f"第 {i + 1} 步：插播一句话要给文案")
+    text = text.strip()
+    if len(text) > 120:
+        raise FlowError(f"第 {i + 1} 步：插播文案最多 120 个字")
+    return {"text": text}
+
+
+def _run_note(agent, params, ctx):
+    """只播报、不碰游戏——分支的人话说明靠它（播报表里也能留痕）。"""
+    yield params["text"]
+    return True, None
+
+
+_step("note", "插播一句",
+      "只播一句话，不碰游戏。走到哪一步了、这个分支是什么意思，写给人看的。",
+      "结构", _run_note, _validate_note,
+      params=[{"key": "text", "type": "text", "label": "要播报的话",
+               "help": "进日志和成绩单，建议带 [流程名] 前缀，比如 [签到] 打开目录…"}])
+
+
 # ── 「结构」类 ──
 
 def _validate_navigate(params: dict, i: int) -> dict:
@@ -638,6 +681,24 @@ def _builtin_popup_sweep(agent, params, ctx):
     return False
 
 
+def _builtin_open_menu(agent, params, ctx):
+    tag = ctx.get("flow_name", "[流程]")
+    if agent._open_menu():
+        yield f"{tag} ✓ 目录已展开"
+        return True
+    yield f"{tag} ✗ 目录没打开，停"
+    return False
+
+
+register_builtin({
+    "name": "open_menu", "label": "开目录",
+    "desc": "循环点目录按钮直到展开（含加载等待/弹窗救援），就是导航层的 _open_menu。进公告、编队这类菜单页面前用它。",
+    "params": [],
+    "validate": lambda params, i: {},
+    "run": _builtin_open_menu,
+})
+
+
 register_builtin({
     "name": "popup_sweep", "label": "弹窗扫地",
     "desc": "关公告/礼物弹窗、点穿归来结算屏，确认落地才收工。",
@@ -670,6 +731,22 @@ register_builtin({
     "params": [],
     "validate": lambda params, i: {},
     "run": _builtin_home,
+})
+
+
+def _builtin_reset_location(agent, params, ctx):
+    tag = ctx.get("flow_name", "[流程]")
+    agent.current_location = None
+    yield f"{tag} ✓ 已标记当前位置失效，接下来重新认路"
+    return True
+
+
+register_builtin({
+    "name": "reset_location", "label": "位置作废",
+    "desc": "标记「当前位置已失效」——比如关公告后其实已回本丸，不告诉导航层，它会以为目录还开着乱点。等价旧代码的 current_location = None。",
+    "params": [],
+    "validate": lambda params, i: {},
+    "run": _builtin_reset_location,
 })
 
 
@@ -764,7 +841,8 @@ def normalize_flow(flow) -> dict:
         if step["type"] == "jump_if" and step["params"]["target"] not in ids:
             raise FlowError(f"第 {i + 1} 步：跳转目标 {step['params']['target']!r} "
                             "不是流程里的步骤 id")
-    return {"id": flow.get("id"), "name": name, "steps": out_steps}
+    return {"id": flow.get("id"), "name": name, "steps": out_steps,
+            "official": flow.get("official") is True}
 
 
 def normalize_test_step(step) -> dict:
@@ -813,6 +891,10 @@ def save_flows(flows: list[dict]):
 
 
 def find_flow(flow_id) -> dict | None:
+    """按 id 找流程：官方优先（官方 id 是收编时定死的，私货撞号也算官方的）。"""
+    for flow in load_official_flows():
+        if flow.get("id") == flow_id:
+            return flow
     for flow in load_flows():
         if flow.get("id") == flow_id:
             return flow
@@ -873,6 +955,67 @@ def duplicate_flow(flow_id: str) -> dict | None:
         save_flows(flows)
         return cloned
     return None
+
+
+# ── 官方流程（resource/base/flows/*.json，随包发布，只读）──
+# 老大在流程工坊里能直接看到现有玩法怎么拼的；官方流程是展品，
+# 不许改，但一键复制成私货就能改（copy_flow 对两者都开放）。
+
+def official_flows_dir() -> Path:
+    return RESOURCE_DIR / "flows"
+
+
+def load_official_flows() -> list[dict]:
+    """读官方流程目录；单个文件坏了/校验不过就跳过，绝不影响面板。"""
+    folder = official_flows_dir()
+    if not folder.is_dir():
+        return []
+    flows = []
+    for path in sorted(folder.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            flow = normalize_flow(data)
+        except (OSError, ValueError, FlowError):
+            continue
+        flow["official"] = True
+        flows.append(flow)
+    return flows
+
+
+def list_flows() -> list[dict]:
+    """官方 + 私货合并列表：官方在前；id 撞车时官方优先，私货让位。"""
+    official = load_official_flows()
+    official_ids = {flow["id"] for flow in official}
+    customs = [flow for flow in load_flows()
+               if flow.get("id") not in official_ids]
+    return official + customs
+
+
+def flow_conflicts() -> list[str]:
+    """私货与官方撞 id 的告警文案（列表接口顺带带给前端，老大看得见）。"""
+    official_ids = {flow["id"] for flow in load_official_flows()}
+    return [f"你的流程「{flow.get('name') or flow.get('id')}」和官方流程撞了编号，"
+            "列表里让位给官方了，复制一条换个编号吧"
+            for flow in load_flows() if flow.get("id") in official_ids]
+
+
+def copy_flow(flow_id: str) -> dict | None:
+    """官方 → 复制成私货（名字加「副本」，官方标记剥掉）；对私货等价 duplicate。"""
+    flow = find_flow(flow_id)
+    if flow is None:
+        return None
+    cloned = copy.deepcopy(flow)
+    cloned["id"] = uuid.uuid4().hex[:8]
+    cloned["name"] = ((cloned.get("name") or "流程")[:27] + " 副本")
+    cloned.pop("official", None)
+    customs = load_flows()
+    customs.append(cloned)
+    save_flows(customs)
+    return cloned
+
+
+def is_official_flow(flow_id) -> bool:
+    return any(flow.get("id") == flow_id for flow in load_official_flows())
 
 
 # ── 执行 ──

@@ -537,5 +537,69 @@ class StorageTests(unittest.TestCase):
                 "steps": [_step("s1", "builtin", {"name": "hack"})]})
 
 
+class OfficialFlowTests(unittest.TestCase):
+    """官方流程加载：resource/base/flows/*.json 只读收编，坏文件跳过不崩。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="flow_official_test_")
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+        patcher = patch.object(flow_engine, "STATUS_DIR", self.dir / "status")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = patch.object(flow_engine, "RESOURCE_DIR", self.dir / "resource")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.flows_dir = self.dir / "resource" / "flows"
+        self.flows_dir.mkdir(parents=True)
+
+    def _write(self, name, data):
+        data = dict(data)
+        data.setdefault("id", name.replace(".json", ""))
+        (self.flows_dir / name).write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def test_bad_files_skipped_and_official_flag_set(self):
+        (self.flows_dir / "broken.json").write_text("{ 这不是 JSON", encoding="utf-8")
+        self._write("invalid.json", _flow("校验不过", [_step("s1", "nope_type")]))
+        self._write("good.json", _flow("官方好流程", [
+            _step("s1", "sleep", {"seconds": 1}),
+            _step("s2", "jump_if", {"when": "hit", "target": "s1"})]))
+        flows = flow_engine.load_official_flows()
+        self.assertEqual([f["id"] for f in flows], [flows[0]["id"]])  # 只剩一个
+        self.assertEqual(flows[0]["name"], "官方好流程")
+        self.assertIs(flows[0]["official"], True)
+
+    def test_missing_dir_is_empty_and_customs_unaffected(self):
+        self.flows_dir.rmdir()
+        self.assertEqual(flow_engine.load_official_flows(), [])
+        self.assertEqual(flow_engine.list_flows(), [])
+        self.assertTrue(flow_engine.is_official_flow("builtin-signin") is False)
+
+    def test_copy_flow_turns_official_into_custom(self):
+        self._write("t-good.json", _flow("官方好流程", [
+            _step("s1", "click_point", {"x": 1, "y": 2})]))
+        official = flow_engine.load_official_flows()[0]
+        self.assertTrue(flow_engine.is_official_flow("t-good"))
+        copied = flow_engine.copy_flow("t-good")
+        self.assertIsNotNone(copied)
+        self.assertNotEqual(copied["id"], "t-good")
+        self.assertNotIn("official", copied)
+        self.assertIn("副本", copied["name"])
+        self.assertEqual(copied["steps"], official["steps"])
+        # 官方还在原地，副本在私货存储里
+        self.assertTrue(flow_engine.is_official_flow("t-good"))
+        self.assertIn(copied["id"], [f["id"] for f in flow_engine.load_flows()])
+        # find_flow 官方优先：同 id 时拿回的是官方件
+        flow_engine.save_flows([{"id": "t-good", "name": "私货撞号",
+                                 "steps": official["steps"]}])
+        self.assertIs(flow_engine.find_flow("t-good")["official"], True)
+        self.assertTrue(any("撞了编号" in w for w in flow_engine.flow_conflicts()))
+        # 列表合并：官方在前，撞号私货让位
+        listed = [f["id"] for f in flow_engine.list_flows()]
+        self.assertEqual(listed[0], "t-good")
+        self.assertEqual(len([i for i in listed if i == "t-good"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ import { applyResize, clampRect, HANDLE_CURSORS, HANDLE_SCREEN_PX, handlePoints,
 import type { HandleId, SelRect } from './templateLabSelection'
 
 const flows = ref<FlowLabFlow[]>([])
+const warnings = ref<string[]>([])
 const defs = ref<FlowStepDef[]>([])
 const builtins = ref<FlowBuiltinDef[]>([])
 const templates = ref<string[]>([])
@@ -43,6 +44,10 @@ const categoryBadge: Record<FlowStepCategory, string> = { 认: 'see', 点: 'tap'
 const categoryHint: Record<FlowStepCategory, string> = { 认: '认：先看画面，不伸手', 点: '点：认到才动手', 结构: '结构：管路线和内置积木' }
 
 const locked = computed(() => saving.value || starting.value)
+// 官方流程 = 随包发布的样板：展品模式，只读可跑可复制，不许改
+const isOfficial = computed(() => draft.value?.official === true)
+const officialFlows = computed(() => flows.value.filter(flow => flow.official))
+const myFlows = computed(() => flows.value.filter(flow => !flow.official))
 const dirty = computed(() => {
   if (!draft.value) return false
   const saved = flows.value.find(flow => flow.id === draft.value?.id)
@@ -109,6 +114,18 @@ async function openFlowMenu(event: MouseEvent) {
     left: `${Math.max(8, Math.min(anchor.left, window.innerWidth - 144))}px`,
     top: `${anchor.bottom + height + 8 <= window.innerHeight ? anchor.bottom + 4 : Math.max(8, anchor.top - height - 4)}px`,
   }
+}
+async function copyCurrent() {
+  closeMenu()
+  const current = flows.value.find(item => item.id === draft.value?.id)
+  if (!current) return
+  saving.value = true
+  try {
+    const result = await api.flowLabCopyFlow(current.id)
+    await load(true)
+    setDraft(result.flow)
+    tell(`已复制成「${result.flow.name}」，随便改`)
+  } catch (e) { fail(e) } finally { saving.value = false }
 }
 async function renameFlow() {
   const current = menuFlow.value
@@ -179,6 +196,7 @@ async function load(keepDraft = false) {
       api.flowLabFlows(), api.flowLabSteps(), api.flowLabTemplates(), api.flowLabRois(), api.templateLabSessions(),
     ])
     flows.value = flowData.flows || []
+    warnings.value = flowData.warnings || []
     defs.value = stepData.steps || []
     builtins.value = stepData.builtins || []
     templates.value = tplData.templates || []
@@ -696,15 +714,22 @@ onBeforeUnmount(() => {
             <label class="fl-flowpick">流程
               <PixelControl v-model="flowPick" as="select">
                 <option value="" disabled>{{ flows.length ? '选一条流程' : '还没有流程，先建一条' }}</option>
-                <option v-for="flow in flows" :key="flow.id" :value="flow.id">{{ flow.name }}（{{ flow.steps.length }} 步）<template v-if="draft.id === flow.id && dirty"> · 编辑中</template></option>
+                <optgroup v-if="officialFlows.length" label="官方流程（只读样板）">
+                  <option v-for="flow in officialFlows" :key="flow.id" :value="flow.id">「官方」{{ flow.name }}（{{ flow.steps.length }} 步）</option>
+                </optgroup>
+                <optgroup v-if="myFlows.length" label="我的流程">
+                  <option v-for="flow in myFlows" :key="flow.id" :value="flow.id">{{ flow.name }}（{{ flow.steps.length }} 步）<template v-if="draft.id === flow.id && dirty"> · 编辑中</template></option>
+                </optgroup>
               </PixelControl>
             </label>
             <button type="button" class="fl-mini" :disabled="locked" @click="newFlow">＋ 新建</button>
             <button type="button" class="fl-mini" :disabled="locked || !draft.id" aria-haspopup="true" :aria-label="`${draft.name || '这条流程'}的更多操作`" @click="openFlowMenu($event)">⋯ 更多</button>
             <small class="fl-flowbar-note">拼新活动的姿势：复制一条旧的，改改就能跑。</small>
           </div>
+          <p v-if="warnings.length" class="fl-warn" role="alert">{{ warnings.join('；') }}</p>
+          <p v-if="isOfficial" class="fl-official-note">「{{ draft.name }}」是<strong>官方样板流程</strong>：像展品一样只读展示，可以直接运行、可以单步试跑。想改成自己的——点「⋯ 更多 → 复制成我的流程」。</p>
           <header class="fl-editor-head">
-            <label class="fl-name">{{ draft.id ? '流程名称' : '新的流程' }}<PixelControl v-model="draft.name" maxlength="30" placeholder="给流程起个名字，比如：新活动每日一抽" /></label>
+            <label class="fl-name">{{ draft.id ? (isOfficial ? '官方流程名称' : '流程名称') : '新的流程' }}<PixelControl v-model="draft.name" maxlength="30" :disabled="isOfficial" placeholder="给流程起个名字，比如：新活动每日一抽" /></label>
           </header>
           <div class="fl-list-heading"><h3>步骤 <span>{{ draft.steps.length }} / {{ maxSteps }}</span></h3><small>从上往下依次执行</small></div>
           <div v-if="!draft.steps.length" class="fl-empty">
@@ -713,7 +738,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-else class="fl-steps">
             <template v-for="(step, index) in draft.steps" :key="step.id">
-              <button type="button" class="fl-insert" :disabled="draft.steps.length >= maxSteps" :aria-label="`在第 ${index + 1} 步前插入`" @click="openPicker(index)"><span>＋ 在这里插入</span></button>
+              <button type="button" class="fl-insert" :disabled="locked || isOfficial || draft.steps.length >= maxSteps" :aria-label="`在第 ${index + 1} 步前插入`" @click="openPicker(index)"><span>＋ 在这里插入</span></button>
               <article :id="`fl-step-${step.id}`" class="fl-step" :class="{ 'is-open': expanded === step }">
                 <div class="fl-step-head">
                   <button type="button" class="fl-step-toggle" :aria-expanded="expanded === step" @click="expanded = expanded === step ? null : step">
@@ -726,12 +751,13 @@ onBeforeUnmount(() => {
                   </button>
                   <span class="fl-step-tools">
                     <button type="button" :aria-label="`试跑第 ${index + 1} 步`" :title="pointPicking && expanded === step ? '画布点选坐标中' : '单步试跑（只认不点）'" :disabled="probingStep === step" @click="testStep(step)">{{ probingStep === step ? '…' : '▶' }}</button>
-                    <button type="button" :aria-label="`上移第 ${index + 1} 步`" title="上移" :disabled="index === 0" @click="moveStep(index, -1)">↑</button>
-                    <button type="button" :aria-label="`下移第 ${index + 1} 步`" title="下移" :disabled="index === draft.steps.length - 1" @click="moveStep(index, 1)">↓</button>
-                    <button type="button" class="fl-danger" :aria-label="`移除第 ${index + 1} 步`" title="移除步骤" @click="removeStep(index)">×</button>
+                    <button type="button" :aria-label="`上移第 ${index + 1} 步`" title="上移" :disabled="locked || isOfficial || index === 0" @click="moveStep(index, -1)">↑</button>
+                    <button type="button" :aria-label="`下移第 ${index + 1} 步`" title="下移" :disabled="locked || isOfficial || index === draft.steps.length - 1" @click="moveStep(index, 1)">↓</button>
+                    <button type="button" class="fl-danger" :aria-label="`移除第 ${index + 1} 步`" title="移除步骤" :disabled="locked || isOfficial" @click="removeStep(index)">×</button>
                   </span>
                 </div>
                 <div v-if="expanded === step" class="fl-step-detail">
+                 <fieldset :disabled="isOfficial" class="fl-guard">
                   <p>{{ defOf(step.type)?.desc }}</p>
                   <p v-if="step.type === 'builtin' && builtinOf(step.params.name)" class="fl-builtin-note">{{ builtinOf(step.params.name)?.desc }}</p>
                   <div class="fields fl-params">
@@ -791,15 +817,17 @@ onBeforeUnmount(() => {
                       <label>间隔秒<PixelControl v-model="step.retry_interval_s" type="number" numeric :min="0" :max="60" /></label>
                     </span>
                   </div>
+                 </fieldset>
                 </div>
               </article>
             </template>
-            <button type="button" class="fl-button fl-add" :disabled="draft.steps.length >= maxSteps" @click="openPicker(draft.steps.length)">{{ draft.steps.length >= maxSteps ? '已达到 50 步上限' : '＋ 添加下一步' }}</button>
+            <button v-if="!isOfficial" type="button" class="fl-button fl-add" :disabled="locked || draft.steps.length >= maxSteps" @click="openPicker(draft.steps.length)">{{ draft.steps.length >= maxSteps ? '已达到 50 步上限' : '＋ 添加下一步' }}</button>
+            <p v-else class="fl-official-note fl-official-tail">官方样板到此为止——复制成我的流程就能接着拼。</p>
           </div>
         </fieldset>
         <footer class="fl-toolbar">
-          <span class="fl-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
-          <div class="fl-actions"><button type="button" class="fl-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="fl-button fl-primary" :disabled="locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
+          <span class="fl-save-state" :class="{ unsaved: dirty }">{{ isOfficial ? '官方流程只读' : dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
+          <div class="fl-actions"><button v-if="!isOfficial" type="button" class="fl-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="fl-button fl-primary" :disabled="locked || !valid" @click="run">{{ starting ? '正在启动…' : !isOfficial && dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
         </footer>
         <p v-if="message" class="fl-message" :class="{ 'fl-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
@@ -848,9 +876,12 @@ onBeforeUnmount(() => {
 
     <div ref="moreMenu" popover="auto" class="fl-preset-menu" :style="menuPosition" :aria-label="`${menuFlow?.name || '流程'}的操作`">
       <template v-if="menuFlow">
-        <button type="button" :disabled="locked" @click="duplicate(menuFlow)">复制流程</button>
-        <button type="button" :disabled="locked" @click="renameFlow">改名…</button>
-        <button type="button" class="fl-danger" :disabled="locked" @click="remove(menuFlow)">删除流程</button>
+        <button v-if="menuFlow.official" type="button" :disabled="locked" @click="copyCurrent">复制成我的流程</button>
+        <template v-else>
+          <button type="button" :disabled="locked" @click="duplicate(menuFlow)">复制流程</button>
+          <button type="button" :disabled="locked" @click="renameFlow">改名…</button>
+          <button type="button" class="fl-danger" :disabled="locked" @click="remove(menuFlow)">删除流程</button>
+        </template>
       </template>
     </div>
     <dialog ref="picker" class="fl-dialog fl-picker" aria-labelledby="fl-picker-title" @cancel.prevent="closePicker">
@@ -930,6 +961,10 @@ onBeforeUnmount(() => {
 .fl-step-tools { display: flex; border-left: 1px solid var(--paper-line); padding-left: 7px; }
 .fl-step-tools button { border: 0; background: none; color: var(--ink-dim); width: 29px; height: 34px; border-radius: 4px; font-size: 12px; }
 .fl-step-tools button:hover:not(:disabled) { background: var(--paper-panel); color: var(--ink); }
+.fl-guard { border: 0; margin: 0; padding: 0; min-width: 0; }
+.fl-official-note { margin: 0 0 14px; padding: 10px 14px; background: #42604710; border: 1px dashed #42604766; border-radius: 7px; color: #426047; font-size: 12px; line-height: 1.8; }
+.fl-official-tail { margin: 14px 0 0; text-align: center; }
+.fl-warn { margin: -6px 0 12px; padding: 8px 12px; background: #b3781f12; border: 1px solid #b3781f55; border-radius: 7px; color: var(--fox-gold-deep, #b3781f); font-size: 12px; line-height: 1.7; }
 .fl-step-detail { padding: 0 18px 18px 53px; }
 .fl-step-detail > p { font-size: 12px; color: var(--ink-dim); line-height: 1.7; margin: 0 0 14px; }
 .fl-builtin-note { padding: 9px 12px; background: var(--paper-panel); border-radius: 5px; }

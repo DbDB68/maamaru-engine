@@ -219,8 +219,16 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 </template>
 
 <style scoped>
-.run-timeline { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; color: var(--ink); }
-/* 收起 = 只剩标题行一行，网格行自动缩回去 */
+/* 独占整页：普通文档流，只约束步骤区高度（vh 是确定的，不依赖任何父级高度链） */
+.run-timeline { min-width: 0; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: var(--r-lg); box-shadow: var(--shadow-card); }
+:global(body[data-theme='pixel']) .run-timeline {
+  color: #1a3055;
+  background: #fffaf0;
+  border: 1px solid #1a3055;
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #b9ad94;
+}
+/* 收起 = 只剩标题行一行 */
 .run-timeline.is-collapsed .rt-run, .run-timeline.is-collapsed .rt-empty { display: none; }
 /* 标题被挤时不许逐字竖排：允许整体折行，标题自己守 nowrap */
 .run-timeline :deep(.section-head) { flex-wrap: wrap; row-gap: 8px; }
@@ -228,7 +236,6 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 .run-timeline button { cursor: pointer; font: inherit; }
 .rt-pick { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-dim); }
 .rt-pick :deep(.pixel-control) { width: clamp(180px, 22vw, 280px); }
-.rt-run { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .rt-run-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; padding: 0 16px 10px; font-size: 12px; color: var(--ink-dim); }
 .rt-run-head b { font-size: 14px; color: var(--ink); }
 .rt-count { margin-left: auto; }
@@ -237,7 +244,7 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 .rt-chip.is-failed, .rt-chip.is-watchdog { color: #9f3d28; border-color: #9f3d2866; background: #9f3d2812; }
 .rt-chip.is-stopped { color: var(--fox-gold-deep, #b3781f); border-color: #b3781f66; background: #b3781f12; }
 .rt-chip.is-running { color: #2f6f8f; border-color: #2f6f8f66; background: #2f6f8f10; }
-.rt-steps { list-style: none; margin: 0; padding: 4px 12px 10px; position: relative; flex: 1 1 auto; min-height: 0; max-height: 46vh; overflow-y: auto; }
+.rt-steps { list-style: none; margin: 0; padding: 4px 12px 10px; position: relative; max-height: 60vh; overflow-y: auto; }
 .rt-steps::before { content: ''; position: absolute; left: 25px; top: 12px; bottom: 16px; width: 2px; background: var(--paper-line); opacity: .7; }
 .rt-step { position: relative; padding: 0 4px 4px 48px; min-width: 0; }
 .rt-icon { position: absolute; left: 12px; top: 5px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); font-size: 12px; font-weight: 700; }

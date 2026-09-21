@@ -52,6 +52,7 @@ class FlowLabTestBase(unittest.TestCase):
         self.dir = Path(self._tmp.name)
         self._patches = [
             patch.object(flow_engine, "STATUS_DIR", self.dir / "status"),
+            patch.object(flow_engine, "RESOURCE_DIR", self.dir / "resource"),
             patch.object(flow_lab, "RESOURCE_DIR", self.dir / "resource"),
             patch.object(template_lab, "DEBUG_DIR", self.dir / "debug"),
         ]
@@ -139,22 +140,22 @@ class StepCatalogTests(FlowLabTestBase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         steps = {s["type"]: s for s in body["steps"]}
-        for type_ in ("wait_landmark", "check", "click_point", "click_template",
-                      "click_ocr", "swipe", "skip_safe", "sleep", "navigate",
-                      "jump_if", "builtin"):
+        for type_ in ("wait_landmark", "check", "click_hit", "click_point",
+                      "click_template", "click_ocr", "swipe", "skip_safe",
+                      "sleep", "note", "navigate", "jump_if", "builtin"):
             self.assertIn(type_, steps)
         categories = {s["category"] for s in body["steps"]}
         self.assertEqual(categories, {"认", "点", "结构"})
         for step in body["steps"]:
             self.assertEqual(set(step), {"type", "label", "desc", "category", "params"})
         self.assertEqual([b["name"] for b in body["builtins"]],
-                         ["home", "popup_sweep", "safe_depart"])
+                         ["home", "open_menu", "popup_sweep", "reset_location", "safe_depart"])
 
     def test_builtin_step_params_offer_select_with_all_three(self):
         steps = {s["type"]: s for s in
                  self.client.get("/api/flow-lab/steps").json()["steps"]}
         names = [opt[0] for opt in steps["builtin"]["params"][0]["options"]]
-        self.assertEqual(names, ["home", "popup_sweep", "safe_depart"])
+        self.assertEqual(names, ["home", "open_menu", "popup_sweep", "reset_location", "safe_depart"])
 
 
 class DevGateTests(FlowLabTestBase):
@@ -336,6 +337,77 @@ class StorageTests(FlowLabTestBase):
         steps = [_step(f"s{i}", "sleep", {"seconds": 0.1})
                  for i in range(flow_engine.MAX_STEPS + 1)]
         self._create(steps=steps, expect=400)
+
+
+class OfficialFlowTests(FlowLabTestBase):
+    """官方流程（真实 resource/base/flows/signin.json）的只读/复制/撞号行为。"""
+
+    def setUp(self):
+        super().setUp()
+        # 指回真仓库的官方流程目录（基础类为了隔离把它挪去了临时目录）
+        from touken.runtime_paths import RESOURCE_DIR as real_resource_dir
+        patcher = patch.object(flow_engine, "RESOURCE_DIR", real_resource_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_official_listed_first_readonly_and_copyable(self):
+        body = self.client.get("/api/flow-lab/flows").json()
+        self.assertEqual(body["flows"][0]["id"], "builtin-signin")
+        self.assertIs(body["flows"][0]["official"], True)
+        self.assertEqual(body["warnings"], [])
+        self.assertGreaterEqual(len(body["flows"][0]["steps"]), 10)
+        put = self.client.put("/api/flow-lab/flows/builtin-signin", json={"name": "改"})
+        self.assertEqual(put.status_code, 403, put.text)
+        delete = self.client.delete("/api/flow-lab/flows/builtin-signin")
+        self.assertEqual(delete.status_code, 403, delete.text)
+        copied = self.client.post("/api/flow-lab/flows/builtin-signin/copy")
+        self.assertEqual(copied.status_code, 200, copied.text)
+        flow = copied.json()["flow"]
+        self.assertNotEqual(flow["id"], "builtin-signin")
+        self.assertNotIn("official", flow)
+        self.assertIn("副本", flow["name"])
+        self.assertEqual(flow["steps"], body["flows"][0]["steps"])
+        # 官方还在最前，副本以私货身份进列表和存储
+        listed = self.client.get("/api/flow-lab/flows").json()["flows"]
+        self.assertEqual(listed[0]["id"], "builtin-signin")
+        self.assertIn(flow["id"], [f["id"] for f in listed])
+        self.assertIn(flow["id"], [f["id"] for f in flow_engine.load_flows()])
+
+    def test_conflict_prefers_official_and_warns(self):
+        flow_engine.save_flows([{
+            "id": "builtin-signin", "name": "私货撞号",
+            "steps": flow_engine.load_official_flows()[0]["steps"]}])
+        body = self.client.get("/api/flow-lab/flows").json()
+        matches = [f for f in body["flows"] if f["id"] == "builtin-signin"]
+        self.assertEqual(len(matches), 1)
+        self.assertIs(matches[0]["official"], True)
+        self.assertTrue(any("撞了编号" in w for w in body["warnings"]))
+
+    def test_official_step_test_run_works(self):
+        official = flow_engine.load_official_flows()[0]
+        step = next(s for s in official["steps"]
+                    if s["type"] == "check" and s["params"].get("ocr_expected") == "公告")
+        adapter = FakeProbeAdapter()
+        with patch.object(flow_lab, "_create_adapter", return_value=adapter):
+            response = self.client.post("/api/flow-lab/test-step", json={"step": step})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIs(response.json()["hit"], True)
+
+    def test_custom_flow_script_runs_official(self):
+        made = []
+
+        def fake_make_agent(config_path):
+            made.append(config_path)
+
+            class _Stub:
+                pass
+            return _Stub()
+
+        with patch.object(panel.server, "_make_agent", fake_make_agent):
+            messages = list(panel.server._build_custom_flow(
+                "fake-config.json", {"flow_id": "builtin-signin"}))
+        self.assertEqual(made, ["fake-config.json"])
+        self.assertTrue(any("▶ 开跑" in m for m in messages))
 
 
 class ScriptRegistrationTests(unittest.TestCase):

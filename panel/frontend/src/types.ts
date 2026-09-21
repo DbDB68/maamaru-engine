@@ -839,6 +839,7 @@ export interface FlowLabFlow {
   id: string
   name: string
   steps: FlowStep[]
+  official?: boolean
 }
 
 export interface FlowStepDef {

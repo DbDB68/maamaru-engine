@@ -5,7 +5,6 @@ import TaskForm from './components/TaskForm.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
-import RunTimeline from './components/RunTimeline.vue'
 import ListsPanel from './components/ListsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import FormationPanel from './components/FormationPanel.vue'
@@ -710,8 +709,6 @@ watch(tab, value => {
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
-        <!-- v-if 直播条条数随时变，套一层让 .home-center 的三行网格永远对得上号 -->
-        <div class="home-top-stack">
         <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>{{ stopping ? "正在停止…" : workflowRunningLabel }}</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
         <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="runSelectedWorkflow">跑这条</button></div>
         <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
@@ -727,8 +724,6 @@ watch(tab, value => {
           @stop="stop"
           @configure="tab = 'tasks'"
         />
-        </div>
-        <RunTimeline />
         <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
