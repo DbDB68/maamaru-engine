@@ -19,6 +19,10 @@ const openKeys = ref<string[]>([])
 const list = ref<HTMLElement | null>(null)
 const follow = ref(true)
 const clock = ref(Date.now())
+// 嫌占地时一键收成一行；选择记在本地，下次打开照旧
+const collapsed = ref(localStorage.getItem('maamaru.runTimeline.collapsed') === '1')
+watch(collapsed, value => localStorage.setItem('maamaru.runTimeline.collapsed', value ? '1' : '0'))
+function toggleCollapsed() { collapsed.value = !collapsed.value }
 let source: EventSource | null = null
 let clockTimer = 0
 const seen = new Set<number>()
@@ -166,9 +170,10 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 </script>
 
 <template>
-  <section class="run-timeline">
+  <section class="run-timeline" :class="{ 'is-collapsed': collapsed }">
     <PanelHeader title="跑况时间线" :subtitle="headerSubtitle">
       <template #actions>
+        <button type="button" class="secondary" :aria-pressed="collapsed" @click="toggleCollapsed">{{ collapsed ? '展开' : '收起' }}</button>
         <label class="rt-pick">看哪次
           <PixelControl as="select" :model-value="pinned?.runId || ''" @update:model-value="pickRun(String($event))">
             <option value="">跟随最新</option>
@@ -214,11 +219,17 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 </template>
 
 <style scoped>
-.run-timeline { min-width: 0; color: var(--ink); }
+.run-timeline { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; color: var(--ink); }
+/* 收起 = 只剩标题行一行，网格行自动缩回去 */
+.run-timeline.is-collapsed .rt-run, .run-timeline.is-collapsed .rt-empty { display: none; }
+/* 标题被挤时不许逐字竖排：允许整体折行，标题自己守 nowrap */
+.run-timeline :deep(.section-head) { flex-wrap: wrap; row-gap: 8px; }
+.run-timeline :deep(.section-head h2) { min-width: 0; white-space: nowrap; }
 .run-timeline button { cursor: pointer; font: inherit; }
 .rt-pick { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-dim); }
 .rt-pick :deep(.pixel-control) { width: clamp(180px, 22vw, 280px); }
-.rt-run-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; font-size: 12px; color: var(--ink-dim); }
+.rt-run { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.rt-run-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0; padding: 0 16px 10px; font-size: 12px; color: var(--ink-dim); }
 .rt-run-head b { font-size: 14px; color: var(--ink); }
 .rt-count { margin-left: auto; }
 .rt-chip { font-style: normal; font-size: 11px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--paper-line); color: var(--ink-dim); }
@@ -226,10 +237,10 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 .rt-chip.is-failed, .rt-chip.is-watchdog { color: #9f3d28; border-color: #9f3d2866; background: #9f3d2812; }
 .rt-chip.is-stopped { color: var(--fox-gold-deep, #b3781f); border-color: #b3781f66; background: #b3781f12; }
 .rt-chip.is-running { color: #2f6f8f; border-color: #2f6f8f66; background: #2f6f8f10; }
-.rt-steps { list-style: none; margin: 0; padding: 4px 0 6px; position: relative; max-height: 46vh; overflow-y: auto; }
-.rt-steps::before { content: ''; position: absolute; left: 13px; top: 12px; bottom: 12px; width: 2px; background: var(--paper-line); opacity: .7; }
-.rt-step { position: relative; padding: 0 0 4px 36px; min-width: 0; }
-.rt-icon { position: absolute; left: 0; top: 5px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); font-size: 12px; font-weight: 700; }
+.rt-steps { list-style: none; margin: 0; padding: 4px 12px 10px; position: relative; flex: 1 1 auto; min-height: 0; max-height: 46vh; overflow-y: auto; }
+.rt-steps::before { content: ''; position: absolute; left: 25px; top: 12px; bottom: 16px; width: 2px; background: var(--paper-line); opacity: .7; }
+.rt-step { position: relative; padding: 0 4px 4px 48px; min-width: 0; }
+.rt-icon { position: absolute; left: 12px; top: 5px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); font-size: 12px; font-weight: 700; }
 .rt-step.is-ok .rt-icon { color: #426047; border-color: #42604788; background: #42604712; }
 .rt-step.is-fail .rt-icon { color: #9f3d28; border-color: #9f3d2888; background: #9f3d2814; }
 .rt-step.is-fail .rt-step-body strong { color: #9f3d28; }
@@ -248,12 +259,15 @@ onBeforeUnmount(() => { source?.close(); window.clearInterval(clockTimer) })
 .rt-lines li.is-fail span { color: #9f3d28; }
 .rt-lines li.is-warn span { color: var(--fox-gold-deep, #b3781f); }
 .rt-lines li.is-ok span { color: #426047; }
-.rt-empty { margin: 10px 0 0; padding: 18px 14px; border: 1px dashed var(--paper-line); border-radius: 8px; color: var(--ink-dim); font-size: 12px; line-height: 1.9; text-align: center; }
+.rt-empty { margin: 0 16px 14px; padding: 18px 14px; border: 1px dashed var(--paper-line); border-radius: 8px; color: var(--ink-dim); font-size: 12px; line-height: 1.9; text-align: center; }
 @media (max-width: 720px) {
   .rt-pick { flex: 1 1 100%; }
   .rt-pick :deep(.pixel-control) { flex: 1; width: auto; }
+  .rt-run-head { padding: 0 12px 8px; }
   .rt-count { width: 100%; margin-left: 0; }
-  .rt-step { padding-left: 32px; }
+  .rt-step { padding-left: 44px; }
+  .rt-steps::before { left: 21px; }
+  .rt-icon { left: 8px; }
   .rt-lines li { flex-direction: column; gap: 0; }
 }
 </style>

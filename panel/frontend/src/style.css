@@ -143,8 +143,30 @@ button { cursor: pointer; }
 .home-functions button.active { color: var(--fox-gold-deep); background: var(--fox-gold-pale); border-color: var(--fox-gold); box-shadow: none; font-weight: 700; }
 .home-functions button small { color: #9d3028; }
 .home-functions-hidden-note { margin: 8px 8px 0; color: var(--ink-dim); font-size: 11px; line-height: 1.5; }
-.home-center { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; }
-.home-center .log-panel { min-height: 0; }
+.home-center { display: grid; grid-template-rows: auto minmax(0, auto) minmax(0, 1fr); gap: 8px; }
+/* v-if 直播条 + 任务卡装进一个盒子，三行网格永远对得上：条/卡=行1，时间线=行2，日志=行3 */
+.home-top-stack { display: grid; gap: 8px; min-width: 0; }
+.home-center .log-panel { min-height: 0; overflow: hidden; }
+/* 时间线占行2：高度封顶（桌面 .home-center 高度确定，百分比生效；窄端框架整体滚动时自动放开），
+   内容在卡片内部滚动，任何情况下不许漫出自己的行、压到下方日志的吸顶头 */
+.home-center .run-timeline {
+  min-height: 0;
+  max-height: 42%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-card);
+  border: 1px solid var(--paper-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+}
+body[data-theme='pixel'] .home-center .run-timeline {
+  color: #1a3055;
+  background: #fffaf0;
+  border: 1px solid #1a3055;
+  border-radius: 0;
+  box-shadow: 3px 3px 0 #b9ad94;
+}
 .home-dashboard { overflow: auto; }
 .home-dashboard .dashboard-panel { background: transparent; border: 0; box-shadow: none; }
 .home-dashboard .dashboard-grid { grid-template-columns: 1fr; }
