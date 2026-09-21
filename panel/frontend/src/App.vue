@@ -66,7 +66,15 @@ function workflowSaved(preset: WorkflowPreset) {
 }
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'>('home')
+type AppTab = 'home' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
+type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
+const tab = ref<AppTab>('home')
+const lastWorkshopTab = ref<WorkshopTab>('workflow')
+const workshopActive = computed(() => ['office', 'tasks', 'workflow', 'devtools'].includes(tab.value))
+function openWorkshop() {
+  tab.value = lastWorkshopTab.value === 'devtools' && !devToolsEnabled.value ? 'workflow' : lastWorkshopTab.value
+}
+function openWorkshopTab(value: WorkshopTab) { tab.value = value }
 const ledgerMode = ref(false)
 const reportEntry = ref<'report' | 'records' | 'planning'>('report')
 const launcherAvailable = ref(false)
@@ -502,6 +510,7 @@ onMounted(async () => {
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
 watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
 watch(tab, value => {
+  if (value === 'office' || value === 'tasks' || value === 'workflow' || value === 'devtools') lastWorkshopTab.value = value
   if (value !== 'tasks') configStageCollapsed.value = false
   if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
   if (value === 'system') systemMounted.value = true
@@ -512,9 +521,9 @@ watch(tab, value => {
 </script>
 
 <template>
-  <div class="shell" :class="{ 'config-stage-collapsed': configStageCollapsed, 'report-stage-collapsed': reportStageCollapsed, 'system-stage-collapsed': systemStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode }">
+  <div class="shell" :class="{ 'config-stage-collapsed': configStageCollapsed, 'report-stage-collapsed': reportStageCollapsed, 'system-stage-collapsed': systemStageCollapsed, 'workflow-stage-collapsed': workflowStageCollapsed, 'ledger-mode': ledgerMode, 'workshop-open': workshopActive }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
-      <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸自动管家' }}</small></div>
+      <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸管家' }}</small></div>
       <StageActors :active="stageActive" />
       <div class="stage-status">
         <small>{{ stagePlace }}</small>
@@ -527,12 +536,9 @@ watch(tab, value => {
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
-          <button class="nav-office" :class="{ active: tab === 'office' }" @click="tab = 'office'">执务</button>
-          <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); tab = 'tasks'">配置</button>
-          <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
-          <button v-if="devToolsEnabled" class="nav-devtools" :class="{ active: tab === 'devtools' }" @click="tab = 'devtools'">开发工具</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸账</button>
           <button class="nav-archive" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀帐</button>
+          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">流程工房</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
         </template>
       </nav>
@@ -544,6 +550,15 @@ watch(tab, value => {
         <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
       </div>
     </header>
+    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="流程工房">
+      <div class="workshop-title"><strong>流程工房</strong><small>搭流程、看实况，需要时再调玩法</small></div>
+      <div class="workshop-tabs">
+        <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
+        <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
+        <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
+        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">识别工具</button>
+      </div>
+    </nav>
     <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onConfigScroll">
       <nav class="sidebar">
         <template v-for="group in scriptGroups" :key="group.label">

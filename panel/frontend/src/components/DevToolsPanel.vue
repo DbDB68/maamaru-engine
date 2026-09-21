@@ -12,8 +12,8 @@ const tab = ref<'template' | 'flow'>('template')
 
 <template>
   <section class="devtools-panel">
-    <PanelHeader variant="page" title="开发工具" subtitle="做模板、拼流程，开发版的私房工具，改完即跑。" />
-    <nav class="dev-tabs" aria-label="开发工具">
+    <PanelHeader variant="page" title="识别工具" subtitle="从真实画面取样、框选识别范围，再把动作接进流程。" />
+    <nav class="dev-tabs" aria-label="识别工具">
       <SideNavItem :active="tab === 'template'" @click="tab = 'template'">模板工坊</SideNavItem>
       <SideNavItem :active="tab === 'flow'" @click="tab = 'flow'">流程工坊</SideNavItem>
     </nav>

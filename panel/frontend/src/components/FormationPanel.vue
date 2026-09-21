@@ -266,7 +266,7 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
         </template>
       </PanelHeader>
       <p v-if="!loadError && profile && !poolDone" class="formation-notice">
-        档案还不可信，不能点将。去「配置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来。
+        档案还不可信，不能点将。去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来。
       </p>
       <p v-else-if="!loadError && profile" class="formation-hintline">
         同名多振按档案逐振列出，狐之助换完会逐项回读对账。

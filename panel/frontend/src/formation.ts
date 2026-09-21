@@ -47,8 +47,8 @@ export function swapEligibility(input: SwapEligibilityInput): SwapEligibility {
     return {
       ok: false,
       reason: input.poolReason
-        ? `本丸档案还不可信：${input.poolReason}。先去「配置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。`
-        : '还没有可信的本丸档案。先去「配置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。',
+        ? `本丸档案还不可信：${input.poolReason}。先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。`
+        : '还没有可信的本丸档案。先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。',
     }
   }
   if (input.running) {

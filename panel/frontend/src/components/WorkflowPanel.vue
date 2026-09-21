@@ -285,7 +285,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 
 <template>
   <section class="workflow-panel wf-panel">
-    <PanelHeader :variant="embedded ? 'embedded' : 'page'" title="工作流" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
+    <PanelHeader :variant="embedded ? 'embedded' : 'page'" title="流程搭建" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
     <p v-if="loading" class="wf-loading">正在取出你的流程…</p>
     <p v-else-if="loadError" class="wf-loading" role="alert">{{ loadError }} <button class="wf-button" @click="load">重新加载</button></p>
     <div v-else class="wf-layout">
@@ -347,7 +347,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
           <span class="wf-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
           <div class="wf-actions"><button type="button" class="wf-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="wf-button wf-primary" :disabled="running || locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
         </footer>
-        <div v-if="running" class="wf-running"><span>{{ stopping ? '正在停止…' : current === 'workflow' ? (runningWorkflow ? `「${runningWorkflow.name}」正在执行` : '工作流正在执行') : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务看实况 →</button></div>
+        <div v-if="running" class="wf-running"><span>{{ stopping ? '正在停止…' : current === 'workflow' ? (runningWorkflow ? `「${runningWorkflow.name}」正在执行` : '工作流正在执行') : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务台看实况 →</button></div>
         <p v-if="message" class="wf-message" :class="{ 'wf-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
     </div>

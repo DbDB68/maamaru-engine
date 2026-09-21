@@ -84,6 +84,7 @@ button { cursor: pointer; }
 .topnav .nav-lists { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-schedule { --nav-icon: url('/static/img/ui/expedition.png'); }
 .topnav .nav-workflow { --nav-icon: url('/static/img/ui/workflow.svg'); }
+.topnav .nav-workshop { --nav-icon: url('/static/img/ui/workflow.svg'); }
 .topnav .nav-archive { --nav-icon: url('/static/img/ui/scrollVertical.png'); }
 .topnav .nav-system { --nav-icon: url('/static/img/ui/wrench.png'); }
 .topnav button:hover { color: var(--ink); background: var(--fox-gold-pale); }
@@ -98,6 +99,21 @@ button { cursor: pointer; }
 .theme-button { --nav-icon: url('/static/img/ui/contrast.png'); display: grid; width: 34px; min-width: 34px; height: 34px; padding: 0; place-items: center; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 6px; }
 .theme-button::before { margin: 0; }
 .topnav a { margin-left: 8px; }
+
+/* 自动执行退到「流程工房」里：顶栏只留一个入口，运行、搭建和玩法设置在这里分层。 */
+.workshop-nav {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  min-height: 48px; margin: 0 20px; padding: 7px 12px 7px 16px;
+  color: var(--ink-dim); background: color-mix(in srgb, var(--paper-panel) 88%, var(--paper-card));
+  border: 1px solid var(--paper-line); border-top: 0;
+}
+.workshop-title { display: flex; min-width: 0; align-items: baseline; gap: 9px; }
+.workshop-title strong { flex: 0 0 auto; color: var(--ink); font-size: 13px; }
+.workshop-title small { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.workshop-tabs { display: flex; flex: 0 0 auto; gap: 5px; }
+.workshop-tabs button { min-height: 31px; padding: 5px 12px; color: var(--ink-dim); background: transparent; border: 1px solid transparent; border-radius: 999px; font-size: 12px; }
+.workshop-tabs button:hover { color: var(--ink); background: var(--paper-card); border-color: var(--paper-line); }
+.workshop-tabs button.active { color: var(--ink); background: var(--fox-gold-pale); border-color: var(--fox-gold); font-weight: 700; }
 
 .maamaru-surface { display: contents; }
 .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: calc(100vh - 68px); }
@@ -561,6 +577,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .topnav button { min-width: 92px; padding: 7px 5px; white-space: nowrap; }
   .top-status { flex: 0 0 auto; }
   .topnav a { display: none; }
+  .workshop-nav { display: grid; gap: 6px; margin: 0; padding: 8px 12px; overflow: hidden; }
+  .workshop-title small { display: none; }
+  .workshop-tabs { width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .workshop-tabs::-webkit-scrollbar { display: none; }
+  .workshop-tabs button { flex: 1 0 auto; min-width: 82px; }
   .overview-layout { grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 70px); padding: 12px; overflow: visible; }
   .home-functions { overflow: visible; }
   .home-functions-head { display: flex; align-items: center; justify-content: space-between; }
