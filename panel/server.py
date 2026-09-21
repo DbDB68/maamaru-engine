@@ -173,6 +173,7 @@ def _i(params, key, default):
 # ── 参数表单零件 ──
 _TEAM_OPTIONS = [["1", "部队一"], ["2", "部队二"], ["3", "部队三"],
                  ["4", "部队四"], ["5", "部队五"]]
+_TEAM_CN = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 _DAILY_STEPS = ["登录", "签到", "万屋", "演练", "远征", "内番",
                 "锻刀", "刀解", "合成", "出阵", "任务奖励", "库存快照"]
 
@@ -533,22 +534,69 @@ def _build_daily_standalone(config_path, params):
                 yield f"[日课] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
 
 
+def _resolve_team(params, default=3) -> tuple[int | None, dict | None, str | None]:
+    """解析 team_no：普通 "1"~"5" 照旧；"preset:<fid>" 换成预设指向的部队。
+    返回 (team_no, 预设记录, 错误消息)；有错时 team_no/记录都是 None。"""
+    from touken.custom_formations import find_formation, load_formations
+    raw = params.get("team_no")
+    if isinstance(raw, str) and raw.startswith("preset:"):
+        record = find_formation(load_formations(), raw[len("preset:"):])
+        if record is None:
+            return None, None, "找不到这套预设编队（可能已被删），重新选一个"
+        return record["target_team"], record, None
+    return _i(params, "team_no", default), None, None
+
+
+def _preset_busy_by_schedule(team_no: int) -> bool:
+    """预设要覆盖的队正被排班托管、且当前还在外面远征 → 别去动它。"""
+    from .scheduler import expedition_records, load_config, managed_teams, team_available
+    cfg = load_config()
+    return (team_no in managed_teams(cfg)
+            and not team_available(team_no, expedition_records(), time.time()))
+
+
+def _team_with_preset_stream(agent, params, default=3):
+    """玩法 builder 共用的部队解析：选了预设就先把它套进游戏再出阵。
+    返回解析后的 team_no；被拒/应用失败时已如实播报并返回 None。"""
+    team_no, preset, err = _resolve_team(params, default)
+    if err:
+        yield f"[预设编队] {err}"
+        return None
+    if preset is not None:
+        from .scheduler import TEAM_NAMES
+        if _preset_busy_by_schedule(team_no):
+            yield (f"[预设编队] {TEAM_NAMES.get(team_no, f'部队{team_no}')}"
+                   "正被远征排班用着，无法覆盖；换个队覆盖，或去排班那里调整")
+            return None
+        ok = yield from agent.apply_preset_formation_stream(
+            team_no, preset["slots"], preset["name"])
+        if not ok:
+            return None
+    return team_no
+
+
 def _build_raid(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     runs = _run_count(params, 3, "rounds")
     yield from agent.raid_stream(
         max_rounds=runs,
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         difficulty_no=_i(params, "map_no", 4),
         auto_buy_ticket=_bool(params.get("auto_refill", False)),
         max_buys=runs)
 
 
 def _build_pumpkin(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     difficulty = _i(params, "difficulty", 0)
     watch = _sword_names(params.get("watch"))
     runs = _run_count(params, 4, "max_skips")
     yield from agent.pumpkin_stream(
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         difficulty=difficulty or None,
         watch_names=watch or None,
         max_skips=runs,
@@ -558,11 +606,14 @@ def _build_pumpkin(agent, config_path, params):
 
 
 def _build_edocastle(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     refill = _bool(params.get("use_koban_refill", False))
     runs = _positive_run_count(
         params, 6, "max_runs", "refill_run_limit")
     yield from agent.edocastle_stream(
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         use_koban_refill=refill,
         max_runs=runs,
         formation_mode=params.get("formation_mode") or "manual",
@@ -570,11 +621,14 @@ def _build_edocastle(agent, config_path, params):
 
 
 def _build_hanafuda(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     refill = _bool(params.get("use_koban_refill", False))
     runs = _positive_run_count(
         params, 6, "max_runs", "refill_run_limit")
     yield from agent.hanafuda_stream(
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         difficulty=_i(params, "difficulty", 4),
         max_runs=runs,
         auto_refill=refill,
@@ -583,10 +637,13 @@ def _build_hanafuda(agent, config_path, params):
 
 
 def _build_sortie(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     yield from agent.sortie_stream(
         chapter=_i(params, "chapter", 1),
         map_no=_i(params, "map_no", 1),
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         auto_march=_bool(params.get("auto_march", True)),
         max_loops=_run_count(params, 1, "loops"),
         formation_mode=params.get("formation_mode") or "manual",
@@ -600,9 +657,12 @@ def _build_sortie(agent, config_path, params):
 
 
 def _build_yosari(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     yield from agent.yosari_stream(
         map_no=_i(params, "map_no", 1),
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         auto_march=_bool(params.get("auto_march", True)),
         auto_refill=_bool(params.get("auto_refill", False)),
         max_loops=_run_count(params, 1, "loops"),
@@ -616,10 +676,13 @@ def _build_yosari(agent, config_path, params):
 
 
 def _build_osaka(agent, config_path, params):
+    team_no = yield from _team_with_preset_stream(agent, params)
+    if team_no is None:
+        return
     # 小判掉落率实验由 osaka_stream 自带记账（开关沿用面板 compare_resources）
     yield from agent.osaka_stream(
         max_floors=_run_count(params, 1, "floors"),
-        team_no=_i(params, "team_no", 3),
+        team_no=team_no,
         select_floor=_bool(params.get("select_floor", False)),
         target_floor=_i(params, "target_floor", 81),
         formation_mode=params.get("formation_mode") or "manual",
@@ -1121,9 +1184,12 @@ register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了�
                                      for i in range(1, 7)], "default": "1"}])
 def _build_practice(agent, config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
-    return agent.practice_stream(
+    team_no = yield from _team_with_preset_stream(agent, params, default=2)
+    if team_no is None:
+        return
+    yield from agent.practice_stream(
         dry_run=False,
-        team_no=_i(params, "team_no", 2),
+        team_no=team_no,
         formation_mode=params.get("formation_mode") or "manual",
         formation=params.get("formation") or "逆行阵")
 
@@ -1541,6 +1607,30 @@ def _event_hidden_scripts() -> list[str]:
     return value
 
 
+def _scripts_with_preset_options(scripts: dict) -> dict:
+    """把当前预设编队追加到各玩法部队选项尾部（只拼响应，不改 _SCRIPTS 本体，
+    否则每请求重复追加）。"""
+    from touken.custom_formations import load_formations
+    formations = load_formations()
+    if not formations:
+        return scripts
+    extras = [[f"preset:{f['id']}",
+               f"{f['name']}（覆盖部队{_TEAM_CN[f['target_team']]}）"]
+              for f in formations]
+    out = {}
+    for name, info in scripts.items():
+        params, touched = [], False
+        for field in info.get("params") or []:
+            if isinstance(field, dict) and field.get("key") == "team_no":
+                field = {**field,
+                         "options": [list(o) for o in field.get("options") or []]
+                                    + [e[:] for e in extras]}
+                touched = True
+            params.append(field)
+        out[name] = {**info, "params": params} if touched else info
+    return out
+
+
 @app.get("/api/scripts")
 async def api_scripts():
     if _ledger_mode():
@@ -1553,7 +1643,7 @@ async def api_scripts():
         }
     runner = get_runner()
     return {
-        "scripts": list_scripts(),
+        "scripts": _scripts_with_preset_options(list_scripts()),
         "running": runner.is_running,
         "current": runner.current_script,
         "workflow": runner.current_workflow,
@@ -1585,6 +1675,80 @@ async def api_stop_script():
     if not runner.is_running:
         return {"ok": False, "reason": "没有在运行的脚本"}
     runner.stop()
+    return {"ok": True}
+
+
+# ── API：预设编队（玩法出阵前一键覆盖某部队）──
+
+def _formation_from_body(fid: str, body: dict) -> dict:
+    """只允许改 name/target_team/slots；id 走路径，created_at 不可动。
+    前端表单值常是字符串，target_team 先尽力转成 int 再交校验兜底。"""
+    team = body.get("target_team")
+    try:
+        team = int(team)
+    except (TypeError, ValueError):
+        pass  # 交给 validate_formation 如实报错
+    return {"id": fid, "name": body.get("name"),
+            "target_team": team, "slots": body.get("slots") or {}}
+
+
+@app.get("/api/custom-formations")
+async def api_list_custom_formations():
+    from touken.custom_formations import load_formations
+    return {"formations": load_formations()}
+
+
+@app.post("/api/custom-formations")
+async def api_create_custom_formation(request: Request):
+    from touken import custom_formations as cf
+    body = await request.json()
+    formations = cf.load_formations()
+    try:
+        fid = cf.new_formation_id(formations)
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    record = _formation_from_body(fid, body)
+    err = cf.validate_formation(record, formations)
+    if err:
+        return JSONResponse({"ok": False, "reason": err}, status_code=400)
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    record["created_at"] = now
+    record["updated_at"] = now
+    formations.append(record)
+    cf.save_formations(formations)
+    return {"ok": True, "formation": record}
+
+
+@app.put("/api/custom-formations/{fid}")
+async def api_update_custom_formation(fid: str, request: Request):
+    from touken import custom_formations as cf
+    body = await request.json()
+    formations = cf.load_formations()
+    old = cf.find_formation(formations, fid)
+    if old is None:
+        return JSONResponse({"ok": False, "reason": "找不到这套预设编队"},
+                            status_code=404)
+    record = _formation_from_body(fid, body)
+    # 查重时剔除自己，不然「原样保存」也会被误判 id 占用
+    err = cf.validate_formation(
+        record, [f for f in formations if f.get("id") != fid])
+    if err:
+        return JSONResponse({"ok": False, "reason": err}, status_code=400)
+    record["created_at"] = old.get("created_at", "")
+    record["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    formations[formations.index(old)] = record
+    cf.save_formations(formations)
+    return {"ok": True, "formation": record}
+
+
+@app.delete("/api/custom-formations/{fid}")
+async def api_delete_custom_formation(fid: str):
+    from touken import custom_formations as cf
+    formations = cf.load_formations()
+    if cf.find_formation(formations, fid) is None:
+        return JSONResponse({"ok": False, "reason": "找不到这套预设编队"},
+                            status_code=404)
+    cf.save_formations([f for f in formations if f.get("id") != fid])
     return {"ok": True}
 
 

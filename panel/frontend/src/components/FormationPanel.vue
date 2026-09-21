@@ -5,14 +5,19 @@ import LogPanel from './LogPanel.vue'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
 import SegmentedControl from './SegmentedControl.vue'
-import type { FormationCandidate, FormationSwapEvent, FormationTeam, HonmaruFormationProfile } from '../types'
+import type { CustomFormation, CustomFormationSlotEntry, FormationCandidate, FormationSwapEvent, FormationTeam, HonmaruFormationProfile } from '../types'
 import {
   candidateEvidenceGaps,
   candidateFormLabel,
   candidateName,
   formationResultText,
   pickSwapEvent,
+  presetCandidatePickable,
+  presetLabel,
+  presetSlotCount,
+  presetSlotSummary,
   swapEligibility,
+  validatePresetDraft,
 } from '../formation'
 
 // 编队页最小闭环：选部队 → 选位置 → 选一振刀 → 运行 → 如实回显后端
@@ -29,6 +34,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ stop: []; notify: [message: string] }>()
 
 const TEAM_LABELS = ['部队一', '部队二', '部队三', '部队四', '部队五']
+const MAX_PRESETS = 5 // 后端合同：预设编队最多存 5 套
 
 const profile = ref<HonmaruFormationProfile | null>(null)
 const loading = ref(true)
@@ -249,7 +255,154 @@ async function pollResult() {
   pollTimer = window.setTimeout(() => void pollResult(), 2000)
 }
 
-onMounted(load)
+// 预设编队管理：增删改只是动记录、不碰游戏，所以不受换人门闩限制——
+// 有任务在跑时照常有增删改（swapEligibility 只管上面「换人」那个按钮，
+// 它拦的是往游戏里发点击）；真要应用预设时，后端自己会把关。
+const presets = ref<CustomFormation[]>([])
+const presetsLoading = ref(false)
+const presetsError = ref('')
+const editorOpen = ref(false)
+const editingId = ref('') // '' = 新建
+const draftName = ref('')
+const draftTeam = ref(1)
+const draftSlots = ref<Record<string, CustomFormationSlotEntry>>({})
+const pickerSlot = ref<number | null>(null) // 正在选刀的格子
+const presetQuery = ref('')
+const presetSaving = ref(false)
+const presetMessage = ref('')
+const presetFailed = ref(false)
+
+const draftSlotCount = computed(() => presetSlotCount({ slots: draftSlots.value }))
+const draftError = computed(() => validatePresetDraft({
+  name: draftName.value,
+  target_team: draftTeam.value,
+  slots: draftSlots.value,
+}))
+
+// 预设选刀池直接复用本丸档案的候选分组（同名多振逐振列出，同一口径）。
+const presetFilteredGroups = computed(() => {
+  const needle = presetQuery.value.trim()
+  if (!needle) return candidateGroups.value
+  return candidateGroups.value.filter(group => group.name.includes(needle))
+})
+
+function cloneSlots(slots: Record<string, CustomFormationSlotEntry>): Record<string, CustomFormationSlotEntry> {
+  return JSON.parse(JSON.stringify(slots || {})) as Record<string, CustomFormationSlotEntry>
+}
+
+async function loadPresets() {
+  presetsLoading.value = true
+  presetsError.value = ''
+  try {
+    const body = await api.customFormations()
+    presets.value = body.formations || []
+  } catch (cause) {
+    presetsError.value = cause instanceof Error ? cause.message : '预设名单没有翻开'
+  } finally {
+    presetsLoading.value = false
+  }
+}
+
+function openPresetEditor(preset?: CustomFormation) {
+  if (preset) {
+    editingId.value = preset.id
+    draftName.value = preset.name
+    draftTeam.value = preset.target_team
+    draftSlots.value = cloneSlots(preset.slots)
+  } else {
+    editingId.value = ''
+    draftName.value = ''
+    draftTeam.value = teamNo.value
+    draftSlots.value = {}
+  }
+  pickerSlot.value = null
+  presetQuery.value = ''
+  presetMessage.value = ''
+  presetFailed.value = false
+  editorOpen.value = true
+}
+
+function closePresetEditor() {
+  if (presetSaving.value) return
+  editorOpen.value = false
+  pickerSlot.value = null
+}
+
+function togglePresetPicker(no: number) {
+  pickerSlot.value = pickerSlot.value === no ? null : no
+  presetQuery.value = ''
+}
+
+function assignPresetCandidate(entry: FormationCandidate) {
+  if (pickerSlot.value == null || !presetCandidatePickable(entry)) return
+  const next = cloneSlots(draftSlots.value)
+  next[String(pickerSlot.value)] = {
+    ...(entry.sword_catalog_id ? { sword_catalog_id: entry.sword_catalog_id } : {}),
+    ...(entry.name_zh ? { name_zh: entry.name_zh } : {}),
+    ...(entry.level != null ? { level: entry.level } : {}),
+    ...(entry.form_status ? { form_status: entry.form_status } : {}),
+    ...(entry.kiwame_date ? { kiwame_date: entry.kiwame_date } : {}),
+  }
+  draftSlots.value = next
+  presetMessage.value = ''
+  // 选完自动滑到下一个空位，一口气能把六个格子点完
+  const rest = [1, 2, 3, 4, 5, 6].find(no => no !== pickerSlot.value && !next[String(no)])
+  pickerSlot.value = rest ?? null
+}
+
+function clearPresetSlot(no: number) {
+  const next = cloneSlots(draftSlots.value)
+  delete next[String(no)]
+  draftSlots.value = next
+}
+
+async function savePreset() {
+  if (presetSaving.value) return
+  const problem = validatePresetDraft({
+    name: draftName.value,
+    target_team: draftTeam.value,
+    slots: draftSlots.value,
+  })
+  if (problem) {
+    presetMessage.value = problem
+    presetFailed.value = true
+    return
+  }
+  presetSaving.value = true
+  presetMessage.value = ''
+  try {
+    const body = await api.saveCustomFormation(
+      { name: draftName.value.trim(), target_team: draftTeam.value, slots: draftSlots.value },
+      editingId.value || undefined,
+    )
+    if (!body.ok) throw new Error('没有保存成功，请重试')
+    emit('notify', `预设「${body.formation.name}」已收好`)
+    editorOpen.value = false
+    pickerSlot.value = null
+    await loadPresets()
+  } catch (cause) {
+    presetMessage.value = cause instanceof Error ? cause.message : '保存失败，请重试'
+    presetFailed.value = true
+  } finally {
+    presetSaving.value = false
+  }
+}
+
+async function removePreset(preset: CustomFormation) {
+  if (presetSaving.value) return
+  if (!window.confirm(`删除「${preset.name}」？这套预设将从名单里移除，无法恢复。`)) return
+  try {
+    const body = await api.deleteCustomFormation(preset.id)
+    if (!body.ok) throw new Error('没有删除成功，请重试')
+    presets.value = presets.value.filter(item => item.id !== preset.id)
+    if (editingId.value === preset.id) closePresetEditor()
+    emit('notify', `已删除预设「${preset.name}」`)
+  } catch (cause) {
+    emit('notify', cause instanceof Error ? cause.message : '删除失败，请重试')
+  }
+}
+
+onMounted(() => { load(); loadPresets() })
 onBeforeUnmount(() => window.clearTimeout(pollTimer))
 </script>
 
@@ -406,6 +559,123 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
         <button type="button" class="secondary" @click="resultMissing = false">知道了</button>
       </section>
 
+      <PaperCard variant="task" tag="section" class="formation-presets">
+        <header class="formation-presets-head">
+          <div>
+            <h3>预设编队</h3>
+            <p>把常用的阵容存下来：一套预设指定覆盖哪支部队、六个位置各上哪振刀；应用时整套换人。改预设只是改记录，不碰游戏。</p>
+          </div>
+          <button
+            type="button"
+            class="secondary"
+            :disabled="presetsLoading || presets.length >= MAX_PRESETS"
+            :title="presets.length >= MAX_PRESETS ? '最多存 5 套预设，先删掉一套不用的' : ''"
+            @click="openPresetEditor()"
+          >{{ presets.length >= MAX_PRESETS ? '最多 5 套' : '＋ 新建预设' }}</button>
+        </header>
+
+        <p v-if="presetsError" class="formation-error" role="alert">{{ presetsError }}</p>
+        <p v-else-if="presetsLoading && !presets.length" class="formation-empty">正在翻预设名单……</p>
+        <template v-else>
+          <p v-if="!presets.length" class="formation-empty">还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。</p>
+          <ul v-else class="formation-preset-list">
+            <li v-for="preset in presets" :key="preset.id" class="formation-preset-card">
+              <div class="formation-preset-info">
+                <b>{{ presetLabel(preset) }}</b>
+                <span class="formation-badges">
+                  <i>已指定 {{ presetSlotCount(preset) }}/6 槽</i>
+                  <i v-if="!presetSlotCount(preset)" class="formation-gap">全是空位，应用时会直接停下</i>
+                </span>
+              </div>
+              <div class="formation-preset-tools">
+                <button type="button" class="secondary" :disabled="presetSaving" @click="openPresetEditor(preset)">编辑</button>
+                <button type="button" class="danger" :disabled="presetSaving" @click="removePreset(preset)">删除</button>
+              </div>
+            </li>
+          </ul>
+          <p v-if="presets.length >= MAX_PRESETS" class="formation-hintline">最多存 5 套预设；想存新的，先删掉一套不用的。</p>
+        </template>
+
+        <div v-if="editorOpen" class="formation-preset-editor">
+          <h4>{{ editingId ? '编辑预设' : '新建预设' }}</h4>
+          <div class="formation-preset-form">
+            <label class="formation-preset-field">
+              <span>预设名字</span>
+              <input v-model="draftName" type="text" maxlength="20" placeholder="比如：演练主力队">
+            </label>
+            <label class="formation-preset-field">
+              <span>覆盖部队</span>
+              <select v-model.number="draftTeam">
+                <option v-for="(label, index) in TEAM_LABELS" :key="label" :value="index + 1">{{ label }}</option>
+              </select>
+            </label>
+          </div>
+          <p class="formation-hintline">六个格子各指定一振刀；留空的格子应用时不动的位置保持原样。</p>
+          <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
+          <ol class="formation-preset-slots">
+            <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
+              <button
+                type="button"
+                class="formation-preset-slot"
+                :class="{ active: pickerSlot === no, filled: Boolean(draftSlots[String(no)]) }"
+                :aria-pressed="pickerSlot === no"
+                @click="togglePresetPicker(no)"
+              >
+                <b>{{ no }}号位</b>
+                <span>{{ presetSlotSummary(draftSlots[String(no)]) }}</span>
+              </button>
+              <button
+                v-if="draftSlots[String(no)]"
+                type="button"
+                class="formation-preset-clear"
+                :aria-label="`清除 ${no} 号位，恢复成不动`"
+                title="清除，恢复成不动"
+                @click="clearPresetSlot(no)"
+              >×</button>
+            </li>
+          </ol>
+
+          <div v-if="pickerSlot != null" class="formation-preset-picker">
+            <label class="formation-search">
+              <span>给 {{ pickerSlot }} 号位选刀</span>
+              <input v-model="presetQuery" type="search" placeholder="输入刀名">
+              <em>{{ presetFilteredGroups.length }} 种</em>
+            </label>
+            <p v-if="!poolDone" class="formation-empty">候选名单还不可信，先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来选。</p>
+            <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
+              <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
+                <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>
+                <button
+                  v-for="(entry, index) in group.rows"
+                  :key="entry.observation_id"
+                  type="button"
+                  class="formation-candidate"
+                  :class="{ 'lacks-evidence': !presetCandidatePickable(entry) }"
+                  :disabled="!presetCandidatePickable(entry)"
+                  :title="!presetCandidatePickable(entry) ? '档案里没认出这振的名字，先重新跑一次「刀帐盘点」再来' : ''"
+                  @click="assignPresetCandidate(entry)"
+                >
+                  <b>{{ group.rows.length > 1 ? `第 ${index + 1} 振` : group.name }}</b>
+                  <span class="formation-badges">
+                    <i :class="{ kiwame: entry.form_status === 'kiwame' }" :title="(entry.form_evidence || []).join('；')">{{ candidateFormLabel(entry) }}</i>
+                    <i>Lv.{{ entry.level ?? '—' }}</i>
+                    <i v-for="gap in candidateEvidenceGaps(entry)" :key="gap" class="formation-gap">缺{{ gap }}</i>
+                  </span>
+                </button>
+              </section>
+            </div>
+            <p v-else class="formation-empty">没有找到这个刀名。</p>
+          </div>
+
+          <p v-if="presetMessage" class="formation-preset-message" :class="{ failed: presetFailed }" :role="presetFailed ? 'alert' : 'status'">{{ presetMessage }}</p>
+          <div class="formation-preset-actions">
+            <button type="button" class="primary" :disabled="presetSaving || Boolean(draftError)" @click="savePreset">{{ presetSaving ? '正在收好……' : '保存预设' }}</button>
+            <button type="button" class="secondary" :disabled="presetSaving" @click="closePresetEditor">取消</button>
+          </div>
+          <p v-if="draftError" class="formation-hintline">{{ draftError }}</p>
+        </div>
+      </PaperCard>
+
       <details class="formation-logfold" @toggle="logOpen = ($event.target as HTMLDetailsElement).open">
         <summary>看看编队换人的详细日志</summary>
         <div v-if="logOpen" class="formation-log">
@@ -482,26 +752,67 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 .formation-log { height: 340px; min-width: 0; }
 .formation-log :deep(.log-panel) { height: 100%; min-width: 0; }
 .formation-log :deep(.log-row span) { overflow-wrap: anywhere; }
+/* 预设编队管理区：列表 + 就地展开的编辑器，视觉零件与选人区同源。 */
+.formation-presets { padding: 13px 15px; }
+.formation-presets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.formation-presets-head h3 { margin: 0; font-size: 14px; }
+.formation-presets-head p { max-width: 560px; margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
+.formation-presets-head button { min-height: 32px; padding: 5px 14px; font-size: 12px; }
+.formation-preset-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.formation-preset-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; }
+.formation-preset-info { display: grid; gap: 5px; min-width: 0; }
+.formation-preset-info b { font-size: 13px; overflow-wrap: anywhere; }
+.formation-preset-info .formation-badges { justify-content: flex-start; }
+.formation-preset-tools { display: flex; flex: 0 0 auto; gap: 6px; }
+.formation-preset-tools button { min-height: 30px; padding: 5px 13px; font-size: 12px; }
+.formation-preset-editor { margin-top: 14px; padding: 13px; background: color-mix(in srgb, var(--paper-card) 62%, var(--paper)); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.formation-preset-editor h4 { margin: 0 0 10px; font-size: 13px; }
+.formation-preset-editor .formation-hintline { margin: 8px 0 0; }
+.formation-presets > .formation-hintline { margin: 10px 0 0; }
+.formation-preset-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.formation-preset-field { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }
+.formation-preset-field input, .formation-preset-field select { width: 100%; min-width: 0; padding: 8px 10px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; }
+.formation-preset-warn { margin: 10px 0 0; padding: 8px 11px; color: #7a5312; background: color-mix(in srgb, #f4e8cf 72%, var(--paper-card)); border: 1px solid #d9bd84; border-radius: 8px; font-size: 12px; }
+.formation-preset-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.formation-preset-slots li { position: relative; min-width: 0; }
+.formation-preset-slot { display: grid; gap: 3px; width: 100%; min-height: 54px; padding: 9px 28px 9px 11px; text-align: left; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; cursor: pointer; }
+.formation-preset-slot b { font-size: 11px; color: var(--ink-dim); }
+.formation-preset-slot span { font-size: 12px; overflow-wrap: anywhere; }
+.formation-preset-slot.filled { background: color-mix(in srgb, var(--fox-gold-pale) 45%, var(--paper)); }
+.formation-preset-slot.active { border-color: var(--fox-gold); box-shadow: 3px 3px 0 color-mix(in srgb, var(--paper-line) 60%, transparent); }
+.formation-preset-clear { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 50%; font-size: 12px; line-height: 1; cursor: pointer; }
+.formation-preset-clear:hover { color: #8f3524; border-color: #d8a195; }
+.formation-preset-picker { margin-top: 10px; }
+.formation-preset-candidates { display: grid; gap: 8px; max-height: 300px; margin-top: 8px; overflow: auto; }
+.formation-preset-message { margin: 10px 0 0; font-size: 12px; color: #2f5527; }
+.formation-preset-message.failed { color: #8f3524; }
+.formation-preset-actions { display: flex; gap: 8px; margin-top: 12px; }
+.formation-preset-actions button { min-height: 34px; padding: 6px 18px; font-size: 12px; }
 @media (max-width: 900px) {
   /* 窄屏重排：操作卡（与结果卡）提到候选名单上面——名单很长，
-     选完刀不该再翻几千 px 才找得到换人按钮。 */
+     选完刀不该再翻几千 px 才找得到换人按钮。预设管理跟在结果后面。 */
   .formation-panel { display: flex; flex-direction: column; }
   .formation-columns { display: contents; }
   .formation-left { order: 1; }
   .formation-action { order: 2; }
   .formation-result { order: 3; }
-  .formation-right { order: 4; }
-  .formation-logfold { order: 5; }
+  .formation-presets { order: 4; }
+  .formation-right { order: 5; }
+  .formation-logfold { order: 6; }
 }
 @media (max-width: 620px) {
   .formation-slot { grid-template-columns: 1fr; gap: 2px; }
   .formation-slot b { grid-row: auto; }
   .formation-candidate { align-items: flex-start; flex-direction: column; gap: 4px; }
   .formation-badges { justify-content: flex-start; }
+  .formation-preset-card { align-items: flex-start; flex-direction: column; }
+  .formation-preset-tools { width: 100%; }
+  .formation-preset-tools button { flex: 1; }
+  .formation-preset-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .formation-log { height: 300px; }
   .formation-log :deep(.head-actions) { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .formation-slot, .formation-candidate { transition: none; }
+  .formation-slot, .formation-candidate, .formation-preset-slot { transition: none; }
 }
 </style>

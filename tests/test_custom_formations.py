@@ -1,0 +1,368 @@
+# -*- coding: utf-8 -*-
+"""预设编队档案（custom_formations）与批量应用（apply_preset_formation_stream）。
+
+假 MAA / 假 ensure，不碰真机；STATE_DIR 一律指到临时目录，不碰真实用户数据。
+话术纪律钉死：成功的消息不许命中翻车词表，停下的话术必须命中
+（touken/flows/report_judge.py 的 _FAIL_RE）。
+"""
+
+import json
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from touken import custom_formations as cf
+from touken.flows import formation_editor as fe
+from touken.flows.formation_editor import (
+    ALREADY_CORRECT, AMBIGUOUS, CHANGED, FormationEditorMixin, _TEAM_TAB)
+from touken.flows.report_judge import _is_fail
+
+
+def _record(**kw):
+    base = {"id": "pf1", "name": "预设编队一", "target_team": 3,
+            "slots": {"1": {"sword_catalog_id": "touken_003_mikazuki_munechika",
+                            "name_zh": "三日月宗近", "level": 99}}}
+    base.update(kw)
+    return base
+
+
+# ==================== 存取 ====================
+
+class StorageTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        patcher = patch.object(cf, "STATE_DIR", Path(self._tmp.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_roundtrip(self):
+        records = [_record(), _record(id="pf2", name="二队", target_team=5)]
+        cf.save_formations(records)
+        self.assertEqual(cf.load_formations(), records)
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(cf.load_formations(), [])
+
+    def test_corrupt_json_is_backed_up_and_empty(self):
+        bad = Path(self._tmp.name) / "custom_formations.json"
+        bad.write_text("{不是 json", encoding="utf-8")
+        self.assertEqual(cf.load_formations(), [])
+        self.assertFalse(bad.exists())
+        backups = list(Path(self._tmp.name).glob("custom_formations.json.bad-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn("{不是 json", backups[0].read_text(encoding="utf-8"))
+        # 备份之后还能正常当空库用（写入/重读）
+        cf.save_formations([_record()])
+        self.assertEqual(len(cf.load_formations()), 1)
+
+    def test_wrong_shape_is_empty(self):
+        bad = Path(self._tmp.name) / "custom_formations.json"
+        bad.write_text(json.dumps(["不是 dict"], ensure_ascii=False),
+                       encoding="utf-8")
+        self.assertEqual(cf.load_formations(), [])
+
+
+# ==================== id 分配 / 查找 ====================
+
+class IdTests(unittest.TestCase):
+    def test_first_gap_is_picked(self):
+        self.assertEqual(cf.new_formation_id([]), "pf1")
+        existing = [_record(id="pf1"), _record(id="pf2"), _record(id="pf4")]
+        self.assertEqual(cf.new_formation_id(existing), "pf3")
+
+    def test_full_raises(self):
+        existing = [_record(id=f"pf{i}") for i in range(1, 6)]
+        with self.assertRaises(ValueError) as ctx:
+            cf.new_formation_id(existing)
+        self.assertIn("预设编队最多 5 套", str(ctx.exception))
+
+
+class FindTests(unittest.TestCase):
+    def test_find(self):
+        a, b = _record(id="pf1"), _record(id="pf2")
+        self.assertIs(cf.find_formation([a, b], "pf2"), b)
+        self.assertIsNone(cf.find_formation([a, b], "pf9"))
+        self.assertIsNone(cf.find_formation([], "pf1"))
+        self.assertIsNone(cf.find_formation(None, "pf1"))
+
+
+# ==================== 校验 ====================
+
+class ValidateTests(unittest.TestCase):
+    def test_valid_record(self):
+        self.assertIsNone(cf.validate_formation(
+            _record(), existing=[_record(id="pf2")]))
+
+    def test_valid_empty_slots(self):
+        # 还没指定任何槽位也合法（应用时会拦）
+        self.assertIsNone(cf.validate_formation(_record(slots={})))
+
+    def test_valid_without_id(self):
+        rec = _record()
+        del rec["id"]
+        self.assertIsNone(cf.validate_formation(rec))
+
+    def test_name_required(self):
+        for bad in (None, "", "   ", 123):
+            self.assertIsNotNone(cf.validate_formation(_record(name=bad)),
+                                 f"name={bad!r} 应被拒")
+
+    def test_name_max_20_chars(self):
+        self.assertIsNone(cf.validate_formation(_record(name="刀" * 20)))
+        self.assertIsNotNone(cf.validate_formation(_record(name="刀" * 21)))
+
+    def test_target_team_range(self):
+        for bad in (0, 6, "3", 3.0, None, True):
+            self.assertIsNotNone(
+                cf.validate_formation(_record(target_team=bad)),
+                f"target_team={bad!r} 应被拒")
+        for good in (1, 5):
+            self.assertIsNone(cf.validate_formation(_record(target_team=good)))
+
+    def test_slots_must_be_dict(self):
+        for bad in (None, [], "1"):
+            self.assertIsNotNone(cf.validate_formation(_record(slots=bad)),
+                                 f"slots={bad!r} 应被拒")
+
+    def test_slots_max_six_keys(self):
+        slots = {str(i): {"name_zh": "三日月宗近"} for i in range(1, 7)}
+        self.assertIsNone(cf.validate_formation(_record(slots=slots)))
+        slots["7"] = {"name_zh": "小狐丸"}
+        self.assertIsNotNone(cf.validate_formation(_record(slots=slots)))
+
+    def test_slot_key_must_be_1_to_6(self):
+        for key in ("0", "7", "七", 1, ""):
+            self.assertIsNotNone(
+                cf.validate_formation(_record(slots={key: {"name_zh": "x"}})),
+                f"槽位键 {key!r} 应被拒")
+
+    def test_slot_entry_needs_identity(self):
+        for entry in ({}, {"sword_catalog_id": ""}, {"name_zh": "  "},
+                      {"sword_catalog_id": None, "name_zh": None},
+                      "三日月宗近", None):
+            self.assertIsNotNone(
+                cf.validate_formation(_record(slots={"1": entry})),
+                f"entry={entry!r} 应被拒")
+        self.assertIsNone(cf.validate_formation(
+            _record(slots={"1": {"sword_catalog_id": "touken_003"}})))
+        self.assertIsNone(cf.validate_formation(
+            _record(slots={"1": {"name_zh": "三日月宗近"}})))
+
+    def test_id_format(self):
+        for bad in ("PF1", "pf-1", "pf 1", "pf_1", "p.f1", "", 123):
+            self.assertIsNotNone(cf.validate_formation(_record(id=bad)),
+                                 f"id={bad!r} 应被拒")
+
+    def test_id_unique_against_existing(self):
+        other = _record(id="pf2", name="别的")
+        self.assertIsNotNone(
+            cf.validate_formation(_record(id="pf2"), existing=[other]))
+        self.assertIsNone(
+            cf.validate_formation(_record(id="pf1"), existing=[other]))
+
+
+# ==================== 批量应用流 ====================
+
+class _ClickMaa:
+    def __init__(self):
+        self.clicks = []
+
+    def click(self, point):
+        self.clicks.append((point.x, point.y))
+
+
+class _PresetHost(FormationEditorMixin):
+    """假宿主：ensure 按槽位剧本返结果；导航指哪打哪（current_location
+    即目的地）。host 上直接替换方法，与下游 panel 的用法一致。"""
+
+    def __init__(self, ensure_results):
+        self.maa = _ClickMaa()
+        self.config = {}
+        self.current_location = None
+        self.nav_calls = []
+        self.ensure_calls = []
+        self._ensure_results = ensure_results
+
+    def navigate_to_stream(self, dest):
+        self.nav_calls.append(dest)
+        self.current_location = dest
+        yield f"nav→{dest}"
+
+    def ensure_team_member_stream(self, team_no, slot_no, target,
+                                  entry_context="auto", **kw):
+        self.ensure_calls.append({"team_no": team_no, "slot_no": slot_no,
+                                  "target": target,
+                                  "entry_context": entry_context})
+        yield f"ensure@{slot_no}"
+        return self._ensure_results.get(slot_no,
+                                        {"result": CHANGED, "reason": ""})
+
+
+SLOTS = {
+    "1": {"sword_catalog_id": "touken_003_mikazuki_munechika",
+          "name_zh": "三日月宗近"},
+    "2": {"name_zh": "小狐丸"},
+    "3": {"sword_catalog_id": "touken_118_heshikiri_hasebe"},
+    "4": {"name_zh": "前田藤四郎"},
+}
+
+
+def _apply(host, team_no=3, slots=None, name="演练预设"):
+    with patch("touken.flows.formation_editor.time.sleep", lambda *_: None):
+        gen = host.apply_preset_formation_stream(
+            team_no, SLOTS if slots is None else slots, name)
+        msgs = []
+        while True:
+            try:
+                msgs.append(next(gen))
+            except StopIteration as stop:
+                return stop.value, msgs
+
+
+class ApplyStreamTests(unittest.TestCase):
+    def test_all_ok_reports_summary_and_true(self):
+        host = _PresetHost({2: {"result": ALREADY_CORRECT, "reason": ""}})
+        ok, msgs = _apply(host)
+
+        self.assertTrue(ok)
+        summary = msgs[-1]
+        self.assertIn("『演练预设』已覆盖部队3", summary)
+        self.assertIn("换好 3 位", summary)
+        self.assertIn("1 位本来就在", summary)
+        self.assertFalse(_is_fail(summary))     # 成功话术不许命中翻车词
+        # 逐槽升序、条目原样透传、formation 外壳
+        self.assertEqual([c["slot_no"] for c in host.ensure_calls],
+                         [1, 2, 3, 4])
+        for c in host.ensure_calls:
+            self.assertEqual(c["team_no"], 3)
+            self.assertEqual(c["entry_context"], "formation")
+            self.assertIs(c["target"], SLOTS[str(c["slot_no"])])
+        # 切队标签点过
+        self.assertIn(_TEAM_TAB[3], host.maa.clicks)
+        self.assertEqual(host.nav_calls, ["编队"])
+
+    def test_slots_applied_in_ascending_order_even_if_dict_unsorted(self):
+        host = _PresetHost({})
+        ok, _ = _apply(host, slots={"3": SLOTS["3"], "1": SLOTS["1"]})
+        self.assertTrue(ok)
+        self.assertEqual([c["slot_no"] for c in host.ensure_calls], [1, 3])
+
+    def test_ambiguous_slot_stops_and_later_slots_never_run(self):
+        host = _PresetHost({3: {"result": AMBIGUOUS,
+                                "reason": "同名候选缺身份证据（form）"}})
+        ok, msgs = _apply(host)
+
+        self.assertFalse(ok)
+        self.assertIn("卡在3号位", msgs[-1])
+        self.assertIn("同名候选缺身份证据", msgs[-1])
+        self.assertIn("队伍现在是半套", msgs[-1])
+        self.assertTrue(_is_fail(msgs[-1]))     # 停下必须命中翻车词
+        self.assertEqual([c["slot_no"] for c in host.ensure_calls],
+                         [1, 2, 3])             # 4 号位没执行
+
+    def test_empty_slots_refused_before_anything(self):
+        host = _PresetHost({})
+        ok, msgs = _apply(host, slots={})
+
+        self.assertFalse(ok)
+        self.assertIn("一个位置都没指定", msgs[-1])
+        self.assertTrue(_is_fail(msgs[-1]))
+        self.assertEqual(host.nav_calls, [])
+        self.assertEqual(host.ensure_calls, [])
+        self.assertEqual(host.maa.clicks, [])
+
+    def test_bad_team_no_refused_before_anything(self):
+        host = _PresetHost({})
+        ok, msgs = _apply(host, team_no=9)
+
+        self.assertFalse(ok)
+        self.assertTrue(_is_fail(msgs[-1]))
+        self.assertEqual(host.nav_calls, [])
+
+    def test_nav_failure_stops_before_any_swap(self):
+        class _LostHost(_PresetHost):
+            def navigate_to_stream(self, dest):
+                self.nav_calls.append(dest)
+                yield "nav→迷路"          # current_location 不变
+
+        host = _LostHost({})
+        ok, msgs = _apply(host)
+
+        self.assertFalse(ok)
+        self.assertTrue(_is_fail(msgs[-1]))
+        self.assertEqual(host.nav_calls, ["编队"])
+        self.assertEqual(host.ensure_calls, [])
+        self.assertEqual(host.maa.clicks, [])
+
+
+# ==================== 远征占用预检 ====================
+
+def _write_expeditions(tmp, payload):
+    Path(tmp, "expeditions.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+class ExpeditionGuardTests(unittest.TestCase):
+    def test_dispatched_team_blocks_before_nav(self):
+        dispatched = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_expeditions(tmp, {
+                "3": {"map_code": "E2", "duration_min": 99999,
+                      "dispatched_at": dispatched}})
+            with patch.object(fe, "STATE_DIR", Path(tmp)):
+                host = _PresetHost({})
+                ok, msgs = _apply(host)
+
+        self.assertFalse(ok)
+        self.assertIn("部队3还在远征", msgs[-1])
+        self.assertTrue(_is_fail(msgs[-1]))
+        self.assertEqual(host.nav_calls, [])        # 没进编队页
+        self.assertEqual(host.ensure_calls, [])
+        self.assertEqual(host.maa.clicks, [])
+
+    def test_expired_record_does_not_block(self):
+        dispatched = time.strftime("%Y-%m-%d %H:%M:%S",
+                                   time.localtime(time.time() - 7200))
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_expeditions(tmp,
+                               {"3": {"duration_min": 60,
+                                      "dispatched_at": dispatched}})
+            with patch.object(fe, "STATE_DIR", Path(tmp)):
+                host = _PresetHost({})
+                ok, _ = _apply(host)
+
+        self.assertTrue(ok)
+        self.assertEqual(len(host.ensure_calls), 4)
+
+    def test_corrupt_expeditions_file_does_not_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "expeditions.json").write_text("{坏", encoding="utf-8")
+            with patch.object(fe, "STATE_DIR", Path(tmp)):
+                host = _PresetHost({})
+                ok, _ = _apply(host)
+
+        self.assertTrue(ok)
+
+    def test_missing_expeditions_file_does_not_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(fe, "STATE_DIR", Path(tmp)):
+                host = _PresetHost({})
+                ok, _ = _apply(host)
+
+        self.assertTrue(ok)
+
+    def test_malformed_record_does_not_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_expeditions(tmp, {"3": {"dispatched_at": "不是时间"}})
+            with patch.object(fe, "STATE_DIR", Path(tmp)):
+                host = _PresetHost({})
+                ok, _ = _apply(host)
+
+        self.assertTrue(ok)
+
+
+if __name__ == "__main__":
+    unittest.main()

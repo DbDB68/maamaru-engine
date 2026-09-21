@@ -59,6 +59,7 @@
   - 翻页有指纹停滞/绕圈检测与页数上限，不在死循环里翻名单。
 """
 
+import json
 import re
 import time
 
@@ -66,6 +67,7 @@ import numpy as np
 
 from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
+from ..runtime_paths import STATE_DIR
 from .team_roster import _match_name, _ROW_CY, _TEAM_TAB
 
 RESULT_SCHEMA_VERSION = 1
@@ -402,6 +404,36 @@ def slot_matches_target(slot, target, match_fields=DEFAULT_MATCH_FIELDS):
     return True
 
 
+# ==================== 远征占用预检（预设编队用） ====================
+
+def _expedition_busy(team_no):
+    """目标队此刻是否还在远征（读 STATE_DIR/expeditions.json）。
+    口径同 panel.scheduler.team_available：dispatched_at + duration_min
+    没过完就算占用；文件缺失/损坏/字段缺一律当作没占用，不拦。
+    （touken 层不 import panel，故口径在此复写一份，别反向依赖。）"""
+    try:
+        records = json.loads(
+            (STATE_DIR / "expeditions.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    record = records.get(str(team_no), {}) if isinstance(records, dict) else {}
+    try:
+        end = time.mktime(time.strptime(record["dispatched_at"],
+                                        "%Y-%m-%d %H:%M:%S"))
+        end += int(record["duration_min"]) * 60
+        return time.time() < end
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _slot_no(key):
+    """槽位键转 int；认不出的键返回 0——ensure 会按 INVALID_REQUEST 收拾它。"""
+    try:
+        return int(key)
+    except (TypeError, ValueError):
+        return 0
+
+
 # ==================== 执行器 ====================
 
 class FormationEditorMixin:
@@ -626,6 +658,57 @@ class FormationEditorMixin:
                             before=slot_before, after=slot_after,
                             team_before=team_before, team_after=team_after,
                             other_slot_changes=others)
+
+    def apply_preset_formation_stream(self, team_no: int, slots: dict,
+                                      name: str = "预设编队"):
+        """把预设编队套到游戏内部队 team_no(1~5)：逐槽 ensure 换人。
+
+        先预检目标队远征占用（占用直接停，不做还原），导航到编队页切队后
+        按槽位号升序逐槽 ensure（entry_context="formation"）。任何一槽结果
+        不是 changed/already_correct 就停：队伍是半套状态，如实汇报，
+        不还原、不装绿。
+        Returns（yield from 接）: True 全部落妥 / False 没应用完。
+        """
+        if not isinstance(team_no, int) or team_no not in _TEAM_TAB:
+            yield f"[预设编队] 部队编号 {team_no} 不认识，无法换人（只支持 1~5）"
+            return False
+        if not isinstance(slots, dict) or not slots:
+            yield ("[预设编队] 这套预设一个位置都没指定，"
+                   "无法应用：去编队页编辑一下")
+            return False
+        if _expedition_busy(team_no):
+            yield (f"[预设编队] 部队{team_no}还在远征没回来，"
+                   "换不了人，等收远征再说")
+            return False
+
+        for msg in self.navigate_to_stream("编队"):
+            yield msg
+        if self.current_location != "编队":
+            yield "[预设编队] 无法到编队页，预设没应用完"
+            return False
+        self.maa.click(Point(*_TEAM_TAB[team_no]))
+        time.sleep(1.5)
+
+        changed = already = 0
+        for slot_key in sorted(slots, key=_slot_no):
+            slot_no = _slot_no(slot_key)
+            result = yield from self.ensure_team_member_stream(
+                team_no, slot_no, slots[slot_key], entry_context="formation")
+            verdict = result.get("result") if isinstance(result, dict) else None
+            if verdict == ALREADY_CORRECT:
+                already += 1
+                continue
+            if verdict == CHANGED:
+                changed += 1
+                continue
+            reason = result.get("reason") if isinstance(result, dict) \
+                else f"ensure 没返回结果 dict（{result!r}）"
+            yield (f"[预设编队] 卡在{slot_no}号位：{reason}，"
+                   "预设没应用完，队伍现在是半套，去看看")
+            return False
+        yield (f"[预设编队] ✓ 『{name}』已覆盖部队{team_no}："
+               f"换好 {changed} 位，{already} 位本来就在")
+        return True
 
     # ---- 外壳与切队 ----
 

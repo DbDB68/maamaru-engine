@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FormationCandidate, FormationSwapEvent } from './types'
+import type { CustomFormation, FormationCandidate, FormationSwapEvent } from './types'
 import {
   FORMATION_RESULT_TEXT,
   candidateEvidenceGaps,
@@ -7,7 +7,12 @@ import {
   candidateName,
   formationResultText,
   pickSwapEvent,
+  presetCandidatePickable,
+  presetLabel,
+  presetSlotCount,
+  presetSlotSummary,
   swapEligibility,
+  validatePresetDraft,
 } from './formation'
 
 function entry(over: Partial<FormationCandidate> = {}): FormationCandidate {
@@ -144,5 +149,59 @@ describe('回读验收事件', () => {
     expect(found?.payload.result).toBe('changed')
     expect(pickSwapEvent(events, 'no-such-run')).toBeNull()
     expect(pickSwapEvent([], 'my-run')).toBeNull()
+  })
+})
+
+function preset(over: Partial<CustomFormation> = {}): CustomFormation {
+  return {
+    id: 'pf1',
+    name: '预设编队一',
+    target_team: 3,
+    slots: {
+      '2': { sword_catalog_id: '00003', name_zh: '三日月宗近', level: 99, form_status: 'kiwame', kiwame_date: '2026-01-01' },
+    },
+    created_at: '2026-09-18T12:00:00',
+    updated_at: '2026-09-18T12:00:00',
+    ...over,
+  }
+}
+
+describe('预设编队', () => {
+  it('卡片标题：名字 + 覆盖部队（部队一~五的中文数字）', () => {
+    expect(presetLabel(preset())).toBe('预设编队一（覆盖部队三）')
+    expect(presetLabel(preset({ target_team: 1 }))).toBe('预设编队一（覆盖部队一）')
+    expect(presetLabel(preset({ target_team: 5 }))).toBe('预设编队一（覆盖部队五）')
+  })
+
+  it('已指定槽数：只数 1~6 里真带了刀身份的格子，空槽/越界键不算', () => {
+    expect(presetSlotCount(preset({ slots: {} }))).toBe(0)
+    expect(presetSlotCount(preset())).toBe(1)
+    expect(presetSlotCount(preset({ slots: { '1': {}, '6': { name_zh: '小狐丸' } } }))).toBe(1)
+    expect(presetSlotCount(preset({ slots: { '0': { name_zh: '岩融' }, '7': { name_zh: '今剣' } } }))).toBe(0)
+  })
+
+  it('校验：名字非空 ≤20 字、目标部队 1~5；一个位置都不指定也放行（UI 另行提示）', () => {
+    const ok = { name: '演练队', target_team: 2, slots: { '1': { name_zh: '三日月宗近' } } }
+    expect(validatePresetDraft(ok)).toBeNull()
+    expect(validatePresetDraft({ ...ok, name: '   ' })).toContain('名字')
+    expect(validatePresetDraft({ ...ok, name: '一'.repeat(21) })).toContain('20')
+    expect(validatePresetDraft({ ...ok, target_team: 0 })).toContain('部队')
+    expect(validatePresetDraft({ ...ok, target_team: 6 })).toContain('部队')
+    expect(validatePresetDraft({ ...ok, target_team: 2.5 })).toContain('部队')
+    expect(validatePresetDraft({ ...ok, slots: {} })).toBeNull()
+  })
+
+  it('格子小字：有快照显示「名字（形态 · 等级）」，空槽显示「不动」', () => {
+    expect(presetSlotSummary(null)).toBe('不动')
+    expect(presetSlotSummary(preset().slots['2'])).toBe('三日月宗近（极 · Lv.99）')
+    expect(presetSlotSummary({ name_zh: '小狐丸', form_status: 'normal' })).toBe('小狐丸（普通）')
+    expect(presetSlotSummary({ sword_catalog_id: '00005' })).toBe('00005（未确认）')
+  })
+
+  it('选刀池：没认出名字的候选禁选，有图鉴号兜底或缺等级的照常能选', () => {
+    expect(presetCandidatePickable(entry())).toBe(true)
+    expect(presetCandidatePickable(entry({ name_zh: null, sword_catalog_id: null }))).toBe(false)
+    expect(presetCandidatePickable(entry({ name_zh: null }))).toBe(true)
+    expect(presetCandidatePickable(entry({ level: null }))).toBe(true)
   })
 })

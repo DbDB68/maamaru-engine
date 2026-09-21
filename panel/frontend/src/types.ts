@@ -622,6 +622,29 @@ export interface FormationSwapEvent {
   }
 }
 
+// ---- 预设编队 /api/custom-formations ----
+
+/** 预设里一个槽位存的刀剑档案快照；槽位可缺省（=应用时该位置不动） */
+export interface CustomFormationSlotEntry {
+  sword_catalog_id?: string
+  name_zh?: string
+  level?: number
+  form_status?: string
+  kiwame_date?: string
+}
+
+export interface CustomFormation {
+  id: string
+  name: string
+  target_team: number
+  slots: Record<string, CustomFormationSlotEntry>
+  created_at: string
+  updated_at: string
+}
+
+/** 新建/编辑预设时递交给后端的正文（id 走后端生成/路径参数，不在 body 里） */
+export type CustomFormationDraft = Pick<CustomFormation, 'name' | 'target_team' | 'slots'>
+
 // ---- 刀帐档案（/api/data/sword-archive）----
 
 export type SwordFormStatus = 'kiwame' | 'normal' | 'ambiguous' | 'unknown'
