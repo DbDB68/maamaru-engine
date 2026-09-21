@@ -69,7 +69,7 @@ const message = ref('')
 type AppTab = 'home' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
 type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
-const lastWorkshopTab = ref<WorkshopTab>('workflow')
+const lastWorkshopTab = ref<WorkshopTab>('office')
 const workshopActive = computed(() => ['office', 'tasks', 'workflow', 'devtools'].includes(tab.value))
 function openWorkshop() {
   tab.value = lastWorkshopTab.value === 'devtools' && !devToolsEnabled.value ? 'workflow' : lastWorkshopTab.value
@@ -551,10 +551,10 @@ watch(tab, value => {
       </div>
     </header>
     <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="流程工房">
-      <div class="workshop-title"><strong>流程工房</strong><small>搭流程、看实况，需要时再调玩法</small></div>
+      <div class="workshop-title"><strong>流程工房</strong><small>看实况、搭流程，需要时再调玩法</small></div>
       <div class="workshop-tabs">
-        <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
+        <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
         <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">识别工具</button>
       </div>
