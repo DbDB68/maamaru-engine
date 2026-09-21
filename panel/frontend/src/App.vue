@@ -11,6 +11,7 @@ import SchedulePanel from './components/SchedulePanel.vue'
 import FormationPanel from './components/FormationPanel.vue'
 import WorkflowPanel from './components/WorkflowPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
+import DevToolsPanel from './components/DevToolsPanel.vue'
 import OverviewTaskCard from './components/OverviewTaskCard.vue'
 import AdvancedSettingLink from './components/AdvancedSettingLink.vue'
 import SwordListDrawer from './components/SwordListDrawer.vue'
@@ -65,7 +66,7 @@ function workflowSaved(preset: WorkflowPreset) {
 }
 const loading = ref(true)
 const message = ref('')
-const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'report' | 'archive' | 'system'>('home')
+const tab = ref<'home' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'>('home')
 const ledgerMode = ref(false)
 const reportEntry = ref<'report' | 'records' | 'planning'>('report')
 const launcherAvailable = ref(false)
@@ -82,6 +83,8 @@ const reportStageCollapsed = ref(false)
 const systemStageCollapsed = ref(false)
 const workflowStageCollapsed = ref(false)
 const systemMounted = ref(false)
+const devToolsEnabled = ref(false)
+const devtoolsMounted = ref(false)
 const homeFunctionsNav = ref<HTMLElement | null>(null)
 const dashboardRun = ref<any>(null)
 const immediateExpedition = ref<{ save: () => Promise<void> } | null>(null)
@@ -359,6 +362,8 @@ async function load() {
       homeLayoutLoaded.value = true
       homeWorkflows.value = workflowData.presets || []
     } catch (_) { /* 兜底走 fallbackHomeOrder */ }
+    // 开发工具只在开发版放开；账房模式在上面早已 return，双层保险。
+    try { devToolsEnabled.value = (await api.templateLabStatus()).enabled } catch { devToolsEnabled.value = false }
   } catch (error) {
     message.value = error instanceof Error ? error.message : '面板加载失败'
   } finally {
@@ -500,6 +505,7 @@ watch(tab, value => {
   if (value !== 'tasks') configStageCollapsed.value = false
   if (value !== 'report') { reportStageCollapsed.value = false; reportEntry.value = 'report' }
   if (value === 'system') systemMounted.value = true
+  if (value === 'devtools') devtoolsMounted.value = true
   if (value !== 'system') systemStageCollapsed.value = false
   if (value !== 'workflow') workflowStageCollapsed.value = false
 })
@@ -524,6 +530,7 @@ watch(tab, value => {
           <button class="nav-office" :class="{ active: tab === 'office' }" @click="tab = 'office'">执务</button>
           <button class="nav-tasks" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); tab = 'tasks'">配置</button>
           <button class="nav-workflow" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">工作流</button>
+          <button v-if="devToolsEnabled" class="nav-devtools" :class="{ active: tab === 'devtools' }" @click="tab = 'devtools'">开发工具</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸账</button>
           <button class="nav-archive" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀帐</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
@@ -684,8 +691,10 @@ watch(tab, value => {
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onReportScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page"><SwordArchivePanel /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
-    <!-- 开发工具里的框选、命名等是未保存草稿；切去看日志时保留组件，回来继续。 -->
+    <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onSystemScroll"><SystemPanel @scroll="onSystemScroll" /></MaamaruFrame>
+    <!-- 开发工具（模板/流程工坊）：框选、命名都是未保存草稿，切走后保留组件，回来继续。 -->
+    <MaamaruFrame v-if="!loading && devToolsEnabled && (tab === 'devtools' || devtoolsMounted)" v-show="tab === 'devtools'" variant="single" page-class="single-layout devtools-page"><DevToolsPanel /></MaamaruFrame>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
     <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onWorkflowScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" :busy="startingWorkflow" :running-workflow="runningWorkflow" @started="workflowStarted" @saved="workflowSaved" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
     <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>

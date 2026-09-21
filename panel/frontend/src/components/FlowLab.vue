@@ -87,17 +87,40 @@ function tell(text: string, error = false) { message.value = text; failed.value 
 function fail(e: unknown) { tell(e instanceof Error && e.message ? e.message : '操作失败，请检查后端连接', true) }
 function closeMenu() { moreMenu.value?.hidePopover() }
 
-// ---- 流程列表 ----
-async function openMenu(flow: FlowLabFlow, event: MouseEvent) {
+// ---- 流程选择器与操作（编辑器顶部的下拉 + 更多菜单）----
+const flowPick = ref('')
+// 下拉跟着草稿走：新建/未保存时回到占位项
+watch(() => draft.value?.id, (id) => { flowPick.value = id || '' })
+// 不能用 @change 联动：PixelControl 的 change 先于 v-model 回写触发，会拿到旧值
+watch(flowPick, (id) => {
+  if (!id) { if (draft.value?.id) newFlow(); return }
+  const flow = flows.value.find(item => item.id === id)
+  if (flow) select(flow)
+})
+async function openFlowMenu(event: MouseEvent) {
+  const current = flows.value.find(item => item.id === draft.value?.id)
+  if (!current) return
   const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  menuFlow.value = flow
+  menuFlow.value = current
   await nextTick()
   moreMenu.value?.showPopover()
-  const height = moreMenu.value?.offsetHeight || 80
+  const height = moreMenu.value?.offsetHeight || 96
   menuPosition.value = {
-    left: `${Math.max(8, Math.min(anchor.right - 136, window.innerWidth - 144))}px`,
+    left: `${Math.max(8, Math.min(anchor.left, window.innerWidth - 144))}px`,
     top: `${anchor.bottom + height + 8 <= window.innerHeight ? anchor.bottom + 4 : Math.max(8, anchor.top - height - 4)}px`,
   }
+}
+async function renameFlow() {
+  const current = menuFlow.value
+  closeMenu()
+  if (!current || !draft.value) return
+  const name = window.prompt('给流程改个名字', draft.value.name)
+  if (name === null) return
+  const trimmed = name.trim().slice(0, 30)
+  if (!trimmed) { tell('流程名字不能为空', true); return }
+  draft.value.name = trimmed
+  if (draft.value.id === current.id && !dirty.value) await save()
+  else tell('改名会跟着下次保存落盘')
 }
 function setDraft(flow: FlowLabFlow) {
   draft.value = clone(flow)
@@ -667,22 +690,19 @@ onBeforeUnmount(() => {
     <p v-if="loading" class="fl-loading">正在取出流程和素材…</p>
     <p v-else-if="loadError" class="fl-loading" role="alert">{{ loadError }} <button class="fl-button" @click="load()">重新加载</button></p>
     <div v-else class="fl-layout">
-      <aside class="fl-library" aria-label="我的流程">
-        <header><h3>我的流程</h3><span>{{ flows.length }}</span></header>
-        <button type="button" class="fl-button fl-new" :class="{ selected: !draft?.id }" :disabled="locked" @click="newFlow">＋ 新建流程</button>
-        <div class="fl-presets">
-          <div v-for="flow in flows" :key="flow.id" class="fl-preset" :class="{ selected: draft?.id === flow.id }">
-            <button type="button" class="fl-preset-select" :aria-pressed="draft?.id === flow.id" :disabled="locked" @click="select(flow)">
-              <strong>{{ flow.name }}</strong><small>{{ flow.steps.length }} 步<span v-if="draft?.id === flow.id && dirty"> · 编辑中</span></small>
-            </button>
-            <button type="button" class="fl-more-button" :aria-label="`${flow.name}的更多操作`" :disabled="locked" aria-haspopup="true" @click="openMenu(flow, $event)"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="13" cy="8" r="1.3" fill="currentColor"/></svg></button>
-          </div>
-        </div>
-        <p class="fl-library-note">拼新活动的姿势：<br>复制一条旧的，改改就能跑。</p>
-      </aside>
-
       <PaperCard v-if="draft" variant="settings" class="fl-editor">
         <fieldset :disabled="locked" class="fl-edit-fields">
+          <div class="fl-flowbar">
+            <label class="fl-flowpick">流程
+              <PixelControl v-model="flowPick" as="select">
+                <option value="" disabled>{{ flows.length ? '选一条流程' : '还没有流程，先建一条' }}</option>
+                <option v-for="flow in flows" :key="flow.id" :value="flow.id">{{ flow.name }}（{{ flow.steps.length }} 步）<template v-if="draft.id === flow.id && dirty"> · 编辑中</template></option>
+              </PixelControl>
+            </label>
+            <button type="button" class="fl-mini" :disabled="locked" @click="newFlow">＋ 新建</button>
+            <button type="button" class="fl-mini" :disabled="locked || !draft.id" aria-haspopup="true" :aria-label="`${draft.name || '这条流程'}的更多操作`" @click="openFlowMenu($event)">⋯ 更多</button>
+            <small class="fl-flowbar-note">拼新活动的姿势：复制一条旧的，改改就能跑。</small>
+          </div>
           <header class="fl-editor-head">
             <label class="fl-name">{{ draft.id ? '流程名称' : '新的流程' }}<PixelControl v-model="draft.name" maxlength="30" placeholder="给流程起个名字，比如：新活动每日一抽" /></label>
           </header>
@@ -829,6 +849,7 @@ onBeforeUnmount(() => {
     <div ref="moreMenu" popover="auto" class="fl-preset-menu" :style="menuPosition" :aria-label="`${menuFlow?.name || '流程'}的操作`">
       <template v-if="menuFlow">
         <button type="button" :disabled="locked" @click="duplicate(menuFlow)">复制流程</button>
+        <button type="button" :disabled="locked" @click="renameFlow">改名…</button>
         <button type="button" class="fl-danger" :disabled="locked" @click="remove(menuFlow)">删除流程</button>
       </template>
     </div>
@@ -849,7 +870,7 @@ onBeforeUnmount(() => {
       </div>
       <footer class="fl-picker-footer"><span role="status">{{ (draft?.steps.length || 0) >= maxSteps ? '已达到 50 步上限' : lastAdded || `将加入第 ${insertAt + 1} 步` }}<small>当前共 {{ draft?.steps.length || 0 }} 个步骤</small></span><button type="button" class="fl-button fl-primary" @click="closePicker">选好了</button></footer>
     </dialog>
-    <dialog ref="switchDialog" class="fl-dialog fl-switch" aria-labelledby="fl-switch-title" @close="pendingSwitch = null">
+    <dialog ref="switchDialog" class="fl-dialog fl-switch" aria-labelledby="fl-switch-title" @close="pendingSwitch = null; flowPick = draft?.id || ''">
       <h2 id="fl-switch-title">先收好这条流程？</h2><p>「{{ draft?.name || '未命名流程' }}」还有没保存的修改。</p><p v-if="failed" class="fl-danger" role="alert">{{ message }}</p><div class="fl-switch-actions"><button type="button" class="fl-text-button" :disabled="locked" @click="switchDialog?.close()">继续编辑</button><button type="button" class="fl-button" :disabled="locked" @click="confirmSwitch(false)">放弃修改</button><button type="button" class="fl-button fl-primary" :disabled="!valid || locked" @click="confirmSwitch(true)">{{ saving ? '保存中…' : '保存并切换' }}</button></div>
     </dialog>
   </section>
@@ -861,33 +882,21 @@ onBeforeUnmount(() => {
 .flow-lab button:disabled { cursor: default; opacity: .42; }
 .flow-lab button:focus-visible, .flow-lab input:focus-visible, .flow-lab select:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
 .fl-loading { padding: 30px clamp(22px, 4vw, 58px); color: var(--ink-dim); font-size: 13px; }
-.fl-layout { display: grid; grid-template-columns: 200px minmax(340px, 1fr) minmax(0, 380px); gap: 0; align-items: start; padding: 0; }
-.fl-library { min-width: 0; padding: 22px 14px; background: #f1e7d6; border-right: 1px solid var(--line); }
-.fl-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
-.fl-library h3 { margin: 0; font-size: 13px; }
-.fl-library > header > span { font-size: 11px; color: var(--ink-dim); }
+.fl-layout { display: grid; grid-template-columns: minmax(360px, 1fr) minmax(0, 420px); gap: 0; align-items: start; padding: 0 clamp(16px, 3vw, 44px); }
 .fl-button { min-height: 38px; border: 1px solid var(--paper-line); border-radius: 6px; color: var(--ink); background: var(--paper-card); padding: 9px 15px; font-size: 13px; font-weight: 600; }
 .fl-button:hover:not(:disabled) { border-color: var(--fox-gold); background: var(--paper-panel); }
 .fl-button.fl-primary { background: var(--fox-gold); color: #fffaf0; border-color: var(--fox-gold); }
 .fl-button.fl-primary:hover:not(:disabled) { filter: brightness(.95); background: var(--fox-gold); }
-.fl-new { width: 100%; text-align: left; background: transparent; border-style: dashed; }
-.fl-new.selected { border-color: var(--fox-gold); color: var(--fox-gold); }
-.fl-presets { display: grid; gap: 6px; margin-top: 14px; }
-.fl-preset { position: relative; text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink); min-width: 0; }
-.fl-preset-select { display: block; width: 100%; padding: 12px 38px 12px 12px; text-align: left; border: 0; border-radius: inherit; background: transparent; color: inherit; }
-.fl-preset strong { display: block; font-size: 13px; overflow-wrap: anywhere; line-height: 1.6; }
-.fl-preset small { display: block; font-size: 11px; color: var(--ink-dim); margin-top: 5px; }
-.fl-preset:hover { background: var(--paper-panel); }
-.fl-preset.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }
-.fl-library-note { font-size: 11px; line-height: 1.9; color: var(--ink-dim); margin: 24px 12px; }
-.fl-editor { margin: 22px 18px; align-self: start; padding: 0; min-width: 0; border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
+.fl-editor { margin: 22px 18px 22px 0; align-self: start; padding: 0; min-width: 0; border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
 .fl-edit-fields { border: 0; margin: 0; padding: 25px 26px 22px; min-width: 0; }
+.fl-flowbar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding-bottom: 18px; }
+.fl-flowpick { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 700; color: var(--ink-dim); min-width: 0; }
+.fl-flowpick :deep(.pixel-control) { width: clamp(200px, 26vw, 340px); }
+.fl-flowbar-note { font-size: 11px; color: var(--ink-dim); line-height: 1.7; margin-left: auto; max-width: 260px; }
 .fl-editor-head { display: flex; gap: 16px; align-items: center; padding-bottom: 24px; }
 .fl-name { display: grid; gap: 9px; flex: 1; min-width: 0; color: var(--ink-dim); font-size: 11px; }
 .fl-name :deep(input) { width: 100%; min-width: 0; height: auto; border: 0; border-bottom: 1px solid var(--paper-line); border-radius: 0; padding: 8px 0; background: transparent; box-shadow: none; color: var(--ink); font: inherit; font-size: 20px; font-weight: 650; }
 .fl-name :deep(input::placeholder) { color: var(--ink-dim); font-size: 16px; font-weight: normal; opacity: .75; }
-.fl-more-button { display: grid; place-items: center; position: absolute; right: 6px; top: 8px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ink-dim); font-size: 18px; line-height: 1; }
-.fl-more-button:hover { background: var(--paper-panel); color: var(--ink); }
 .fl-preset-menu { position: fixed; inset: auto; margin: 0; width: 136px; padding: 4px; background: var(--paper-card); color: var(--ink); border: 1px solid var(--paper-line); border-radius: 6px; box-shadow: 0 4px 14px #0002; }
 .fl-preset-menu button { display: block; width: 100%; background: none; color: var(--ink); border: 0; border-radius: 3px; padding: 8px 10px; text-align: left; font-size: 12px; }
 .fl-preset-menu button:hover:not(:disabled) { background: var(--paper-panel); }
@@ -958,7 +967,7 @@ onBeforeUnmount(() => {
 button.fl-danger { color: #a04b3a; }
 .fl-ok { color: #426047; }
 .fl-bad { color: #9f3d28; }
-.fl-stage { display: grid; gap: 14px; align-content: start; min-width: 0; padding: 22px 18px 22px 0; }
+.fl-stage { display: grid; gap: 14px; align-content: start; min-width: 0; padding: 22px 0; }
 .fl-card { display: grid; gap: 10px; align-content: start; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: var(--r-lg); min-width: 0; }
 .fl-card h3 { margin: 0; font-size: 15px; }
 .fl-card h3 small { margin-left: 8px; color: var(--ink-dim); font-size: 11px; font-weight: 400; }
@@ -1004,22 +1013,19 @@ button.fl-danger { color: #a04b3a; }
 @media (prefers-reduced-motion: reduce) {
   .fl-step { transition: none; }
 }
-@media (max-width: 1200px) {
-  .fl-layout { grid-template-columns: 170px minmax(340px, 1fr); }
-  .fl-stage { grid-column: 1 / -1; padding: 0 18px 22px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+@media (max-width: 1100px) {
+  .fl-layout { grid-template-columns: 1fr; }
+  .fl-editor { margin: 22px 0; }
+  .fl-stage { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   .fl-canvas-scroll { max-height: 60vh; }
 }
 @media (max-width: 720px) {
-  .fl-layout { grid-template-columns: 1fr; }
-  .fl-library { padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-  .fl-library > header { flex: 1; margin: 0; }
-  .fl-new { width: auto; }
-  .fl-presets { display: flex; width: 100%; overflow-x: auto; gap: 8px; margin: 0; padding-bottom: 3px; }
-  .fl-preset { flex: 0 0 auto; max-width: 210px; border-color: var(--paper-line); }
-  .fl-preset-select { padding: 9px 38px 9px 13px; }
-  .fl-library-note { display: none; }
-  .fl-editor { margin: 16px 14px; }
-  .fl-stage { padding: 0 14px 18px; grid-template-columns: 1fr; }
+  .fl-layout { grid-template-columns: 1fr; padding: 0 14px; }
+  .fl-editor { margin: 16px 0; }
+  .fl-flowbar-note { display: none; }
+  .fl-flowpick :deep(.pixel-control) { width: 100%; }
+  .fl-flowpick { flex: 1 1 100%; }
+  .fl-stage { padding: 0 0 18px; grid-template-columns: 1fr; }
   .fl-editor-head { padding-bottom: 20px; gap: 8px; }
   .fl-name :deep(input) { font-size: 18px; }
   .fl-name :deep(input::placeholder) { font-size: 13px; }
@@ -1047,5 +1053,4 @@ button.fl-danger { color: #a04b3a; }
   .fl-picker-footer > span { font-size: 11px; }
   .fl-switch { padding: 22px 18px; }
 }
-:global(body[data-theme='pixel']) .fl-library { background: #e8dfca; border-color: #c8bea5; }
 </style>
