@@ -304,11 +304,22 @@ let scrollRaf = 0
 let renderToken = 0
 
 const frameMeta = computed(() => frames.value[frameIdx.value] ?? null)
+// 100% = 恰好填满右栏可用宽度；200%/400% 在画布容器内滚动。
+// 画布 CSS 宽用百分比，坐标换算靠 canvas 位图宽 / 实际渲染宽（currentScale），
+// 任何缩放下拖框、八向手柄、命中标记都不会错位。
 const canvasStyle = computed(() => {
   const meta = frameMeta.value
   if (!meta) return { width: '0px', height: '0px' }
-  return { width: `${meta.width * zoom.value}px`, height: `${meta.height * zoom.value}px` }
+  return { width: `${zoom.value * 100}%`, height: 'auto', display: 'block' }
 })
+// 当前图像像素 / CSS 像素 的换算比：缩放级别、右栏宽度变化都从这里实时读，
+// 不缓存、不看 zoom 值本身——它就是此刻画布的真实映射。
+function currentScale() {
+  const canvas = canvasRef.value
+  if (!canvas) return 1
+  const rect = canvas.getBoundingClientRect()
+  return rect.width > 0 ? canvas.width / rect.width : 1
+}
 const selText = computed(() => {
   const sel = selection.value
   return sel && sel.w > 0 && sel.h > 0 ? `x ${sel.x}，y ${sel.y}，宽 ${sel.w}，高 ${sel.h}` : '按住鼠标拖一个框'
@@ -467,7 +478,9 @@ async function renderCanvas() {
       ctx.stroke()
       ctx.setLineDash([])
     }
-    // 框选（ROI）：金框 + 八向手柄，与模板工坊同款
+    // 框选（ROI）：金框 + 八向手柄，与模板工坊同款。
+    // 手柄屏幕尺寸恒定，要按当前真实缩放（位图宽/渲染宽）换算回图像坐标。
+    const scale = currentScale()
     const sel = selection.value
     if (sel && sel.w > 0 && sel.h > 0) {
       ctx.fillStyle = 'rgba(212, 160, 23, 0.12)'
@@ -475,10 +488,10 @@ async function renderCanvas() {
       ctx.strokeStyle = '#d4a017'
       ctx.lineWidth = Math.max(1, 1.5)
       ctx.strokeRect(sel.x + 0.5, sel.y + 0.5, sel.w - 1, sel.h - 1)
-      const hs = HANDLE_SCREEN_PX / zoom.value
+      const hs = HANDLE_SCREEN_PX / scale
       ctx.fillStyle = '#d4a017'
       ctx.strokeStyle = '#fffaf0'
-      ctx.lineWidth = Math.max(1 / zoom.value, 0.5)
+      ctx.lineWidth = Math.max(1 / scale, 0.5)
       for (const p of Object.values(handlePoints(sel))) {
         ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
         ctx.strokeRect(p.x - hs / 2, p.y - hs / 2, hs, hs)
@@ -562,7 +575,7 @@ function onMouseDown(e: MouseEvent) {
   if (dragging.value) stopWindowDrag()
   const p = toImageCoords(e.clientX, e.clientY)
   const sel = selection.value
-  const handle = sel && sel.w > 0 && sel.h > 0 ? hitHandle(sel, p, zoom.value) : null
+  const handle = sel && sel.w > 0 && sel.h > 0 ? hitHandle(sel, p, currentScale()) : null
   if (handle && sel) {
     resizeHandle = handle
     resizeBase = { ...sel }
@@ -589,7 +602,7 @@ function onCanvasHover(e: MouseEvent) {
   if (dragging.value) return
   const sel = selection.value
   const handle = sel && sel.w > 0 && sel.h > 0
-    ? hitHandle(sel, toImageCoords(e.clientX, e.clientY), zoom.value)
+    ? hitHandle(sel, toImageCoords(e.clientX, e.clientY), currentScale())
     : null
   canvas.style.cursor = handle ? HANDLE_CURSORS[handle] : 'crosshair'
 }
@@ -622,6 +635,17 @@ function protectDraft(event: BeforeUnloadEvent) {
     event.returnValue = ''
   }
 }
+// 画布要等 loading 完才挂载（v-else 渲染），用 watch 挂 ResizeObserver：
+// 右栏宽度变化（窗口缩放、断点切换）→ 重新按新宽度适配绘制。
+let canvasObserver: ResizeObserver | null = null
+watch(canvasRef, (el) => {
+  canvasObserver?.disconnect()
+  canvasObserver = null
+  if (el && typeof ResizeObserver !== 'undefined') {
+    canvasObserver = new ResizeObserver(() => { renderCanvas() })
+    canvasObserver.observe(el)
+  }
+})
 onMounted(() => {
   load()
   window.addEventListener('keydown', onKeyDown)
@@ -633,6 +657,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', protectDraft)
   window.removeEventListener('scroll', closeMenu, true)
   stopWindowDrag()
+  canvasObserver?.disconnect()
 })
 </script>
 
@@ -779,7 +804,7 @@ onBeforeUnmount(() => {
             <canvas ref="canvasRef" class="fl-canvas" :style="canvasStyle" @mousedown.prevent="onMouseDown" @mousemove="onCanvasHover" />
           </div>
           <p v-if="!sessions.length" class="fl-hintline">还没有帧——点「抓一帧」，或去模板工坊抓一组。</p>
-          <p v-else class="fl-hintline">{{ pointPicking ? '点选模式：在画面上点一下回填坐标（Esc 取消）' : `拖框 = 给展开步骤的 ROI 画范围（${selText}）；方向键微调 1px，Shift=10px` }}</p>
+          <p v-else class="fl-hintline">{{ pointPicking ? '点选模式：在画面上点一下回填坐标（Esc 取消）' : `拖框 = 给展开步骤的 ROI 画范围（${selText}）；方向键微调 1px，Shift=10px。100% 恰好填满右栏，200%/400% 在框内滚动` }}</p>
         </section>
         <section v-if="probe" class="fl-card fl-probe">
           <h3>试跑结果 <small>{{ probe.kind === 'recognize' ? '只认不点' : '动作预览，没有真点' }}</small></h3>
@@ -836,7 +861,7 @@ onBeforeUnmount(() => {
 .flow-lab button:disabled { cursor: default; opacity: .42; }
 .flow-lab button:focus-visible, .flow-lab input:focus-visible, .flow-lab select:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
 .fl-loading { padding: 30px clamp(22px, 4vw, 58px); color: var(--ink-dim); font-size: 13px; }
-.fl-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(300px, 380px); gap: 0; align-items: start; padding: 0; }
+.fl-layout { display: grid; grid-template-columns: 200px minmax(340px, 1fr) minmax(0, 380px); gap: 0; align-items: start; padding: 0; }
 .fl-library { min-width: 0; padding: 22px 14px; background: #f1e7d6; border-right: 1px solid var(--line); }
 .fl-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
 .fl-library h3 { margin: 0; font-size: 13px; }
@@ -884,7 +909,7 @@ onBeforeUnmount(() => {
 .fl-step-head { display: flex; align-items: center; padding: 0 9px 0 0; }
 .fl-step-toggle { display: flex; align-items: center; gap: 13px; min-width: 0; flex: 1; border: 0; background: none; color: var(--ink); padding: 14px 12px; text-align: left; }
 .fl-number { align-self: flex-start; margin-top: 1px; width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center; color: var(--fox-gold); background: var(--paper-panel); border-radius: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
-.fl-step-label { min-width: 0; flex: 1; }
+.fl-step-label { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .fl-step-label strong { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 14px; line-height: 1.7; }
 .fl-step-label strong small { font-weight: normal; color: var(--ink-dim); font-size: 10px; border: 1px solid var(--paper-line); padding: 0 5px; border-radius: 3px; }
 .fl-step-label > span { display: block; color: var(--ink-dim); font-size: 11px; line-height: 1.7; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -945,7 +970,7 @@ button.fl-danger { color: #a04b3a; }
 .fl-zoom button { padding: 7px 10px; background: var(--paper); border: 0; border-right: 1px solid var(--line-strong); font-size: 11px; }
 .fl-zoom button:last-child { border-right: 0; }
 .fl-zoom button.active { color: #fffaf0; background: var(--fox-gold-deep); }
-.fl-canvas-scroll { overflow: auto; max-height: 46vh; border: 1px solid var(--paper-line); border-radius: 6px; background: #221c17; }
+.fl-canvas-scroll { overflow: auto; max-height: 46vh; min-width: 0; border: 1px solid var(--paper-line); border-radius: 6px; background: #221c17; }
 .fl-canvas { display: block; cursor: crosshair; image-rendering: pixelated; }
 .fl-probe p { margin: 0; font-size: 12px; line-height: 1.8; }
 .fl-dialog { padding: 0; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); width: min(700px, calc(100% - 32px)); max-height: calc(100dvh - 48px); box-shadow: 0 22px 80px #251a1140; }
@@ -979,8 +1004,8 @@ button.fl-danger { color: #a04b3a; }
 @media (prefers-reduced-motion: reduce) {
   .fl-step { transition: none; }
 }
-@media (max-width: 1180px) {
-  .fl-layout { grid-template-columns: 170px minmax(0, 1fr); }
+@media (max-width: 1200px) {
+  .fl-layout { grid-template-columns: 170px minmax(340px, 1fr); }
   .fl-stage { grid-column: 1 / -1; padding: 0 18px 22px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   .fl-canvas-scroll { max-height: 60vh; }
 }
