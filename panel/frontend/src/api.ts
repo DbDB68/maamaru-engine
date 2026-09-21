@@ -1,4 +1,4 @@
-import type { EventGoalResult, EventTimelineReport, EventsCalendar, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
+import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 import type { FormationSwapEvent, HonmaruFormationProfile } from './types'
@@ -216,4 +216,20 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, rect }),
   }),
   templateLabDeleteCodeRoi: (id: string) => request<{ ok: boolean }>(`/api/template-lab/code-rois/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  flowLabFlows: () => request<{ flows: FlowLabFlow[] }>('/api/flow-lab/flows'),
+  flowLabCreateFlow: (value: { name: string; steps: FlowStep[] }) => request<{ ok: boolean; flow: FlowLabFlow }>('/api/flow-lab/flows', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
+  }),
+  flowLabUpdateFlow: (flow: FlowLabFlow) => request<{ ok: boolean; flow: FlowLabFlow }>(`/api/flow-lab/flows/${encodeURIComponent(flow.id)}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: flow.name, steps: flow.steps }),
+  }),
+  flowLabDeleteFlow: (id: string) => request<{ ok: boolean }>(`/api/flow-lab/flows/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  flowLabDuplicateFlow: (id: string) => request<{ ok: boolean; flow: FlowLabFlow }>(`/api/flow-lab/flows/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
+  flowLabSteps: () => request<{ steps: FlowStepDef[]; builtins: FlowBuiltinDef[] }>('/api/flow-lab/steps'),
+  flowLabTemplates: () => request<{ templates: string[] }>('/api/flow-lab/templates'),
+  flowLabTemplateImageUrl: (path: string) => `/api/flow-lab/template-image?path=${encodeURIComponent(path)}`,
+  flowLabRois: () => request<{ rois: TemplateLabRoi[] }>('/api/flow-lab/rois'),
+  flowLabTestStep: (step: FlowStep) => request<FlowTestResult>('/api/flow-lab/test-step', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step }),
+  }),
 }

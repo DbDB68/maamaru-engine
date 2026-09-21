@@ -6,9 +6,11 @@ import PanelHeader from './PanelHeader.vue'
 import SideNavItem from './SideNavItem.vue'
 import PixelControl from './PixelControl.vue'
 import TemplateLab from './TemplateLab.vue'
+import FlowLab from './FlowLab.vue'
 
 const emit = defineEmits<{ scroll: [event: Event] }>()
 const selected = ref<'ai' | 'qq' | 'telegram' | 'broadcast' | 'appearance' | 'emulator' | 'devtools'>('ai')
+const devTab = ref<'template' | 'flow'>('template')
 const ai = ref<any>(null)
 const bot = ref<any>(null)
 const emu = ref<any>(null)
@@ -66,7 +68,15 @@ onMounted(async () => {
   <section v-if="ready || labEnabled" class="system-panel" :class="{ 'no-header': !ready }" @scroll="emit('scroll', $event)">
     <PanelHeader v-if="ready" variant="page" title="系统设置" subtitle="近侍、协议端与播报"><template #actions><button v-if="selected !== 'devtools'" class="primary" @click="save">保存设置</button></template></PanelHeader>
     <div class="system-layout"><nav class="system-nav"><template v-if="ready"><SideNavItem :active="selected === 'ai'" @click="selected = 'ai'">近侍 AI</SideNavItem><SideNavItem :active="selected === 'qq'" @click="selected = 'qq'">QQ</SideNavItem><SideNavItem :active="selected === 'telegram'" @click="selected = 'telegram'">Telegram</SideNavItem><SideNavItem :active="selected === 'broadcast'" @click="selected = 'broadcast'">播报</SideNavItem><SideNavItem :active="selected === 'appearance'" @click="selected = 'appearance'">外观</SideNavItem><SideNavItem :active="selected === 'emulator'" @click="selected = 'emulator'">模拟器</SideNavItem></template><SideNavItem v-if="labEnabled" :active="selected === 'devtools'" @click="selected = 'devtools'">开发工具</SideNavItem></nav>
-      <div v-if="selected === 'devtools'" class="devtools-pane" @scroll="emit('scroll', $event)"><TemplateLab /></div>
+      <div v-if="selected === 'devtools'" class="devtools-pane" @scroll="emit('scroll', $event)">
+        <nav class="dev-tabs" aria-label="开发工具">
+          <SideNavItem :active="devTab === 'template'" @click="devTab = 'template'">模板工坊</SideNavItem>
+          <SideNavItem :active="devTab === 'flow'" @click="devTab = 'flow'">流程工坊</SideNavItem>
+        </nav>
+        <!-- v-show 不用 v-if：两个工坊都有没保存的草稿，切换页签不许丢 -->
+        <div v-show="devTab === 'template'" class="dev-tab-pane"><TemplateLab /></div>
+        <div v-show="devTab === 'flow'" class="dev-tab-pane"><FlowLab /></div>
+      </div>
       <div v-else-if="ready" class="system-form" :class="`${selected}-form`">
         <template v-if="selected === 'ai'"><h3>近侍 AI</h3><label>API Key<PixelControl v-model="apiKey" type="password" :placeholder="ai.has_key ? `已配置（${ai.api_key_masked}），留空不改` : '输入 API Key'" /></label><label>API 地址<PixelControl v-model="ai.base_url" /></label><label>模型<PixelControl v-model="ai.model" /></label><label>角色设定<PixelControl v-model="ai.system_prompt" as="textarea" /></label><p>保存后立即生效，不需要重启。</p></template>
         <template v-else-if="selected === 'qq'"><h3>QQ 协议端</h3><QQStatus /><label class="check-label"><input v-model="bot.qq.enabled" type="checkbox" />启用 QQ</label><label>协议端<PixelControl v-model="bot.qq.provider" as="select"><option value="napcat">NapCat</option><option value="snowluma">SnowLuma</option><option value="custom">其他 OneBot 实现</option></PixelControl></label><label>消息接口<PixelControl v-model="bot.qq.snowluma_http" /></label><label>管理页<PixelControl v-model="bot.qq.snowluma_gui_http" /></label><label>管理员 QQ<PixelControl :model-value="(bot.qq.admin_qq || []).join(', ')" @update:model-value="bot.qq.admin_qq = $event" /></label><p>QQ 配置修改后需要重启まあ丸。</p></template>
@@ -83,4 +93,6 @@ onMounted(async () => {
 <style scoped>
 .system-panel.no-header .system-layout { height: 100%; }
 .devtools-pane { min-width: 0; padding: 20px 24px; overflow: auto; }
+.dev-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+.dev-tab-pane { min-width: 0; }
 </style>

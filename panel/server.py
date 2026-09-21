@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .log_store import get_store
 from .honmaru_home import create_home_router
 from .template_lab import create_template_lab_router
+from .flow_lab import create_flow_lab_router
 from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
 from .daily_workflow import install_daily_template, recipe_fields, recipe_from_params
 from touken.diagnostics import (
@@ -59,6 +60,7 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 app = FastAPI(title="まあ丸 近侍面板")
 app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json"))
 app.include_router(create_template_lab_router())
+app.include_router(create_flow_lab_router())
 _server_mode = threading.local()
 
 
@@ -1295,6 +1297,32 @@ def _build_workflow(config_path, params):
 register_script("workflow", "自定义工作流",
                 "把任务积木自由排序拼成流水线，一键运行",
                 _build_workflow, hidden=True)
+
+
+# ── 自定义流程（流程工坊）──
+def _build_custom_flow(config_path, params):
+    """流程工坊入口：按 flow_id 读流程，交给流程引擎跑（步骤安全红线在引擎里）。"""
+    from touken import flow_engine
+    flow_id = str(params.get("flow_id") or "")
+    flow = flow_engine.find_flow(flow_id)
+    if flow is None:
+        yield f"[流程工坊] 找不到流程 {flow_id!r}，可能已被删除"
+        return
+    try:
+        plan = flow_engine.normalize_flow(flow)
+    except flow_engine.FlowError as exc:
+        yield f"[流程工坊] 流程校验翻车: {exc}"
+        return
+    agent = _make_agent(config_path)
+    yield from flow_engine.run_flow(agent, plan)
+
+
+register_script("custom_flow", "自定义流程",
+                "跑流程工坊里拼好的自定义流程（开发版调试工具）",
+                _build_custom_flow,
+                params=[{"key": "flow_id", "type": "text", "label": "流程 id",
+                         "help": "流程工坊里保存的流程 id（/api/flow-lab/flows 里看）。"}],
+                hidden=True)
 
 
 # ── 服务端启动 ──

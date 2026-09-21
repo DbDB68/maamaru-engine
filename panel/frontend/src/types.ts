@@ -23,7 +23,7 @@ export interface VisibilityRule {
 
 export interface ParamField {
   key: string
-  type: 'select' | 'number' | 'text' | 'checks' | 'note' | 'toggle' | 'duration-list'
+  type: 'select' | 'number' | 'text' | 'checks' | 'note' | 'toggle' | 'duration-list' | 'template' | 'roi' | 'step'
   label?: string
   default?: unknown
   options?: Option[]
@@ -818,6 +818,56 @@ export interface TemplateLabCodeRoi {
   override: TemplateLabRectXyxy | null
   effective: TemplateLabRectXyxy
   overridden: boolean
+}
+
+// ---- 流程工坊 /api/flow-lab（开发专用，打包版不启用）----
+
+export type FlowStepCategory = '认' | '点' | '结构'
+export type FlowOnFail = 'stop' | 'continue' | 'retry'
+
+export interface FlowStep {
+  id: string
+  type: string
+  label?: string
+  params: ScriptParams
+  on_fail: FlowOnFail
+  retry_times?: number
+  retry_interval_s?: number
+}
+
+export interface FlowLabFlow {
+  id: string
+  name: string
+  steps: FlowStep[]
+}
+
+export interface FlowStepDef {
+  type: string
+  label: string
+  desc: string
+  category: FlowStepCategory
+  params: ParamField[]
+}
+
+export interface FlowBuiltinDef {
+  name: string
+  label: string
+  desc: string
+  params: ParamField[]
+}
+
+export interface FlowTestResult {
+  kind: 'recognize' | 'preview'
+  action?: 'click' | 'swipe' | 'sleep'
+  hit?: boolean
+  score?: number | null
+  point?: [number, number] | null
+  texts?: string[] | null
+  from?: [number, number]
+  to?: [number, number]
+  duration_ms?: number
+  seconds?: number
+  note?: string
 }
 
 // ── 远征排班：班次实况（automation.slot_states 的前端投影）──
