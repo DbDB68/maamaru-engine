@@ -15,9 +15,9 @@ const emit = defineEmits<{
     金边是底座被上层面板遮住后露出的部分，不可“优化”为 border、outline 或伪元素，
     否则滚动内容会被浮在线上的描边切穿。
   -->
-  <main class="maamaru-frame" :class="[`${variant}-frame`, pageClass]" @scroll="emit('scroll', $event)">
-    <!-- scroll 不冒泡：像素主题由内层滚动，也要通知页面使用同一套滚动行为。 -->
-    <div class="maamaru-surface" @scroll="emit('scroll', $event)">
+  <!-- scroll 不冒泡；用捕获阶段把框体、像素主题内层和执务台各栏的滚动统一上报。 -->
+  <main class="maamaru-frame" :class="[`${variant}-frame`, pageClass]" @scroll.capture="emit('scroll', $event)">
+    <div class="maamaru-surface">
       <slot />
     </div>
   </main>
