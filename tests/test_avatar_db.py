@@ -152,10 +152,23 @@ class ThresholdTests(unittest.TestCase):
         # 分数不够 → 只记观测
         self.assertIsNone(avatar_db.avatar_form_status(
             self._hit(0.80, 0.3, rival=0.60)))
-        # 单形态库 → 永不下结论
-        self.assertIsNone(avatar_db.avatar_form_status(
-            self._hit(0.99, 0.9, forms=("普",), rival=None)))
         self.assertIsNone(avatar_db.avatar_form_status(None))
+
+    def test_form_status_single_form_library_relaxed(self):
+        # 2026-09-21 老大拍板放宽：单形态库高分直接下结论（跨形态实测
+        # 0.27~0.45 物理隔离，实物若是另一形态只会低分挂起不误判）
+        self.assertEqual(avatar_db.avatar_form_status(
+            self._hit(0.99, 0.9, forms=("普",), rival=None, form="普")),
+            "normal")
+        self.assertEqual(avatar_db.avatar_form_status(
+            self._hit(0.93, 0.9, forms=("极",), rival=None, form="极")),
+            "kiwame")
+        # 单形态弱分 → 挂起（unknown 提醒补模板），不硬判
+        self.assertIsNone(avatar_db.avatar_form_status(
+            self._hit(0.85, 0.9, forms=("普",), rival=None, form="普")))
+        # forms 信息缺/空 → 不下结论
+        self.assertIsNone(avatar_db.avatar_form_status(
+            self._hit(0.99, 0.9, forms=(), rival=None)))
 
     def test_form_status_respects_master_switch(self):
         # 开关拨回 False 时（比如未来校准翻车要紧急下架），再漂亮的命中

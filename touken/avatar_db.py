@@ -116,17 +116,26 @@ def avatar_identity_adopted(hit) -> bool:
 
 
 def avatar_form_status(hit):
-    """头像形态结论（保守）：该刀库里普极两张都有 + 命中分 ≥ SCORE_MIN +
-    压过同刀另一形态 ≥ FORM_MARGIN_MIN 才下结论，其余一律 None 只记观测。
-    中伤 tag 不影响结论（身份照认、形态照给，tag 已在观测里）。
-    总开关 AVATAR_FORM_ENABLED 关闭期间（模板库普/极标签待修正）一律 None。"""
+    """头像形态结论：命中分 ≥ SCORE_MIN 是前提，之后两档门槛——
+
+    双形态库（普极都在）：还要压过同刀另一形态 ≥ FORM_MARGIN_MIN。
+    单形态库（库里有普没极或有极没普）：2026-09-21 老大拍板放宽，
+    高分直接下结论。依据：校准 v2 实测跨形态（实物普对极模板、实物
+    极对普模板）分数只有 0.27~0.45，离 0.88 线物理级隔离——实物若
+    是另一形态只会低分挂起（→unknown 提醒补模板）而不会误判，两个
+    方向都安全。老大的诊断：单形态库高分命中是自我选择的无风险样本
+    （只有极模板是因为实物就是极；游戏没开极化/她没素材 ≠ 数据缺失
+    不敢判）。中伤 tag 不影响结论（身份照认、形态照给，tag 已在观测
+    里）；总开关 AVATAR_FORM_ENABLED 关闭时一律 None。"""
     if not AVATAR_FORM_ENABLED or not hit:
         return None
-    if set(hit.get("forms_in_library") or ()) != {"普", "极"}:
+    if hit["score"] < SCORE_MIN:
         return None
-    rival = hit.get("form_rival_score")
-    if rival is None:
+    forms = set(hit.get("forms_in_library") or ())
+    if forms == {"普", "极"}:
+        rival = hit.get("form_rival_score")
+        if rival is None or hit["score"] - rival < FORM_MARGIN_MIN:
+            return None
+    elif forms not in ({"普"}, {"极"}):
         return None
-    if hit["score"] >= SCORE_MIN and hit["score"] - rival >= FORM_MARGIN_MIN:
-        return "normal" if hit["form"] == "普" else "kiwame"
-    return None
+    return "normal" if hit["form"] == "普" else "kiwame"

@@ -887,11 +887,17 @@ class AvatarVerifyTests(unittest.TestCase):
         _inv_mod.merge_avatar_form(fact, {"result": "disagree", "hit": hit})
         self.assertEqual(fact["status"], "unknown")
         self.assertNotIn("avatar", fact)
-        # 单形态库/分差不够 → 观测照记，结论不下
-        weak = dict(hit, forms_in_library=["普"], form_rival_score=None)
+        # 弱分 → 观测照记，结论不下（2026-09-21 放宽后仍保的底线）
+        weak = dict(hit, forms_in_library=["普"], form_rival_score=None, score=0.80)
         fact = {"status": "unknown", "evidence": []}
         _inv_mod.merge_avatar_form(fact, {"result": "agree", "hit": weak})
         self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["avatar"]["form"], "普")
+        # 单形态库高分 → 放宽后直接下结论（跨形态分数离 0.88 线物理级隔离）
+        single = dict(hit, forms_in_library=["普"], form_rival_score=None, score=0.95)
+        fact = {"status": "unknown", "evidence": []}
+        _inv_mod.merge_avatar_form(fact, {"result": "agree", "hit": single})
+        self.assertEqual(fact["status"], "normal")
         self.assertEqual(fact["avatar"]["form"], "普")
 
     def test_avatar_messages_not_fail_worded(self):
