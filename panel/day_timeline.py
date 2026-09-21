@@ -126,7 +126,9 @@ def _run_items(store, active: dict | None, day_start: float, day_end: float,
             ended_at = None
         items.append({
             "script": script,
-            "label": labels.get(script) or script,
+            # 工作流在开工时已经把当时的名字写进 runs.label；优先使用这份
+            # 快照，既不退回笼统的“自定义工作流”，也不被日后改名篡改历史。
+            "label": row.get("label") or labels.get(script) or script,
             "started_at": started_at,
             "ended_at": ended_at,
             "status": status,

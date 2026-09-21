@@ -80,12 +80,16 @@ function update(key: string, value: unknown) {
         @update:model-value="update(field.key, $event)"
       />
     </div>
+    <div v-if="!visibleFields.length && !hasAdvanced" class="task-empty-state">
+      <strong>这个功能无需设置</strong>
+      <span>可以直接在这里启动，也可以回执务台把它放进常用功能。</span>
+    </div>
     <div v-if="hasAdvanced" class="advanced-settings-slot">
       <span class="advanced-settings-label">{{ advancedLabel || '特有高级设置' }}</span>
       <slot name="advanced" />
     </div>
     <footer>
-      <button type="button" class="secondary" @click="emit('save')">保存配置</button>
+      <button v-if="visibleFields.length || hasAdvanced" type="button" class="secondary" @click="emit('save')">保存配置</button>
       <button v-if="running" type="button" class="danger" @click="emit('stop')">紧急停止</button>
       <button v-else type="button" class="primary" :disabled="busy" @click="emit('run')">
         {{ busy ? '有其他任务正在运行' : '开始任务' }}

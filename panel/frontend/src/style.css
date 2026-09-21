@@ -120,6 +120,7 @@ button { cursor: pointer; }
 .sidebar { padding: 18px 14px; background: #f4ecdd; border-right: 1px solid #c7bba8; }
 .sidebar h3 { margin: 16px 10px 7px; color: #8a7f72; font-size: 12px; letter-spacing: .08em; }
 .sidebar h3:first-child { margin-top: 2px; }
+.task-nav-group > summary { display: none; }
 .sidebar button {
   width: 100%; display: flex; justify-content: space-between; align-items: center;
   padding: 11px 13px; margin-bottom: 7px; border: 1px solid transparent;
@@ -131,6 +132,9 @@ button { cursor: pointer; }
 .sidebar button.active { background: #fffaf0; border-color: #bd8b47; box-shadow: 3px 3px 0 #d6c7ad; }
 .sidebar small { color: #9d3028; }
 .content { position: relative; padding: 30px; }
+.task-empty-state { display: grid; gap: 6px; margin: 28px 0; padding: 24px; color: var(--ink-dim); background: var(--paper-panel); border: 1px dashed var(--paper-line); text-align: center; }
+.task-empty-state strong { color: var(--ink); font-size: 15px; }
+.task-empty-state span { font-size: 12px; }
 .content > .lists-panel, .content > .schedule-panel, .content > .formation-panel, .content > .archive-panel { width: min(1080px, 100%); height: auto; min-height: 100%; margin: 0 auto; overflow: visible; }
 .overview-layout { display: grid; flex: 1; grid-template-columns: 210px minmax(0, 1fr) 280px; gap: 12px; min-height: 0; padding: 14px 36px 36px; height: auto; overflow: hidden; background: var(--paper-panel); border: 1px solid var(--paper-line); border-top: 0; border-radius: 0 0 12px 12px; }
 .home-functions, .home-dashboard, .home-center { min-width: 0; min-height: 0; }
@@ -566,9 +570,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .stage-kogi { left: 8%; bottom: 2px; width: 60px; height: 73px; background-position: center bottom; }
   .stage-bubble { display: none; }
   .layout { grid-template-columns: 1fr; }
-  .sidebar { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid #c7bba8; }
-  .sidebar button { width: auto; min-width: 110px; margin: 0 7px 0 0; }
+  .sidebar { display: block; overflow: visible; padding: 10px 12px; border-right: 0; border-bottom: 1px solid #c7bba8; }
+  .sidebar button { width: 100%; min-width: 0; margin: 0 0 6px; }
   .sidebar h3 { display: none; }
+  .task-nav-group { padding: 0; border-bottom: 1px solid var(--paper-line); }
+  .task-nav-group:last-child { border-bottom: 0; }
+  .task-nav-group > summary { display: flex; align-items: center; justify-content: space-between; padding: 11px 7px; color: var(--ink-dim); cursor: pointer; font-size: 12px; font-weight: 700; letter-spacing: .06em; list-style: none; }
+  .task-nav-group > summary::-webkit-details-marker { display: none; }
+  .task-nav-group > summary::after { content: '＋'; color: var(--fox-gold-deep); font-size: 15px; }
+  .task-nav-group[open] > summary::after { content: '−'; }
   .content { padding: 18px 12px; }
   .fields { grid-template-columns: 1fr; }
   .topbar span { display: none; }
@@ -609,6 +619,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .embedded-head, .system-toolbar { align-items: flex-start; padding: 12px; }
   .embedded-head h2, .system-toolbar h2 { font-size: 17px; }
   .content > .lists-panel, .content > .schedule-panel, .content > .formation-panel { height: auto; min-height: 70vh; }
+}
+
+@media (min-width: 721px) {
+  .tasks-frame.layout { overflow: hidden; }
+  .tasks-frame > .maamaru-surface > .sidebar,
+  .tasks-frame > .maamaru-surface > .content {
+    min-height: 0;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .tasks-frame > .maamaru-surface { overflow: hidden; }
 }
 
 @media (max-width: 720px) {
@@ -1042,7 +1065,7 @@ body[data-theme='pixel'] .tasks-frame { display: block; }
 body[data-theme='pixel'] .tasks-frame > .maamaru-surface {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);
-  overflow: auto;
+  overflow: hidden;
 }
 body[data-theme='pixel'] .single-frame { display: block; }
 body[data-theme='pixel'] .single-frame > .maamaru-surface {
@@ -2056,7 +2079,7 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: 210px minmax(0, 1fr) 280px;
+  grid-template-columns: 210px minmax(0, 1fr);
   gap: 16px;
   padding: 8px 12px 12px;
   overflow: hidden;
@@ -2183,6 +2206,8 @@ body[data-theme='washi'] .overview-frame.overview-layout { padding: 7px; }
   .workflow-page.single-layout { height: auto; overflow: visible; padding: 0; }
   body[data-theme='pixel'] .workflow-page { height: auto; overflow: visible; padding: 3px; }
   body[data-theme='pixel'] .workflow-page > .maamaru-surface { height: auto; overflow: visible; }
+  body[data-theme='pixel'] .tasks-frame,
+  body[data-theme='pixel'] .tasks-frame > .maamaru-surface { height: auto; overflow: visible; }
 }
 .topnav { min-width: 0; overflow-x: auto; overflow-y: hidden; flex-shrink: 1; }
 .topnav button { flex-shrink: 0; }

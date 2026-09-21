@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
 import PixelControl from './PixelControl.vue'
 import ParamField from './ParamField.vue'
@@ -285,7 +284,6 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 
 <template>
   <section class="workflow-panel wf-panel">
-    <PanelHeader :variant="embedded ? 'embedded' : 'page'" title="流程搭建" subtitle="安排好先后顺序，把本丸的日常交给まあ丸。" />
     <p v-if="loading" class="wf-loading">正在取出你的流程…</p>
     <p v-else-if="loadError" class="wf-loading" role="alert">{{ loadError }} <button class="wf-button" @click="load">重新加载</button></p>
     <div v-else class="wf-layout">
@@ -371,12 +369,11 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 
 <style scoped>
 .wf-panel { color: var(--ink); }
-/* 页面改用通用 page-toolbar 顶部（与本丸/近侍一致）；页面 padding 为 0，
-   内容区自己留边距。 */
+/* 顶部工房导航已经说明当前位置；编辑器直接从流程列表和正文开始。 */
 .wf-panel button, .wf-dialog button { cursor: pointer; font: inherit; }
 .wf-panel button:disabled, .wf-dialog button:disabled { cursor: default; opacity: .42; }
 .wf-panel button:focus-visible, .wf-dialog button:focus-visible, .wf-dialog input:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 3px; }
-.wf-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 0; align-items: stretch; padding: 0; }
+.wf-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 0; align-items: stretch; padding: 0; }
 /* 侧栏与系统设置导航同款：贴左缘、自成一列米色带。 */
 .wf-library { min-width: 0; padding: 22px 14px; background: #f1e7d6; border-right: 1px solid var(--line); }
 .wf-library > header { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; }
@@ -396,7 +393,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-preset:hover { background: var(--paper-panel); }
 .wf-preset.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }
 .wf-library-note { font-size: 11px; line-height: 1.9; color: var(--ink-dim); margin: 24px 12px; }
-.wf-editor { margin: 22px clamp(22px, 4vw, 58px); align-self: start; padding: 0; min-width: 0; border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); box-shadow: 0 5px 18px #49382106; overflow: visible; }
+.wf-editor { margin: 30px; align-self: start; padding: 0; min-width: 0; border: 1px solid #b8aa96; border-radius: 0; background: #fffaf0; box-shadow: 6px 6px 0 #cfc1aa; overflow: visible; }
 .wf-edit-fields { border: 0; margin: 0; padding: 25px 26px 22px; min-width: 0; }
 .wf-editor-head { display: flex; gap: 16px; align-items: center; padding-bottom: 24px; }
 .wf-tutorial { margin: -8px 0 20px; padding: 12px 14px; background: var(--paper-panel); border-radius: 5px; color: var(--ink-dim); font-size: 12px; line-height: 1.8; }
@@ -425,12 +422,13 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-empty { text-align: center; padding: 16px 10px 18px; }
 .wf-empty h3 { font-size: 16px; margin: 0 0 8px; }
 .wf-empty p { color: var(--ink-dim); font-size: 12px; margin: 0 0 14px; line-height: 1.8; }
-.wf-insert { display: flex; width: 100%; height: 29px; padding: 0; border: 0; align-items: center; justify-content: center; gap: 8px; background: transparent; color: var(--ink-dim); font-size: 10px; }
+.wf-insert { display: flex; width: 100%; height: 22px; padding: 0; border: 0; align-items: center; justify-content: center; gap: 8px; background: transparent; color: var(--ink-dim); font-size: 10px; }
 .wf-insert::before, .wf-insert::after { content: ''; height: 1px; background: var(--paper-line); flex: 1; opacity: .5; }
 .wf-insert span { opacity: .65; }
 .wf-insert:hover span, .wf-insert:focus-visible span { opacity: 1; color: var(--fox-gold); }
-.wf-step { border: 1px solid var(--paper-line); border-radius: var(--r-md); background: var(--paper-card); scroll-margin: 12px; }
-.wf-step.is-open { border-color: var(--fox-gold); }
+.wf-step { border: 0; border-top: 1px solid var(--paper-line); border-radius: 0; background: transparent; scroll-margin: 12px; }
+.wf-step:last-of-type { border-bottom: 1px solid var(--paper-line); }
+.wf-step.is-open { background: color-mix(in srgb, var(--paper-panel) 45%, transparent); box-shadow: inset 3px 0 var(--fox-gold); }
 .wf-step-head { display: flex; align-items: center; padding: 0 9px 0 0; }
 .wf-step-toggle { display: flex; align-items: center; gap: 13px; min-width: 0; flex: 1; border: 0; background: none; color: var(--ink); padding: 16px 12px; text-align: left; }
 .wf-number { align-self: flex-start; margin-top: 1px; width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center; color: var(--fox-gold); background: var(--paper-panel); border-radius: 4px; font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -492,7 +490,7 @@ button.wf-danger { color: #a04b3a; }
 .wf-switch > p { color: var(--ink-dim); font-size: 13px; line-height: 1.7; }
 .wf-switch-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
 @media (max-width: 1000px) {
-  .wf-layout { grid-template-columns: 170px minmax(0, 1fr); }
+  .wf-layout { grid-template-columns: 190px minmax(0, 1fr); }
   .wf-edit-fields { padding: 20px 18px; }
   .wf-toolbar { padding: 14px 18px; }
   .wf-step-detail { padding-left: 18px; }
@@ -500,7 +498,7 @@ button.wf-danger { color: #a04b3a; }
 @media (max-width: 720px) {
   .wf-layout { grid-template-columns: 1fr; }
   .wf-library { padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-  .wf-editor { margin: 16px 14px; }
+  .wf-editor { margin: 16px 14px; box-shadow: 3px 3px 0 #cfc1aa; }
   .wf-library > header { flex: 1; margin: 0; }
   .wf-new { width: auto; }
   .wf-presets { display: flex; width: 100%; overflow-x: auto; gap: 8px; margin: 0; padding-bottom: 3px; }

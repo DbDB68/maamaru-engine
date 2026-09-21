@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import PanelHeader from './PanelHeader.vue'
 import SideNavItem from './SideNavItem.vue'
 import TemplateLab from './TemplateLab.vue'
 import FlowLab from './FlowLab.vue'
@@ -13,8 +12,7 @@ const tab = ref<'template' | 'flow' | 'run'>('template')
 
 <template>
   <section class="devtools-panel">
-    <PanelHeader variant="page" title="识别工具" subtitle="从真实画面取样、框选识别范围，再把动作接进流程；跑过的任务一步步回看。" />
-    <nav class="dev-tabs" aria-label="识别工具">
+    <nav class="dev-tabs" aria-label="开发工具">
       <SideNavItem :active="tab === 'template'" @click="tab = 'template'">模板工坊</SideNavItem>
       <SideNavItem :active="tab === 'flow'" @click="tab = 'flow'">流程工坊</SideNavItem>
       <SideNavItem :active="tab === 'run'" @click="tab = 'run'">跑况时间线</SideNavItem>
@@ -28,6 +26,6 @@ const tab = ref<'template' | 'flow' | 'run'>('template')
 
 <style scoped>
 .devtools-panel { min-width: 0; color: var(--ink); }
-.dev-tabs { display: flex; gap: 4px; margin: 0 0 14px; }
+.dev-tabs { display: flex; gap: 4px; margin: 0 0 14px; padding: 14px 14px 0; }
 .dev-tab-pane { min-width: 0; }
 </style>

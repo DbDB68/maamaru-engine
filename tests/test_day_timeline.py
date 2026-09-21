@@ -129,6 +129,17 @@ class DayTimelineRunTests(unittest.TestCase):
         self.assertEqual(out["runs"][0]["label"], "secret_thing")
         self.assertEqual(out["runs"][0]["tone"], "stopped")
 
+    def test_workflow_uses_name_snapshot_from_run(self):
+        day_start = _today_at(0, 0)
+        self.store.start_run(
+            "wf1", "workflow", started_at=day_start + 7200,
+            label="活动+异去")
+        self.store.finish_run("wf1", "completed", ended_at=day_start + 9000)
+        out = dtl.build_day_timeline(
+            _today_at(12, 0), cfg=_cfg([]), store=self.store,
+            script_labels={"workflow": "自定义工作流"})
+        self.assertEqual(out["runs"][0]["label"], "活动+异去")
+
     def test_active_run_forced_running(self):
         day_start = _today_at(0, 0)
         started = day_start + 7200

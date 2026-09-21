@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
 import TaskForm from './components/TaskForm.vue'
-import DashboardPanel from './components/DashboardPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
@@ -536,7 +535,13 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('scroll', onWindowScroll); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
-watch(selected, async () => { await nextTick(); contentEl.value?.scrollTo({ top: 0 }) })
+watch(selected, async () => {
+  await nextTick()
+  contentEl.value?.scrollTo({ top: 0 })
+  // 旧版玩法页由外框整体滚动；拆成左右两栏后，也把可能残留或被
+  // scrollIntoView 改动的外框位置归零，避免右侧正文被推到视口上方。
+  contentEl.value?.closest<HTMLElement>('.tasks-frame')?.scrollTo({ top: 0 })
+})
 watch(tab, value => {
   stageCollapsed.value = false
   if (value === 'office' || value === 'tasks' || value === 'workflow' || value === 'devtools') lastWorkshopTab.value = value
@@ -582,34 +587,43 @@ watch(tab, value => {
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
         <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
-        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">识别工具</button>
+        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
       </div>
     </nav>
     <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onStageScroll">
       <nav class="sidebar">
         <template v-for="group in scriptGroups" :key="group.label">
-          <h3>{{ group.label }}</h3>
-          <SideNavItem v-for="([key, info]) in group.entries" :key="key" :active="selected === key" :running="running && current === key" @click="key === 'daily' ? openDailyWorkflow() : selected = key">
-            <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
-          </SideNavItem>
-          <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
-            <span><img class="task-menu-icon" :src="'/static/img/ui/expedition.png'" alt="">自动排班</span>
-          </SideNavItem>
+          <details class="task-nav-group" open>
+            <summary>{{ group.label }}</summary>
+            <h3>{{ group.label }}</h3>
+            <SideNavItem v-for="([key, info]) in group.entries" :key="key" :active="selected === key" :running="running && current === key" @click="key === 'daily' ? openDailyWorkflow() : selected = key">
+              <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
+            </SideNavItem>
+            <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
+              <span><img class="task-menu-icon" :src="'/static/img/ui/expedition.png'" alt="">自动排班</span>
+            </SideNavItem>
+          </details>
         </template>
-        <h3>队伍</h3>
-        <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
-          <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
-        </SideNavItem>
-        <h3>名单设置</h3>
-        <SideNavItem :active="selected === '$repair-list'" @click="selected = '$repair-list'">
-          <span><img class="task-menu-icon" :src="'/static/img/ui/repair-tools.png'" alt="">手入黑名单</span>
-        </SideNavItem>
-        <SideNavItem :active="selected === '$dismantle-list'" @click="selected = '$dismantle-list'">
-          <span><img class="task-menu-icon" :src="'/static/img/ui/dismantle.png'" alt="">刀解白名单</span>
-        </SideNavItem>
-        <SideNavItem :active="selected === '$wishlist'" @click="selected = '$wishlist'">
-          <span><img class="task-menu-icon" :src="'/static/img/ui/menuList.png'" alt="">心愿刀名单</span>
-        </SideNavItem>
+        <details class="task-nav-group" open>
+          <summary>队伍</summary>
+          <h3>队伍</h3>
+          <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
+            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
+          </SideNavItem>
+        </details>
+        <details class="task-nav-group" open>
+          <summary>名单设置</summary>
+          <h3>名单设置</h3>
+          <SideNavItem :active="selected === '$repair-list'" @click="selected = '$repair-list'">
+            <span><img class="task-menu-icon" :src="'/static/img/ui/repair-tools.png'" alt="">手入黑名单</span>
+          </SideNavItem>
+          <SideNavItem :active="selected === '$dismantle-list'" @click="selected = '$dismantle-list'">
+            <span><img class="task-menu-icon" :src="'/static/img/ui/dismantle.png'" alt="">刀解白名单</span>
+          </SideNavItem>
+          <SideNavItem :active="selected === '$wishlist'" @click="selected = '$wishlist'">
+            <span><img class="task-menu-icon" :src="'/static/img/ui/menuList.png'" alt="">心愿刀名单</span>
+          </SideNavItem>
+        </details>
       </nav>
       <section ref="contentEl" class="content">
         <TaskForm
@@ -727,7 +741,6 @@ watch(tab, value => {
         <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
-      <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /></MaamaruFrame>
