@@ -27,6 +27,7 @@ from pathlib import Path
 
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
+from .. import avatar_db
 from ..roi_overrides import get_roi
 from .team_roster import (load_flower_templates, match_badge_flowers,
                           conclude_kiwame, norm_sword_type)
@@ -166,6 +167,7 @@ def _strip_row_scratch(rows) -> None:
         row.pop("_base_y", None)
         row.pop("_badge_rect", None)
         row.pop("_date_roi", None)
+        row.pop("_row_no", None)
 
 
 def _strip_changed(prev, cur) -> bool:
@@ -526,13 +528,14 @@ def read_page_cells(ocr_fn) -> dict:
     （如实上报语义不变）；名字格空白 → 空行（末页尾巴），不算 fail。
     """
     rows, fail_rows = [], 0
-    for rois in ROW_CELL_ROIS.values():
+    for row_no, rois in ROW_CELL_ROIS.items():
         name_text = _joined(ocr_fn(rois["name"]))
         name_hit = match_name_text(name_text)
         if not name_hit:
             if name_text:
                 fail_rows += 1
-                rows.append({"sword_id": None, "name_zh": None})
+                rows.append({"sword_id": None, "name_zh": None,
+                             "_row_no": row_no})
             continue
         stats_texts = [_joined(ocr_fn(cell))
                        for cell in split_stats_roi(rois["stats"])]
@@ -541,7 +544,8 @@ def read_page_cells(ocr_fn) -> dict:
                "kiwame_date": parse_date_cell(ocr_fn(rois["date"])),
                "locked": None,
                "_badge_rect": rois["badge"],
-               "_date_roi": rois["date"]}
+               "_date_roi": rois["date"],
+               "_row_no": row_no}
         rows.append(row)
     return {"rows": rows, "fail_rows": fail_rows}
 
@@ -580,6 +584,91 @@ def read_row_form_fact(img, badge_rect, sword_id, templates, proven_combos):
             "badge": badge,
             "rarity_base": rarity_base,
             "sword_type": confirmed_type}
+
+
+def _avatar_band(row_no) -> tuple:
+    """头像搜索带（xyxy）：从逐格 ROI 推导——x 取徽章格左-20 ~ 名字格右+8，
+    y 取等级格上-6 ~ 名字格下+2。纯派生不进注册表；数值带右侧不碰。"""
+    rois = ROW_CELL_ROIS[row_no]
+    return (max(0, rois["badge"][0] - 20), max(0, rois["levels"][1] - 6),
+            min(1280, rois["name"][2] + 8), min(720, rois["name"][3] + 2))
+
+
+def verify_rows_by_avatar(img, parsed, templates, cell_ocr=None) -> None:
+    """逐行头像核验（与逐格 OCR 同一帧；纯函数，离线校准直接复用）。
+
+    三种结果记 row["avatar_check"]：
+    agree——OCR 名字与头像身份一致（分数入证，不卡阈值）；
+    disagree——对不上且头像达采纳阈值：OCR 名字保留为主，详情入证，
+      并向 parsed["avatar_notes"] 追加待播报的 ⚠️（OCR+名册一向可靠，
+      不静默二选一）；
+    rescued——OCR 没认出的 fail 行被头像高分认出：补身份、算回 fail_rows，
+      cell_ocr 在场时顺手把该行的等级/数值/日期格补读上。
+    头像低分且身份对不上的只记观测（low_score），不报警不捞回。
+    """
+    if img is None or not templates:
+        return
+    notes = parsed.setdefault("avatar_notes", [])
+    for row in parsed["rows"]:
+        row_no = row.get("_row_no")
+        if not row_no:
+            continue
+        x0, y0, x1, y1 = _avatar_band(row_no)
+        band = img[y0:y1, x0:x1]
+        hit = avatar_db.match_avatar(band, templates)
+        if not hit:
+            continue
+        adopted = avatar_db.avatar_identity_adopted(hit)
+        if row.get("sword_id"):
+            if hit["sword_id"] == row["sword_id"]:
+                row["avatar_check"] = {"result": "agree", "hit": hit}
+            elif adopted:
+                row["avatar_check"] = {"result": "disagree", "hit": hit}
+                notes.append({"kind": "disagree", "row_no": row_no,
+                              "ocr": row["name_zh"],
+                              "avatar": hit["name_zh"],
+                              "score": hit["score"]})
+            else:
+                row["avatar_check"] = {"result": "low_score", "hit": hit}
+            continue
+        # fail 行：头像够格才捞，不够格维持 fail 如实上报
+        if adopted:
+            row["sword_id"] = hit["sword_id"]
+            row["name_zh"] = hit["name_zh"]
+            row["avatar_check"] = {"result": "rescued", "hit": hit}
+            parsed["fail_rows"] -= 1
+            notes.append({"kind": "rescued", "row_no": row_no,
+                          "name": hit["name_zh"], "score": hit["score"]})
+            rois = ROW_CELL_ROIS[row_no]
+            row["_badge_rect"] = rois["badge"]
+            row["_date_roi"] = rois["date"]
+            row.setdefault("locked", None)
+            if cell_ocr is not None:
+                row.update(parse_levels_cell(cell_ocr(rois["levels"])))
+                row["stats"] = stats_from_cells(
+                    [_joined(cell_ocr(c))
+                     for c in split_stats_roi(rois["stats"])])
+                row["kiwame_date"] = parse_date_cell(cell_ocr(rois["date"]))
+        else:
+            row["avatar_check"] = {"result": "low_score", "hit": hit}
+
+
+def merge_avatar_form(fact: dict, avatar_check) -> dict:
+    """把头像观测并进 form_fact：原始观测（form/score/margin/tag）+ 人读
+    证据始终记（仅 agree/rescued——disagree 的头像是另一把刀，它的形态
+    观测不属于本行）；形态结论只在 badge 结论 unknown 且头像通道过自己
+    的保守门槛时补，badge 已确认的不许被头像推翻。"""
+    check = avatar_check or {}
+    hit = check.get("hit")
+    if not hit or check.get("result") not in ("agree", "rescued"):
+        return fact
+    fact["avatar"] = {k: hit.get(k) for k in ("form", "score", "margin", "tag")}
+    fact["evidence"].append(f"头像形态「{hit['form']}」分{hit['score']:.2f}")
+    status = avatar_db.avatar_form_status(hit)
+    if status and fact["status"] == "unknown":
+        fact["status"] = status
+        fact["evidence"].append("形态结论来自头像通道")
+    return fact
 
 
 def parse_album_tokens(tokens) -> list[dict]:
@@ -713,6 +802,14 @@ class SwordInventoryMixin:
                 if fell_back:
                     yield (f"[刀帐] 第 {page_no} 页逐格精读一行名字都没认出，"
                            f"改用整列读法")
+            for note in parsed.pop("avatar_notes", []):
+                if note["kind"] == "disagree":
+                    yield (f"[刀帐] ⚠️ 第 {page_no} 页第 {note['row_no']} 行 "
+                           f"OCR 和头像对不上：OCR={note['ocr']}，"
+                           f"头像={note['avatar']}，先按 OCR 记，已标注待核对")
+                elif note["kind"] == "rescued":
+                    yield (f"[刀帐] 第 {page_no} 页第 {note['row_no']} 行 "
+                           f"OCR 没认出的行用头像捞回：{note['name']}")
             fail_rows_total += parsed["fail_rows"]
             self._retry_missing_levels(parsed["rows"])
             self._retry_missing_dates(parsed["rows"])
@@ -874,8 +971,9 @@ class SwordInventoryMixin:
                 base_y = row["_base_y"]
                 rect = (_INV_BADGE_X[0], base_y + _INV_BADGE_DY[0],
                         _INV_BADGE_X[1], base_y + _INV_BADGE_DY[1])
-            row["form_fact"] = read_row_form_fact(
+            fact = read_row_form_fact(
                 img, rect, row["sword_id"], templates, _INV_PROVEN_FLOWER_COMBOS)
+            row["form_fact"] = merge_avatar_form(fact, row.get("avatar_check"))
 
     def _scan_list_page(self, img):
         """逐格精读一页；整页一行名字都认不出时退回整列 token 汤（老路径）。
@@ -890,6 +988,10 @@ class SwordInventoryMixin:
                     maa.ocr_all(roi_4to4(*roi), img) or []]
 
         parsed = read_page_cells(cell_ocr)
+        if img is not None:
+            templates, _skipped = avatar_db.load_avatar_templates(
+                getattr(maa, "resource_dir", "resource/base"))
+            verify_rows_by_avatar(img, parsed, templates, cell_ocr)
         if any(r.get("sword_id") for r in parsed["rows"]):
             return parsed, False
         tokens = [(t, (p.x, p.y)) for t, p in

@@ -366,6 +366,7 @@ class CellParseTests(unittest.TestCase):
         self.assertEqual(row["kiwame_date"], "2026-7-29")
         self.assertEqual(row["_badge_rect"], rois["badge"])
         self.assertEqual(row["_date_roi"], rois["date"])  # 缺日期重读定位用
+        self.assertEqual(row["_row_no"], 1)  # 头像核验行带定位用
 
     def test_read_page_cells_garbage_name_is_fail_row(self):
         rois = _inv_mod.ROW_CELL_ROIS[2]
@@ -391,9 +392,10 @@ class CellParseTests(unittest.TestCase):
             "刀帐页待核对里能人工补"))
 
     def test_strip_row_scratch(self):
-        """落库前清掉流程暂存键：_base_y/_badge_rect/_date_roi 不进快照"""
+        """落库前清掉流程暂存键：_base_y/_badge_rect/_date_roi/_row_no 不进快照"""
         rows = [{"sword_id": "x", "level": 99, "_base_y": 215,
-                 "_badge_rect": (1, 2, 3, 4), "_date_roi": (5, 6, 7, 8)},
+                 "_badge_rect": (1, 2, 3, 4), "_date_roi": (5, 6, 7, 8),
+                 "_row_no": 1},
                 {"sword_id": "y"}]
         _strip_row_scratch(rows)
         self.assertEqual(rows, [{"sword_id": "x", "level": 99},
@@ -762,6 +764,144 @@ class RetryMissingDatesTests(unittest.TestCase):
                     "_date_roi": self.DATE_ROI}
         maa = self._run([legacy_row, dated_row, fail_row], [])
         self.assertEqual(maa.rois, [])
+
+
+class AvatarVerifyTests(unittest.TestCase):
+    """逐行头像核验三分支（互证/对不上/捞回）+ 形态证据保守合并。
+    假图假模板：拼贴脸=高分命中，无关脸=低分。"""
+
+    @staticmethod
+    def _img(h, w, seed):
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        return rng.integers(0, 255, (h, w, 3), dtype=np.uint8)
+
+    def _tpl(self, sword_id, name_zh, form, seed):
+        return {"no": "0000", "form": form, "name": name_zh, "tag": None,
+                "sword_id": sword_id, "name_zh": name_zh, "path": None,
+                "img": self._img(56, 76, seed)}
+
+    def _frame_with_face(self, row_no, face):
+        img = self._img(720, 1280, seed=99)
+        x0, y0, _x1, _y1 = _inv_mod._avatar_band(row_no)
+        img[y0 + 10:y0 + 66, x0 + 20:x0 + 96] = face
+        return img
+
+    def _parsed(self, rows, fail_rows=0):
+        return {"rows": rows, "fail_rows": fail_rows}
+
+    def test_agree_records_score_without_threshold(self):
+        face_tpl = self._tpl("sid_a", "甲", "普", seed=7)
+        img = self._frame_with_face(1, face_tpl["img"])
+        row = {"sword_id": "sid_a", "name_zh": "甲", "_row_no": 1}
+        parsed = self._parsed([row])
+        _inv_mod.verify_rows_by_avatar(img, parsed, [face_tpl])
+        check = row["avatar_check"]
+        self.assertEqual(check["result"], "agree")
+        self.assertEqual(check["hit"]["form"], "普")
+        self.assertGreaterEqual(check["hit"]["score"], 0.99)
+        self.assertEqual(parsed.get("avatar_notes"), [])   # 互证不嚷嚷
+
+    def test_disagree_keeps_ocr_and_notes(self):
+        face_tpl = self._tpl("sid_a", "甲", "普", seed=7)
+        img = self._frame_with_face(1, face_tpl["img"])
+        row = {"sword_id": "sid_b", "name_zh": "乙", "_row_no": 1}
+        parsed = self._parsed([row])
+        _inv_mod.verify_rows_by_avatar(img, parsed, [face_tpl])
+        self.assertEqual(row["sword_id"], "sid_b")   # OCR 为主，不二选一
+        check = row["avatar_check"]
+        self.assertEqual(check["result"], "disagree")
+        self.assertEqual(check["hit"]["name_zh"], "甲")
+        note = parsed["avatar_notes"][0]
+        self.assertEqual(note["kind"], "disagree")
+        self.assertEqual((note["ocr"], note["avatar"]), ("乙", "甲"))
+
+    def test_rescued_fail_row_gets_identity_and_cells_backfilled(self):
+        face_tpl = self._tpl("sid_a", "甲", "普", seed=7)
+        img = self._frame_with_face(2, face_tpl["img"])
+        row = {"sword_id": None, "name_zh": None, "_row_no": 2}
+        parsed = self._parsed([row], fail_rows=1)
+        rois = _inv_mod.ROW_CELL_ROIS[2]
+        cell_map = {
+            tuple(rois["levels"]): [_tok("刀剑99级乱舞1级生存45/45疲劳100/100",
+                                         460, 280)],
+            tuple(rois["date"]): [_tok("2026", 1062, 394),
+                                  _tok("7/29", 1061, 417)],
+        }
+        for cell, value in zip(split_stats_roi(rois["stats"]),
+                               ["45", "46", "55", "52", "34", "42", "40", "29",
+                                "狭"]):
+            cell_map[tuple(cell)] = [_tok(value, cell[0] + 5, cell[1] + 5)]
+        cell_ocr = lambda roi: cell_map.get(tuple(roi), [])  # noqa: E731
+        _inv_mod.verify_rows_by_avatar(img, parsed, [face_tpl], cell_ocr)
+        self.assertEqual(row["sword_id"], "sid_a")
+        self.assertEqual(row["name_zh"], "甲")
+        self.assertEqual(row["avatar_check"]["result"], "rescued")
+        self.assertEqual(parsed["fail_rows"], 0)     # 捞回不算 fail
+        self.assertEqual((row["level"], row["tou_level"]), (99, 1))
+        self.assertEqual(row["stats"]["生存"], 45)
+        self.assertEqual(row["kiwame_date"], "2026-7-29")
+        self.assertEqual(row["_badge_rect"], rois["badge"])
+        note = parsed["avatar_notes"][0]
+        self.assertEqual(note["kind"], "rescued")
+
+    def test_low_score_mismatch_stays_observation_only(self):
+        # 带里没有这张脸：分数够不上采纳线，不报警不捞回，只记观测
+        face_tpl = self._tpl("sid_a", "甲", "普", seed=7)
+        img = self._img(720, 1280, seed=99)   # 纯噪声，没有脸
+        named = {"sword_id": "sid_b", "name_zh": "乙", "_row_no": 1}
+        fail = {"sword_id": None, "name_zh": None, "_row_no": 2}
+        parsed = self._parsed([named, fail], fail_rows=1)
+        _inv_mod.verify_rows_by_avatar(img, parsed, [face_tpl])
+        self.assertEqual(named["avatar_check"]["result"], "low_score")
+        self.assertEqual(fail["avatar_check"]["result"], "low_score")
+        self.assertIsNone(fail["sword_id"])          # 低分不许捞
+        self.assertEqual(parsed["fail_rows"], 1)
+        self.assertEqual(parsed["avatar_notes"], [])
+
+    def test_merge_avatar_form_fills_only_badge_unknown(self):
+        hit = {"sword_id": "sid", "name_zh": "甲", "form": "普", "tag": None,
+               "score": 0.95, "margin": 0.3, "forms_in_library": ["普", "极"],
+               "form_rival_score": 0.80}
+        agree = {"result": "agree", "hit": hit}
+        # badge unknown + 头像达标 + 总开关开（模板库修正后）→ 头像补结论
+        from touken import avatar_db
+        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", True):
+            fact = {"status": "unknown", "evidence": []}
+            _inv_mod.merge_avatar_form(fact, agree)
+            self.assertEqual(fact["status"], "normal")
+            self.assertEqual(fact["avatar"]["form"], "普")
+            self.assertTrue(any("头像通道" in e for e in fact["evidence"]))
+            # badge 已确认 → 头像不许推翻（观测照记）
+            fact = {"status": "kiwame", "evidence": ["花数3/基线2"]}
+            _inv_mod.merge_avatar_form(fact, agree)
+            self.assertEqual(fact["status"], "kiwame")
+            self.assertEqual(fact["avatar"]["form"], "普")
+        # 总开关默认关闭（校准 54/79 期间）：观测照记，结论不下
+        fact = {"status": "unknown", "evidence": []}
+        _inv_mod.merge_avatar_form(fact, agree)
+        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["avatar"]["form"], "普")
+        # disagree 的头像是另一把刀：形态观测不进本行
+        fact = {"status": "unknown", "evidence": []}
+        _inv_mod.merge_avatar_form(fact, {"result": "disagree", "hit": hit})
+        self.assertEqual(fact["status"], "unknown")
+        self.assertNotIn("avatar", fact)
+        # 单形态库/分差不够 → 观测照记，结论不下（开关开着也不下）
+        weak = dict(hit, forms_in_library=["普"], form_rival_score=None)
+        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", True):
+            fact = {"status": "unknown", "evidence": []}
+            _inv_mod.merge_avatar_form(fact, {"result": "agree", "hit": weak})
+            self.assertEqual(fact["status"], "unknown")
+            self.assertEqual(fact["avatar"]["form"], "普")
+
+    def test_avatar_messages_not_fail_worded(self):
+        """对不上/捞回的话术是 ⚠️ 级播报，不许撞翻车词表"""
+        self.assertFalse(_is_fail(
+            "⚠️ 第 3 页第 2 行 OCR 和头像对不上：OCR=安宅切，头像=小狐丸，"
+            "先按 OCR 记，已标注待核对"))
+        self.assertFalse(_is_fail(
+            "第 3 页第 2 行 OCR 没认出的行用头像捞回：面影"))
 
 
 if __name__ == "__main__":
