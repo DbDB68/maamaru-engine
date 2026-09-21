@@ -820,7 +820,7 @@ onBeforeUnmount(() => {
               <button v-for="z in [1, 2, 4]" :key="z" type="button" :class="{ active: zoom === z }" @click="zoom = z">{{ z * 100 }}%</button>
             </div>
           </div>
-          <div ref="scrollRef" class="fl-canvas-scroll">
+          <div ref="scrollRef" class="fl-canvas-scroll" data-stage-scroll-ignore>
             <canvas ref="canvasRef" class="fl-canvas" :style="canvasStyle" @mousedown.prevent="onMouseDown" @mousemove="onCanvasHover" />
           </div>
           <p v-if="!sessions.length" class="fl-hintline">还没有帧——点「抓一帧」，或去模板工坊抓一组。</p>

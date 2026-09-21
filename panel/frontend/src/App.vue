@@ -442,6 +442,8 @@ function updateStageCollapse(scrollTop: number) {
 }
 function onStageScroll(event: Event) {
   const scroller = event.target as HTMLElement | null
+  // 框选画布的滚动只是在帧里找位置；到达画布顶端也不能把页面舞台重新拉下来。
+  if (scroller?.closest('[data-stage-scroll-ignore]')) return
   const scrollRange = scroller ? scroller.scrollHeight - scroller.clientHeight : 0
   // 框体里有些内层会发 scroll，但自己并不能滚；不能把它的 0 误判成“回到顶部”。
   if (scrollRange <= 1) return

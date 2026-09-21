@@ -651,7 +651,7 @@ onBeforeUnmount(() => {
         </div>
         <label class="lab-check"><input v-model="lockSelection" type="checkbox" />锁定框选（←/→ 翻帧框不动）</label>
       </div>
-      <div class="lab-canvas-scroll" ref="scrollRef">
+      <div ref="scrollRef" class="lab-canvas-scroll" data-stage-scroll-ignore>
         <canvas
           ref="canvasRef"
           class="lab-canvas"
