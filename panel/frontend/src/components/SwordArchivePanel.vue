@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import PaperCard from './PaperCard.vue'
 import PanelHeader from './PanelHeader.vue'
@@ -32,6 +32,14 @@ import {
 // 编号/筛选/分组/置顶/请求体全在 archive.ts，这里只做展示和递请求。
 // entry.human?.watch 全程点属性访问，别解构——和 vue 的 watch API 撞名。
 
+const props = defineProps<{
+  running: boolean
+  current: string | null
+  stopping: boolean
+  starting: boolean
+}>()
+const emit = defineEmits<{ runInventory: [] }>()
+
 const data = ref<SwordArchiveResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -47,6 +55,11 @@ const done = computed(() => Boolean(data.value?.done))
 const summary = computed(() => data.value?.summary || null)
 const entries = computed(() => data.value?.entries || [])
 const attention = computed(() => data.value?.attention || [])
+const inventoryRunning = computed(() => props.running && props.current === 'sword_inventory')
+const inventoryBusy = computed(() => props.running || props.stopping || props.starting)
+const inventoryButtonLabel = computed(() => props.starting
+  ? '正在启动……'
+  : inventoryRunning.value ? '正在盘点……' : '刀帐盘点')
 
 const sortedEntries = computed(() => sortArchiveEntries(entries.value))
 const ordinals = computed(() => duplicateOrdinals(entries.value))
@@ -224,6 +237,9 @@ async function confirmLevel(item: SwordArchiveAttentionItem) {
 }
 
 onMounted(load)
+watch(inventoryRunning, (isRunning, wasRunning) => {
+  if (wasRunning && !isRunning) load()
+})
 </script>
 
 <template>
@@ -231,7 +247,10 @@ onMounted(load)
     <PaperCard variant="task" tag="section">
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
-          <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在翻档……' : '刷新档案' }}</button>
+          <div class="archive-header-actions">
+            <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在翻档……' : '刷新档案' }}</button>
+            <button type="button" class="primary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : ''" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
+          </div>
         </template>
       </PanelHeader>
       <div v-if="summary" class="archive-summary">
@@ -355,6 +374,7 @@ onMounted(load)
    内容宽悬在中间（编队页"东一块西一块"就是这么来的）。 */
 .archive-panel { display: grid; gap: 13px; align-content: start; }
 .archive-panel :deep(.task-card) { max-width: none; margin: 0; }
+.archive-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .archive-view-switch { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; padding: 0; }
 .archive-view-switch :deep(button) { min-width: 0; }
 .archive-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -435,6 +455,7 @@ onMounted(load)
 .archive-level-bad { color: #9f3d28; font-size: 11px; }
 
 @media (max-width: 900px) {
+  .archive-header-actions { justify-content: flex-start; }
   .archive-view-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .archive-view-switch :deep(button:last-child) { grid-column: 1 / -1; }
   .archive-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
