@@ -5,6 +5,7 @@ import TaskForm from './components/TaskForm.vue'
 import DashboardPanel from './components/DashboardPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
+import RunTimeline from './components/RunTimeline.vue'
 import ListsPanel from './components/ListsPanel.vue'
 import SchedulePanel from './components/SchedulePanel.vue'
 import FormationPanel from './components/FormationPanel.vue'
@@ -28,6 +29,7 @@ const params = ref<Record<string, ScriptParams>>({})
 const selected = ref('daily')
 const running = ref(false)
 const current = ref<string | null>(null)
+const startingScript = ref<string | null>(null)
 const workflowDraft = ref<WorkflowPreset | null>(null)
 const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
@@ -472,15 +474,33 @@ async function save() {
   }
 }
 
+async function runScript(scriptKey: string) {
+  if (running.value || stopping.value || startingScript.value) return
+  const info = scripts.value[scriptKey]
+  if (!info) {
+    message.value = '这个任务目前不能启动'
+    return
+  }
+  startingScript.value = scriptKey
+  try {
+    const result = await api.run(scriptKey, params.value[scriptKey] || {})
+    if (!result.ok) throw new Error(`${info.label}没有启动，请重试`)
+    running.value = true
+    current.value = scriptKey
+    message.value = `${info.label}已开始`
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '启动失败，请重试'
+  } finally {
+    startingScript.value = null
+  }
+}
+
 async function run() {
   if (selected.value === 'daily') {
     await startWorkflow(homeWorkflows.value.find(preset => preset.id === 'builtin-daily') || { id: 'builtin-daily', name: '一键日课' })
     return
   }
-  await api.run(selected.value, params.value[selected.value] || {})
-  running.value = true
-  current.value = selected.value
-  message.value = `${selectedInfo.value.label}已开始`
+  await runScript(selected.value)
 }
 
 async function stop() {
@@ -703,13 +723,14 @@ watch(tab, value => {
           @stop="stop"
           @configure="tab = 'tasks'"
         />
+        <RunTimeline />
         <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
       <aside class="home-dashboard"><DashboardPanel @open-report="tab = 'report'" /></aside>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>

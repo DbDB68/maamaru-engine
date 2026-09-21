@@ -1429,9 +1429,10 @@ async def favicon():
 # ── API：日志 ──
 
 @app.get("/api/logs")
-async def get_logs(limit: int = 100, after_id: int = 0):
+async def get_logs(limit: int = 100, after_id: int = 0, run_id: str = ""):
     store = get_store()
-    logs = store.get_recent(limit=limit, after_id=after_id)
+    logs = store.get_recent(limit=limit, after_id=after_id,
+                            run_id=run_id or None)
     last_id = store.get_last_id()
     return {"logs": logs, "last_id": last_id}
 

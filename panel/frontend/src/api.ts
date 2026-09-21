@@ -139,7 +139,8 @@ export const api = {
   addGameplayGoal: (value: Record<string, unknown>) => request<{ ok: boolean; goal: any; estimate: any }>('/api/planning/gameplay-goal', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
-  logs: () => request<{ logs: any[] }>('/api/logs?limit=200'),
+  logs: (limit = 200) => request<{ logs: any[] }>(`/api/logs?limit=${limit}`),
+  logsForRun: (runId: string, limit = 3000) => request<{ logs: any[] }>(`/api/logs?run_id=${encodeURIComponent(runId)}&limit=${limit}`),
   chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
   chat: (message: string) => request<{ reply: string }>('/api/chat', {
     method: 'POST',

@@ -68,10 +68,17 @@ class LogStore:
         )
         conn.commit()
 
-    def get_recent(self, limit: int = 100, after_id: int = 0) -> list[dict]:
-        """获取最近日志，支持增量拉取（after_id）"""
+    def get_recent(self, limit: int = 100, after_id: int = 0,
+                   run_id: str | None = None) -> list[dict]:
+        """获取最近日志，支持增量拉取（after_id）和按 run 回看（run_id）。"""
         conn = self._get_conn()
-        if after_id > 0:
+        if run_id:
+            rows = conn.execute(
+                "SELECT id, ts, run_id, script, message FROM logs "
+                "WHERE run_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
+                (run_id, after_id, max(1, min(int(limit), 5000))),
+            ).fetchall()
+        elif after_id > 0:
             rows = conn.execute(
                 "SELECT id, ts, run_id, script, message FROM logs "
                 "WHERE id > ? ORDER BY id ASC LIMIT ?",
@@ -100,6 +107,16 @@ class LogStore:
         conn = self._get_conn()
         row = conn.execute("SELECT MAX(id) FROM logs").fetchone()
         return row[0] or 0
+
+    def close(self):
+        """关掉本线程的 SQLite 连接（测试清理临时库时用，Windows 不放文件锁）。"""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            self._local.conn = None
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def add_chat(self, role: str, content: str):
         """存一条聊天记录"""
