@@ -864,36 +864,35 @@ class AvatarVerifyTests(unittest.TestCase):
                "score": 0.95, "margin": 0.3, "forms_in_library": ["普", "极"],
                "form_rival_score": 0.80}
         agree = {"result": "agree", "hit": hit}
-        # badge unknown + 头像达标 + 总开关开（模板库修正后）→ 头像补结论
+        # badge unknown + 头像达标（总开关默认开）→ 头像补结论
         from touken import avatar_db
-        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", True):
-            fact = {"status": "unknown", "evidence": []}
-            _inv_mod.merge_avatar_form(fact, agree)
-            self.assertEqual(fact["status"], "normal")
-            self.assertEqual(fact["avatar"]["form"], "普")
-            self.assertTrue(any("头像通道" in e for e in fact["evidence"]))
-            # badge 已确认 → 头像不许推翻（观测照记）
-            fact = {"status": "kiwame", "evidence": ["花数3/基线2"]}
-            _inv_mod.merge_avatar_form(fact, agree)
-            self.assertEqual(fact["status"], "kiwame")
-            self.assertEqual(fact["avatar"]["form"], "普")
-        # 总开关默认关闭（校准 54/79 期间）：观测照记，结论不下
         fact = {"status": "unknown", "evidence": []}
         _inv_mod.merge_avatar_form(fact, agree)
-        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["status"], "normal")
         self.assertEqual(fact["avatar"]["form"], "普")
+        self.assertTrue(any("头像通道" in e for e in fact["evidence"]))
+        # badge 已确认 → 头像不许推翻（观测照记）
+        fact = {"status": "kiwame", "evidence": ["花数3/基线2"]}
+        _inv_mod.merge_avatar_form(fact, agree)
+        self.assertEqual(fact["status"], "kiwame")
+        self.assertEqual(fact["avatar"]["form"], "普")
+        # 总开关拨回 False：观测照记，结论不下
+        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", False):
+            fact = {"status": "unknown", "evidence": []}
+            _inv_mod.merge_avatar_form(fact, agree)
+            self.assertEqual(fact["status"], "unknown")
+            self.assertEqual(fact["avatar"]["form"], "普")
         # disagree 的头像是另一把刀：形态观测不进本行
         fact = {"status": "unknown", "evidence": []}
         _inv_mod.merge_avatar_form(fact, {"result": "disagree", "hit": hit})
         self.assertEqual(fact["status"], "unknown")
         self.assertNotIn("avatar", fact)
-        # 单形态库/分差不够 → 观测照记，结论不下（开关开着也不下）
+        # 单形态库/分差不够 → 观测照记，结论不下
         weak = dict(hit, forms_in_library=["普"], form_rival_score=None)
-        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", True):
-            fact = {"status": "unknown", "evidence": []}
-            _inv_mod.merge_avatar_form(fact, {"result": "agree", "hit": weak})
-            self.assertEqual(fact["status"], "unknown")
-            self.assertEqual(fact["avatar"]["form"], "普")
+        fact = {"status": "unknown", "evidence": []}
+        _inv_mod.merge_avatar_form(fact, {"result": "agree", "hit": weak})
+        self.assertEqual(fact["status"], "unknown")
+        self.assertEqual(fact["avatar"]["form"], "普")
 
     def test_avatar_messages_not_fail_worded(self):
         """对不上/捞回的话术是 ⚠️ 级播报，不许撞翻车词表"""

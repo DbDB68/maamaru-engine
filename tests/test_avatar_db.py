@@ -139,30 +139,30 @@ class ThresholdTests(unittest.TestCase):
         self.assertFalse(avatar_db.avatar_identity_adopted(None))
 
     def test_form_status_conservative_conditions(self):
-        # 总开关打开时（模板库修正后）：双形态库 + 达标 + 压过另一形态
-        # ≥0.05 才下结论
-        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", True):
-            self.assertEqual(avatar_db.avatar_form_status(
-                self._hit(0.95, 0.3, rival=0.80, form="普")), "normal")
-            self.assertEqual(avatar_db.avatar_form_status(
-                self._hit(0.95, 0.3, rival=0.80, form="极")), "kiwame")
-            # 分差不够 0.05 → 只记观测
-            self.assertIsNone(avatar_db.avatar_form_status(
-                self._hit(0.95, 0.3, rival=0.92)))
-            # 分数不够 → 只记观测
-            self.assertIsNone(avatar_db.avatar_form_status(
-                self._hit(0.80, 0.3, rival=0.60)))
-            # 单形态库 → 永不下结论
-            self.assertIsNone(avatar_db.avatar_form_status(
-                self._hit(0.99, 0.9, forms=("普",), rival=None)))
+        # 总开关默认开（2026-09-21 校准 v2 满分上线）：双形态库 + 达标 +
+        # 压过另一形态 ≥0.05 才下结论
+        self.assertTrue(avatar_db.AVATAR_FORM_ENABLED)
+        self.assertEqual(avatar_db.avatar_form_status(
+            self._hit(0.95, 0.3, rival=0.80, form="普")), "normal")
+        self.assertEqual(avatar_db.avatar_form_status(
+            self._hit(0.95, 0.3, rival=0.80, form="极")), "kiwame")
+        # 分差不够 0.05 → 只记观测
+        self.assertIsNone(avatar_db.avatar_form_status(
+            self._hit(0.95, 0.3, rival=0.92)))
+        # 分数不够 → 只记观测
+        self.assertIsNone(avatar_db.avatar_form_status(
+            self._hit(0.80, 0.3, rival=0.60)))
+        # 单形态库 → 永不下结论
+        self.assertIsNone(avatar_db.avatar_form_status(
+            self._hit(0.99, 0.9, forms=("普",), rival=None)))
         self.assertIsNone(avatar_db.avatar_form_status(None))
 
-    def test_form_status_disabled_until_template_labels_fixed(self):
-        # 2026-09-21 校准 54/79 一致（25 把双形态刀疑似普/极标反）：
-        # 总开关默认关闭，再漂亮的命中也不下形态结论
-        self.assertFalse(avatar_db.AVATAR_FORM_ENABLED)
-        self.assertIsNone(avatar_db.avatar_form_status(
-            self._hit(0.99, 0.9, rival=0.50)))
+    def test_form_status_respects_master_switch(self):
+        # 开关拨回 False 时（比如未来校准翻车要紧急下架），再漂亮的命中
+        # 也不下形态结论
+        with patch.object(avatar_db, "AVATAR_FORM_ENABLED", False):
+            self.assertIsNone(avatar_db.avatar_form_status(
+                self._hit(0.99, 0.9, rival=0.50)))
 
 
 if __name__ == "__main__":
