@@ -103,6 +103,8 @@ class _FakeMaa:
         self.filtered_pages = None          # 点「确定」后切换成这份页集
         self.reset_closes_panel = False     # True=「取消筛选」顺手关掉面板
         self.single_page_sighted = False    # True=单页到底的独立视觉证据成立
+        self.missing_form_button = False    # True=「初/极」按钮 OCR 认不到
+        self.scrollbar_visible = True       # False=滑块读数缺失（证据不足）
 
     # 筛选面板按钮文字→坐标（与 formation_editor 的 OCR 文字定位对应；
     # 值本身无语义，只为 click 反查按钮）
@@ -129,6 +131,18 @@ class _FakeMaa:
         return bool(self.in_list and self.pages
                     and self.list_page == len(self.pages) - 1)
 
+    def scrollbar_bottom(self):
+        """剧本滑块底缘 y：末页恒 689（贴底钳住，2026-09-22 探针实测），
+        其余按页序内插（页距实测 180~200，远大于反滑最小落差 30）；
+        单页名单滑轨形态未标定、证据不可见时返回 None。"""
+        if not self.scrollbar_visible or not self.in_list or not self.pages:
+            return None
+        if len(self.pages) < 2:
+            return None
+        if self.list_page >= len(self.pages) - 1:
+            return 689
+        return 200 + int(400 * self.list_page / (len(self.pages) - 1))
+
     def screenshot(self, force=False):
         return None
 
@@ -143,6 +157,8 @@ class _FakeMaa:
                                     and self.filter_works) else None
         if self.in_filter and match_mode == "exact" \
                 and expected in self._FILTER_BTNS:
+            if expected in ("初", "极") and self.missing_form_button:
+                return None             # 剧本：形态按钮 OCR 认不到
             return _P(*self._FILTER_BTNS[expected])
         if expected == "部队编成":
             return _P(640, 30) if (self.shell == "formation"
@@ -182,6 +198,9 @@ class _FakeMaa:
         x, y = point.x, point.y
         self.clicks.append((x, y))
         if self.in_filter:
+            if (x, y) == (1149, 47):
+                self.in_filter = False  # 面板右上 X：失败兜底关面板
+                return
             for label, pos in self._FILTER_BTNS.items():
                 if (x, y) == pos:
                     self.filter_clicks.append(label)
@@ -273,9 +292,9 @@ class _EditorHost(FormationEditorMixin):
     def _formation_row_label(self, cy):
         return self.maa.current_tab
 
-    def _list_end_sighted(self):
-        """注入缝：剧本滚动条证据（生产通道=右缘滑轨滑块贴底）。"""
-        return self.maa.end_sighted()
+    def _scrollbar_bottom(self):
+        """注入缝：剧本滑块底缘读数（生产通道=右缘滑轨像素读取）。"""
+        return self.maa.scrollbar_bottom()
 
     def _list_single_page_sighted(self):
         """注入缝：剧本单页到底证据（生产通道待真机标定）。"""
@@ -968,13 +987,26 @@ class BottomProofTests(unittest.TestCase):
 
     def test_probe_swipes_also_swallowed_cannot_fake_bottom(self):
         """精确回归（老大第二轮反例）：吞第 2、3、5、7 次前滑——停滞触发
-        核验后的两次「探测滑」也恰好被吞。探测滑本身也可能被吞，「两轮
-        探测都没翻动」和「真到底」在指纹流上不可区分，没有独立末端证据
-        时只能 stalled，绝不 not_found。"""
+        核验后的「探测滑」也恰好被吞。滑块底缘是绝对位置证据：停滞时
+        滑块没贴底（page1/3）→ 直接证伪「到底」，续滑找回新页继续扫；
+        真到底后探测滑被吞也骗不出 689——complete 并裁决 not_found。"""
         pages = [self._full_page(0), self._full_page(1),
                  self._full_page(2, rows=2)]
         maa, host = _std_setup(pages=pages)
-        maa.swallow_forward = {2, 3, 5, 7}   # 吞停滞滑 + 两次探测滑
+        maa.swallow_forward = {2, 3, 5, 7}   # 吞停滞滑 + 探测滑
+        result = _run(host)
+        self.assertEqual(result["result"], NOT_FOUND)
+        self.assertEqual(result["pages_scanned"], 3)
+        _assert_never_departs(self, maa)
+
+    def test_swallowed_swipes_without_scrollbar_reading_are_stalled(self):
+        """同一反例 + 滑块读数缺失：拿不出绝对位置证据，「探测没翻动」
+        与真底在指纹流上不可区分——只能 stalled，绝不 not_found。"""
+        pages = [self._full_page(0), self._full_page(1),
+                 self._full_page(2, rows=2)]
+        maa, host = _std_setup(pages=pages)
+        maa.swallow_forward = {2, 3, 5, 7}
+        maa.scrollbar_visible = False        # 滑块读数缺失（证据不足）
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
@@ -1196,6 +1228,22 @@ class FilterPanelTests(unittest.TestCase):
 
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(maa.filter_clicks, ["取消筛选", "短刀", "极", "确定"])
+
+    def test_form_button_missing_bails_out_and_closes_panel(self):
+        """「极」认不到（2026-09-22 真机：查找范围下缘切了按钮行）：
+        停下，且兜底点 X 关面板——面板不在 navigator 页面地图里，
+        留着会把收尾导航卡死。"""
+        full, _filtered = self._kiwame_hasebe_pages()
+        maa, host = _std_setup(pages=full)
+        maa.missing_form_button = True
+        result = _run(host, target=_target(form="kiwame", level=99))
+
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀"])
+        self.assertIn((1149, 47), maa.clicks)       # X 点了
+        self.assertFalse(maa.in_filter)             # 面板关掉了
+        self.assertEqual(maa.swipes, [])            # 没翻页
+        _assert_never_departs(self, maa)
 
 
 if __name__ == "__main__":

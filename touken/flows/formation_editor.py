@@ -129,9 +129,9 @@ _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是
                                     # 全局唯一只允许在 reached_end 后声称
 _STALL_LIMIT = 2                    # 指纹连续不动触发「到底核验」（不等于到底）
 _BOTTOM_PROOF_STAGES = 2            # 到底核验的独立阶段数：每阶段都重新正面
-                                    # 验证反向+恢复有效后再探测；探测无新页还
-                                    # 须独立末端视觉证据（_list_end_sighted），
-                                    # 可能被吞的探测滑不包装成绝对证明
+                                    # 验证滑块贴底+反滑回落+恢复贴底；恢复
+                                    # 欠程帧不比指纹，贴底帧指纹与候选页
+                                    # 一致才计有效阶段
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
 # 选择列表右缘滚动条（_list_end_sighted 的独立末端证据通道，
@@ -149,6 +149,9 @@ _SCROLLBAR_BOTTOM_TOL = 0                 # 贴底零容差：真机证据只有
 _SCROLLBAR_THUMB_BRIGHT = 200             # 滑块亮 ~243 / 轨道灰 ~113
 _SCROLLBAR_TRACK_DARK = 150               # 轨道灰必须成段存在（防无滑轨
                                           # 页面的亮背景冒充满轨滑块）
+_SCROLLBAR_REVERSE_MIN_DY = 30            # 反滑生效的最小底缘回落
+                                          # （2026-09-22 探针实测一次反滑
+                                          # 689→482；欠程/抖动远小于 30）
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
 
 # ── 筛选/排序面板：按刀种（+形态）预筛名单，把全表扫描缩到几页 ──
@@ -156,18 +159,29 @@ _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
 # 唯一（「太刀」exact 防误中「大太刀」）。筛选只决定「名单里有什么」，
 # 裁决仍按行证据：筛错了顶多 not_found/ambiguous，不会换错人。
 # 游戏会记住上次筛选条件，故每次先「取消筛选」重置再点目标刀种。
+# 按钮查找范围是读取型 ROI，走注册表+覆盖（2026-09-22 真机校准：
+# 刀种行 y≈226/300、全刀剑 y≈372、初/极行 y≈450、确定 y≈623——
+# 「初/极」比布局推算低 ~70px，查找范围下缘千万别卡在 440）。
 _FILTER_OPEN_TEXT = "筛选/排序"
-_FILTER_OPEN_ROI = (600, 60, 1100, 140)       # 列表页右上按钮带
-_FILTER_PANEL_TITLE = ("筛选", (400, 60, 640, 130))
-_FILTER_PANEL_ROI = (100, 50, 1180, 670)      # 面板整区（找按钮用）
-_FILTER_TYPE_ROI = (130, 140, 1140, 470)      # 刀种按钮区
-_FILTER_FORM_ROI = (130, 330, 1140, 440)      # 「初/极/喜爱…」按钮行
-_FILTER_CONFIRM_ROI = (400, 540, 880, 680)    # 「确定」
+_FILTER_OPEN_ROI = get_roi("formation_editor.filter_open",
+                           (600, 60, 1100, 140))
+_FILTER_PANEL_TITLE = ("筛选", get_roi("formation_editor.filter_title",
+                                       (400, 60, 640, 130)))
+_FILTER_PANEL_ROI = get_roi("formation_editor.filter_panel",
+                            (100, 50, 1180, 670))
+_FILTER_TYPE_ROI = get_roi("formation_editor.filter_types",
+                           (130, 140, 1140, 470))
+_FILTER_FORM_ROI = get_roi("formation_editor.filter_form_row",
+                           (130, 410, 1140, 500))
+_FILTER_CONFIRM_ROI = get_roi("formation_editor.filter_confirm",
+                              (400, 540, 880, 680))
 _FILTER_RESET_TEXT = "取消筛选"
 _FILTER_CONFIRM_TEXT = "确定"
 _FILTER_TYPES = frozenset(
     ("短刀", "胁差", "打刀", "太刀", "大太刀", "枪", "薙刀", "剑"))
 _FILTER_FORM_TEXT = {"normal": "初", "kiwame": "极"}
+_FILTER_CLOSE_X = (1149, 47)        # 面板右上 X（2026-09-22 运行帧实测）；
+                                    # 只用于失败兜底回名单页，点击坐标不进注册表
 DEFAULT_MATCH_FIELDS = ("name", "form", "level")
 
 # 安全声明：本执行器的点击只允许落在以下目标上——部队标签、行内"替换"
@@ -600,6 +614,17 @@ class FormationEditorMixin:
         return True
 
     def _apply_list_filter(self, tgt):
+        """筛选包装：失败兜底点面板 X 回名单页——筛选面板不在 navigator
+        页面地图里，留着它开着会把收尾导航卡死（2026-09-22 真机实锤）。
+        点不上也不追加尝试，结果已定。"""
+        ok = yield from self._apply_list_filter_flow(tgt)
+        if not ok:
+            self.maa.click(Point(*_FILTER_CLOSE_X))
+            time.sleep(0.8)
+            self._wait_list_open(attempts=4)
+        return ok
+
+    def _apply_list_filter_flow(self, tgt):
         """按目标刀种（+形态）预筛名单。Returns（yield from 接）bool。
 
         流程：开面板 →「取消筛选」重置（游戏记住上次条件）→ 点刀种 →
@@ -997,20 +1022,16 @@ class FormationEditorMixin:
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
 
         status 四态分明——「滑不动」和「确认到底」是两件事：
-          complete  —— 停滞后通过多阶段到底核验（每阶段：反滑回上一页、
-                      正滑恢复候选页、再正滑探测候选页之后；探测无新页
-                      还必须由独立末端视觉证据确认「候选页就是末页」，
-                      连续 _BOTTOM_PROOF_STAGES 个阶段全过才允许称底）。
-                      回翻复归只证明「反向和恢复有效」，证明不了候选页
-                      是底：中途被吞的前滑会在恢复后的探测里露出新页，
-                      新页交还本循环继续扫，不丢页不重复；而探测滑本身
-                      也可能被吞，「探测没翻动」与真底在指纹流上不可
-                      区分，故末端证据独立成章。OCR 行数不足不是独立
-                      到底证据（满页被整行漏识与真正短末页长得一样，见
-                      2026-09-14 牛老师组合反例），绝不使用；
-          stalled   —— 连续滑动无响应且拿不出到底证据（滑动可能被吞；
-                      探测被吞与真底不可区分、滚动条没贴底、或单页名单
-                      无从回翻验证，同样保守 stalled——这是 honest stop）；
+          complete  —— 停滞后通过多阶段到底核验（主仪器是右缘滑块底缘
+                      的绝对位置：候选页没贴底说明停滞是前滑被吞，续滑
+                      把新页找回来交还本循环；候选页贴底则逐阶段正面
+                      验证反滑回落+恢复贴底，贴底帧指纹与候选页一致
+                      才计一个有效阶段，连续 _BOTTOM_PROOF_STAGES 个
+                      阶段全过才允许称底。滑动不吸附整页，欠程恢复帧
+                      不比指纹。OCR 行数不足不是独立到底证据，绝不使用）；
+          stalled   —— 连续滑动无响应且拿不出到底证据（滑动可能被吞、
+                      滑块读数缺失、或单页名单无从回翻验证，同样保守
+                      stalled——这是 honest stop）；
           blind     —— 任何一页 OCR 一行都读不出（整页失明，识别失败）；
           truncated —— 触达 max_pages 安全阀仍未到底；
           loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
@@ -1063,25 +1084,26 @@ class FormationEditorMixin:
         return pages, fps, current_idx, unreadable, status
 
     def _verify_bottom(self, fps):
-        """停滞后的「到底」多阶段核验。Returns (outcome, recovered)：
-          ("stalled",  None)       证据不足（只有一页无从回翻，或回翻/
-                                   恢复/探测任一环失效，或探测无新页却
-                                   拿不出独立末端证据）——绝不称底；
+        """停滞后的「到底」多阶段核验，主仪器是右缘滑块底缘的绝对位置
+        （免疫滑动欠程/被吞，2026-09-22 探针标定：贴底恒 689；一次反滑
+        689→482；单次恢复滑欠程只回 588，再滑一次才重新钳到 689——
+        欠程帧内容位移、指纹失真，故只在贴底帧比对指纹）。
+        Returns (outcome, recovered)：
+          ("stalled",  None)       证据不足（只有一页无从回翻，或滑块
+                                   读数缺失，或反滑/恢复/探测任一环
+                                   失效，或贴底帧指纹与候选页矛盾）
+                                   ——绝不称底；
           ("complete", None)       连续 _BOTTOM_PROOF_STAGES 个阶段，每阶段
-                                   反向+恢复都被正面验证、探测无新页、且
-                                   独立末端证据确认当前位置就是末页；
-          ("advanced", (rows,bad)) 恢复后探测出新页——候选页不是底，新页
-                                   交还扫描循环继续（由主循环判 loop/blind）。
+                                   候选页贴底、反滑回落生效、恢复后重新
+                                   贴底且指纹与候选页一致；
+          ("advanced", (rows,bad)) 候选页滑块没贴底（停滞是前滑被吞），
+                                   续滑探出新页——交还扫描循环继续
+                                   （由主循环判 loop/blind）。
 
-        纪律：回翻复归只证明「此刻反向和恢复滑都有效」，证明不了候选页
-        就是底——中途被吞的前滑正是这么骗过单步核验的（2026-09-14 精确
-        反例：page1 上两次前滑被吞，回翻复归两步全对，page2 从未被看见，
-        误报 not_found）。而「探测无新页」同样证明不了到底——探测滑本身
-        也可能被吞，与真底在指纹流上不可区分（同日第二轮反例：吞第 2、3、
-        5、7 次前滑，两轮探测全被吞，照样假 complete）。所以称底必须
-        同时具备：① 逐阶段正面验证的反向+恢复机制（证明「我在候选页」）、
-        ② 探测后无新页、③ 独立末端视觉证据（证明「候选页就是末页」）。
-        任何一环证据不足都只报 stalled，绝不 not_found。
+        纪律：滑块底缘是绝对位置证据，与滑动是否被执行无关——没贴底
+        就一定不在底，探测滑被吞也骗不出 689；贴底帧指纹与候选页一致
+        则排除「滑块误读」。任何一环证据不足都只报 stalled，绝不
+        not_found。
         """
         if len(fps) < 2:
             # 单页名单（筛选后常态）：回翻无从谈起，只能靠独立末端证据。
@@ -1089,63 +1111,96 @@ class FormationEditorMixin:
             if self._list_single_page_sighted():
                 return "complete", None
             return "stalled", None      # 单页无从回翻：honest stop
+        candidate_fp = fps[-1]
+        bottom = _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
         for _stage in range(_BOTTOM_PROOF_STAGES):
-            self.maa.swipe(*_SWIPE_PREV)            # ① 反滑回上一页
+            self.maa.screenshot(force=True)
+            b0 = self._scrollbar_bottom()
+            if b0 is None:
+                return "stalled", None          # 滑块读数缺失：证据不足
+            if b0 < bottom:
+                # 滑块没贴底：候选页不是底，停滞是前滑被吞——续滑把
+                # 新页找回来交还主循环（找不回/失明就 stalled）。
+                for _retry in range(2):
+                    self.maa.swipe(*_SWIPE_NEXT)
+                    time.sleep(1.2)
+                    rows, bad = self._read_list_page()
+                    if rows and page_fingerprint(rows) != candidate_fp:
+                        return "advanced", (rows, bad)
+                return "stalled", None
+            # 候选页自称贴底：先正面验证反向滑动有效……
+            self.maa.swipe(*_SWIPE_PREV)
             time.sleep(1.2)
             rows, _bad = self._read_list_page()
-            if page_fingerprint(rows) != fps[-2]:
+            b1 = self._scrollbar_bottom()
+            if b1 is None or b0 - b1 < _SCROLLBAR_REVERSE_MIN_DY:
+                return "stalled", None          # 反滑无效：机制不可信
+            if rows and page_fingerprint(rows) == candidate_fp:
+                return "stalled", None          # 反滑后内容没变：滑动被吞
+            # ……再续滑恢复贴底。滑动不吸附整页，单次恢复可能欠程
+            # （探针实测恢复后底缘 588，再滑一次才回 689）；欠程帧
+            # 内容位移、指纹失真，不比指纹直接再滑，只有重新贴底的
+            # 帧才与候选页比对。
+            restored = False
+            for _retry in range(3):
+                self.maa.swipe(*_SWIPE_NEXT)
+                time.sleep(1.2)
+                rows, bad = self._read_list_page()
+                b2 = self._scrollbar_bottom()
+                if b2 is None:
+                    return "stalled", None
+                if b2 < bottom:
+                    continue                    # 欠程过渡帧：再滑一次
+                if not rows:
+                    return "stalled", None      # 贴底帧失明：证据不足
+                if page_fingerprint(rows) != candidate_fp:
+                    return "stalled", None      # 贴底但内容变了：证据矛盾
+                restored = True
+                break
+            if not restored:
                 return "stalled", None
-            self.maa.swipe(*_SWIPE_NEXT)            # ② 正滑恢复候选页
-            time.sleep(1.2)
-            rows, _bad = self._read_list_page()
-            if page_fingerprint(rows) != fps[-1]:
-                return "stalled", None
-            self.maa.swipe(*_SWIPE_NEXT)            # ③ 探测候选页之后
-            time.sleep(1.2)
-            rows, bad = self._read_list_page()
-            if not rows:
-                return "stalled", None              # 探测后失明：证据不足
-            if page_fingerprint(rows) != fps[-1]:
-                return "advanced", (rows, bad)      # 还有页：交还扫描循环
-            if not self._list_end_sighted():
-                return "stalled", None              # 探测没翻动 ≠ 到底：探测滑
-                                                    # 本身也可能被吞（指纹流与
-                                                    # 真底不可区分），须独立
-                                                    # 末端证据才能称底
         return "complete", None
 
-    def _list_end_sighted(self):
-        """独立末端视觉证据：选择列表右缘滚动条的滑块底缘贴上滑轨底部。
-        回答「当前位置是不是列表末尾」——与滑动是否被执行无关的绝对
-        位置证据，探测滑被吞也不影响读数。读帧失败或找不到滑块时保守
-        False（证据不足，调用方只能 stalled）。测试经子类注入剧本证据。
+    def _scrollbar_bottom(self):
+        """读选择列表右缘滑块的底缘 y。Returns int 或 None（读帧失败、
+        看不到滑轨、找不到滑块——一律当证据不足，调用方只能 stalled）。
 
-        校准来源（2026-09-14，MAAAdapter 运行帧通道逐页取样 30 页）：
-        滑轨体 x[1262,1270]、轨道 y[124,689]；滑块亮 ~243 / 轨道灰 ~113；
-        滑块高约 103px。到底时滑块被轨道物理钳住，底缘读数在亮度阈值
-        180~235 下恒定 689；离底一页的过渡帧底缘 685（cal_page_28，
-        该页内容仍在变）。滑块每 px 约对应列表内容 15px（实测 4px
-        滑块 = 62px 内容），1~2px 的「差不多贴底」就足够藏住一行
-        姓名——故零容差：只有明确读到 689 才算到底，687/688 一律
-        不放行；读数差一点就只配 stalled，不配 complete。
+        校准来源（2026-09-14 运行帧通道逐页取样 30 页 + 2026-09-22
+        filter_bottom_probe 复测）：滑轨体 x[1262,1270]、轨道
+        y[124,689]；滑块亮 ~243 / 轨道灰 ~113；滑块高约 103px。
+        到底时滑块被轨道物理钳住，底缘读数恒定 689；一次反滑
+        689→482；恢复滑欠程可只回 588（不吸附整页）。测试经子类
+        注入剧本读数。
         """
         img = self.maa.screenshot()     # 复用核验刚读过的那一帧，不再截
         if img is None or img.shape[0] < 690 or img.shape[1] < 1270:
-            return False
+            return None
         x0, x1 = _SCROLLBAR_BAND_X
         y0, y1 = _SCROLLBAR_TRACK_Y
         band = np.asarray(img[y0:y1, x0:x1], dtype=np.int32).mean(axis=(1, 2))
         hot = band > _SCROLLBAR_THUMB_BRIGHT
         if (band < _SCROLLBAR_TRACK_DARK).sum() < 100:
-            return False                # 看不到灰色滑轨：不在选择列表上
+            return None                 # 看不到灰色滑轨：不在选择列表上
         best_len = best_end = cur = 0
         for i, h in enumerate(hot):
             cur = cur + 1 if h else 0
             if cur > best_len:
                 best_len, best_end = cur, i
         if best_len < 20:               # 滑块实测高 ~103px，太短当噪声
-            return False
-        return y0 + best_end >= _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
+            return None
+        return y0 + best_end
+
+    def _list_end_sighted(self):
+        """独立末端视觉证据：滑块底缘贴上滑轨底部。回答「当前位置是不是
+        列表末尾」——与滑动是否被执行无关的绝对位置证据，探测滑被吞
+        也不影响读数。读不出滑块时保守 False（证据不足）。
+
+        零容差（2026-09-14 校准）：离底一页的过渡帧底缘 685，滑块每
+        4px≈内容 62px，1~2px 的「差不多贴底」就够藏住一行姓名——
+        只有明确读到 689 才算到底，687/688 一律不放行。
+        """
+        b = self._scrollbar_bottom()
+        return b is not None and b >= _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
 
     def _list_single_page_sighted(self):
         """单页名单（筛选后常态）的到底证据通道。
