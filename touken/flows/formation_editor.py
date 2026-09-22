@@ -150,6 +150,24 @@ _SCROLLBAR_THUMB_BRIGHT = 200             # 滑块亮 ~243 / 轨道灰 ~113
 _SCROLLBAR_TRACK_DARK = 150               # 轨道灰必须成段存在（防无滑轨
                                           # 页面的亮背景冒充满轨滑块）
 _CONFIRM_POPUP_TEMPLATE = "通用_确定.png"
+
+# ── 筛选/排序面板：按刀种（+形态）预筛名单，把全表扫描缩到几页 ──
+# 按钮全部 OCR 文字定位（exact），不写死点击坐标——面板内按钮文字
+# 唯一（「太刀」exact 防误中「大太刀」）。筛选只决定「名单里有什么」，
+# 裁决仍按行证据：筛错了顶多 not_found/ambiguous，不会换错人。
+# 游戏会记住上次筛选条件，故每次先「取消筛选」重置再点目标刀种。
+_FILTER_OPEN_TEXT = "筛选/排序"
+_FILTER_OPEN_ROI = (600, 60, 1100, 140)       # 列表页右上按钮带
+_FILTER_PANEL_TITLE = ("筛选", (400, 60, 640, 130))
+_FILTER_PANEL_ROI = (100, 50, 1180, 670)      # 面板整区（找按钮用）
+_FILTER_TYPE_ROI = (130, 140, 1140, 470)      # 刀种按钮区
+_FILTER_FORM_ROI = (130, 330, 1140, 440)      # 「初/极/喜爱…」按钮行
+_FILTER_CONFIRM_ROI = (400, 540, 880, 680)    # 「确定」
+_FILTER_RESET_TEXT = "取消筛选"
+_FILTER_CONFIRM_TEXT = "确定"
+_FILTER_TYPES = frozenset(
+    ("短刀", "胁差", "打刀", "太刀", "大太刀", "枪", "薙刀", "剑"))
+_FILTER_FORM_TEXT = {"normal": "初", "kiwame": "极"}
 DEFAULT_MATCH_FIELDS = ("name", "form", "level")
 
 # 安全声明：本执行器的点击只允许落在以下目标上——部队标签、行内"替换"
@@ -196,6 +214,7 @@ def normalize_target(target):
            "sword_catalog_id": sid,
            "name": name,
            "form": form,
+           "sword_type": info.get("type"),
            "level": target.get("level"),
            "tou_level": target.get("tou_level"),
            "survival": target.get("survival"),
@@ -550,6 +569,80 @@ class FormationEditorMixin:
         """读行首"N之M"位置标签（切队正面确认）。"""
         return self._read_row_label(cy)
 
+    # ---- 筛选/排序面板 ----
+
+    def _open_filter_panel(self):
+        """点「筛选/排序」开面板，标题 OCR 正面确认。Returns bool。"""
+        text, roi = _FILTER_PANEL_TITLE
+        for _ in range(2):
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(text, roi_4to4(*roi)):
+                return True             # 已经开着
+            pt = self.maa.ocr(_FILTER_OPEN_TEXT,
+                              roi_4to4(*_FILTER_OPEN_ROI))
+            if not pt:
+                time.sleep(0.5)
+                continue
+            self.maa.click(pt)
+            time.sleep(0.8)
+        self.maa.screenshot(force=True)
+        return bool(self.maa.ocr(text, roi_4to4(*roi)))
+
+    def _click_panel_button(self, text, roi=None):
+        """面板里按文字（exact）找按钮并点。Returns 找没找到。"""
+        self.maa.screenshot(force=True)
+        pt = self.maa.ocr(text, roi_4to4(*(roi or _FILTER_PANEL_ROI)),
+                          match_mode="exact")
+        if not pt:
+            return False
+        self.maa.click(pt)
+        time.sleep(0.5)
+        return True
+
+    def _apply_list_filter(self, tgt):
+        """按目标刀种（+形态）预筛名单。Returns（yield from 接）bool。
+
+        流程：开面板 →「取消筛选」重置（游戏记住上次条件）→ 点刀种 →
+        目标形态已知时点「初/极」→「确定」→ 确认回到名单。任何一步
+        认不到就如实 False：此时列表开着、未点决定，队伍无变化。
+        目标没刀种信息时返回 True 不筛（退化全表扫，由扫描纪律兜底）。
+        """
+        stype = tgt.get("sword_type")
+        if not stype or stype not in _FILTER_TYPES:
+            return True
+        form_text = _FILTER_FORM_TEXT.get(tgt.get("form"))
+        yield (f"[编队] 先筛名单：{stype}"
+               + (f"＋{form_text}" if form_text else ""))
+        if not self._open_filter_panel():
+            yield "[编队] 筛选面板打不开（名单未动，未做任何变更），停"
+            return False
+        if not self._click_panel_button(_FILTER_RESET_TEXT):
+            yield ("[编队] 「取消筛选」认不到：不敢带着未知的上次筛选"
+                   "条件扫名单，停")
+            return False
+        # 「取消筛选」可能顺手关了面板：关了就重开再选
+        text, roi = _FILTER_PANEL_TITLE
+        self.maa.screenshot(force=True)
+        if not self.maa.ocr(text, roi_4to4(*roi)):
+            if not self._open_filter_panel():
+                yield "[编队] 重置筛选后叫不回筛选面板，停"
+                return False
+        if not self._click_panel_button(stype, _FILTER_TYPE_ROI):
+            yield f"[编队] 筛选面板里认不到「{stype}」按钮，停"
+            return False
+        if form_text and not self._click_panel_button(form_text,
+                                                      _FILTER_FORM_ROI):
+            yield f"[编队] 筛选面板里认不到「{form_text}」按钮，停"
+            return False
+        if not self._click_panel_button(_FILTER_CONFIRM_TEXT,
+                                        _FILTER_CONFIRM_ROI):
+            yield "[编队] 筛选「确定」认不到，停"
+            return False
+        if not self._wait_list_open():
+            yield "[编队] 筛选确定后回不到名单页，停"
+            return False
+        return True
+
     # ---- 对外契约 ----
 
     def ensure_team_member(self, team_no, slot_no, target, **kw):
@@ -646,6 +739,15 @@ class FormationEditorMixin:
             yield "[编队] 刀剑男士选择列表没打开，停（未做任何变更）"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "点了替换但选择列表未出现", entry_shell=shell,
+                                before=slot_before, team_before=team_before)
+
+        # 4.5) 按刀种（+形态）预筛名单：全表几百振缩到几页，同名多振
+        #      筛「初/极」后只剩目标形态。筛选只决定名单里有什么，
+        #      裁决仍按行证据——筛错顶多 not_found，不会换错人
+        if not (yield from self._apply_list_filter(tgt)):
+            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
+                                "筛选名单失败（面板识别中断），未点决定",
+                                entry_shell=shell,
                                 before=slot_before, team_before=team_before)
 
         # 5) 全表扫描（指纹停滞=到底 / 绕圈 / 截断三种结局分明），
@@ -982,6 +1084,10 @@ class FormationEditorMixin:
         任何一环证据不足都只报 stalled，绝不 not_found。
         """
         if len(fps) < 2:
+            # 单页名单（筛选后常态）：回翻无从谈起，只能靠独立末端证据。
+            # 标定未完成前保守 stalled（honest stop）。
+            if self._list_single_page_sighted():
+                return "complete", None
             return "stalled", None      # 单页无从回翻：honest stop
         for _stage in range(_BOTTOM_PROOF_STAGES):
             self.maa.swipe(*_SWIPE_PREV)            # ① 反滑回上一页
@@ -1040,6 +1146,16 @@ class FormationEditorMixin:
         if best_len < 20:               # 滑块实测高 ~103px，太短当噪声
             return False
         return y0 + best_end >= _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
+
+    def _list_single_page_sighted(self):
+        """单页名单（筛选后常态）的到底证据通道。
+
+        单页时回翻核验无从谈起，需要独立视觉证据回答「这一页就是
+        全部」——候选：右缘滑轨消失（内容不足一屏）或滑块满轨贴底。
+        两者都还没真机标定，标定完成前保守 False（宁可 stalled，
+        绝不拿没验证过的证据称底）。测试经子类注入剧本证据。
+        """
+        return False
 
     def _goto_page(self, pages, fps, current_idx, target_idx):
         """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""

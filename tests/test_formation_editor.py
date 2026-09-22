@@ -84,9 +84,6 @@ class _FakeMaa:
         self.swallow_swipes = swallow_swipes  # True=滑动全被模拟器吞掉
         self.swallow_forward = set()        # 被吞的前滑序号（1 起）
         self._forward_count = 0
-        self.form_map = {(r["name"], r.get("level")): r["form"]
-                         for page in self.pages for r in page
-                         if r.get("form") is not None}
         self.in_list = False
         self.list_page = 0
         self.pending_slot = None
@@ -99,8 +96,32 @@ class _FakeMaa:
         self.clicks = []
         self.swipes = []
         self.templates_seen = []
+        # 筛选面板剧本
+        self.filter_works = True            # False=「筛选/排序」认不到
+        self.in_filter = False
+        self.filter_clicks = []             # 面板按钮点击顺序（按文字记录）
+        self.filtered_pages = None          # 点「确定」后切换成这份页集
+        self.reset_closes_panel = False     # True=「取消筛选」顺手关掉面板
+        self.single_page_sighted = False    # True=单页到底的独立视觉证据成立
+
+    # 筛选面板按钮文字→坐标（与 formation_editor 的 OCR 文字定位对应；
+    # 值本身无语义，只为 click 反查按钮）
+    _FILTER_BTNS = {"取消筛选": (798, 151),
+                    "短刀": (276, 225), "胁差": (423, 225),
+                    "打刀": (573, 225), "太刀": (717, 225),
+                    "大太刀": (276, 303), "枪": (423, 303),
+                    "薙刀": (573, 303), "剑": (717, 303),
+                    "初": (276, 377), "极": (423, 377),
+                    "确定": (640, 611)}
 
     # ---- 识别 ----
+
+    @property
+    def form_map(self):
+        """当前页集的形态证据表（筛选切页集后自动反映新 pages）。"""
+        return {(r["name"], r.get("level")): r["form"]
+                for page in self.pages for r in page
+                if r.get("form") is not None}
 
     def end_sighted(self):
         """剧本末端视觉证据（滚动条到底）：当前页就是最后一页才为真——
@@ -113,7 +134,16 @@ class _FakeMaa:
 
     def ocr(self, expected, roi, match_mode="contains"):
         if expected == "刀剑男士选择":
-            return _P(640, 40) if self.in_list else None
+            return _P(640, 40) if (self.in_list
+                                   and not self.in_filter) else None
+        if expected == "筛选":
+            return _P(520, 95) if self.in_filter else None
+        if expected == "筛选/排序":
+            return _P(848, 100) if (self.in_list and not self.in_filter
+                                    and self.filter_works) else None
+        if self.in_filter and match_mode == "exact" \
+                and expected in self._FILTER_BTNS:
+            return _P(*self._FILTER_BTNS[expected])
         if expected == "部队编成":
             return _P(640, 30) if (self.shell == "formation"
                                    and not self.in_list) else None
@@ -151,6 +181,20 @@ class _FakeMaa:
     def click(self, point):
         x, y = point.x, point.y
         self.clicks.append((x, y))
+        if self.in_filter:
+            for label, pos in self._FILTER_BTNS.items():
+                if (x, y) == pos:
+                    self.filter_clicks.append(label)
+                    if label == "取消筛选" and self.reset_closes_panel:
+                        self.in_filter = False
+                        return
+                    if label == "确定":
+                        self.in_filter = False
+                        if self.filtered_pages is not None:
+                            self.pages = self.filtered_pages
+                            self.list_page = 0
+                    return
+            return                      # 面板开着时点击不穿到列表
         for team, (tx, ty) in _TEAM_TAB.items():
             if (x, y) == (tx, ty):
                 if team in self.swallow_tabs and team not in self._swallowed:
@@ -160,6 +204,9 @@ class _FakeMaa:
                 return
         if (x, y) == (640, 500) and self.popup:
             self.popup = False
+            return
+        if (x, y) == (848, 100) and self.in_list and self.filter_works:
+            self.in_filter = True       # 「筛选/排序」开面板
             return
         if x == _SWAP_X:
             if y in _ROW_CY:
@@ -229,6 +276,10 @@ class _EditorHost(FormationEditorMixin):
     def _list_end_sighted(self):
         """注入缝：剧本滚动条证据（生产通道=右缘滑轨滑块贴底）。"""
         return self.maa.end_sighted()
+
+    def _list_single_page_sighted(self):
+        """注入缝：剧本单页到底证据（生产通道待真机标定）。"""
+        return bool(self.maa.single_page_sighted)
 
     def _parse_selection_rows(self, tokens):
         """注入缝：给行补上剧本里的形态证据（未来真机形态通道的位置）。"""
@@ -1062,6 +1113,89 @@ class ScrollbarEndEvidenceTests(unittest.TestCase):
 
     def test_no_frame_is_not_sighted(self):
         self.assertFalse(self._sighted(None))
+
+
+# ==================== 筛选/排序面板 ====================
+
+class FilterPanelTests(unittest.TestCase):
+    """按刀种（+形态）预筛名单：按钮 OCR 文字定位、取消筛选重置、
+    面板识别失败即停（列表开着、未点决定、队伍无变化）。"""
+
+    def _kiwame_hasebe_pages(self):
+        """全表一页（无目标），筛选「打刀＋极」后一页含目标。"""
+        full = [[_row("小狐丸", 150, level=35, fatigue=60)]]
+        filtered = [[_row("压切长谷部", 150, level=99, fatigue=88,
+                          form="kiwame",
+                          becomes=_slot(3, catalog=HASEBE,
+                                        name="压切长谷部", level=99,
+                                        kiwame="kiwame"))]]
+        return full, filtered
+
+    def test_filter_narrows_scan_and_clicks_in_order(self):
+        full, filtered = self._kiwame_hasebe_pages()
+        maa, host = _std_setup(pages=full)
+        maa.filtered_pages = filtered
+        maa.single_page_sighted = True
+        result = _run(host, target=_target(form="kiwame", level=99))
+
+        self.assertEqual(result["result"], CHANGED)
+        # 压切长谷部=打刀；form=kiwame → 点「极」；每次先取消筛选重置
+        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
+        # 名单换成筛选后的（全表里没有目标，换页集才找得到）
+        _assert_never_departs(self, maa)
+
+    def test_filter_without_form_skips_form_buttons(self):
+        """目标形态未知：只筛刀种，不点「初/极」。"""
+        full, filtered = self._kiwame_hasebe_pages()
+        filtered[0][0]["form"] = None       # 页面给不出形态证据
+        maa, host = _std_setup(pages=full)
+        maa.filtered_pages = filtered
+        maa.single_page_sighted = True
+        result = _run(host, target=_target(form=None, level=99,
+                                           name="压切长谷部"))
+        # form 未知 → match_fields 里 form 不参与；name+level 齐全 → 换
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "确定"])
+
+    def test_filter_panel_never_opens_stops_cleanly(self):
+        """「筛选/排序」认不到：停，不翻页、不点决定、队伍不变。"""
+        full, _filtered = self._kiwame_hasebe_pages()
+        maa, host = _std_setup(pages=full)
+        maa.filter_works = False
+        result = _run(host, target=_target(form="kiwame", level=99))
+
+        self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
+        self.assertEqual(maa.filter_clicks, [])
+        self.assertEqual(maa.swipes, [])
+        self.assertEqual(len(host.teams[2]), 6)     # 队伍原样
+
+    def test_reset_closing_panel_reopens_and_continues(self):
+        """「取消筛选」顺手关了面板（游戏行为分支）：重开再选，流程不断。"""
+        full, filtered = self._kiwame_hasebe_pages()
+        maa, host = _std_setup(pages=full)
+        maa.filtered_pages = filtered
+        maa.single_page_sighted = True
+        maa.reset_closes_panel = True
+        result = _run(host, target=_target(form="kiwame", level=99))
+
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
+
+    def test_tanto_target_clicks_tanto(self):
+        """短刀目标点「短刀」——刀种来自 sword_db，不是写死。"""
+        full = [[_row("小狐丸", 150, level=35, fatigue=60)]]
+        filtered = [[_row("今剑", 150, level=99, fatigue=100, form="kiwame",
+                          becomes=_slot(3, catalog=IMA, name="今剑",
+                                        level=99, kiwame="kiwame"))]]
+        maa, host = _std_setup(pages=full)
+        maa.filtered_pages = filtered
+        maa.single_page_sighted = True
+        target = {"sword_catalog_id": IMA, "name": "今剑",
+                  "form": "kiwame", "level": 99}
+        result = _run(host, target=target)
+
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(maa.filter_clicks, ["取消筛选", "短刀", "极", "确定"])
 
 
 if __name__ == "__main__":
