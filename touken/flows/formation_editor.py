@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """共用编队执行器 v1（"听命令的手"）：把指定部队的指定槽位换成明确目标。
 
-只做换人 + 回读验收。绝不选人（目标由调用方从当前本丸共用档案里挑好
+只做换人。绝不选人（目标由调用方从当前本丸共用档案里挑好
 给进来），绝不点击"即刻出阵/远征派遣/演练开始"——出发安全流程永远归
 各玩法的 BattleMixin._safe_depart_stream + _confirm_departure。
 
@@ -33,8 +33,7 @@
     形态未知、target.level 已知而等级没读到，都只凭同位名字点不得；
     同名多振拉不开、有证据不足的同名行、或存在读不清的行，一律
     ambiguous 并附 missing_evidence，绝不点第一条；
-  - 槽位验收同样三态：换前/换后都必须逐项验明（形态读不出=证据不足），
-    证据不足换前可继续开名单、换后必须 verification_failed；
+  - 换前槽位观察只用于避免重复点击；证据不足就继续开名单，不据此猜测；
   - 当前选择列表没有形态直读通道（行 form 恒 None）：普通/极化同名
     在无法由其他可靠身份证据区分时应诚实停住，不装能认。调用方若从
     档案确知同名唯一，可显式收窄 match_fields（如 ("name","level")）
@@ -49,13 +48,12 @@
     scan_incomplete 原因，绝不点击。
 
 失败边界：
-  - 找不到列表 / 切队未确认 / 回读页认不出 → screen_unrecognized；
+  - 找不到列表 / 切队未确认 → screen_unrecognized；
   - 目标整表不存在（可能被别队/手入/修行/互斥隐藏，或档案陈旧）
     → not_found，不换相似候选；
   - 决定已点但列表不关闭（游戏禁用该目标）→ unavailable；
-  - 决定后回读不是目标或证据不足 → verification_failed，明确告知
-    "游戏队伍可能已发生变化"；只有原成员能被唯一定位时才允许恢复，
-    本版不做盲回滚；
+  - 点「决定」后只确认选择列表已经关闭，不再 OCR 回读编队，也不根据
+    回读结果改判成败或写入编队档案；若后续实测需要，再单独设计验收；
   - 翻页有指纹停滞/绕圈检测与页数上限，不在死循环里翻名单。
 """
 
@@ -503,7 +501,7 @@ def slot_matches_target(slot, target, match_fields=DEFAULT_MATCH_FIELDS):
     刀种目录必须一致（不一致=False）。对 match_fields 里 target 有值的
     身份字段：槽位有值且冲突 → False；槽位缺值 → None（证据不足，
     不算确认也不算排除）。目标 form 已知而槽位形态读不出时绝不通过——
-    换前不能零点击宣称 already_correct，换后也不能报 changed。
+    换前不能零点击宣称 already_correct。
     疲劳不在默认 match_fields 里（自然恢复，不是身份证据）。
     """
     status = slot.get("slot_status")
@@ -695,7 +693,7 @@ class FormationEditorMixin:
     def ensure_team_member_stream(self, team_no, slot_no, target,
                                   entry_context="auto",
                                   match_fields=None, max_pages=None):
-        """把部队 team_no(1~5) 的 slot_no(1~6) 换成明确目标，回读验收。
+        """把部队 team_no(1~5) 的 slot_no(1~6) 换成明确目标。
 
         entry_context:
           "auto"       已在编队/部队选择页则原地执行；都不在 → 导航去编队；
@@ -840,48 +838,16 @@ class FormationEditorMixin:
                                 entry_shell=shell, before=slot_before,
                                 team_before=team_before)
 
-        # 7) 回到原编队表面，重新观察验收：三态——确认是目标才 changed；
-        #    证据不足与确认不是目标一样算 verification_failed，绝不假报成功
-        shell_after = self._detect_shell()
-        if shell_after is None:
-            yield "[编队] 决定后回不到编队表面，页面状态未知，停"
-            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
-                                "决定后既认不出编成才也认不出部队选择",
-                                entry_shell=shell, before=slot_before,
-                                team_before=team_before)
-        if not (yield from self._select_team_confirmed(team_no)):
-            yield f"[编队] 回读前切不回部队{team_no}，验收失败"
-            return self._finish(VERIFICATION_FAILED, team_no, slot_no, tgt,
-                                "决定已生效但回读前切队未确认；游戏队伍可能"
-                                "已发生变化，请人工核对", entry_shell=shell,
-                                before=slot_before, team_before=team_before)
-        team_after = self._formation_read_team()
-        slot_after = team_after[slot_no - 1] if team_after else None
-        others = _other_slot_changes(team_before, team_after, slot_no)
-        if slot_after is not None \
-                and slot_matches_target(slot_after, tgt, match_fields) is True:
-            yield (f"[编队] ✓ 换好了：部队{team_no} {slot_no}号位 = "
-                   f"{slot_after.get('name') or tgt['name']}")
-            return self._finish(CHANGED, team_no, slot_no, tgt,
-                                "回读逐项验收通过", entry_shell=shell,
-                                before=slot_before, after=slot_after,
-                                team_before=team_before, team_after=team_after,
-                                other_slot_changes=others,
-                                evidence_gaps=[],
-                                pages_scanned=len(pages))
-        if slot_after is not None \
-                and slot_matches_target(slot_after, tgt, match_fields) is None:
-            detail = ("回读证据不足（形态/等级未能逐项复核），无法确认是目标")
-        else:
-            detail = (f"回读不是目标（{(slot_after or {}).get('name') or '读不出'}）")
-        yield (f"[编队] ⚠️ {detail}，"
-               "游戏队伍可能已发生变化，请人工核对；本版不做盲回滚")
-        return self._finish(VERIFICATION_FAILED, team_no, slot_no, tgt,
-                            f"{detail}；游戏队伍可能已发生变化，未做盲回滚",
-                            entry_shell=shell,
-                            before=slot_before, after=slot_after,
-                            team_before=team_before, team_after=team_after,
-                            other_slot_changes=others)
+        # 「决定」后列表已关闭就结束。本阶段不再 OCR 回读当前队伍：回读
+        # 误识别不能反过来把一次正常换人报成失败，也不拿未经独立盘点的
+        # 读数刷新编队档案。
+        yield (f"[编队] ✓ 已决定：部队{team_no} {slot_no}号位 ← "
+               f"{tgt['name']}（本阶段不做回读）")
+        return self._finish(CHANGED, team_no, slot_no, tgt,
+                            "已点击决定且选择列表正常关闭；未做编队回读",
+                            entry_shell=shell, before=slot_before,
+                            team_before=team_before,
+                            pages_scanned=len(pages))
 
     def apply_preset_formation_stream(self, team_no: int, slots: dict,
                                       name: str = "预设编队"):
@@ -1307,40 +1273,4 @@ class FormationEditorMixin:
                 self.record_event("formation.member_ensured", **payload)
             except Exception:
                 pass  # 记账失败不阻塞执行结果
-            # 换后事实刷新：验收通过（CHANGED/ALREADY_CORRECT）时把刚回读的
-            # 整队六槽落成 team_roster.observed。本丸档案的编队层
-            # （honmaru_profile.build_roster）只认这类事件——不补这条，
-            # 页面会一直显示旧成员，点"刷新档案"也救不回来。
-            # verification_failed 不落：那时队伍状态存疑，不拿存疑读数冒充事实。
-            team_after = extra.get("team_after")
-            if result in (CHANGED, ALREADY_CORRECT) and team_after:
-                try:
-                    observe = getattr(self, "_observation_status", None)
-                    status = observe(team_after) if observe else (
-                        "partial" if any(
-                            s.get("slot_status") == "unknown"
-                            or s.get("unknown_fields")
-                            for s in team_after) else "complete")
-                    self.record_event("team_roster.observed",
-                                      team_no=team_no, slots=team_after,
-                                      observation_status=status,
-                                      source="formation_editor")
-                except Exception:
-                    pass  # 记账失败不阻塞执行结果
         return out
-
-
-def _other_slot_changes(team_before, team_after, slot_no):
-    """整队前后对比（目标槽以外）：别的槽位身份变了要如实报出来。"""
-    if not team_before or not team_after:
-        return []
-    changes = []
-    for b, a in zip(team_before, team_after):
-        if b.get("slot") == slot_no:
-            continue
-        if (b.get("sword_catalog_id"), b.get("level")) != \
-                (a.get("sword_catalog_id"), a.get("level")):
-            changes.append({"slot": b.get("slot"),
-                            "before": b.get("name") or b.get("name_raw"),
-                            "after": a.get("name") or a.get("name_raw")})
-    return changes

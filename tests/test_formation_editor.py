@@ -27,7 +27,7 @@ from touken.flows.formation_editor import (
     row_conflicts_target, slot_matches_target,
     FORBIDDEN_DEPART_CLICKS, ALREADY_CORRECT, AMBIGUOUS, CHANGED,
     INVALID_REQUEST, NOT_FOUND, SCREEN_UNRECOGNIZED, UNAVAILABLE,
-    VERIFICATION_FAILED, _DECIDE_X, _ROW_CY, _SWAP_X, _TEAM_TAB)
+    _DECIDE_X, _ROW_CY, _SWAP_X, _TEAM_TAB)
 
 HASEBE = "touken_118_heshikiri_hasebe"   # 压切长谷部（打刀）
 MIKA = "touken_003_mikazuki_munechika"   # 三日月宗近（太刀）
@@ -613,16 +613,18 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["entry_shell"], "formation")
         self.assertEqual(result["before"]["sword_catalog_id"], KOGI)
-        self.assertEqual(result["after"]["sword_catalog_id"], HASEBE)
         self.assertEqual(len(result["team_before"]), 6)
-        self.assertEqual(len(result["team_after"]), 6)
+        self.assertNotIn("after", result)
+        self.assertNotIn("team_after", result)
         self.assertIn((_DECIDE_X, 300 - 22), maa.clicks)
         self.assertEqual(maa.shell, "formation")   # 保持原入口上下文
         ev = [e for e in host.events
               if e["event_type"] == "formation.member_ensured"][-1]
         self.assertEqual(ev["payload"]["result"], CHANGED)
-        # 换后整队回读要落成新事实，本丸档案编队层只认这类事件
-        self.assertEqual(host.events[-1]["event_type"], "team_roster.observed")
+        self.assertEqual(host.events[-1]["event_type"],
+                         "formation.member_ensured")
+        self.assertNotIn("team_roster.observed",
+                         [event["event_type"] for event in host.events])
         _assert_never_departs(self, maa)
 
     def test_team_select_shell_same_path(self):
@@ -759,52 +761,26 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertIn("不可选", result["reason"])
         _assert_never_departs(self, maa)
 
-    def test_verification_failed_on_wrong_readback(self):
-        """决定生效但回读是别的刀 → verification_failed，明说队伍可能已变。"""
+    def test_decide_success_does_not_read_back_team(self):
+        """决定后不再读整队；错误 OCR 不能把正常换人改判成失败。"""
         wrong = _slot(3, catalog=MAEDA, name="前田藤四郎", level=80)
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
                        form="normal", becomes=wrong)],
                  _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
-        result = _run(host)
-        self.assertEqual(result["result"], VERIFICATION_FAILED)
-        self.assertIn("可能已发生变化", result["reason"])
-        self.assertEqual(result["after"]["sword_catalog_id"], MAEDA)
-        _assert_never_departs(self, maa)
-
-    def test_verification_failed_on_insufficient_readback(self):
-        """回读同名但形态未知 → 证据不足也绝不报 changed。"""
-        weak = _slot(3, catalog=HASEBE, name="压切长谷部", level=35,
-                     kiwame="unknown")
-        pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
-                       form="normal", becomes=weak)],
-                 _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
-        result = _run(host)
-        self.assertEqual(result["result"], VERIFICATION_FAILED)
-        self.assertIn("证据不足", result["reason"])
-        self.assertIn("可能已发生变化", result["reason"])
-
-    def test_verification_failed_on_unreadable_slot(self):
-        pages = [[_ok_row(300)], _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
         original = host._formation_read_team
-        state = {"decided": False}
-        real_apply = host._apply_decide
-
-        def apply(slot_no, row):
-            state["decided"] = True
-            real_apply(slot_no, row)
-        maa.on_decide = apply
+        reads = {"count": 0}
 
         def read_team():
-            team = original()
-            if state["decided"]:
-                team[2] = _slot(3, status="unknown", catalog=None, name=None)
-            return team
+            reads["count"] += 1
+            return original()
+
         host._formation_read_team = read_team
         result = _run(host)
-        self.assertEqual(result["result"], VERIFICATION_FAILED)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(reads["count"], 1)  # 只保留换前检查
+        self.assertNotIn("after", result)
+        _assert_never_departs(self, maa)
 
     def test_shell_unrecognized_and_no_wandering(self):
         maa, host = _std_setup(shell=None, pages=[])

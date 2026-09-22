@@ -206,9 +206,8 @@ class FormationContractTests(unittest.TestCase):
         result = self._play(host, entry, match_fields=("name", "level"))
         self.assertEqual(result["result"], CHANGED, result.get("reason"))
 
-    def test_changed_records_fresh_roster_observation(self):
-        """换好以后把整队回读落 team_roster.observed：本丸档案编队层
-        （build_roster）只认这类事件，不落这条页面永远显示旧成员。"""
+    def test_changed_does_not_record_roster_observation(self):
+        """决定后不回读，也不把未经独立盘点的队伍写进编队档案。"""
         from tests.test_formation_editor import CHANGED
         from tests.test_formation_editor import HASEBE, _row, _slot
         maa, host = self._stage([
@@ -224,19 +223,12 @@ class FormationContractTests(unittest.TestCase):
         self.assertEqual(result["result"], CHANGED, result.get("reason"))
         roster = [e for e in host.events
                   if e["event_type"] == "team_roster.observed"]
-        self.assertEqual(len(roster), 1)
-        payload = roster[0]["payload"]
-        self.assertEqual(payload["team_no"], 2)
-        self.assertEqual(payload["source"], "formation_editor")
-        self.assertEqual(payload["observation_status"], "complete")
-        self.assertEqual(payload["slots"][2]["sword_catalog_id"], HASEBE)
-        self.assertEqual(payload["slots"][2]["name"], "压切长谷部")
-        # 事实事件跟在结果事件后面，页面刷新读到的一定是换后状态
+        self.assertEqual(roster, [])
         self.assertEqual(host.events[-1]["event_type"],
-                         "team_roster.observed")
+                         "formation.member_ensured")
 
-    def test_already_correct_also_records_roster_observation(self):
-        """零换人收工同样落事实（目标已在位也是一种确认过的队伍状态）。"""
+    def test_already_correct_does_not_record_roster_observation(self):
+        """换前看见目标已在位也不顺手刷新五队档案。"""
         from tests.test_formation_editor import ALREADY_CORRECT, _DECIDE_X
         from tests.test_formation_editor import (
             HASEBE, _EditorHost, _FakeMaa, _six)
@@ -249,8 +241,7 @@ class FormationContractTests(unittest.TestCase):
                          result.get("reason"))
         roster = [e for e in host.events
                   if e["event_type"] == "team_roster.observed"]
-        self.assertEqual(len(roster), 1)
-        self.assertEqual(roster[0]["payload"]["team_no"], 2)
+        self.assertEqual(roster, [])
         # 没有换人动作：只有切队确认的标签点击，不碰替换/决定
         self.assertFalse(any(x in (1033, _DECIDE_X) for x, _y in maa.clicks))
 
