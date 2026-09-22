@@ -3,7 +3,7 @@
 
 覆盖只写用户数据目录 DEBUG_DIR/template_lab/code-rois.json（结构
 {id: [x1,y1,x2,y2]}），不碰仓库；删覆盖即恢复注册表默认。读取走
-mtime 缓存，面板改完文件下一次读就生效。
+内容缓存，面板改完文件下一次读就生效。
 
 宽容原则：这些全是读取型区域，读岔了顶多 OCR 读空，不能因此把流程
 跑崩——所以坏覆盖（格式烂、越界、不是整数）一律静默回落注册表默认；
@@ -19,9 +19,9 @@ from .runtime_paths import DEBUG_DIR
 _OVERRIDES_PATH = ("template_lab", "code-rois.json")
 _FRAME_W, _FRAME_H = 1280, 720
 
-# mtime 缓存：{"path": str|None, "mtime": float|None, "overrides": {...}}。
-# path 也进 key——测试会 patch DEBUG_DIR 到临时目录，单靠 mtime 会串。
-_cache: dict = {"path": None, "mtime": None, "overrides": {}}
+# 文件内容缓存：Windows CI 上连续等长写入可能拿到相同 mtime，
+# 不能靠时间戳判定外部修改。path 也进 key，避免测试 patch DEBUG_DIR 后串目录。
+_cache: dict = {"path": None, "content": None, "overrides": {}}
 
 
 def _overrides_file() -> Path:
@@ -39,18 +39,18 @@ def _is_valid_rect(rect) -> bool:
 
 
 def _load_overrides() -> dict:
-    """读覆盖文件（mtime 缓存）：只收合法条目，读不出来一律空表。"""
+    """读覆盖文件（内容缓存）：只收合法条目，读不出来一律空表。"""
     path = _overrides_file()
     try:
-        mtime = path.stat().st_mtime
+        content = path.read_text(encoding="utf-8")
     except OSError:
-        mtime = None
-    if _cache["path"] == str(path) and _cache["mtime"] == mtime:
+        content = None
+    if _cache["path"] == str(path) and _cache["content"] == content:
         return _cache["overrides"]
     overrides = {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(content) if content is not None else None
+    except ValueError:
         data = None
     if isinstance(data, dict):
         for roi_id, rect in data.items():
@@ -58,7 +58,7 @@ def _load_overrides() -> dict:
                 overrides[roi_id] = (int(rect[0]), int(rect[1]),
                                      int(rect[2]), int(rect[3]))
     _cache["path"] = str(path)
-    _cache["mtime"] = mtime
+    _cache["content"] = content
     _cache["overrides"] = overrides
     return overrides
 

@@ -2,7 +2,7 @@
 """代码 ROI 注册表 + 覆盖层测试。
 
 覆盖：默认回落、存取往返、返回 tuple 约定、坏覆盖静默回落、save 拒非法
-矩形、删除恢复默认且幂等、mtime 缓存失效重读；注册表条目健全性；
+矩形、删除恢复默认且幂等、外部等长改写立即重读；注册表条目健全性；
 注册表 default 与流程代码常量逐一对齐（防漂移）。
 
 隔离红线（照 test_template_lab.py 惯例）：模块头的 MAAMARU_DATA_DIR 环境
@@ -98,11 +98,11 @@ class OverrideStorageTests(unittest.TestCase):
         # 再删一次：没有这条也算完事
         self.assertIs(roi_overrides.delete_override("sword_inventory.title"), False)
 
-    def test_external_edit_is_picked_up_via_mtime(self):
+    def test_external_same_length_edit_is_picked_up_immediately(self):
         roi_overrides.save_override("sword_inventory.title", [1, 2, 3, 4])
         self.assertEqual(roi_overrides.get_roi("sword_inventory.title",
                                                (9, 9, 9, 9)), (1, 2, 3, 4))
-        # 面板外的手改（mtime 变了）下一次读必须生效
+        # 面板外的等长手改下一次读必须生效，不能依赖文件系统的 mtime 精度。
         path = _overrides_path(self.debug_dir)
         data = json.loads(path.read_text(encoding="utf-8"))
         data["sword_inventory.title"] = [5, 6, 7, 8]
