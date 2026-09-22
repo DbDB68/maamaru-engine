@@ -619,10 +619,10 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertIn((_DECIDE_X, 300 - 22), maa.clicks)
         self.assertEqual(maa.shell, "formation")   # 保持原入口上下文
         ev = [e for e in host.events
-              if e["event_type"] == "formation.member_ensured"][-1]
+              if e["event_type"] == "formation.member_selected"][-1]
         self.assertEqual(ev["payload"]["result"], CHANGED)
         self.assertEqual(host.events[-1]["event_type"],
-                         "formation.member_ensured")
+                         "formation.member_selected")
         self.assertNotIn("team_roster.observed",
                          [event["event_type"] for event in host.events])
         _assert_never_departs(self, maa)

@@ -13,6 +13,7 @@ import time
 from .runtime_paths import STATE_DIR
 
 MAX_FORMATIONS = 5
+SCHEMA_VERSION = 2
 
 _ID_RE = re.compile(r"^[a-z0-9]+$")
 _SLOT_KEYS = frozenset("123456")
@@ -48,7 +49,8 @@ def save_formations(formations: list[dict]):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        json.dumps({"formations": formations}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps({"schema_version": SCHEMA_VERSION,
+                    "formations": formations}, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8")
     temporary.replace(path)
 
@@ -111,3 +113,113 @@ def find_formation(formations, fid) -> dict | None:
         if isinstance(f, dict) and f.get("id") == fid:
             return f
     return None
+
+
+_FINGERPRINT_FIELDS = (
+    "sword_catalog_id", "name_zh", "form_status", "level", "tou_level",
+    "survival_max", "kiwame_date",
+)
+
+
+def _fingerprint_matches(saved: dict, current: dict) -> bool:
+    """旧预设也能迁移：只拿它当时实际保存过的字段参与当前刀账匹配。"""
+    for field in _FINGERPRINT_FIELDS:
+        expected = saved.get(field)
+        if expected in (None, "", "unknown", "ambiguous"):
+            continue
+        if current.get(field) != expected:
+            return False
+    expected_stats = saved.get("stats")
+    if isinstance(expected_stats, dict):
+        current_stats = current.get("stats") or {}
+        for key, value in expected_stats.items():
+            if value is not None and current_stats.get(key) != value:
+                return False
+    return True
+
+
+def _current_candidate_pool() -> dict:
+    from .honmaru_profile import get_honmaru_profile
+    return get_honmaru_profile().get("candidate_pool") or {}
+
+
+def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) -> dict:
+    """开工前一次性把整套预设链接到最新完整刀账。
+
+    observation_id 只在原快照内有效：同一快照优先直连；刀账更新后按已保存
+    的可见指纹重新链接。任何槽位不唯一、档案不可用或同位刀冲突，都在
+    点游戏第一下之前整体拒绝。
+    """
+    err = validate_formation(record)
+    if err:
+        return {"ok": False, "reason": err}
+    slots = record.get("slots") or {}
+    if not slots:
+        return {"ok": False, "reason": "这套预设一个位置都没指定"}
+    if candidate_pool is None:
+        candidate_pool = _current_candidate_pool()
+    if not candidate_pool.get("done"):
+        return {"ok": False,
+                "reason": candidate_pool.get("reason")
+                or "没有可信的完整刀账，先跑一次刀帐盘点"}
+
+    entries = candidate_pool.get("entries") or []
+    by_oid = {entry.get("observation_id"): entry for entry in entries
+              if entry.get("observation_id")}
+    resolved = {}
+    for key in sorted(slots, key=int):
+        saved = slots[key]
+        direct = by_oid.get(saved.get("observation_id"))
+        if direct is not None and _fingerprint_matches(saved, direct):
+            matches = [direct]
+        else:
+            matches = [entry for entry in entries
+                       if _fingerprint_matches(saved, entry)]
+        label = saved.get("name_zh") or saved.get("sword_catalog_id") or "未识别刀剑"
+        if not matches:
+            return {"ok": False,
+                    "reason": f"{key}号位「{label}」已对不上最新刀账，重新选一次"}
+        if len(matches) > 1:
+            return {"ok": False,
+                    "reason": f"{key}号位「{label}」在最新刀账里仍有 {len(matches)} 振分不清"}
+        resolved[key] = matches[0]
+
+    from .honmaru_profile import formation_conflicts
+    conflicts = formation_conflicts(list(resolved.values()))
+    if conflicts:
+        slots_text = []
+        for conflict in conflicts:
+            ids = set(conflict.get("observation_ids") or [])
+            numbers = [key for key, entry in resolved.items()
+                       if entry.get("observation_id") in ids]
+            slots_text.append("、".join(f"{key}号位" for key in numbers))
+        return {"ok": False,
+                "reason": "同一位刀不能重复编入一队：" + "；".join(slots_text)}
+    return {"ok": True, "slots": resolved,
+            "candidate_observed_at": candidate_pool.get("observed_at")}
+
+
+def apply_formation_preset_stream(agent, record: dict,
+                                  candidate_pool: dict | None = None):
+    """所有玩法/远征/任务流共用的套预设入口。"""
+    prepared = resolve_formation_slots(record, candidate_pool=candidate_pool)
+    if not prepared.get("ok"):
+        yield f"[部队预设] ✗ 开工前检查没通过：{prepared.get('reason')}，没有动游戏"
+        return False
+    return (yield from agent.apply_preset_formation_stream(
+        int(record["target_team"]), prepared["slots"],
+        str(record.get("name") or "部队预设")))
+
+
+def apply_formation_preset_by_id_stream(agent, preset_id: str,
+                                        expected_team: int | None = None):
+    """按保存 id 套预设；远征和任务流共用，删除/错队都在点击前拒绝。"""
+    record = find_formation(load_formations(), str(preset_id or ""))
+    if record is None:
+        yield "[部队预设] ✗ 找不到这套预设（可能已删除），没有动游戏"
+        return False
+    if expected_team is not None and record.get("target_team") != expected_team:
+        yield (f"[部队预设] ✗ 「{record.get('name')}」覆盖的是部队"
+               f"{record.get('target_team')}，不能拿来改部队{expected_team}，没有动游戏")
+        return False
+    return (yield from apply_formation_preset_stream(agent, record))

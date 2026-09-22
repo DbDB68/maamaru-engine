@@ -85,10 +85,10 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
         saved = (_load_settings().get("params", {}).get("practice") or {})
         fallback = getattr(agent, "config", {}).get("daily", {}).get("practice", {})
         values = {**(saved or fallback), **params}
-        team = values.get("team_no")
-        yield from agent.practice_stream(dry_run=False,
-            team_no=int(team) if team not in (None, "") else None,
-            formation_mode=values.get("formation_mode"), formation=values.get("formation"))
+        # 复用普通演练积木的部队解析：普通队号与 preset:<id> 都走同一条
+        # 开工前检查/套队逻辑，避免一键日课另造半套实现。
+        yield from workflow.NODE_REGISTRY["practice"]["run"](
+            agent, values, config_path)
 
     def daily_expedition(agent, params, config_path):
         routes = plan_inputs({})[4]

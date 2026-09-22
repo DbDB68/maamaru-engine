@@ -1975,7 +1975,14 @@ body[data-theme='pixel'] .report-panel :is(p, small, time, label, summary, .run-
 .immediate-expedition-head h3,
 .immediate-expedition-head p { margin: 0; }
 .immediate-expedition-head p { color: var(--ink-dim); font-size: 12px; }
+.immediate-expedition .expedition-row {
+  grid-template-columns: 96px minmax(0, 1fr) minmax(150px, 190px);
+}
 body[data-theme='pixel'] .immediate-expedition { border-color: #c8bea5; }
+
+@media (max-width: 720px) {
+  .immediate-expedition .expedition-row { grid-template-columns: 1fr; }
+}
 
 /*
  * 页面骨架几何必须跨主题一致：切换皮肤只能改变圆角、描边、纹理和阴影，

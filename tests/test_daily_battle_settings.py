@@ -38,6 +38,22 @@ class PlanInputsCutTests(unittest.TestCase):
         self.assertEqual(plan["repair_on_injury"], "repair_stop")
         self.assertNotIn("rotate_captain", plan)  # 大阪城没有换队长
 
+    def test_daily_sortie_carries_preset_to_the_execution_step(self):
+        with patch.object(server, "_resolve_team",
+                          return_value=(4, {"id": "pf2"}, None)):
+            plan = server._daily_plan_inputs({
+                "sortie_mode": "sortie", "team_no": "preset:pf2"})[2]
+        self.assertEqual(plan["team_no"], 4)
+        self.assertEqual(plan["formation_id"], "pf2")
+
+    def test_deleted_daily_preset_is_not_silently_changed_to_a_team(self):
+        with patch.object(server, "_resolve_team",
+                          return_value=(None, None, "预设已删除")):
+            plan = server._daily_plan_inputs({
+                "sortie_mode": "sortie", "team_no": "preset:gone"})[2]
+        self.assertIsNone(plan["team_no"])
+        self.assertEqual(plan["formation_error"], "预设已删除")
+
 
 class MigrationTests(unittest.TestCase):
     def setUp(self):

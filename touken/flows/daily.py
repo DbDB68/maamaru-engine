@@ -133,11 +133,8 @@ class DailyMixin:
         steps = [
             ("签到", lambda: self.signin_stream()),
             ("万屋", lambda: self.claim_free_gift_stream()),
-            ("演练", lambda: self.practice_stream(
-                dry_run=False,
-                team_no=plan.get("practice", {}).get("team_no"),
-                formation_mode=plan.get("practice", {}).get("formation_mode"),
-                formation=plan.get("practice", {}).get("formation"))),
+            ("演练", lambda: self._daily_practice_step(
+                plan.get("practice", {}))),
             ("远征", lambda: self._daily_expedition_step(
                 expedition_override,
                 fallback_redispatch=plan.get("expedition_redispatch", "same"))),
@@ -343,16 +340,53 @@ class DailyMixin:
             if not route.get("era") or not route.get("map_slot"):
                 yield f"[远征] 常用安排地图 {route.get('map_code')} 不存在，无法派遣"
                 continue
+            formation_id = str(route.get("formation_id") or "")
+            if formation_id:
+                from ..custom_formations import apply_formation_preset_by_id_stream
+                applied = yield from apply_formation_preset_by_id_stream(
+                    self, formation_id, expected_team=team)
+                if not applied:
+                    yield f"[远征] ✗ 部队{team}的预设没套好，本次不派这队"
+                    continue
             yield (f"[远征] 按常用安排派部队{team}去 {route['map_code']}"
                    f"「{route.get('map_name') or ''}」")
             yield from self.expedition_stream(
                 era=int(route["era"]), map_slot=int(route["map_slot"]),
                 team_no=team)
 
+    def _apply_daily_preset(self, plan, step_label):
+        error = str(plan.get("formation_error") or "")
+        if error:
+            yield f"[日课] ✗ {step_label}选择的部队预设不可用：{error}；没有动游戏"
+            return False
+        formation_id = str(plan.get("formation_id") or "")
+        if not formation_id:
+            return True
+        from ..custom_formations import apply_formation_preset_by_id_stream
+        applied = yield from apply_formation_preset_by_id_stream(
+            self, formation_id, expected_team=plan.get("team_no"))
+        if not applied:
+            yield f"[日课] ✗ {step_label}的部队预设没套好，本次{step_label}不开始"
+            return False
+        return True
+
+    def _daily_practice_step(self, practice_plan):
+        if not (yield from self._apply_daily_preset(practice_plan, "演练")):
+            return
+        yield from self.practice_stream(
+            dry_run=False,
+            team_no=practice_plan.get("team_no"),
+            formation_mode=practice_plan.get("formation_mode"),
+            formation=practice_plan.get("formation"))
+
     def _sortie_step(self, plan, report):
         sortie_plan = plan.get("sortie", {"mode": "none"})
         mode = sortie_plan.get("mode", "none")
         try:
+            if mode != "none" and not (yield from self._apply_daily_preset(
+                    sortie_plan, "出阵")):
+                report.append(("出阵", "✗ 部队预设未套用"))
+                return
             if mode == "raid":
                 ok = True
                 equip_status = None

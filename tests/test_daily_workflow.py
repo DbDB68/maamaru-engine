@@ -153,6 +153,45 @@ class DailyWorkflowTests(unittest.TestCase):
         agent._closing_snapshot_stream.assert_called_once_with(True)
         agent._dismantle_step.assert_called_once_with()
 
+    def test_daily_practice_reuses_the_normal_preset_team_resolver(self):
+        agent = _FakeAgent()
+
+        def choose_preset(_agent, params, default=3):
+            self.assertEqual(params["team_no"], "preset:pf1")
+            yield "[部队预设] 已套用"
+            return 4
+
+        with patch.object(server, "_load_panel_settings", return_value={
+                "params": {"practice": {"team_no": "preset:pf1"}}}), \
+             patch.object(server, "_team_with_preset_stream", choose_preset):
+            _, messages = self.run_plan(
+                [_node("practice")], agent=agent, daily_mode=True)
+        call = next(c for c in agent.calls if c[0] == "practice_stream")
+        self.assertEqual(call[2]["team_no"], 4)
+        self.assertIn("[部队预设] 已套用", messages)
+
+    def test_daily_sortie_does_not_depart_when_preset_application_fails(self):
+        class Host(DailyMixin):
+            pass
+
+        host = Host()
+        host.raid_stream = Mock(side_effect=AssertionError(
+            "预设失败后不应进入活动"))
+
+        def rejected(*args, **kwargs):
+            yield "[部队预设] ✗ 档案有歧义，没有动游戏"
+            return False
+
+        report = []
+        with patch("touken.custom_formations.apply_formation_preset_by_id_stream",
+                   rejected):
+            messages = list(host._sortie_step({"sortie": {
+                "mode": "raid", "team_no": 3, "formation_id": "pf1",
+            }}, report))
+        host.raid_stream.assert_not_called()
+        self.assertEqual(report, [("出阵", "✗ 部队预设未套用")])
+        self.assertTrue(any("本次出阵不开始" in message for message in messages))
+
     def test_report_precedes_pc_sleep(self):
         agent = _FakeAgent()
         def finale(report, payload):

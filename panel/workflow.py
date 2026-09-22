@@ -279,6 +279,19 @@ _stream_node("snapshot", "库存快照", "拍一次完整家底刷新看板", "c
              "status_snapshot_stream", detail=[_snapshot_report_status])
 
 
+def _run_apply_formation_preset(agent, params, config_path):
+    from touken.custom_formations import apply_formation_preset_by_id_stream
+    preset_id = str((params or {}).get("preset_id") or "")
+    yield from apply_formation_preset_by_id_stream(agent, preset_id)
+
+
+_node("apply_formation_preset", "套用部队预设",
+      "把保存好的成员套到目标部队；整套开工前先检查刀账和同位冲突，没套完就停。后面再接出阵或远征。",
+      "battle", _run_apply_formation_preset,
+      params=[{"key": "preset_id", "type": "select", "label": "部队预设",
+               "options": [], "default": ""}])
+
+
 # ── 收尾 ──
 
 def _run_logout(agent, params, config_path):

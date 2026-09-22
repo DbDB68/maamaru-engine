@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""编队换人接线：注册形状、目标原样透传、运行占用与结果事件回读。
+"""编队换人接线：注册形状、目标原样透传、运行占用与结果事件。
 
 接线层（panel/server.py _build_formation）的纪律只有一条：把前端选好的
 完整候选池条目原样交给 ensure_team_member_from_honmaru_stream——
@@ -153,7 +153,7 @@ class FormationContractTests(unittest.TestCase):
         self.assertEqual(result["result"], CHANGED, result.get("reason"))
         self.assertIn((1197, 178), maa.clicks)  # 决定落在目标行
         ensured = [e for e in host.events
-                   if e["event_type"] == "formation.member_ensured"]
+                   if e["event_type"] == "formation.member_selected"]
         self.assertEqual(ensured[-1]["payload"]["result"], CHANGED)
 
     def test_confirmed_form_is_doomed_with_default_match_fields(self):
@@ -225,7 +225,7 @@ class FormationContractTests(unittest.TestCase):
                   if e["event_type"] == "team_roster.observed"]
         self.assertEqual(roster, [])
         self.assertEqual(host.events[-1]["event_type"],
-                         "formation.member_ensured")
+                         "formation.member_selected")
 
     def test_already_correct_does_not_record_roster_observation(self):
         """换前看见目标已在位也不顺手刷新五队档案。"""
@@ -275,9 +275,9 @@ class FormationResultEventTests(unittest.TestCase):
         self.addCleanup(store.close)
         with patch.dict("os.environ", {"MAAMARU_RUN_ID": "runxyz",
                                        "MAAMARU_SCRIPT": "formation"}):
-            store.record_event("formation.member_ensured", {
+            store.record_event("formation.member_selected", {
                 "team_no": 2, "slot_no": 3, "result": "changed",
-                "reason": "回读逐项验收通过",
+                "reason": "已点击决定且选择列表正常关闭",
                 "target": {"name": "三日月宗近"}})
         client = TestClient(server.app)
         self.addCleanup(client.close)
@@ -285,11 +285,12 @@ class FormationResultEventTests(unittest.TestCase):
                    return_value=store):
             body = client.get(
                 "/api/data/events",
-                params={"event_type": "formation.member_ensured"}).json()
+                params={"event_type": "formation.member_selected"}).json()
         mine = [e for e in body["items"] if e["run_id"] == "runxyz"]
         self.assertEqual(len(mine), 1)
         self.assertEqual(mine[0]["payload"]["result"], "changed")
-        self.assertEqual(mine[0]["payload"]["reason"], "回读逐项验收通过")
+        self.assertEqual(mine[0]["payload"]["reason"],
+                         "已点击决定且选择列表正常关闭")
         self.assertEqual(mine[0]["payload"]["target"]["name"], "三日月宗近")
 
 

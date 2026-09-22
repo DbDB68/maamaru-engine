@@ -27,8 +27,20 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _data.name}):
 
 
 def _slot(name="三日月宗近"):
-    return {"sword_catalog_id": "touken_003_mikazuki_munechika",
+    catalog = {"三日月宗近": "touken_003_mikazuki_munechika",
+               "小狐丸": "touken_005_kogitsunemaru"}.get(name, f"touken_{name}")
+    return {"sword_catalog_id": catalog,
             "name_zh": name, "level": 99}
+
+
+def _candidate_pool():
+    entries = []
+    for index, name in enumerate(("三日月宗近", "小狐丸"), 1):
+        entry = _slot(name)
+        entry.update({"observation_id": f"9:{index}",
+                      "same_team_exclusion_key": entry["sword_catalog_id"]})
+        entries.append(entry)
+    return {"done": True, "observed_at": 1700000000, "entries": entries}
 
 
 def _body(**over):
@@ -61,7 +73,8 @@ class PanelTestCase(unittest.TestCase):
         # 排班配置是 config/expedition.json，不是 state 里的文件，分开指
         patches = ((cf, "STATE_DIR", self._state),
                    (scheduler, "STATE_DIR", self._state),
-                   (scheduler, "_SCHED_PATH", self._sched_dir / "expedition.json"))
+                   (scheduler, "_SCHED_PATH", self._sched_dir / "expedition.json"),
+                   (cf, "_current_candidate_pool", _candidate_pool))
         for target, attr, value in patches:
             patcher = patch.object(target, attr, value)
             patcher.start()
@@ -175,6 +188,15 @@ class SchemaInjectionTests(PanelTestCase):
         self.assertEqual(fields["team_no"]["options"],
                          server._TEAM_OPTIONS)
 
+    def test_workflow_preset_node_receives_current_options(self):
+        cf.save_formations([_record(name="远征轮换", target_team=5)])
+        nodes = self.client.get("/api/workflows/nodes").json()["nodes"]
+        node = next(item for item in nodes
+                    if item["type"] == "apply_formation_preset")
+        field = next(item for item in node["params"]
+                     if item["key"] == "preset_id")
+        self.assertEqual(field["options"], [["pf1", "远征轮换（覆盖部队五）"]])
+
 
 class AgentStub:
     """假 Agent：记 apply 调用与玩法流 kwargs；apply 可按需返回 False。"""
@@ -222,6 +244,12 @@ class AgentStub:
     def practice_stream(self, **kw):
         return self._play("practice", **kw)
 
+    def collect_expedition_stream(self, **kw):
+        return self._play("collect_expedition", **kw)
+
+    def expedition_stream(self, **kw):
+        return self._play("expedition", **kw)
+
 
 class BuilderTests(PanelTestCase):
     def setUp(self):
@@ -237,7 +265,7 @@ class BuilderTests(PanelTestCase):
         agent, messages = self._run(
             server._build_sortie, {"team_no": "preset:pf1", "chapter": "2"})
         self.assertEqual(agent.apply_calls,
-                         [(5, _record()["slots"], "刷图队")])
+                         [(5, {"1": _candidate_pool()["entries"][0]}, "刷图队")])
         stream, kw = agent.calls[0]
         self.assertEqual(stream, "sortie")
         self.assertEqual(kw["team_no"], 5)  # 玩法流拿到的是预设指向的队
@@ -245,6 +273,15 @@ class BuilderTests(PanelTestCase):
         self.assertLess(messages.index("[预设编队] 已套用「刷图队」"),
                         messages.index("[玩法] sortie 干活"))
         self.assertFalse(any(_is_fail(m) for m in messages))
+
+    def test_workflow_node_uses_the_same_executor(self):
+        agent = AgentStub()
+        messages = list(server._workflow.NODE_REGISTRY[
+            "apply_formation_preset"]["run"](
+                agent, {"preset_id": "pf1"}, "cfg"))
+        self.assertEqual(len(agent.apply_calls), 1)
+        self.assertEqual(agent.apply_calls[0][0], 5)
+        self.assertFalse(any(_is_fail(message) for message in messages))
 
     def test_all_battle_builders_are_wired(self):
         pairs = [("sortie", server._build_sortie),
@@ -338,6 +375,44 @@ class ScheduleConflictTests(PanelTestCase):
         agent = AgentStub()
         list(server._build_sortie(agent, "cfg", {"team_no": "preset:pf1"}))
         self.assertEqual(len(agent.apply_calls), 1)
+
+
+class ExpeditionPresetTests(PanelTestCase):
+    def setUp(self):
+        super().setUp()
+        cf.save_formations([_record(name="远征轮换", target_team=2)])
+
+    def test_schedule_keeps_only_a_preset_for_the_same_team(self):
+        body = {"common_plan": [
+            {"team_no": 2, "map_code": "B2", "enabled": True,
+             "formation_id": "pf1"},
+            {"team_no": 3, "map_code": "C1", "enabled": True,
+             "formation_id": "pf1"},
+        ]}
+        self.assertEqual(self.client.post(
+            "/api/expedition-schedule", json=body).status_code, 200)
+        rows = scheduler.load_config()["common_plan"]
+        self.assertEqual(rows[0]["formation_id"], "pf1")
+        self.assertEqual(rows[1]["formation_id"], "")
+
+    def test_common_expedition_applies_preset_before_dispatch(self):
+        agent = AgentStub()
+        schedule = {"common_plan": [{
+            "team_no": 2, "map_code": "B2", "enabled": True,
+            "formation_id": "pf1",
+        }]}
+        with patch("panel.scheduler.load_config", return_value=schedule), \
+             patch("panel.scheduler.managed_teams", return_value=set()), \
+             patch("panel.scheduler.find_map", return_value={
+                "code": "B2", "era": 2, "slot": 2, "name": "测试图"}), \
+             patch.object(server, "_read_expedition_records", return_value={}):
+            messages = list(server._build_expedition_manager(
+                agent, "cfg", {}))
+        self.assertEqual([call[0] for call in agent.calls],
+                         ["collect_expedition", "expedition"])
+        self.assertEqual(len(agent.apply_calls), 1)
+        self.assertLess(messages.index("[预设编队] 已套用「远征轮换」"),
+                        messages.index("[玩法] expedition 干活"))
 
 
 if __name__ == "__main__":

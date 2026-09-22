@@ -158,11 +158,18 @@ function assignPresetCandidate(entry: FormationCandidate) {
   if (pickerSlot.value == null || !presetCandidatePickable(entry)) return
   const next = cloneSlots(draftSlots.value)
   next[String(pickerSlot.value)] = {
+    ...(entry.observation_id ? { observation_id: entry.observation_id } : {}),
     ...(entry.sword_catalog_id ? { sword_catalog_id: entry.sword_catalog_id } : {}),
+    ...(entry.same_team_exclusion_key ? { same_team_exclusion_key: entry.same_team_exclusion_key } : {}),
     ...(entry.name_zh ? { name_zh: entry.name_zh } : {}),
     ...(entry.level != null ? { level: entry.level } : {}),
+    ...(entry.tou_level != null ? { tou_level: entry.tou_level } : {}),
+    ...(entry.survival_max != null ? { survival_max: entry.survival_max } : {}),
+    ...(entry.stats ? { stats: { ...entry.stats } } : {}),
     ...(entry.form_status ? { form_status: entry.form_status } : {}),
     ...(entry.kiwame_date ? { kiwame_date: entry.kiwame_date } : {}),
+    ...(entry.source_snapshot_id != null ? { source_snapshot_id: entry.source_snapshot_id } : {}),
+    ...(entry.observed_at != null ? { observed_at: entry.observed_at } : {}),
   }
   draftSlots.value = next
   presetMessage.value = ''

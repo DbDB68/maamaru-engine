@@ -78,7 +78,6 @@ AMBIGUOUS = "ambiguous"
 NOT_FOUND = "not_found"
 UNAVAILABLE = "unavailable"
 SCREEN_UNRECOGNIZED = "screen_unrecognized"
-VERIFICATION_FAILED = "verification_failed"
 INVALID_REQUEST = "invalid_request"
 
 _SWAP_X = 1033            # 行内"替换"按钮（sakura 真机校准）
@@ -747,11 +746,10 @@ class FormationEditorMixin:
         if m is True:
             yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
             return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
-                                "目标槽位回读与目标逐项一致，未做任何换人点击",
+                                "换人前已确认目标就在该槽位，未做任何换人点击",
                                 entry_shell=shell,
-                                before=slot_before, after=slot_before,
-                                team_before=team_before,
-                                team_after=team_before)
+                                before=slot_before,
+                                team_before=team_before)
         if m is None:
             yield (f"[编队] {slot_no}号位读数与目标不足以互相确认"
                    "（形态/等级证据缺口），不能零点击宣称正确——"
@@ -1265,12 +1263,9 @@ class FormationEditorMixin:
                        "entry_shell": extra.get("entry_shell"),
                        "target": out["target"],
                        "before": extra.get("before"),
-                       "after": extra.get("after"),
-                       "candidates": extra.get("candidates"),
-                       "other_slot_changes":
-                           extra.get("other_slot_changes") or []}
+                       "candidates": extra.get("candidates")}
             try:
-                self.record_event("formation.member_ensured", **payload)
+                self.record_event("formation.member_selected", **payload)
             except Exception:
                 pass  # 记账失败不阻塞执行结果
         return out

@@ -404,24 +404,26 @@ def _daily_plan_inputs(params):
     # 面板传 steps，Agent 网关传 only，都认
     steps = params.get("steps") or params.get("only") or None   # 空列表=全跑
     after = params.get("after") or "none"
-    # 出阵安排：面板选的覆盖配置文件里的默认
+    # 出阵安排：面板选的覆盖配置文件里的默认。team_no 允许直接选一套
+    # 预设；这里只解析成“目标队 + 预设 id”，真正点游戏由日课步骤执行。
+    sortie_team, sortie_preset, sortie_team_error = _resolve_team(params, 3)
     mode = params.get("sortie_mode") or "none"
     if mode == "raid":
         sortie_plan = {"mode": "raid",
                        "rounds": _i(params, "raid_rounds", 3),
-                       "team_no": _i(params, "team_no", 3),
+                       "team_no": sortie_team,
                        "auto_buy_ticket": _bool(params.get("raid_auto_refill", False)),
                        "max_buys": _i(params, "raid_rounds", 3)}
     elif mode == "pumpkin":
         sortie_plan = {"mode": "pumpkin",
                        "difficulty": _i(params, "pumpkin_difficulty", 1),
-                       "team_no": _i(params, "team_no", 3),
+                       "team_no": sortie_team,
                        "watch_names": _sword_names(params.get("pumpkin_watch")),
                        "max_skips": _i(params, "pumpkin_runs", 4)}
     elif mode == "yosari":
         sortie_plan = {"mode": "yosari",
                        "map_no": _i(params, "yosari_map_no", 1),
-                       "team_no": _i(params, "team_no", 3),
+                       "team_no": sortie_team,
                        "loops": _i(params, "yosari_runs", 1),
                        "auto_refill": _bool(params.get("yosari_auto_refill", False)),
                        "auto_march": _bool(params.get("auto_march", True)),
@@ -439,7 +441,7 @@ def _daily_plan_inputs(params):
                        "chapter": _i(params, "chapter", 1),
                        "map_no": _i(params, "map_no", 1),
                        "loops": _i(params, "loops", 1),
-                       "team_no": _i(params, "team_no", 3),
+                       "team_no": sortie_team,
                        "auto_march": _bool(params.get("auto_march", True)),
                        "formation_mode": params.get("formation_mode") or "manual",
                        "formation": params.get("formation") or "鱼鳞阵",
@@ -451,7 +453,7 @@ def _daily_plan_inputs(params):
                        "rotate_captain_margin": _i(params, "rotate_captain_margin", 10)}
     elif mode == "osaka":
         sortie_plan = {"mode": "osaka",
-                       "team_no": _i(params, "team_no", 3),
+                       "team_no": sortie_team,
                        "loops": _i(params, "osaka_runs", 1),
                        "select_floor": _bool(params.get("osaka_select_floor", False)),
                        "target_floor": _i(params, "osaka_target_floor", 81),
@@ -462,11 +464,22 @@ def _daily_plan_inputs(params):
                        "auto_equip": _bool(params.get("auto_equip", True))}
     else:
         sortie_plan = {"mode": "none"}
+    if mode != "none":
+        if sortie_preset:
+            sortie_plan["formation_id"] = sortie_preset["id"]
+        if sortie_team_error:
+            sortie_plan["formation_error"] = sortie_team_error
     # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
     saved_practice = (_load_panel_settings().get("params", {}).get("practice", {}) or {})
     practice_plan = dict(saved_practice)
     if practice_plan.get("team_no") not in (None, ""):
-        practice_plan["team_no"] = int(practice_plan["team_no"])
+        practice_team, practice_preset, practice_error = _resolve_team(
+            practice_plan, 2)
+        practice_plan["team_no"] = practice_team
+        if practice_preset:
+            practice_plan["formation_id"] = practice_preset["id"]
+        if practice_error:
+            practice_plan["formation_error"] = practice_error
     # 排班接管的队伍只收奖励，续派由排班统一负责。
     from .scheduler import find_map, load_config, managed_teams
     schedule = load_config()
@@ -477,12 +490,15 @@ def _daily_plan_inputs(params):
                 or int(row["team_no"]) in owned):
             continue
         found = find_map(row["map_code"])
-        expedition_plan.append({
+        route = {
             "team_no": int(row["team_no"]), "map_code": row["map_code"],
             "era": found.get("era") if found else None,
             "map_slot": found.get("slot") if found else None,
             "map_name": found.get("name") if found else None,
-        })
+        }
+        if row.get("formation_id"):
+            route["formation_id"] = str(row["formation_id"])
+        expedition_plan.append(route)
     return steps, after, sortie_plan, practice_plan, expedition_plan
 
 
@@ -563,13 +579,13 @@ def _team_with_preset_stream(agent, params, default=3):
         yield f"[预设编队] {err}"
         return None
     if preset is not None:
+        from touken.custom_formations import apply_formation_preset_stream
         from .scheduler import TEAM_NAMES
         if _preset_busy_by_schedule(team_no):
             yield (f"[预设编队] {TEAM_NAMES.get(team_no, f'部队{team_no}')}"
                    "正被远征排班用着，无法覆盖；换个队覆盖，或去排班那里调整")
             return None
-        ok = yield from agent.apply_preset_formation_stream(
-            team_no, preset["slots"], preset["name"])
+        ok = yield from apply_formation_preset_stream(agent, preset)
         if not ok:
             return None
     return team_no
@@ -890,6 +906,14 @@ def _build_expedition_manager(agent, config_path, params):
         if not m:
             yield f"[远征管理] 部队{team}的地图 {row['map_code']} 不存在，跳过"
             continue
+        formation_id = str(row.get("formation_id") or "")
+        if formation_id:
+            from touken.custom_formations import apply_formation_preset_by_id_stream
+            applied = yield from apply_formation_preset_by_id_stream(
+                agent, formation_id, expected_team=int(team))
+            if not applied:
+                yield f"[远征管理] ✗ 部队{team}的预设没套好，本次不派这队"
+                continue
         yield f"[远征管理] 派部队{team}去 {m['code']}「{m['name']}」"
         yield from agent.expedition_stream(
             era=m["era"], map_slot=m["slot"], team_no=int(team))
@@ -908,7 +932,7 @@ def _build_simple(stream_method_name):
 
 def _build_formation(agent, config_path, params):
     """编队换人接线：把前端从本丸档案里选好的完整目标对象原样交给
-    共用编队执行器。匹配/翻页/同名裁决/换后验收全在
+    共用编队执行器。匹配/翻页/同名裁决全在
     touken/flows/formation_editor.py，这层不做任何识别，
     也不包装、不粉饰结果。
 
@@ -1764,7 +1788,17 @@ async def api_workflow_nodes():
     """节点目录：type/label/desc/category/params schema，前端渲染积木选择器用"""
     nodes = _workflow.node_catalog()
     saved = _load_panel_settings().get("params", {})
+    from touken.custom_formations import load_formations
+    formation_options = [[f["id"],
+                          f'{f["name"]}（覆盖部队{_TEAM_CN[f["target_team"]]}）']
+                         for f in load_formations()]
     for node in nodes:
+        if node["type"] == "apply_formation_preset":
+            node["params"] = [
+                {**field, "options": [option[:] for option in formation_options],
+                 "default": (formation_options[0][0] if formation_options else "")}
+                if field.get("key") == "preset_id" else field
+                for field in node.get("params") or []]
         if _workflow.NODE_REGISTRY[node["type"]].get("merge_saved"):
             node["saved_params"] = saved.get(node["type"], {})
             if node["type"] == "practice" and not node["saved_params"]:
@@ -2046,10 +2080,17 @@ async def api_save_schedule(request: Request):
             continue
         if team not in range(1, 6):
             continue
+        formation_id = str(row.get("formation_id") or "")
+        if formation_id:
+            from touken.custom_formations import find_formation, load_formations
+            preset = find_formation(load_formations(), formation_id)
+            if preset is None or preset.get("target_team") != team:
+                formation_id = ""
         common.append({
             "team_no": team,
             "map_code": str(row.get("map_code", "")),
             "enabled": bool(row.get("enabled", False)),
+            "formation_id": formation_id,
         })
     auto_in = body.get("automation", {})
     auto = cfg.get("automation", {})

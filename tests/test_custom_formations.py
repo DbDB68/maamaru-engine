@@ -42,6 +42,20 @@ class StorageTests(unittest.TestCase):
         records = [_record(), _record(id="pf2", name="二队", target_team=5)]
         cf.save_formations(records)
         self.assertEqual(cf.load_formations(), records)
+        raw = json.loads((Path(self._tmp.name) / "custom_formations.json")
+                         .read_text(encoding="utf-8"))
+        self.assertEqual(raw["schema_version"], cf.SCHEMA_VERSION)
+
+    def test_legacy_file_without_version_loads_losslessly(self):
+        path = Path(self._tmp.name) / "custom_formations.json"
+        records = [_record()]
+        path.write_text(json.dumps({"formations": records}, ensure_ascii=False),
+                        encoding="utf-8")
+        self.assertEqual(cf.load_formations(), records)
+        cf.save_formations(cf.load_formations())
+        upgraded = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(upgraded["schema_version"], cf.SCHEMA_VERSION)
+        self.assertEqual(upgraded["formations"], records)
 
     def test_missing_file_is_empty(self):
         self.assertEqual(cf.load_formations(), [])
@@ -162,6 +176,77 @@ class ValidateTests(unittest.TestCase):
             cf.validate_formation(_record(id="pf2"), existing=[other]))
         self.assertIsNone(
             cf.validate_formation(_record(id="pf1"), existing=[other]))
+
+
+def _pool_entry(oid, catalog, name, level=99, **extra):
+    entry = {"observation_id": oid, "sword_catalog_id": catalog,
+             "same_team_exclusion_key": catalog, "name_zh": name,
+             "level": level, "form_status": "normal", "stats": {}}
+    entry.update(extra)
+    return entry
+
+
+class ResolvePresetTests(unittest.TestCase):
+    def test_observation_id_links_directly(self):
+        entry = _pool_entry("9:1", "touken_003", "三日月宗近")
+        record = _record(slots={"1": {"observation_id": "9:1",
+                                            "sword_catalog_id": "touken_003",
+                                            "name_zh": "三日月宗近", "level": 99}})
+        result = cf.resolve_formation_slots(
+            record, {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertIs(result["slots"]["1"], entry)
+
+    def test_new_snapshot_relinks_by_saved_fingerprint(self):
+        entry = _pool_entry("10:7", "touken_003", "三日月宗近",
+                            tou_level=4, survival_max=60,
+                            stats={"recon": 42})
+        saved = {**entry, "observation_id": "9:1"}
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": saved}),
+            {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["observation_id"], "10:7")
+
+    def test_legacy_ambiguous_same_name_level_is_rejected_before_clicks(self):
+        entries = [_pool_entry("9:1", "touken_118", "压切长谷部"),
+                   _pool_entry("9:2", "touken_118", "压切长谷部")]
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": {"sword_catalog_id": "touken_118",
+                                        "name_zh": "压切长谷部", "level": 99}}),
+            {"done": True, "entries": entries})
+        self.assertFalse(result["ok"])
+        self.assertIn("2 振分不清", result["reason"])
+
+    def test_growth_stats_can_distinguish_same_name_level(self):
+        entries = [_pool_entry("9:1", "touken_118", "压切长谷部",
+                               survival_max=55, stats={"recon": 44}),
+                   _pool_entry("9:2", "touken_118", "压切长谷部",
+                               survival_max=57, stats={"recon": 46})]
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": {"sword_catalog_id": "touken_118",
+                                        "name_zh": "压切长谷部", "level": 99,
+                                        "survival_max": 57,
+                                        "stats": {"recon": 46}}}),
+            {"done": True, "entries": entries})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["observation_id"], "9:2")
+
+    def test_same_instance_in_two_slots_is_rejected(self):
+        entry = _pool_entry("9:1", "touken_003", "三日月宗近")
+        saved = {"observation_id": "9:1", "sword_catalog_id": "touken_003",
+                 "name_zh": "三日月宗近", "level": 99}
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": saved, "2": dict(saved)}),
+            {"done": True, "entries": [entry]})
+        self.assertFalse(result["ok"])
+        self.assertIn("不能重复", result["reason"])
+
+    def test_incomplete_pool_is_rejected(self):
+        result = cf.resolve_formation_slots(
+            _record(), {"done": False, "reason": "只有残缺盘点"})
+        self.assertFalse(result["ok"])
+        self.assertIn("残缺", result["reason"])
 
 
 # ==================== 批量应用流 ====================

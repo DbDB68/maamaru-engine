@@ -604,11 +604,18 @@ export interface HonmaruFormationProfile {
 
 /** 预设里一个槽位存的刀剑档案快照；槽位可缺省（=应用时该位置不动） */
 export interface CustomFormationSlotEntry {
+  observation_id?: string
   sword_catalog_id?: string
+  same_team_exclusion_key?: string
   name_zh?: string
   level?: number
+  tou_level?: number
+  survival_max?: number
+  stats?: Record<string, number | null>
   form_status?: string
   kiwame_date?: string
+  source_snapshot_id?: number
+  observed_at?: number
 }
 
 export interface CustomFormation {
@@ -924,7 +931,7 @@ export interface ExpeditionScheduleEntry {
 
 export interface ExpeditionSchedule {
   version: number
-  common_plan: Array<{ team_no: number; map_code: string; enabled: boolean }>
+  common_plan: Array<{ team_no: number; map_code: string; enabled: boolean; formation_id?: string }>
   automation: ExpeditionAutomation
   entries: ExpeditionScheduleEntry[]
   maps: Array<{ code: string; era: number; slot: number; name: string; duration_min: number; duration_text: string }>
