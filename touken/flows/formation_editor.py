@@ -134,6 +134,8 @@ _BOTTOM_PROOF_STAGES = 2            # 到底核验的独立阶段数：每阶段
                                     # 一致才计有效阶段
 _SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
 _SWIPE_PREV = (640, 200, 640, 550, 800)
+_GOTO_MAX_SWIPES = 12                   # 重定位安全阀：滑块地标导航正常
+                                        # 几次就到；翻满还没落地如实失败
 # 选择列表右缘滚动条（_list_end_sighted 的独立末端证据通道，
 # 校准口径见该函数 docstring；改动这些数必须重新从运行帧取样验证）
 _SCROLLBAR_BAND_X = (1262, 1270)          # 滑轨体列带
@@ -778,7 +780,7 @@ class FormationEditorMixin:
         # 5) 全表扫描（指纹停滞=到底 / 绕圈 / 截断三种结局分明），
         #    只有确定扫到底的完整扫描才允许裁决唯一——截断名单上的
         #    "唯一"既找不到后段目标，也证明不了全局唯一
-        pages, fps, current_idx, unreadable, scan_status = \
+        pages, fps, bars, current_idx, unreadable, scan_status = \
             yield from self._scan_selection_list(max_pages)
         if scan_status != "complete":
             why = {"truncated": "触达安全上限仍未到底",
@@ -812,24 +814,20 @@ class FormationEditorMixin:
                                     "missing_evidence", []),
                                 pages_scanned=len(pages))
 
-        # 6) 回到目标所在页，用同一套「证据充分」条件重新确认该行后点"决定"
+        # 6) 把目标行翻回视野：列表是连续滚动不吸附整页，不以扫描页
+        #    指纹为落点——方向由滑块底缘地标给出，落地条件就是目标行
+        #    在帧内且通过行证据裁决（与扫描同一道闸），坐标以落地帧
+        #    实读为准
         target_page = verdict["page"]
         row = verdict["row"]
         yield (f"[编队] 唯一匹配在第 {target_page + 1} 页："
                f"{row['name']} Lv{row.get('level') or '?'}")
-        current_idx = yield from self._goto_page(
-            pages, fps, current_idx, target_page)
-        if current_idx is None:
-            yield "[编队] 无法在列表里重新定位目标页，停（未点决定）"
-            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
-                                "列表翻页指纹对不上，重新定位失败",
-                                entry_shell=shell, before=slot_before,
-                                team_before=team_before)
-        row = self._relocate_row(tgt, row, match_fields)
+        row = yield from self._goto_page(bars, target_page, tgt, row,
+                                         match_fields)
         if row is None:
-            yield "[编队] 回到目标页后该行读不稳，停（未点决定）"
+            yield "[编队] 无法在列表里重新定位目标行，停（未点决定）"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
-                                "目标行重新读取与扫描时不一致",
+                                "列表连续滚动不吸附，目标行重新定位失败",
                                 entry_shell=shell, before=slot_before,
                                 team_before=team_before)
 
@@ -1037,7 +1035,7 @@ class FormationEditorMixin:
           loop      —— 指纹绕回已见过的页（页序异常，不等于到底）。
         只有 complete 允许裁决唯一/确定 not_found，其余一律拒绝下点。
         """
-        pages, fps, unreadable = [], [], 0
+        pages, fps, bars, unreadable = [], [], [], 0
         current_idx, stalls, status = 0, 0, "complete"
         pending = None          # 到底核验探出的新页，交还循环当当前页处理
         while True:
@@ -1070,6 +1068,9 @@ class FormationEditorMixin:
                 break
             pages.append(rows)
             fps.append(fp)
+            # 每页记下右缘滑块底缘（绝对位置），给重定位当导航地标；
+            # 读不出就存 None，目标页没地标时重定位如实失败
+            bars.append(self._scrollbar_bottom())
             unreadable += bad
             current_idx = len(pages) - 1
             stalls = 0
@@ -1081,7 +1082,7 @@ class FormationEditorMixin:
         yield (f"[编队] 列表扫描 {len(pages)} 页"
                f"（{'已到底' if status == 'complete' else '未到底：' + status}，"
                f"读不清 {unreadable} 行）")
-        return pages, fps, current_idx, unreadable, status
+        return pages, fps, bars, current_idx, unreadable, status
 
     def _verify_bottom(self, fps):
         """停滞后的「到底」多阶段核验，主仪器是右缘滑块底缘的绝对位置
@@ -1212,48 +1213,77 @@ class FormationEditorMixin:
         """
         return False
 
-    def _goto_page(self, pages, fps, current_idx, target_idx):
-        """按指纹把列表翻回目标页；对不上就如实失败（返回 None）。"""
-        if len(set(fps)) != len(fps):
-            yield "[编队] 列表存在指纹相同的页，无法可靠定位，停"
-            return None
-        while current_idx != target_idx:
-            step = 1 if target_idx > current_idx else -1
-            self.maa.swipe(*(_SWIPE_NEXT if step > 0 else _SWIPE_PREV))
-            time.sleep(1.2)
-            ok = False
-            for _retry in range(2):
-                self.maa.screenshot(force=True)
-                rows, _bad = parse_selection_rows(
-                    self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
-                fp = page_fingerprint(rows)
-                if fp == fps[current_idx + step]:
-                    ok = True
-                    break
-                self.maa.swipe(*(_SWIPE_NEXT if step > 0 else _SWIPE_PREV))
-                time.sleep(1.2)
-            if not ok:
-                return None
-            current_idx += step
-        return current_idx
+    def _goto_page(self, bars, target_idx, target, scanned_row,
+                   match_fields):
+        """把目标行翻回视野，返回落地帧实读的目标行（点决定的坐标
+        以它为准）；证据不足/找不到就返回 None，绝不乱点。
 
-    def _relocate_row(self, target, scanned_row, match_fields):
-        """回到目标页后重读该行：与扫描裁决同一套「证据充分」条件——
-        零冲突且无缺证据的唯一行才返回新坐标（回页阶段不比扫描阶段宽）。"""
-        self.maa.screenshot(force=True)
-        rows, _bad = self._parse_selection_rows(
-            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+        列表是连续滚动、不吸附整页（2026-09-22 真机：回翻落点停在
+        两页之间，任何记录页的指纹都复现不了），故不以扫描页指纹为
+        落点。方向由滑块底缘与扫描记录的页底缘对比给出（绝对位置，
+        滑动被吞也骗不了）；每一帧直接拿目标行证据裁决当落地条件，
+        首次命中后再强制重读一帧复核——两帧证据都过才算落地。
+        单页名单（筛选后常态）根本不用导航：首帧就该命中。"""
+        b_target = bars[target_idx] if target_idx < len(bars) else None
+        for _attempt in range(_GOTO_MAX_SWIPES):
+            self.maa.screenshot(force=True)
+            rows, _bad = self._parse_selection_rows(
+                self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+            hit = self._match_target_row(rows, target, scanned_row,
+                                         match_fields)
+            if hit is not None:
+                # 落地复核：强制重读一帧，证据要连续两帧都成立
+                rows2, _bad2 = self._parse_selection_rows(
+                    self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+                hit2 = self._match_target_row(rows2, target, scanned_row,
+                                              match_fields)
+                if hit2 is None:
+                    yield "[编队] 目标行读数不稳定（复核帧证据不成立），停"
+                    return None
+                return hit2
+            b = self._scrollbar_bottom()
+            if b is None or b_target is None:
+                yield "[编队] 重定位途中没有滑块地标读数，无法导航，停"
+                return None
+            if b == b_target:
+                # 地标到了但行不在视野/证据不过：多为 OCR 偶发漏行，
+                # 原地重读一次还不行就如实失败
+                rows3, _bad3 = self._parse_selection_rows(
+                    self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+                hit3 = self._match_target_row(rows3, target, scanned_row,
+                                              match_fields)
+                if hit3 is not None:
+                    return hit3
+                yield "[编队] 已到目标页位置但目标行读不出来，停"
+                return None
+            self.maa.swipe(*(_SWIPE_NEXT if b < b_target else _SWIPE_PREV))
+            time.sleep(1.2)
+        yield f"[编队] 重定位翻满 {_GOTO_MAX_SWIPES} 次仍未找到目标行，停"
+        return None
+
+    def _match_target_row(self, rows, target, scanned_row, match_fields):
+        """在一帧已解析的行里找目标：与扫描裁决同一套「证据充分」
+        条件——零冲突且无缺证据的唯一行（落地阶段不比扫描阶段宽）。"""
         hits = [r for r in rows
                 if r.get("sword_catalog_id") == target["sword_catalog_id"]
                 and not row_conflicts_target(r, target, match_fields)
                 and not row_evidence_gaps(r, target, match_fields)]
         if len(hits) != 1:
             return None
-        # 与扫描时的行特征一致才认（y 允许微漂）
+        # 与扫描时的行特征一致才认（y 允许漂移——连续滚动落点不吸附，
+        # 行坐标以落地帧实读为准，由调用方拿去点决定）
         if scanned_row.get("level") is not None \
                 and hits[0].get("level") != scanned_row["level"]:
             return None
         return hits[0]
+
+    def _relocate_row(self, target, scanned_row, match_fields):
+        """重读当前帧找目标行（_match_target_row 的读帧包装）。"""
+        self.maa.screenshot(force=True)
+        rows, _bad = self._parse_selection_rows(
+            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+        return self._match_target_row(rows, target, scanned_row,
+                                      match_fields)
 
     # ---- 结果组装 ----
 
