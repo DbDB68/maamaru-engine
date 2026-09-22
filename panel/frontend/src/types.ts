@@ -600,28 +600,6 @@ export interface HonmaruFormationProfile {
   roster: { teams: FormationTeam[] }
 }
 
-export type FormationSwapResult =
-  | 'changed' | 'already_correct' | 'ambiguous' | 'not_found'
-  | 'unavailable' | 'screen_unrecognized' | 'verification_failed'
-  | 'invalid_request'
-
-export interface FormationSwapEvent {
-  id: number
-  ts: number
-  run_id: string | null
-  script: string | null
-  event_type: string
-  payload: {
-    team_no: number
-    slot_no: number
-    result: FormationSwapResult
-    reason: string
-    target?: { name?: string; form?: string | null; level?: number | null }
-    candidates?: Array<{ name?: string | null; level?: number | null; fatigue?: number | null; unknown_fields?: string[] }>
-    missing_evidence?: string[]
-  }
-}
-
 // ---- 预设编队 /api/custom-formations ----
 
 /** 预设里一个槽位存的刀剑档案快照；槽位可缺省（=应用时该位置不动） */

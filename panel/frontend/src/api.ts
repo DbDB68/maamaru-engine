@@ -1,7 +1,7 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
-import type { CustomFormation, CustomFormationDraft, FormationSwapEvent, HonmaruFormationProfile } from './types'
+import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
 import type { ExpeditionSchedule, DayTimeline } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -40,7 +40,6 @@ export const api = {
     body: JSON.stringify({ script, params }),
   }),
   honmaruProfile: () => request<HonmaruFormationProfile>('/api/data/honmaru-profile'),
-  formationEvents: (eventType: string, limit = 20, fromTs?: number) => request<{ schema_version: number; items: FormationSwapEvent[]; has_more: boolean }>(`/api/data/events?limit=${limit}&event_type=${encodeURIComponent(eventType)}${fromTs == null ? '' : `&from_ts=${fromTs}`}`),
   customFormations: () => request<{ formations: CustomFormation[] }>('/api/custom-formations'),
   saveCustomFormation: (record: CustomFormationDraft, id?: string) => request<{ ok: boolean; formation: CustomFormation }>(`/api/custom-formations${id ? `/${encodeURIComponent(id)}` : ''}`, {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record),

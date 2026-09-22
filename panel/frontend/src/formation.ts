@@ -1,8 +1,7 @@
-import type { CustomFormation, CustomFormationSlotEntry, FormationCandidate, FormationSwapEvent, FormationSwapResult } from './types'
+import type { CustomFormation, CustomFormationSlotEntry, FormationCandidate } from './types'
 
-// 编队页的纯逻辑：候选展示、换人门闩、结果文案。组件只负责渲染，
-// 判定全收在这里好测。纪律与后端一致：前端不做匹配，只做「能不能
-// 把请求递出去」的门闩；换没换成永远以后端回读验收为准。
+// 部队预设页的纯逻辑：候选展示与存前校验。真正套用预设由玩法入口
+// 和后端执行器负责，前端不展示历史队伍，也不自行宣称换人成功。
 
 export function candidateName(entry: FormationCandidate): string {
   return entry.name_zh || entry.sword_catalog_id || '没认出名字'
@@ -25,116 +24,6 @@ export function candidateEvidenceGaps(entry: FormationCandidate): string[] {
   if (!entry.sword_catalog_id && !entry.name_zh) gaps.push('名字')
   if (entry.level == null) gaps.push('等级')
   return gaps
-}
-
-export interface SwapEligibilityInput {
-  poolDone: boolean
-  poolReason?: string
-  running: boolean
-  slotNo: number | null
-  candidate: FormationCandidate | null
-}
-
-export interface SwapEligibility {
-  ok: boolean
-  reason: string
-}
-
-// 启动换人的门闩：档案不完整、有任务在跑、没选位置/目标、目标身份
-// 证据不足，一律不许递请求，并告诉玩家下一步干什么。
-export function swapEligibility(input: SwapEligibilityInput): SwapEligibility {
-  if (!input.poolDone) {
-    return {
-      ok: false,
-      reason: input.poolReason
-        ? `本丸档案还不可信：${input.poolReason}。先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。`
-        : '还没有可信的本丸档案。先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点。',
-    }
-  }
-  if (input.running) {
-    return { ok: false, reason: '有任务正在运行，等它跑完（或先停止）再换人。' }
-  }
-  if (input.slotNo == null) {
-    return { ok: false, reason: '先点一下要换的位置（1～6 号位）。' }
-  }
-  if (!input.candidate) {
-    return { ok: false, reason: '再从候选名单里选一振要换上去的刀。' }
-  }
-  const gaps = candidateEvidenceGaps(input.candidate)
-  if (gaps.length) {
-    return {
-      ok: false,
-      reason: `这振${candidateName(input.candidate)}的档案缺${gaps.join('、')}，同名时分辨不出来；先重新跑一次「刀帐盘点」再换。`,
-    }
-  }
-  return { ok: true, reason: '' }
-}
-
-export interface FormationResultText {
-  title: string
-  tone: 'ok' | 'warn' | 'bad'
-  detail: string
-}
-
-// 机器结果 → 生活化中文。只有 changed / already_correct 算办成；
-// 其余各自说清发生了什么、玩家下一步该干什么，绝不统一显示「失败」。
-export const FORMATION_RESULT_TEXT: Record<FormationSwapResult, FormationResultText> = {
-  changed: {
-    title: '换好了',
-    tone: 'ok',
-    detail: '这位已经站到位置上，狐之助回读逐项核对无误。',
-  },
-  already_correct: {
-    title: '本来就是他',
-    tone: 'ok',
-    detail: '这个位置上已经是你选的这位了，一下都没动。',
-  },
-  ambiguous: {
-    title: '不敢随便点',
-    tone: 'warn',
-    detail: '名单里有几振同名的刀分不清谁是谁，怕换错人，一下都没点。重新跑一次「刀帐盘点」把档案认清后再试。',
-  },
-  not_found: {
-    title: '名单里没找到他',
-    tone: 'warn',
-    detail: '翻遍整份刀剑名单都没见到这振刀：他可能在别的队里、手入/修行/远征中，或者档案旧了。先去游戏里看看他在哪儿。',
-  },
-  unavailable: {
-    title: '游戏不让他上岗',
-    tone: 'warn',
-    detail: '点了「决定」但游戏没答应（多半在手入、修行或远征中），队伍没动。等他闲下来再试。',
-  },
-  screen_unrecognized: {
-    title: '没认出画面',
-    tone: 'bad',
-    detail: '游戏画面跟预期对不上，为安全起见一刀没动。看看模拟器是不是卡在奇怪界面，再试一次。',
-  },
-  verification_failed: {
-    title: '换完对不上账',
-    tone: 'bad',
-    detail: '点了「决定」但回读对不上，队伍可能已经变了。请去游戏里亲眼核对一下部队编成。',
-  },
-  invalid_request: {
-    title: '这次请求有问题',
-    tone: 'bad',
-    detail: '换人请求本身不成立，没有发出任何点击。刷新档案后再选一次。',
-  },
-}
-
-export function formationResultText(result: string): FormationResultText {
-  return FORMATION_RESULT_TEXT[result as FormationSwapResult] || {
-    title: '结果没看懂',
-    tone: 'bad',
-    detail: '后端给了一个不认识的回读结果，请以游戏里的队伍为准。',
-  }
-}
-
-// 从事件流里找回本轮换人的回读验收（run_id 对上的那条，别的任务的不管）。
-export function pickSwapEvent(
-  events: FormationSwapEvent[],
-  runId: string,
-): FormationSwapEvent | null {
-  return events.find(item => item.run_id === runId) || null
 }
 
 // ---- 预设编队 ----

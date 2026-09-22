@@ -608,7 +608,7 @@ watch(tab, value => {
           <summary>队伍</summary>
           <h3>队伍</h3>
           <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
-            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">编队</span>
+            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">部队预设</span>
           </SideNavItem>
         </details>
         <details class="task-nav-group" open>

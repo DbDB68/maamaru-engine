@@ -1285,10 +1285,10 @@ register_script("snapshot", "库存快照",
 register_script("sword_inventory", "刀帐盘点",
                 "走进刀剑男士一览，逐页认出每把刀的等级、疲劳和属性记成快照；全程只看不点，怕漏会如实报缺口",
                 _wrap_inventory("刀帐盘点", _build_sword_inventory))
-# 编队换人由前端「编队」页选目标后直接 POST /api/scripts/run 触发，
+# 旧的单格换人入口只为兼容既有调用保留；部队预设页不再直接触发它。
 # target 是整支档案条目对象，任务表单画不出来，故对任务列表隐藏（仍可运行）。
 register_script("formation", "编队换人",
-                "把指定部队的指定位置换成本丸档案里选好的那振刀；换完逐项回读验收，认不准就如实说，不装成功",
+                "把指定部队的指定位置换成本丸档案里选好的那振刀；点决定后只确认选人列表正常关闭，不回读当前编队",
                 _wrap_inventory("编队", _build_formation),
                 hidden=True)
 
