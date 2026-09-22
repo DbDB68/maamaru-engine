@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
-import LogPanel from './LogPanel.vue'
 import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
 import SegmentedControl from './SegmentedControl.vue'
@@ -23,7 +22,7 @@ import {
 // 编队页最小闭环：选部队 → 选位置 → 选一振刀 → 运行 → 如实回显后端
 // 验收结果。匹配、翻页、同名裁决、换后验收全在后端执行器；这里只做
 // 门闩（档案可信/没在跑/证据够），绝不自己宣称换人成功。
-// 视觉复用现有组件（PanelHeader/PaperCard/SegmentedControl/LogPanel +
+// 视觉复用现有组件（PanelHeader/PaperCard/SegmentedControl +
 // 全局按钮类），本文件只管布局与编队特有的槽位/候选行。
 
 const props = withDefaults(defineProps<{
@@ -46,7 +45,6 @@ const query = ref('')
 const starting = ref(false)
 const result = ref<FormationSwapEvent['payload'] | null>(null)
 const resultMissing = ref(false)
-const logOpen = ref(false)
 let pendingRunId = ''
 let pendingSince = 0
 let pollTimer = 0
@@ -408,7 +406,7 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 
 <template>
   <section class="formation-panel">
-    <PaperCard variant="task" tag="section">
+    <PaperCard variant="task" tag="section" class="formation-workspace">
       <PanelHeader
         title="编队"
         :subtitle="profileSummary || '从本丸档案里点将：选部队、选位置、选要换上去的刀'"
@@ -424,13 +422,12 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
       <p v-else-if="!loadError && profile" class="formation-hintline">
         同名多振按档案逐振列出，狐之助换完会逐项回读对账。
       </p>
-    </PaperCard>
 
-    <p v-if="loadError" class="formation-error">{{ loadError }}</p>
-    <div v-else-if="loading && !profile" class="formation-empty">正在翻本丸档案……</div>
-    <template v-else-if="profile">
-      <div class="formation-columns" :aria-disabled="runningThis">
-        <PaperCard variant="task" tag="section" class="formation-left">
+      <p v-if="loadError" class="formation-error">{{ loadError }}</p>
+      <div v-else-if="loading && !profile" class="formation-empty">正在翻本丸档案……</div>
+      <template v-else-if="profile">
+        <div class="formation-columns" :aria-disabled="runningThis">
+          <section class="formation-left" aria-label="选择部队和位置">
           <h3 class="formation-sub">1. 选部队</h3>
           <SegmentedControl v-model="teamNo" :items="teamItems" label="选部队" variant="wide" />
           <h3 class="formation-sub">2. 选位置</h3>
@@ -450,9 +447,9 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
               </button>
             </li>
           </ol>
-        </PaperCard>
+          </section>
 
-        <PaperCard variant="task" tag="section" class="formation-right">
+          <section class="formation-right" aria-label="选择要换上去的刀">
           <h3 class="formation-sub">3. 选要换上去的刀</h3>
           <label class="formation-search">
             <span>找一振刀</span>
@@ -514,186 +511,185 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
           </div>
           <p v-else-if="poolDone" class="formation-empty">没有找到这个刀名。</p>
           <p v-else class="formation-empty">档案可用之前，这里暂时没有候选。</p>
-        </PaperCard>
-      </div>
-
-      <PaperCard variant="task" tag="section" class="formation-action">
-        <p><strong>{{ selectionSummary }}</strong></p>
-        <p v-if="!eligibility.ok" class="formation-hintline">{{ eligibility.reason }}</p>
-        <div class="formation-buttons">
-          <button
-            v-if="!runningThis"
-            type="button"
-            class="primary"
-            :disabled="!eligibility.ok"
-            @click="run"
-          >{{ starting ? '正在开工……' : '换人' }}</button>
-          <button
-            v-else
-            type="button"
-            class="danger"
-            :disabled="stopping"
-            @click="emit('stop')"
-          >{{ stopping ? '正在停止…' : '紧急停止' }}</button>
+          </section>
         </div>
-      </PaperCard>
 
-      <section v-if="result && resultText" class="formation-result" :class="resultText.tone" role="status">
-        <header>
-          <b>{{ resultText.title }}</b>
-          <span>部队{{ TEAM_LABELS[(result.team_no || 1) - 1].slice(-1) }} {{ result.slot_no }}号位 · {{ result.target?.name || '' }}</span>
-        </header>
-        <p>{{ resultText.detail }}</p>
-        <p v-if="result.reason" class="formation-result-reason">狐之助说：{{ result.reason }}</p>
-        <ul v-if="result.result === 'ambiguous' && result.candidates?.length">
-          <li v-for="(item, index) in result.candidates" :key="index">
-            {{ item.name || '没认出名字' }}<template v-if="item.level != null"> · Lv.{{ item.level }}</template>
-            <small v-if="item.unknown_fields?.length">（缺 {{ item.unknown_fields.join('、') }}）</small>
-          </li>
-        </ul>
-        <button type="button" class="secondary" @click="result = null">知道了</button>
-      </section>
-      <section v-else-if="resultMissing" class="formation-result warn" role="status">
-        <header><b>没拿到回读验收</b></header>
-        <p>任务结束了（多半是被中途停止），狐之助没能交回验收单。队伍现在什么样，以游戏里看到的为准。</p>
-        <button type="button" class="secondary" @click="resultMissing = false">知道了</button>
-      </section>
-
-      <PaperCard variant="task" tag="section" class="formation-presets">
-        <header class="formation-presets-head">
-          <div>
-            <h3>预设编队</h3>
-            <p>把常用的阵容存下来：一套预设指定覆盖哪支部队、六个位置各上哪振刀；应用时整套换人。改预设只是改记录，不碰游戏。</p>
+        <section class="formation-action" aria-label="确认换人">
+          <div class="formation-action-copy">
+            <span class="formation-step">4. 确认换人</span>
+            <p><strong>{{ selectionSummary }}</strong></p>
+            <p v-if="!eligibility.ok" class="formation-hintline">{{ eligibility.reason }}</p>
           </div>
-          <button
-            type="button"
-            class="secondary"
-            :disabled="presetsLoading || presets.length >= MAX_PRESETS"
-            :title="presets.length >= MAX_PRESETS ? '最多存 5 套预设，先删掉一套不用的' : ''"
-            @click="openPresetEditor()"
-          >{{ presets.length >= MAX_PRESETS ? '最多 5 套' : '＋ 新建预设' }}</button>
-        </header>
+          <div class="formation-buttons">
+            <button
+              v-if="!runningThis"
+              type="button"
+              class="primary"
+              :disabled="!eligibility.ok"
+              @click="run"
+            >{{ starting ? '正在开工……' : '换人' }}</button>
+            <button
+              v-else
+              type="button"
+              class="danger"
+              :disabled="stopping"
+              @click="emit('stop')"
+            >{{ stopping ? '正在停止…' : '紧急停止' }}</button>
+          </div>
+        </section>
 
-        <p v-if="presetsError" class="formation-error" role="alert">{{ presetsError }}</p>
-        <p v-else-if="presetsLoading && !presets.length" class="formation-empty">正在翻预设名单……</p>
-        <template v-else>
-          <p v-if="!presets.length" class="formation-empty">还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。</p>
-          <ul v-else class="formation-preset-list">
-            <li v-for="preset in presets" :key="preset.id" class="formation-preset-card">
-              <div class="formation-preset-info">
-                <b>{{ presetLabel(preset) }}</b>
-                <span class="formation-badges">
-                  <i>已指定 {{ presetSlotCount(preset) }}/6 槽</i>
-                  <i v-if="!presetSlotCount(preset)" class="formation-gap">全是空位，应用时会直接停下</i>
-                </span>
-              </div>
-              <div class="formation-preset-tools">
-                <button type="button" class="secondary" :disabled="presetSaving" @click="openPresetEditor(preset)">编辑</button>
-                <button type="button" class="danger" :disabled="presetSaving" @click="removePreset(preset)">删除</button>
-              </div>
+        <section v-if="result && resultText" class="formation-result" :class="resultText.tone" role="status">
+          <header>
+            <b>{{ resultText.title }}</b>
+            <span>部队{{ TEAM_LABELS[(result.team_no || 1) - 1].slice(-1) }} {{ result.slot_no }}号位 · {{ result.target?.name || '' }}</span>
+          </header>
+          <p>{{ resultText.detail }}</p>
+          <p v-if="result.reason" class="formation-result-reason">狐之助说：{{ result.reason }}</p>
+          <ul v-if="result.result === 'ambiguous' && result.candidates?.length">
+            <li v-for="(item, index) in result.candidates" :key="index">
+              {{ item.name || '没认出名字' }}<template v-if="item.level != null"> · Lv.{{ item.level }}</template>
+              <small v-if="item.unknown_fields?.length">（缺 {{ item.unknown_fields.join('、') }}）</small>
             </li>
           </ul>
-          <p v-if="presets.length >= MAX_PRESETS" class="formation-hintline">最多存 5 套预设；想存新的，先删掉一套不用的。</p>
-        </template>
+          <button type="button" class="secondary" @click="result = null">知道了</button>
+        </section>
+        <section v-else-if="resultMissing" class="formation-result warn" role="status">
+          <header><b>没拿到回读验收</b></header>
+          <p>任务结束了（多半是被中途停止），狐之助没能交回验收单。队伍现在什么样，以游戏里看到的为准。</p>
+          <button type="button" class="secondary" @click="resultMissing = false">知道了</button>
+        </section>
 
-        <div v-if="editorOpen" class="formation-preset-editor">
-          <h4>{{ editingId ? '编辑预设' : '新建预设' }}</h4>
-          <div class="formation-preset-form">
-            <label class="formation-preset-field">
-              <span>预设名字</span>
-              <input v-model="draftName" type="text" maxlength="20" placeholder="比如：演练主力队">
-            </label>
-            <label class="formation-preset-field">
-              <span>覆盖部队</span>
-              <select v-model.number="draftTeam">
-                <option v-for="(label, index) in TEAM_LABELS" :key="label" :value="index + 1">{{ label }}</option>
-              </select>
-            </label>
-          </div>
-          <p class="formation-hintline">六个格子各指定一振刀；留空的格子应用时不动的位置保持原样。</p>
-          <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
-          <ol class="formation-preset-slots">
-            <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
-              <button
-                type="button"
-                class="formation-preset-slot"
-                :class="{ active: pickerSlot === no, filled: Boolean(draftSlots[String(no)]) }"
-                :aria-pressed="pickerSlot === no"
-                @click="togglePresetPicker(no)"
-              >
-                <b>{{ no }}号位</b>
-                <span>{{ presetSlotSummary(draftSlots[String(no)]) }}</span>
-              </button>
-              <button
-                v-if="draftSlots[String(no)]"
-                type="button"
-                class="formation-preset-clear"
-                :aria-label="`清除 ${no} 号位，恢复成不动`"
-                title="清除，恢复成不动"
-                @click="clearPresetSlot(no)"
-              >×</button>
-            </li>
-          </ol>
-
-          <div v-if="pickerSlot != null" class="formation-preset-picker">
-            <label class="formation-search">
-              <span>给 {{ pickerSlot }} 号位选刀</span>
-              <input v-model="presetQuery" type="search" placeholder="输入刀名">
-              <em>{{ presetFilteredGroups.length }} 种</em>
-            </label>
-            <p v-if="!poolDone" class="formation-empty">候选名单还不可信，先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来选。</p>
-            <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
-              <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
-                <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>
-                <button
-                  v-for="(entry, index) in group.rows"
-                  :key="entry.observation_id"
-                  type="button"
-                  class="formation-candidate"
-                  :class="{ 'lacks-evidence': !presetCandidatePickable(entry) }"
-                  :disabled="!presetCandidatePickable(entry)"
-                  :title="!presetCandidatePickable(entry) ? '档案里没认出这振的名字，先重新跑一次「刀帐盘点」再来' : ''"
-                  @click="assignPresetCandidate(entry)"
-                >
-                  <b>{{ group.rows.length > 1 ? `第 ${index + 1} 振` : group.name }}</b>
-                  <span class="formation-badges">
-                    <i :class="{ kiwame: entry.form_status === 'kiwame' }" :title="(entry.form_evidence || []).join('；')">{{ candidateFormLabel(entry) }}</i>
-                    <i>Lv.{{ entry.level ?? '—' }}</i>
-                    <i v-for="gap in candidateEvidenceGaps(entry)" :key="gap" class="formation-gap">缺{{ gap }}</i>
-                  </span>
-                </button>
-              </section>
+        <section class="formation-presets">
+          <header class="formation-presets-head">
+            <div>
+              <h3>预设编队</h3>
+              <p>常用阵容收在这里，下次直接整队换上。改预设只改记录，不碰游戏。</p>
             </div>
-            <p v-else class="formation-empty">没有找到这个刀名。</p>
-          </div>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="presetsLoading || presets.length >= MAX_PRESETS"
+              :title="presets.length >= MAX_PRESETS ? '最多存 5 套预设，先删掉一套不用的' : ''"
+              @click="openPresetEditor()"
+            >{{ presets.length >= MAX_PRESETS ? '最多 5 套' : '＋ 新建预设' }}</button>
+          </header>
 
-          <p v-if="presetMessage" class="formation-preset-message" :class="{ failed: presetFailed }" :role="presetFailed ? 'alert' : 'status'">{{ presetMessage }}</p>
-          <div class="formation-preset-actions">
-            <button type="button" class="primary" :disabled="presetSaving || Boolean(draftError)" @click="savePreset">{{ presetSaving ? '正在收好……' : '保存预设' }}</button>
-            <button type="button" class="secondary" :disabled="presetSaving" @click="closePresetEditor">取消</button>
-          </div>
-          <p v-if="draftError" class="formation-hintline">{{ draftError }}</p>
-        </div>
-      </PaperCard>
+          <p v-if="presetsError" class="formation-error" role="alert">{{ presetsError }}</p>
+          <p v-else-if="presetsLoading && !presets.length" class="formation-empty">正在翻预设名单……</p>
+          <template v-else>
+            <p v-if="!presets.length" class="formation-empty">还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。</p>
+            <ul v-else class="formation-preset-list">
+              <li v-for="preset in presets" :key="preset.id" class="formation-preset-card">
+                <div class="formation-preset-info">
+                  <b>{{ presetLabel(preset) }}</b>
+                  <span class="formation-badges">
+                    <i>已指定 {{ presetSlotCount(preset) }}/6 槽</i>
+                    <i v-if="!presetSlotCount(preset)" class="formation-gap">全是空位，应用时会直接停下</i>
+                  </span>
+                </div>
+                <div class="formation-preset-tools">
+                  <button type="button" class="secondary" :disabled="presetSaving" @click="openPresetEditor(preset)">编辑</button>
+                  <button type="button" class="danger" :disabled="presetSaving" @click="removePreset(preset)">删除</button>
+                </div>
+              </li>
+            </ul>
+            <p v-if="presets.length >= MAX_PRESETS" class="formation-hintline">最多存 5 套预设；想存新的，先删掉一套不用的。</p>
+          </template>
 
-      <details class="formation-logfold" @toggle="logOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>看看编队换人的详细日志</summary>
-        <div v-if="logOpen" class="formation-log">
-          <LogPanel :running="running" :stopping="stopping" task-label="编队换人" only-script="formation" />
-        </div>
-      </details>
-    </template>
+          <div v-if="editorOpen" class="formation-preset-editor">
+            <h4>{{ editingId ? '编辑预设' : '新建预设' }}</h4>
+            <div class="formation-preset-form">
+              <label class="formation-preset-field">
+                <span>预设名字</span>
+                <input v-model="draftName" type="text" maxlength="20" placeholder="比如：演练主力队">
+              </label>
+              <label class="formation-preset-field">
+                <span>覆盖部队</span>
+                <select v-model.number="draftTeam">
+                  <option v-for="(label, index) in TEAM_LABELS" :key="label" :value="index + 1">{{ label }}</option>
+                </select>
+              </label>
+            </div>
+            <p class="formation-hintline">六个格子各指定一振刀；留空的格子应用时不动的位置保持原样。</p>
+            <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
+            <ol class="formation-preset-slots">
+              <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
+                <button
+                  type="button"
+                  class="formation-preset-slot"
+                  :class="{ active: pickerSlot === no, filled: Boolean(draftSlots[String(no)]) }"
+                  :aria-pressed="pickerSlot === no"
+                  @click="togglePresetPicker(no)"
+                >
+                  <b>{{ no }}号位</b>
+                  <span>{{ presetSlotSummary(draftSlots[String(no)]) }}</span>
+                </button>
+                <button
+                  v-if="draftSlots[String(no)]"
+                  type="button"
+                  class="formation-preset-clear"
+                  :aria-label="`清除 ${no} 号位，恢复成不动`"
+                  title="清除，恢复成不动"
+                  @click="clearPresetSlot(no)"
+                >×</button>
+              </li>
+            </ol>
+
+            <div v-if="pickerSlot != null" class="formation-preset-picker">
+              <label class="formation-search">
+                <span>给 {{ pickerSlot }} 号位选刀</span>
+                <input v-model="presetQuery" type="search" placeholder="输入刀名">
+                <em>{{ presetFilteredGroups.length }} 种</em>
+              </label>
+              <p v-if="!poolDone" class="formation-empty">候选名单还不可信，先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来选。</p>
+              <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
+                <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
+                  <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>
+                  <button
+                    v-for="(entry, index) in group.rows"
+                    :key="entry.observation_id"
+                    type="button"
+                    class="formation-candidate"
+                    :class="{ 'lacks-evidence': !presetCandidatePickable(entry) }"
+                    :disabled="!presetCandidatePickable(entry)"
+                    :title="!presetCandidatePickable(entry) ? '档案里没认出这振的名字，先重新跑一次「刀帐盘点」再来' : ''"
+                    @click="assignPresetCandidate(entry)"
+                  >
+                    <b>{{ group.rows.length > 1 ? `第 ${index + 1} 振` : group.name }}</b>
+                    <span class="formation-badges">
+                      <i :class="{ kiwame: entry.form_status === 'kiwame' }" :title="(entry.form_evidence || []).join('；')">{{ candidateFormLabel(entry) }}</i>
+                      <i>Lv.{{ entry.level ?? '—' }}</i>
+                      <i v-for="gap in candidateEvidenceGaps(entry)" :key="gap" class="formation-gap">缺{{ gap }}</i>
+                    </span>
+                  </button>
+                </section>
+              </div>
+              <p v-else class="formation-empty">没有找到这个刀名。</p>
+            </div>
+
+            <p v-if="presetMessage" class="formation-preset-message" :class="{ failed: presetFailed }" :role="presetFailed ? 'alert' : 'status'">{{ presetMessage }}</p>
+            <div class="formation-preset-actions">
+              <button type="button" class="primary" :disabled="presetSaving || Boolean(draftError)" @click="savePreset">{{ presetSaving ? '正在收好……' : '保存预设' }}</button>
+              <button type="button" class="secondary" :disabled="presetSaving" @click="closePresetEditor">取消</button>
+            </div>
+            <p v-if="draftError" class="formation-hintline">{{ draftError }}</p>
+          </div>
+        </section>
+      </template>
+    </PaperCard>
   </section>
 </template>
 
 <style scoped>
 /* 只管布局与编队特有零件；颜色、按钮、卡片全走全局样式与现有组件。 */
-.formation-panel { display: grid; gap: 13px; }
+.formation-panel { min-width: 0; }
+.formation-workspace { overflow: hidden; }
 .formation-notice { margin: 12px 18px 16px; padding: 10px 13px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 8px; font-size: 12px; }
 .formation-hintline { margin: 8px 18px 14px; color: var(--ink-dim); font-size: 12px; }
-.formation-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 13px; align-items: start; }
+.formation-columns { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); border-top: 1px solid var(--paper-line); border-bottom: 1px solid var(--paper-line); }
 .formation-columns[aria-disabled='true'] { opacity: .82; }
-.formation-left, .formation-right { min-width: 0; padding: 13px 15px; }
+.formation-left, .formation-right { min-width: 0; padding: 18px; }
+.formation-left { border-right: 1px solid var(--paper-line); }
 .formation-sub { margin: 2px 0 8px; color: var(--ink-dim); font-size: 12px; letter-spacing: .06em; }
 .formation-sub + .formation-sub, .formation-left .formation-sub:nth-of-type(2) { margin-top: 14px; }
 .formation-slots { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
@@ -728,11 +724,15 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 .formation-badges i { padding: 2px 6px; font-size: 10px; font-style: normal; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 999px; }
 .formation-badges i.kiwame { color: #8a5a18; border-color: color-mix(in srgb, var(--fox-gold) 65%, var(--paper-line)); }
 .formation-badges .formation-gap { color: #9f3d28; border-color: #d8a195; }
-.formation-action p { margin: 0 0 6px; font-size: 13px; }
+.formation-action { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; background: color-mix(in srgb, var(--fox-gold-pale) 28%, var(--paper-card)); border-bottom: 1px solid var(--paper-line); }
+.formation-action-copy { min-width: 0; }
+.formation-step { display: block; margin-bottom: 5px; color: var(--ink-dim); font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.formation-action p { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .formation-action .formation-hintline { margin: 0 0 8px; color: #8a5a18; }
-.formation-buttons { display: flex; gap: 8px; }
+.formation-action p + .formation-hintline { margin-top: 5px; margin-bottom: 0; }
+.formation-buttons { display: flex; flex: 0 0 auto; gap: 8px; }
 .formation-buttons button { min-height: 38px; padding: 8px 22px; }
-.formation-result { display: grid; gap: 7px; padding: 14px 16px; border: 1px solid var(--paper-line); border-radius: 12px; font-size: 12px; }
+.formation-result { display: grid; gap: 7px; margin: 16px 18px 0; padding: 14px 16px; border: 1px solid var(--paper-line); border-radius: 12px; font-size: 12px; }
 .formation-result header { display: flex; align-items: baseline; gap: 10px; }
 .formation-result header b { font-size: 15px; }
 .formation-result header span { color: var(--ink-dim); }
@@ -744,16 +744,10 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 .formation-result ul { display: grid; gap: 3px; margin: 0; padding-left: 18px; }
 .formation-result ul small { opacity: .75; }
 .formation-result button { justify-self: start; }
-.formation-error, .formation-empty { display: grid; gap: 3px; margin: 0; padding: 18px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; font-size: 13px; }
+.formation-error, .formation-empty { display: grid; gap: 3px; margin: 16px 18px; padding: 18px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; font-size: 13px; }
 .formation-error { color: #9f3d28; }
-.formation-logfold { border: 1px dashed var(--paper-line); border-radius: 10px; background: var(--paper-card); }
-.formation-logfold summary { padding: 10px 14px; color: var(--ink-dim); font-size: 12px; cursor: pointer; }
-.formation-logfold[open] summary { border-bottom: 1px dashed var(--paper-line); }
-.formation-log { height: 340px; min-width: 0; }
-.formation-log :deep(.log-panel) { height: 100%; min-width: 0; }
-.formation-log :deep(.log-row span) { overflow-wrap: anywhere; }
 /* 预设编队管理区：列表 + 就地展开的编辑器，视觉零件与选人区同源。 */
-.formation-presets { padding: 13px 15px; }
+.formation-presets { padding: 18px; }
 .formation-presets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .formation-presets-head h3 { margin: 0; font-size: 14px; }
 .formation-presets-head p { max-width: 560px; margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
@@ -789,18 +783,21 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
 .formation-preset-actions { display: flex; gap: 8px; margin-top: 12px; }
 .formation-preset-actions button { min-height: 34px; padding: 6px 18px; font-size: 12px; }
 @media (max-width: 900px) {
-  /* 窄屏重排：操作卡（与结果卡）提到候选名单上面——名单很长，
-     选完刀不该再翻几千 px 才找得到换人按钮。预设管理跟在结果后面。 */
-  .formation-panel { display: flex; flex-direction: column; }
+  /* 窄屏不把上百振刀的名单挡在「换人」前面。先选队伍和位置，
+     确认条固定跟在后面，再往下搜刀；选好后只需回到上方确认。 */
+  .formation-workspace { display: flex; flex-direction: column; overflow: visible; }
   .formation-columns { display: contents; }
-  .formation-left { order: 1; }
-  .formation-action { order: 2; }
+  .formation-left { order: 1; border-top: 1px solid var(--paper-line); border-right: 0; }
+  .formation-action { order: 2; border-top: 1px solid var(--paper-line); }
   .formation-result { order: 3; }
-  .formation-presets { order: 4; }
-  .formation-right { order: 5; }
-  .formation-logfold { order: 6; }
+  .formation-right { order: 4; border-bottom: 1px solid var(--paper-line); }
+  .formation-presets { order: 5; }
 }
 @media (max-width: 620px) {
+  .formation-left, .formation-right, .formation-presets { padding: 14px; }
+  .formation-action { align-items: stretch; flex-direction: column; padding: 14px; }
+  .formation-buttons button { width: 100%; }
+  .formation-result { margin: 14px 14px 0; }
   .formation-slot { grid-template-columns: 1fr; gap: 2px; }
   .formation-slot b { grid-row: auto; }
   .formation-candidate { align-items: flex-start; flex-direction: column; gap: 4px; }
@@ -809,8 +806,6 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
   .formation-preset-tools { width: 100%; }
   .formation-preset-tools button { flex: 1; }
   .formation-preset-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .formation-log { height: 300px; }
-  .formation-log :deep(.head-actions) { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   .formation-slot, .formation-candidate, .formation-preset-slot { transition: none; }
