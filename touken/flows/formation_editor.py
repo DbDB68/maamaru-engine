@@ -67,6 +67,7 @@ import numpy as np
 
 from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
+from ..roi_overrides import get_roi
 from ..runtime_paths import STATE_DIR
 from .team_roster import _match_name, _ROW_CY, _TEAM_TAB
 
@@ -85,15 +86,43 @@ INVALID_REQUEST = "invalid_request"
 _SWAP_X = 1033            # 行内"替换"按钮（sakura 真机校准）
 _DECIDE_X = 1197          # 列表行内"决定"按钮（sakura 真机校准）
 _DECIDE_DY = -22          # 决定中心 ≈ 名字行中心上方 22px（sakura: 疲劳行-40）
-_LIST_TITLE = ("刀剑男士选择", (450, 0, 830, 110))
-_FORMATION_TITLE = ("部队编成", (480, 0, 800, 60))      # 与 navigator verify 一致
-_TEAM_SELECT_TITLE = ("部队选择", (506, 1, 774, 55))    # 与各玩法 team_ui_ocr 一致
-_LIST_ROI = (60, 100, 1240, 700)    # 列表整列 OCR
-_NAME_X = (100, 300)                # 姓名带（sakura 名字 ROI x[100,265] 同源）；
+# 读取型 ROI 走注册表 + 覆盖（面板模板工坊「代码 ROI」页可临时改，
+# 存 DEBUG_DIR/template_lab/code-rois.json）：工人进程一跑一 import，
+# 改完覆盖下次跑任务生效；坏覆盖静默回落这里的默认。点击坐标
+# （_SWAP_X/_DECIDE_X）与滚动条到底证据按纪律不进注册表。
+_LIST_TITLE = ("刀剑男士选择",
+               get_roi("formation_editor.list_title", (450, 0, 830, 110)))
+_FORMATION_TITLE = ("部队编成",
+                    get_roi("formation_editor.title", (480, 0, 800, 60)))
+_TEAM_SELECT_TITLE = ("部队选择",
+                      get_roi("formation_editor.team_select_title",
+                              (506, 1, 774, 55)))
+_LIST_ROI = get_roi("formation_editor.list", (60, 40, 1240, 700))
+                                              # 列表整列 OCR；y0=40：首行名字
+                                              # y≈140 时其刀剑等级 y≈56，
+                                              # y0=100 会把首行等级切掉
+                                              # （2026-09-22 真机）
+# 三条竖带注册成矩形只为面板里能框能调；代码只用 x 分量，y 跨度无语义
+_NAME_BAND = get_roi("formation_editor.name_band", (100, 40, 300, 700))
+_LEVEL_BAND = get_roi("formation_editor.level_band", (440, 40, 620, 700))
+_FATIGUE_BAND = get_roi("formation_editor.fatigue_band", (440, 40, 640, 700))
+_NAME_X = (_NAME_BAND[0], _NAME_BAND[2])
+                                    # 姓名带（sakura 名字 ROI x[100,265] 同源）；
                                     # x<100 是位置标记/锁图标区，直接排除
-_LEVEL_X = (300, 460)               # 等级列（布局推算，待真机校准）
-_FATIGUE_X = (460, 620)             # 疲劳列（sakura 真机校准）
+_LEVEL_X = (_LEVEL_BAND[0], _LEVEL_BAND[2])
+                                    # 等级/疲劳小字带，按内容格式区分
+_FATIGUE_X = (_FATIGUE_BAND[0], _FATIGUE_BAND[2])
+                                    # 疲劳值（含「疲劳 N/M」合体 token x≈529）
+# 2026-09-22 真机校准（preset_list_probe，运行帧通道）：行内四行小字
+# 「刀剑 N级 / 乱舞 N级 / 生存 N/N / 疲劳 N/M」同在 x≈492~580 一列——
+# 旧 _LEVEL_X(300,460) 是布局推算，真机全落空，等级永远读 None。
+_LEVEL_ABOVE_NAME = (40, 99)        # 刀剑等级在名字上方 40~99px（实测 ~86）；
+                                    # 乱舞等级同格式（名字上方 ~63），靠
+                                    # 「刀剑」label 同 y 配对排除，不靠 y 硬切
 _POS_MARK = re.compile(r"^[一二三四五]\s*之\s*[一二三四五六]?$")  # "N之M"位置标记
+_EDGE_ROW_Y = 640                   # 页缘行阈值（ROI 底 700）：底部行及其
+                                    # 小字（y≈640~685）翻页后必然重现于页
+                                    # 中部复核，乱码留待那时裁决
 _ROW_MERGE_DY = 25                  # 同一行碎 token 归并的 y 容差
 _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y 容差
 _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
@@ -191,14 +220,31 @@ def parse_selection_rows(tokens):
 
     姓名带只收 x∈[100,300) 的 token：左侧 x<100 是"N之M"位置标记和
     锁图标区（真机布局），落进姓名带的"N之M"标记也按格式排除——
-    两者都不算"读不清的名字"。姓名带里的其他乱码仍计入 unreadable
-    （保守阻断）。碎 token 按 y 归并成文本行再过名册校正；等级/疲劳
-    token 按 y 就近归属。 Returns: (rows, unreadable_rows)。
+    两者都不算"读不清的名字"。碎 token 按 y 归并成文本行再过名册
+    校正；归并行整体校正不上时，恰好一个碎 token 能过名册则采纳它
+    （其余是小字误读噪声，真机常客）。姓名带里的其他乱码仍计入
+    unreadable（保守阻断），唯二例外：行内小字区误读（下方 50px
+    内紧跟可校正名字行，丢弃不计）与页缘乱码（y>_EDGE_ROW_Y，
+    翻页后必然送回页中部复核，留待那时裁决）。
+
+    等级/疲劳（2026-09-22 真机校准）：行内四行小字同在 x∈[440,640)
+    一列，按内容格式区分（疲劳=N/M 且上限 100；等级=N级）。「刀剑」
+    与「乱舞」等级格式相同，刀剑行靠自体前缀或同 y 的「刀剑」label
+    配对认领，乱舞等级不得冒充刀剑等级；刀剑等级在名字上方
+    _LEVEL_ABOVE_NAME 区间内就近归属，疲劳在名字上方 ±_ROW_ATTACH_DY。
+
+    行内小字区（名字上方 ~28~45px）的 OCR 误读会落进姓名带、自成
+    乱码行——它们不是名字：仅当其下方 50px 内紧跟一行能过名册的
+    名字时，按小字垃圾丢弃（不计 unreadable）；名字位本身的乱码
+    （下方无紧邻名字行）仍保守计入 unreadable。
+
+    Returns: (rows, unreadable_rows)。
     rows 每项: {"y", "name_raw", "name", "sword_catalog_id", "level",
     "fatigue", "form": None, "unknown_fields": [...]}。
     form 恒为 None——选择列表目前没有形态直读通道（盲区，如实标注）。
     """
     name_band, level_band, fatigue_band = [], [], []
+    sword_label_ys = []
     for text, pt in tokens or []:
         text = str(text or "").strip()
         if not text:
@@ -210,14 +256,18 @@ def parse_selection_rows(tokens):
             if _POS_MARK.match(text):
                 continue            # 落进姓名带的"N之M"标记：排除，不算乱码
             name_band.append((x, y, text))
-        elif _LEVEL_X[0] <= x < _LEVEL_X[1]:
-            lv = _parse_level_token(text)
-            if lv is not None:
-                level_band.append((y, lv))
         elif _FATIGUE_X[0] <= x < _FATIGUE_X[1]:
             fv = _parse_fatigue_token(text)
             if fv is not None:
                 fatigue_band.append((y, fv))
+                continue
+            lv = _parse_level_token(text)
+            if lv is not None and x < _LEVEL_X[1]:
+                # 自体带「刀剑」前缀（合体 token）直接可信；分体值 token
+                # 需同 y 有「刀剑」label 配对，防「乱舞 N级」冒充刀剑等级
+                level_band.append((y, lv, text.startswith("刀剑")))
+            elif text == "刀剑":
+                sword_label_ys.append(y)
 
     # 名字碎 token 归行：按 y 排序后 proximity 归并，同组按 x 拼接
     name_band.sort(key=lambda t: (t[1], t[0]))
@@ -228,18 +278,43 @@ def parse_selection_rows(tokens):
         else:
             lines.append([y, [(x, text)]])
 
+    def _sid_of(parts):
+        return _match_name("".join(t for _x, t in sorted(parts)))
+
     rows, unreadable = [], 0
-    for y, parts in lines:
+    for idx, (y, parts) in enumerate(lines):
         name_raw = "".join(t for _x, t in sorted(parts))
         sid = _match_name(name_raw)
+        if sid is None and len(parts) > 1:
+            # 小字垃圾与名字同 y 被归并进一行（'今剑AN'）：恰好一个
+            # 碎 token 能过名册时采纳它，其余是误读噪声
+            hits = [t for _x, t in sorted(parts)
+                    if _match_name(t) is not None]
+            if len(hits) == 1:
+                sid = _match_name(hits[0])
+        if sid is None and idx + 1 < len(lines):
+            gap = lines[idx + 1][0] - y
+            if 0 < gap <= 50 and _sid_of(lines[idx + 1][1]) is not None:
+                continue            # 行内小字区误读：丢弃，不算读不清的名字
         if sid is None:
-            unreadable += 1
+            # 页缘乱码（底部 50px）不计入全表 unreadable：翻页位移
+            # ~350px 必然把它送回下一页中部重新裁决（读清了自然参与
+            # 匹配，仍读不清则以非页缘身份计入）。裁决点击只落在证据
+            # 充分的确认行上，漏算页缘乱码不会点错人；代价是目标恰好
+            # 是末页页缘乱码行时报 not_found（安全方向）。
+            if y <= _EDGE_ROW_Y:
+                unreadable += 1
         info = sword_db.all_swords().get(sid) if sid else None
         level = fatigue = None
-        for ty, lv in level_band:
-            if abs(ty - y) <= _ROW_ATTACH_DY:
-                level = lv
-                break
+        lo, hi = _LEVEL_ABOVE_NAME
+        for ty, lv, self_labeled in sorted(level_band):
+            if not (y - hi <= ty <= y - lo):
+                continue
+            if not self_labeled and not any(
+                    abs(sy - ty) <= 10 for sy in sword_label_ys):
+                continue            # 没有「刀剑」label 配对：疑是乱舞等级
+            level = lv
+            break
         for ty, fv in fatigue_band:
             if abs(ty - y) <= _ROW_ATTACH_DY:
                 fatigue = fv
@@ -327,6 +402,30 @@ def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
                 unconfirmed.append((page_idx, row, missing))
             else:
                 confirmed.append((page_idx, row))
+
+    # 跨页弱副本剔除（2026-09-22 真机）：翻页重叠区里同一物理行会
+    # 出现两次——页缘半遮行（刀剑等级在可视区外，level=None）和页中部
+    # 完整行。半遮行缺证据但不构成反证；若它的已知字段与某 confirmed
+    # 行逐项一致（缺值视为相容），视为该确认行的弱读取副本，剔除。
+    # 安全边界：剔除只发生在「已知字段全一致」时——同名两振若疲劳或
+    # 等级任一不同，半遮副本不会被剔，照样 ambiguous 停下；裁决点击
+    # 永远只落在证据充分的确认行上。
+    if confirmed and unconfirmed:
+        def _weak_copy_of_confirmed(item):
+            _p, r, _m = item
+            for _cp, c in confirmed:
+                if r.get("sword_catalog_id") != c.get("sword_catalog_id"):
+                    continue
+                if r.get("level") is not None \
+                        and r.get("level") != c.get("level"):
+                    continue
+                if r.get("fatigue") is not None \
+                        and r.get("fatigue") != c.get("fatigue"):
+                    continue
+                return True
+            return False
+        unconfirmed = [item for item in unconfirmed
+                       if not _weak_copy_of_confirmed(item)]
 
     if len(confirmed) == 1 and not unconfirmed and not unreadable_rows:
         page_idx, row = confirmed[0]

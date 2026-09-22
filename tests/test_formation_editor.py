@@ -32,6 +32,7 @@ from touken.flows.formation_editor import (
 HASEBE = "touken_118_heshikiri_hasebe"   # 压切长谷部（打刀）
 MIKA = "touken_003_mikazuki_munechika"   # 三日月宗近（太刀）
 KOGI = "touken_005_kogitsune_maru"       # 小狐丸（太刀）
+IMA = "touken_011_imagiri_no_toshiro"    # 今剑（短刀）
 MAEDA = "touken_039_maeda_toushirou"     # 前田藤四郎（短刀）
 
 
@@ -122,7 +123,7 @@ class _FakeMaa:
         return None
 
     def ocr_all(self, roi, image=None):
-        if not self.in_list or not (roi.x == 60 and roi.y == 100):
+        if not self.in_list or not (roi.x == 60 and roi.y == 40):
             return []
         if not self.pages:
             return []
@@ -130,10 +131,13 @@ class _FakeMaa:
         for row in self.pages[self.list_page]:
             tokens.append((row["name"], _P(150, row["y"])))
             if row.get("level") is not None:
-                tokens.append((f"{row['level']}级", _P(380, row["y"])))
+                # 真机布局：刀剑等级在名字上方 ~84px、x≈500（合体 token）
+                tokens.append((f"刀剑 {row['level']}级",
+                               _P(500, row["y"] - 84)))
             if row.get("fatigue") is not None:
+                # 疲劳在名字上方 ~19px、x≈520
                 tokens.append((f"疲劳 {row['fatigue']}/100",
-                               _P(520, row["y"])))
+                               _P(520, row["y"] - 19)))
         return tokens
 
     def template_match(self, template, roi=None, threshold=0.7):
@@ -301,9 +305,11 @@ class PureFunctionTests(unittest.TestCase):
         self.assertIsNotNone(err)
 
     def test_parse_rows_merges_fragments_and_attaches(self):
-        tokens = [("压切", _P(150, 148)), ("长谷部", _P(200, 152)),
-                  ("35级", _P(380, 150)), ("疲劳 85/100", _P(520, 150)),
-                  ("小狐丸", _P(150, 300)), ("疲劳 20/100", _P(520, 300))]
+        # 真机坐标（2026-09-22 校准）：名字 y≈248，刀剑等级在名字上方 ~84px、
+        # x≈500（合体 token），疲劳在名字上方 ~17px、x≈520
+        tokens = [("压切", _P(150, 248)), ("长谷部", _P(200, 252)),
+                  ("刀剑 35级", _P(500, 164)), ("疲劳 85/100", _P(520, 231)),
+                  ("小狐丸", _P(150, 347)), ("疲劳 20/100", _P(520, 330))]
         rows, unreadable = parse_selection_rows(tokens)
         self.assertEqual(unreadable, 0)
         self.assertEqual(len(rows), 2)
@@ -316,6 +322,67 @@ class PureFunctionTests(unittest.TestCase):
         self.assertIn("form", r0["unknown_fields"])
         self.assertEqual(rows[1]["sword_catalog_id"], KOGI)
         self.assertIn("level", rows[1]["unknown_fields"])
+
+    def test_split_level_token_needs_sword_label(self):
+        """分体等级值（'99 级'）须同 y 有「刀剑」label 配对才认；
+        「乱舞 9 级」同格式但 label 是乱舞，不得冒充刀剑等级。
+        （2026-09-22 真机：刀剑/乱舞/生存/疲劳同列 x≈492~580。）"""
+        tokens = [("刀剑", _P(493, 276)), ("99 级", _P(558, 277)),
+                  ("乱舞", _P(493, 299)), ("9级", _P(561, 299)),
+                  ("疲劳 100/100", _P(529, 343)),
+                  ("今剑", _P(126, 362))]
+        rows, unreadable = parse_selection_rows(tokens)
+        self.assertEqual(unreadable, 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["level"], 99)        # 不是乱舞的 9
+        self.assertEqual(rows[0]["fatigue"], 100)
+
+    def test_fused_level_token_self_labeled(self):
+        """合体 token（'刀剑1级'）自体带前缀，无需 label 配对。"""
+        rows, _ = parse_selection_rows(
+            [("刀剑1级", _P(530, 276)), ("今剑", _P(126, 362))])
+        self.assertEqual(rows[0]["level"], 1)
+
+    def test_ranbu_level_alone_does_not_leak(self):
+        """只有乱舞等级（刀剑行漏读）时 level 必须 None，不拿 9 级冒充。"""
+        tokens = [("乱舞", _P(493, 299)), ("9级", _P(561, 299)),
+                  ("今剑", _P(126, 362))]
+        rows, _ = parse_selection_rows(tokens)
+        self.assertIsNone(rows[0]["level"])
+        self.assertIn("level", rows[0]["unknown_fields"])
+
+    def test_header_garbage_above_name_dropped(self):
+        """名字上方 ~28~45px 的乱码是行内小字区误读（真机每行都有），
+        下方紧跟能过名册的名字行时丢弃，不计 unreadable。"""
+        tokens = [("天", _P(131, 200)), ("小狐丸", _P(139, 245)),
+                  ("沃怡", _P(162, 150)), ("三日月宗近", _P(162, 195))]
+        rows, unreadable = parse_selection_rows(tokens)
+        self.assertEqual(unreadable, 0)
+        self.assertEqual([r["name"] for r in rows], ["三日月宗近", "小狐丸"])
+
+    def test_garbage_at_name_position_still_blocks(self):
+        """名字位本身的乱码（非页缘、下方无紧邻名字行）仍保守阻断。"""
+        tokens = [("小狐丸", _P(139, 245)), ("出司", _P(128, 600))]
+        rows, unreadable = parse_selection_rows(tokens)
+        self.assertEqual(unreadable, 1)
+        self.assertEqual(len(rows), 2)
+
+    def test_merged_line_single_hit_fragment_adopted(self):
+        """小字垃圾与名字同 y 归并进一行（真机 '今剑AN'）：恰好一个
+        碎 token 过名册时采纳它，噪声不拖成 unreadable。"""
+        tokens = [("今剑", _P(126, 149)), ("AN", _P(187, 128))]
+        rows, unreadable = parse_selection_rows(tokens)
+        self.assertEqual(unreadable, 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sword_catalog_id"], IMA)
+        self.assertEqual(rows[0]["name_raw"], "今剑AN")  # 原样留证
+
+    def test_edge_row_garbage_not_counted(self):
+        """页缘乱码（y>650）不计 unreadable：翻页必然送回页中部复核。"""
+        tokens = [("小狐丸", _P(139, 245)), ("出司", _P(128, 685))]
+        rows, unreadable = parse_selection_rows(tokens)
+        self.assertEqual(unreadable, 0)
+        self.assertEqual(len(rows), 2)          # 行还在，只是不计数
 
     def test_position_markers_never_pollute_name_band(self):
         """真机布局：名字左侧的"N之M"位置标记/锁图标不算读不清的名字。"""

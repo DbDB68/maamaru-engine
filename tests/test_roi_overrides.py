@@ -154,6 +154,7 @@ class RegistryDriftTests(unittest.TestCase):
         # 把覆盖层临时清空，常量回到代码写死的默认值，测的才是真漂移。
         with patch.object(roi_overrides, "_load_overrides", lambda: {}):
             inv = importlib.reload(sword_inventory)
+            fed = importlib.reload(formation_editor)
         pairs = [
             ("sword_inventory.title", inv._TITLE_ROI),
             ("sword_inventory.owned", inv._OWNED_ROI),
@@ -161,7 +162,14 @@ class RegistryDriftTests(unittest.TestCase):
             ("sword_inventory.album_title", inv._ALBUM_TITLE_ROI),
             ("sword_inventory.album_collect", inv._COLLECT_ROI),
             ("sword_inventory.album_grid", inv._GRID_ROI),
-            ("formation_editor.list", formation_editor._LIST_ROI),
+            ("formation_editor.list", fed._LIST_ROI),
+            ("formation_editor.list_title", fed._LIST_TITLE[1]),
+            ("formation_editor.title", fed._FORMATION_TITLE[1]),
+            ("formation_editor.team_select_title",
+             fed._TEAM_SELECT_TITLE[1]),
+            ("formation_editor.name_band", fed._NAME_BAND),
+            ("formation_editor.level_band", fed._LEVEL_BAND),
+            ("formation_editor.fatigue_band", fed._FATIGUE_BAND),
             ("smith.capacity", smith.SmithMixin._CAPACITY_ROI),
             ("smith.board_name", smith.SmithMixin._BOARD_NAME_ROI),
             ("smith.board_mark", smith.SmithMixin._BOARD_MARK_ROI),
