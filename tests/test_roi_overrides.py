@@ -22,7 +22,8 @@ _module_tmp = tempfile.TemporaryDirectory(prefix="roi_overrides_module_test_")
 with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _module_tmp.name}):
     from touken import roi_overrides
     from touken.flows import formation_editor, smith, sortie, sword_inventory
-    from touken.roi_registry import ROI_REGISTRY
+    from touken.flows import team_roster
+    from touken.roi_registry import ROI_REGISTRY, FORMATION_ROW_DEFAULTS
 
 
 def _overrides_path(debug_dir: Path) -> Path:
@@ -190,6 +191,12 @@ class RegistryDriftTests(unittest.TestCase):
                 roi_id = f"sword_inventory.row{row_no}.{field}"
                 self.assertEqual(
                     tuple(inv.ROW_CELL_ROIS[row_no][field]),
+                    defaults[roi_id], roi_id)
+        for slot_no, cells in FORMATION_ROW_DEFAULTS.items():
+            for field in cells:
+                roi_id = f"team_roster.row{slot_no}.{field}"
+                self.assertEqual(
+                    tuple(team_roster.ROW_CELL_ROIS[slot_no][field]),
                     defaults[roi_id], roi_id)
 
 

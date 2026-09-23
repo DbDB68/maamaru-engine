@@ -67,7 +67,7 @@ from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
 from ..runtime_paths import STATE_DIR
-from .team_roster import _match_name, _ROW_CY, _TEAM_TAB
+from .team_roster import _match_name, _ROW_CY, _TEAM_TAB, link_visible_slot
 
 RESULT_SCHEMA_VERSION = 1
 
@@ -582,6 +582,20 @@ class FormationEditorMixin:
         """读行首"N之M"位置标签（切队正面确认）。"""
         return self._read_row_label(cy)
 
+    def _formation_link_visible_slot(self, slot_no, slot):
+        """预设槽位零点击前，用最新完整刀账核对当前这振的可见指纹。"""
+        from ..custom_formations import _current_candidate_pool
+        try:
+            pool = _current_candidate_pool()
+        except Exception as exc:
+            return {"status": "unavailable", "observation_id": None,
+                    "reason": f"读取完整刀账失败：{exc}"}
+        if not pool.get("done"):
+            return {"status": "insufficient", "observation_id": None}
+        observed = dict(slot)
+        observed["stats"] = self._read_slot_stats(slot_no)
+        return link_visible_slot(observed, pool.get("entries") or [])
+
     # ---- 筛选/排序面板 ----
 
     def _open_filter_panel(self):
@@ -743,6 +757,14 @@ class FormationEditorMixin:
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "换前观察失败：整页读不出", entry_shell=shell)
         m = slot_matches_target(slot_before, tgt, match_fields)
+        if m is not False and tgt.get("observation_id"):
+            link = self._formation_link_visible_slot(slot_no, slot_before)
+            slot_before["visible_link"] = link
+            m = (True if link.get("status") == "linked" and
+                 link.get("observation_id") == tgt["observation_id"]
+                 else None)
+            # 名字/等级相同仍可能是另一振；形态章偶尔漏识别时，完整刀账中
+            # 唯一的当前可见指纹也能正面确认就是这振。
         if m is True:
             yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
             return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
@@ -752,7 +774,7 @@ class FormationEditorMixin:
                                 team_before=team_before)
         if m is None:
             yield (f"[编队] {slot_no}号位读数与目标不足以互相确认"
-                   "（形态/等级证据缺口），不能零点击宣称正确——"
+                   "（形态/等级/实例证据缺口），不能零点击宣称正确——"
                    "打开名单寻找明确目标")
 
         # 4) 点"替换"，确认进入"刀剑男士选择"

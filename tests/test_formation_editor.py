@@ -292,6 +292,10 @@ class _EditorHost(FormationEditorMixin):
     def _formation_row_label(self, cy):
         return self.maa.current_tab
 
+    def _formation_link_visible_slot(self, slot_no, slot):
+        return getattr(self, "visible_link", {"status": "linked",
+                                              "observation_id": "9:12"})
+
     def _scrollbar_bottom(self):
         """注入缝：剧本滑块底缘读数（生产通道=右缘滑轨像素读取）。"""
         return self.maa.scrollbar_bottom()
@@ -665,16 +669,34 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(decide_clicks, [])
         _assert_never_departs(self, maa)
 
+    def test_same_name_level_but_instance_ambiguous_does_not_skip(self):
+        maa, host = _std_setup(pages=[])
+        host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
+                                 level=35)
+        host.visible_link = {"status": "ambiguous", "observation_id": None}
+        result = _run(host)
+        self.assertNotEqual(result["result"], ALREADY_CORRECT)
+        self.assertTrue(any(x == _SWAP_X for x, _y in maa.clicks))
+
     def test_already_correct_requires_proven_form(self):
-        """槽位同名但形态读不出：不能零点击宣称正确（去名单找证据）。"""
+        """形态读不出且实例也未能唯一链接：不能零点击宣称正确。"""
         pages = [[_ok_row(300)], _DECOY_PAGE]
         maa, host = _std_setup(pages=pages)
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35, kiwame="unknown")
+        host.visible_link = {"status": "insufficient", "observation_id": None}
         result = _run(host)
         self.assertNotEqual(result["result"], ALREADY_CORRECT)
         swap_clicks = [c for c in maa.clicks if c[0] == _SWAP_X]
         self.assertTrue(swap_clicks)     # 开了名单，没偷懒宣称正确
+
+    def test_unique_visible_instance_can_confirm_when_badge_misses(self):
+        maa, host = _std_setup(pages=[])
+        host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
+                                 level=35, kiwame="unknown")
+        result = _run(host)
+        self.assertEqual(result["result"], ALREADY_CORRECT)
+        self.assertFalse(any(x == _SWAP_X for x, _y in maa.clicks))
 
     def test_target_on_first_page_of_three_navigates_back(self):
         """目标在首页，扫完全表后按指纹翻回首页再点决定。"""

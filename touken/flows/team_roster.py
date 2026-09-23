@@ -42,9 +42,17 @@ from pathlib import Path
 
 from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
+from ..roi_overrides import get_roi
+from ..roi_registry import FORMATION_ROW_DEFAULTS
 
 _TEAM_TAB = {1: (154, 91), 2: (274, 91), 3: (394, 91), 4: (516, 91), 5: (638, 91)}
 _ROW_CY = [160, 258, 357, 455, 553, 652]
+_STAT_NAMES = ("生存", "打击", "防御", "机动", "冲力", "侦察", "隐蔽", "必杀")
+ROW_CELL_ROIS = {
+    slot: {field: get_roi(f"team_roster.row{slot}.{field}", rect)
+           for field, rect in cells.items()}
+    for slot, cells in FORMATION_ROW_DEFAULTS.items()
+}
 
 # 每槽读取 ROI（相对行心 cy 的偏移，1280x720）
 _NAME_ROI = (68, 5, 270, 38)        # 名字（标签右侧空隙 64~76，首字不掐头）
@@ -335,9 +343,56 @@ def _match_name(raw: str):
     return hit
 
 
+def _slot_name_from_combined(raw: str, slot: int):
+    """从「位置号＋刀名」格剥离本槽号；号错了不能拿剩余字认刀。"""
+    text = re.sub(r"\s+", "", raw or "")
+    if not text:
+        return None, False
+    numerals = "一二三四五六"
+    if text[0] in numerals:
+        if text[0] != numerals[slot - 1]:
+            return None, True
+        return text[1:] or None, False
+    return text, False
+
+
+def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
+    """当前槽与完整刀账按可见指纹链接；缺字段、重复或过期都不猜实例。"""
+    if slot.get("slot_status") != "occupied" or not slot.get("sword_catalog_id"):
+        return {"status": "insufficient", "observation_id": None}
+    if any(slot.get(key) is None for key in
+           ("level", "tou_level", "survival_max")):
+        return {"status": "insufficient", "observation_id": None}
+    stats = slot.get("stats") or {}
+    if any(stats.get(key) is None for key in _STAT_NAMES):
+        return {"status": "insufficient", "observation_id": None}
+    matches = []
+    for entry in entries:
+        if entry.get("sword_catalog_id") != slot["sword_catalog_id"]:
+            continue
+        if any(entry.get(key) != slot[key] for key in
+               ("level", "tou_level", "survival_max")):
+            continue
+        archived = entry.get("stats") or {}
+        if all(archived.get(key) == stats[key] for key in _STAT_NAMES):
+            matches.append(entry)
+    if len(matches) == 1 and matches[0].get("observation_id"):
+        return {"status": "linked",
+                "observation_id": matches[0]["observation_id"]}
+    return {"status": "ambiguous" if matches else "stale",
+            "observation_id": None}
+
+
 def _shift(roi, cy):
     x0, y0, x1, y1 = roi
     return (x0, y0 + cy, x1, y1 + cy)
+
+
+def _badge_cell(cy):
+    try:
+        return ROW_CELL_ROIS[_ROW_CY.index(cy) + 1]["badge"]
+    except ValueError:
+        return _shift(_BADGE_ROI, cy)
 
 
 def _tactical_roles(sword_type, kiwame_status, injury):
@@ -469,19 +524,40 @@ class TeamRosterMixin:
 
     def _read_roster_slot(self, slot, cy, stamps):
         """读单个槽位：空位（正面证据）/ 占用（逐字段降级）/ 未知。"""
-        name_raw = self._roster_ocr_text(_shift(_NAME_ROI, cy))
-        level = _parse_level(self._roster_ocr_text(_shift(_LEVEL_ROI, cy)))
-        fatigue = _parse_fatigue_tokens(
-            self._roster_ocr_tokens(_shift(_FATIGUE_ROI, cy)),
-            y_min=cy + 28, y_max=cy + 55)
-        survival, survival_max = _parse_survival_tokens(
-            self._roster_ocr_tokens(_shift(_SURVIVAL_ROI, cy)))
+        cells = ROW_CELL_ROIS[slot]
+        combined = self._roster_ocr_text(cells["name"])
+        name_raw, label_conflict = _slot_name_from_combined(combined, slot)
+        if combined is None:
+            # 老测试桩及旧识别路径兜底；新格有内容但位置号冲突时不能回退猜名。
+            name_raw = self._roster_ocr_text(_shift(_NAME_ROI, cy))
+
+        levels_tokens = self._roster_ocr_tokens(cells["levels"])
+        if levels_tokens:
+            # 延迟导入：sword_inventory 本身会导入 team_roster 的徽章判定。
+            from .sword_inventory import parse_levels_cell
+            levels = parse_levels_cell(levels_tokens)
+        else:
+            levels = {}
+        level = levels.get("level")
+        tou_level = levels.get("tou_level")
+        survival = levels.get("survival")
+        survival_max = levels.get("survival_max")
+        fatigue = levels.get("fatigue")
+        if level is None:
+            level = _parse_level(self._roster_ocr_text(_shift(_LEVEL_ROI, cy)))
+        if fatigue is None:
+            fatigue = _parse_fatigue_tokens(
+                self._roster_ocr_tokens(_shift(_FATIGUE_ROI, cy)),
+                y_min=cy + 28, y_max=cy + 55)
+        if survival is None:
+            survival, survival_max = _parse_survival_tokens(
+                self._roster_ocr_tokens(_shift(_SURVIVAL_ROI, cy)))
         badge = self._read_badge_char(cy)
         injury = self._read_slot_injury(cy, stamps, survival, survival_max)
         blank = self._card_blank(cy)
 
         # 内容证据任一：名字/数值/徽章字符/伤势章（可靠花数在占用分支里才算）
-        has_content = any(v is not None for v in
+        has_content = label_conflict or any(v is not None for v in
                           (name_raw, level, fatigue, survival,
                            badge["type_raw"], injury))
 
@@ -491,7 +567,8 @@ class TeamRosterMixin:
             return {"slot": slot, "slot_status": "empty", "name_raw": None,
                     "name": None, "name_status": None,
                     "sword_catalog_id": None, "sword_type": None,
-                    "rarity_base": None, "level": None, "fatigue": None,
+                    "rarity_base": None, "level": None, "tou_level": None,
+                    "fatigue": None,
                     "survival": None, "survival_max": None, "injury": None,
                     "badge": badge, "kiwame_status": None,
                     "kiwame_evidence": [], "tactical_roles": [],
@@ -509,11 +586,12 @@ class TeamRosterMixin:
 
         # 卡面有形但没有任何读得动的内容（整页失明/证据不足），
         # 或卡面纯白却有内容证据（矛盾）：都 → unknown，绝不硬判空位
-        if (blank and has_content) or (not blank and not has_content):
+        if label_conflict or (blank and has_content) or (not blank and not has_content):
             return {"slot": slot, "slot_status": "unknown", "name_raw": name_raw,
                     "name": name, "name_status": name_status,
                     "sword_catalog_id": sid, "sword_type": None,
-                    "rarity_base": None, "level": level, "fatigue": fatigue,
+                    "rarity_base": None, "level": level, "tou_level": tou_level,
+                    "fatigue": fatigue,
                     "survival": survival, "survival_max": survival_max,
                     "injury": injury, "badge": badge, "kiwame_status": "unknown",
                     "kiwame_evidence": [], "tactical_roles": [],
@@ -527,7 +605,8 @@ class TeamRosterMixin:
             return {"slot": slot, "slot_status": "unknown", "name_raw": name_raw,
                     "name": name, "name_status": name_status,
                     "sword_catalog_id": sid, "sword_type": None,
-                    "rarity_base": None, "level": None, "fatigue": None,
+                    "rarity_base": None, "level": None, "tou_level": tou_level,
+                    "fatigue": None,
                     "survival": None, "survival_max": None,
                     "injury": injury, "badge": badge, "kiwame_status": "unknown",
                     "kiwame_evidence": [], "tactical_roles": [],
@@ -544,7 +623,8 @@ class TeamRosterMixin:
         return {"slot": slot, "slot_status": "occupied", "name_raw": name_raw,
                 "name": name, "name_status": name_status,
                 "sword_catalog_id": sid, "sword_type": sword_type,
-                "rarity_base": rarity_base, "level": level, "fatigue": fatigue,
+                "rarity_base": rarity_base, "level": level,
+                "tou_level": tou_level, "fatigue": fatigue,
                 "survival": survival, "survival_max": survival_max,
                 "injury": injury, "badge": badge,
                 "kiwame_status": kiwame_status,
@@ -553,6 +633,18 @@ class TeamRosterMixin:
                 "unknown_fields": _unknown_fields(
                     name_status, sid, sword_type, level, fatigue, survival,
                     injury, badge, kiwame_status == "unknown")}
+
+    def _read_slot_stats(self, slot):
+        """属性带逐格读；整带 OCR 会把相邻数字粘成一个数。缺格留 None。"""
+        from .sword_inventory import split_stats_roi
+        cells = split_stats_roi(ROW_CELL_ROIS[slot]["stats"])
+        out = {}
+        for name, rect in zip(_STAT_NAMES, cells):
+            numbers = [int(text.strip()) for text, _pt in
+                       self._roster_ocr_tokens(rect)
+                       if re.fullmatch(r"\d{1,3}", text.strip())]
+            out[name] = numbers[0] if len(numbers) == 1 else None
+        return out
 
     # ---------- 伤势 / 白樱花 ----------
 
@@ -636,7 +728,7 @@ class TeamRosterMixin:
         type_raw = None
         if img is not None:
             for text, _pt in self.maa.ocr_all(
-                    roi_4to4(*_shift(_BADGE_ROI, cy)), img) or []:
+                    roi_4to4(*_badge_cell(cy)), img) or []:
                 for ch in _BADGE_TYPE_OF:
                     if ch in text:
                         type_raw = ch
@@ -678,7 +770,7 @@ class TeamRosterMixin:
         img = self.maa.screenshot()
         region = None
         if img is not None:
-            x0, y0, x1, y1 = _shift(_BADGE_ROI, cy)
+            x0, y0, x1, y1 = _badge_cell(cy)
             region = img[y0:y1, x0:x1]
         badge.update(match_badge_flowers(
             region, self._flower_templates(), confirmed_type,

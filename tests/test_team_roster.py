@@ -25,7 +25,8 @@ import numpy as np
 
 from touken.flows.team_roster import (
     TeamRosterMixin, _ROW_CY, _TEAM_TAB, _BADGE_THRESHOLD,
-    _PROVEN_FLOWER_COMBOS)
+    _PROVEN_FLOWER_COMBOS, ROW_CELL_ROIS, _slot_name_from_combined,
+    link_visible_slot)
 
 _REPO = Path(__file__).resolve().parents[1]
 _DEV_FRAMES = Path(os.environ.get("LOCALAPPDATA", "")) / "Maamaru-Dev" / "debug" / "research"
@@ -103,6 +104,10 @@ class _RosterMaa:
             if abs(x - 20) < 5 and abs(y - (cy - 48)) < 6:
                 return [(label, _P(40, cy - 30))]
         for cy, fields in page.rows.items():
+            slot = _ROW_CY.index(cy) + 1
+            combined = ROW_CELL_ROIS[slot]["name"]
+            if x == combined[0] and y == combined[1]:
+                return self._tokens(fields.get("combined_name"), cy + 20)
             if abs(x - 68) < 5 and abs(y - (cy + 5)) < 5:
                 return self._tokens(fields.get("name"), cy + 20)
             if abs(x - 348) < 5 and abs(y - (cy - 42)) < 5:
@@ -244,13 +249,14 @@ def _make_maa(pages_spec, current=1, swallow=(), delayed=(), cards=None,
 
 def _read(cy=160, name=None, level=None, fatigue=None, survival=None,
           badge_char=None, badge_template=None, badge_scale=1.0,
-          sakura=False, stamp_scores=None, card="occupied"):
+          sakura=False, stamp_scores=None, card="occupied",
+          combined_name=None):
     """读一个槽位：字段/徽章/伤势分数/白樱花/卡面形态按剧本组合。
 
     stamp_scores: {伤势中文键: 真实分}（模拟脉动帧的各类别实测分）。
     """
     fields = {"level": level, "fatigue": fatigue, "survival": survival,
-              "badge_char": badge_char}
+              "badge_char": badge_char, "combined_name": combined_name}
     if name is not None:
         fields["name"] = name
     scores = {cy: stamp_scores} if stamp_scores else {}
@@ -260,7 +266,8 @@ def _read(cy=160, name=None, level=None, fatigue=None, survival=None,
                          {cy} if sakura else set(), scores)},
                     cards=cards, badge_scale=badge_scale)
     host = _RosterHost(maa)
-    return host._read_roster_slot(1, cy, host._roster_injury_stamps())
+    return host._read_roster_slot(_ROW_CY.index(cy) + 1, cy,
+                                  host._roster_injury_stamps())
 
 
 class MroResolutionTests(unittest.TestCase):
@@ -547,6 +554,39 @@ class SlotFieldTests(unittest.TestCase):
         slot = _read(name="丼丼", badge_char="丼")
         self.assertEqual(slot["slot_status"], "unknown")
         self.assertEqual(slot["kiwame_status"], "unknown")
+
+
+class CombinedSlotEvidenceTests(unittest.TestCase):
+    def test_position_prefix_and_empty_candidate(self):
+        self.assertEqual(_slot_name_from_combined("四鹤丸国永", 4),
+                         ("鹤丸国永", False))
+        self.assertEqual(_slot_name_from_combined("四", 4), (None, False))
+        self.assertEqual(_slot_name_from_combined("三鹤丸国永", 4),
+                         (None, True))
+
+    def test_label_only_requires_blank_card(self):
+        self.assertEqual(_read(cy=455, card="blank", combined_name="四")
+                         ["slot_status"], "empty")
+        self.assertEqual(_read(cy=455, card="occupied", combined_name="四")
+                         ["slot_status"], "unknown")
+
+    def test_visible_fingerprint_links_only_unique_complete_instance(self):
+        keys = ("生存", "打击", "防御", "机动", "冲力", "侦察", "隐蔽", "必杀")
+        stats = {key: index + 50 for index, key in enumerate(keys)}
+        slot = {"slot_status": "occupied", "sword_catalog_id": "same-sword",
+                "level": 91, "tou_level": 9, "survival_max": 73,
+                "stats": stats}
+        entries = [dict(slot, observation_id="snapshot:1"),
+                   dict(slot, observation_id="snapshot:2",
+                        stats={**stats, "机动": 99})]
+        self.assertEqual(link_visible_slot(slot, entries),
+                         {"status": "linked", "observation_id": "snapshot:1"})
+        self.assertEqual(link_visible_slot(slot, entries + [dict(entries[0])]),
+                         {"status": "ambiguous", "observation_id": None})
+        self.assertEqual(link_visible_slot({**slot, "stats": {"生存": 73}}, entries),
+                         {"status": "insufficient", "observation_id": None})
+        self.assertEqual(link_visible_slot({**slot, "level": 90}, entries),
+                         {"status": "stale", "observation_id": None})
 
 
 class NameMatchTests(unittest.TestCase):

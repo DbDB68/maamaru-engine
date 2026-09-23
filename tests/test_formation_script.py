@@ -236,6 +236,8 @@ class FormationContractTests(unittest.TestCase):
         maa = _FakeMaa(shell="formation", pages=[])
         host = _EditorHost(maa, teams)
         entry = self._pool_entry(HASEBE, "压切长谷部", 35)
+        host.visible_link = {"status": "linked",
+                             "observation_id": entry["observation_id"]}
         result = self._play(host, entry, match_fields=("name", "level"))
         self.assertEqual(result["result"], ALREADY_CORRECT,
                          result.get("reason"))

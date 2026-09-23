@@ -361,6 +361,37 @@ ROI_REGISTRY = [
     },
 ]
 
+# 2026-09-23 模板工坊六槽框定；来源为同源运行帧
+# Maamaru-Dev/debug/template_lab/sessions/20260922-173410/frame_000.png。
+# name 同时含竖排位置号和刀名。badge 沿用编队页真帧校准的圆章范围，
+# 玩家所框「头像和徽章」实际从 x≈130 起，未覆盖 x≈80～130 的圆章。
+FORMATION_ROW_DEFAULTS = {
+    1: {"name": (34, 179, 266, 212), "levels": (296, 118, 419, 216),
+        "stats": (418, 121, 926, 213), "badge": (62, 110, 140, 180)},
+    2: {"name": (34, 274, 266, 303), "levels": (298, 217, 417, 309),
+        "stats": (415, 215, 926, 309), "badge": (62, 208, 140, 278)},
+    3: {"name": (34, 367, 272, 404), "levels": (297, 312, 420, 402),
+        "stats": (414, 311, 929, 401), "badge": (62, 307, 140, 377)},
+    4: {"name": (34, 464, 268, 501), "levels": (297, 405, 418, 497),
+        "stats": (416, 404, 926, 496), "badge": (62, 405, 140, 475)},
+    5: {"name": (29, 559, 267, 598), "levels": (297, 500, 417, 591),
+        "stats": (418, 500, 927, 591), "badge": (62, 503, 140, 573)},
+    6: {"name": (26, 654, 265, 691), "levels": (298, 594, 417, 687),
+        "stats": (418, 595, 926, 686), "badge": (62, 602, 140, 672)},
+}
+_FORMATION_NUMERALS = "一二三四五六"
+for _slot_no, _fields in FORMATION_ROW_DEFAULTS.items():
+    for _field, _rect in _fields.items():
+        _caption = {"name": "位置号＋刀名", "levels": "等级与生存块",
+                    "stats": "九格属性带", "badge": "左侧刀种圆章"}[_field]
+        ROI_REGISTRY.append({
+            "id": f"team_roster.row{_slot_no}.{_field}",
+            "label": f"部队编成·{_FORMATION_NUMERALS[_slot_no - 1]}号位{_caption}",
+            "used_in": "touken/flows/team_roster.py:50",
+            "purpose": f"只读第{_slot_no}槽{_caption}，用于编队观察与身份核对",
+            "default": _rect,
+        })
+
 
 def registry_index() -> dict:
     """id → 条目，给按 id 查默认/出处用。"""
