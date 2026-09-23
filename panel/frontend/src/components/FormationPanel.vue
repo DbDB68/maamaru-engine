@@ -29,6 +29,7 @@ const TEAM_LABELS = ['部队一', '部队二', '部队三', '部队四', '部队
 const MAX_PRESETS = 5 // 后端合同：预设编队最多存 5 套
 
 const profile = ref<HonmaruFormationProfile | null>(null)
+const catalog = ref<Array<{ id: string; name: string; name_zh: string; type: string }>>([])
 const loading = ref(true)
 const loadError = ref('')
 
@@ -50,10 +51,12 @@ const candidateGroups = computed<CandidateGroup[]>(() => {
     .map(([name, rows]) => ({ name, rows }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
+const catalogMatches = computed(() => catalog.value.filter(sword =>
+  (sword.name_zh || sword.name).includes(presetQuery.value.trim())))
 
 const profileSummary = computed(() => {
   if (!profile.value) return ''
-  if (!poolDone.value) return pool.value?.reason || '还没有可信的完整盘点'
+  if (!poolDone.value) return '没有完整刀账也能编队；具体一振仍需刀账'
   const skipped = pool.value?.skipped_newer_snapshots?.length || 0
   const base = `刀账候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
   return skipped ? `${base} · 之后还有 ${skipped} 次盘点没认全，以这份为准` : base
@@ -70,7 +73,13 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    profile.value = await api.honmaruProfile()
+    const [profileResult, catalogResult] = await Promise.allSettled([
+      api.honmaruProfile(), api.swords(),
+    ])
+    if (profileResult.status === 'fulfilled') profile.value = profileResult.value
+    else loadError.value = '刀账暂时没有翻开；仍可按上锁刀和等级设置预设。'
+    if (catalogResult.status === 'fulfilled') catalog.value = catalogResult.value.swords
+    else loadError.value = '刀剑名册暂时没有翻开，请稍后重新读取。'
   } catch (cause) {
     loadError.value = cause instanceof Error ? cause.message : '本丸档案没有翻开'
   } finally {
@@ -88,6 +97,7 @@ const draftName = ref('')
 const draftTeam = ref(1)
 const draftSlots = ref<Record<string, CustomFormationSlotEntry>>({})
 const pickerSlot = ref<number | null>(null) // 正在选刀的格子
+const pickerMode = ref<'ranked' | 'exact'>('ranked')
 const presetQuery = ref('')
 const presetSaving = ref(false)
 const presetMessage = ref('')
@@ -152,6 +162,18 @@ function closePresetEditor() {
 function togglePresetPicker(no: number) {
   pickerSlot.value = pickerSlot.value === no ? null : no
   presetQuery.value = ''
+}
+
+function assignRankedSword(sword: { id: string; name: string; name_zh: string }, form: 'normal' | 'kiwame') {
+  if (pickerSlot.value == null) return
+  const next = cloneSlots(draftSlots.value)
+  next[String(pickerSlot.value)] = {
+    selection_policy: 'locked_highest_level', sword_catalog_id: sword.id,
+    name_zh: sword.name_zh || sword.name, form_status: form,
+  }
+  draftSlots.value = next
+  const rest = [1, 2, 3, 4, 5, 6].find(no => no !== pickerSlot.value && !next[String(no)])
+  pickerSlot.value = rest ?? null
 }
 
 function assignPresetCandidate(entry: FormationCandidate) {
@@ -238,23 +260,18 @@ onMounted(() => { load(); loadPresets() })
     <PaperCard variant="task" tag="section" class="formation-workspace">
       <PanelHeader
         title="部队预设"
-        :subtitle="profileSummary || '从刀账里选好六个位置，出阵或远征时再整队套用'"
+        :subtitle="profileSummary || '选好要用的刀，出阵或远征时再整队套用'"
         variant="embedded"
       >
         <template #actions>
-          <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在读取刀账……' : '重新读取刀账' }}</button>
+          <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在读取……' : '重新读取' }}</button>
         </template>
       </PanelHeader>
-      <p v-if="!loadError && profile && !poolDone" class="formation-notice">
-        刀账还不可信，暂时不能选人。去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来。
-      </p>
-      <p v-else-if="!loadError && profile" class="formation-hintline">
-        这里读取的是刀账，不是游戏里的实时编队。保存预设不会立刻动游戏，选中玩法开工时才会套用。
-      </p>
+      <p class="formation-hintline">保存预设不会立刻动游戏；开工时会在名单里找上锁且等级最高的刀。</p>
 
       <p v-if="loadError" class="formation-error">{{ loadError }}</p>
-      <div v-else-if="loading && !profile" class="formation-empty">正在读取刀账……</div>
-      <template v-else-if="profile">
+      <div v-if="loading && !catalog.length" class="formation-empty">正在读取刀剑名册……</div>
+      <template v-else>
         <section class="formation-presets">
           <header class="formation-presets-head">
             <div>
@@ -306,7 +323,7 @@ onMounted(() => { load(); loadPresets() })
                 </select>
               </label>
             </div>
-            <p class="formation-hintline">六个格子各指定一振刀；留空的格子应用时不动的位置保持原样。</p>
+            <p class="formation-hintline">按刀名选上锁最高级，或从刀账指定具体一振；留空的格子应用时保持原样。</p>
             <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
             <ol class="formation-preset-slots">
               <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
@@ -332,12 +349,25 @@ onMounted(() => { load(); loadPresets() })
             </ol>
 
             <div v-if="pickerSlot != null" class="formation-preset-picker">
+              <div class="formation-picker-modes" role="group" aria-label="选刀方式">
+                <button type="button" class="secondary" :aria-pressed="pickerMode === 'ranked'" @click="pickerMode = 'ranked'">按上锁最高级</button>
+                <button type="button" class="secondary" :aria-pressed="pickerMode === 'exact'" @click="pickerMode = 'exact'">指定刀账里的一振</button>
+              </div>
               <label class="formation-search">
                 <span>给 {{ pickerSlot }} 号位选刀</span>
                 <input v-model="presetQuery" type="search" placeholder="输入刀名">
-                <em>{{ presetFilteredGroups.length }} 种</em>
+                <em>{{ pickerMode === 'ranked' ? catalogMatches.length : presetFilteredGroups.length }} 种</em>
               </label>
-              <p v-if="!poolDone" class="formation-empty">候选名单还不可信，先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来选。</p>
+              <p v-if="pickerMode === 'ranked'" class="formation-hintline">选普通或极。开工时只考虑黄色上锁的刀；最高级并列或认不清时会停下。</p>
+              <div v-if="pickerMode === 'ranked' && catalogMatches.length" class="formation-preset-candidates">
+                <section v-for="sword in catalogMatches" :key="sword.id" class="formation-candidate-group formation-ranked-choice">
+                  <b>{{ sword.name_zh || sword.name }}</b>
+                  <button type="button" class="formation-candidate" @click="assignRankedSword(sword, 'normal')">普通 · 上锁最高级</button>
+                  <button type="button" class="formation-candidate" @click="assignRankedSword(sword, 'kiwame')">极 · 上锁最高级</button>
+                </section>
+              </div>
+              <p v-else-if="pickerMode === 'ranked'" class="formation-empty">没有找到这个刀名。</p>
+              <p v-else-if="!poolDone" class="formation-empty">指定具体一振需要完整刀账；可以切回「按上锁最高级」。</p>
               <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
                 <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
                   <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>
@@ -429,7 +459,13 @@ onMounted(() => { load(); loadPresets() })
 .formation-preset-clear { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 50%; font-size: 12px; line-height: 1; cursor: pointer; }
 .formation-preset-clear:hover { color: #8f3524; border-color: #d8a195; }
 .formation-preset-picker { margin-top: 10px; }
+.formation-picker-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.formation-picker-modes button { min-height: 30px; padding: 5px 10px; font-size: 12px; }
+.formation-picker-modes button[aria-pressed="true"] { border-color: var(--fox-gold); background: var(--fox-gold-pale); }
 .formation-preset-candidates { display: grid; gap: 8px; max-height: 300px; margin-top: 8px; overflow: auto; }
+.formation-ranked-choice { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, auto)); align-items: center; }
+.formation-ranked-choice > b { min-width: 0; padding: 8px 10px; font-size: 12px; overflow-wrap: anywhere; }
+.formation-ranked-choice .formation-candidate { width: auto; height: 100%; border-top: 0; border-left: 1px solid var(--paper-line); white-space: nowrap; }
 .formation-preset-message { margin: 10px 0 0; font-size: 12px; color: #2f5527; }
 .formation-preset-message.failed { color: #8f3524; }
 .formation-preset-actions { display: flex; gap: 8px; margin-top: 12px; }
@@ -445,6 +481,9 @@ onMounted(() => { load(); loadPresets() })
   .formation-preset-tools { width: 100%; }
   .formation-preset-tools button { flex: 1; }
   .formation-preset-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .formation-ranked-choice { grid-template-columns: 1fr 1fr; }
+  .formation-ranked-choice > b { grid-column: 1 / -1; }
+  .formation-ranked-choice .formation-candidate { width: 100%; border-top: 1px solid var(--paper-line); }
 }
 @media (prefers-reduced-motion: reduce) {
   .formation-candidate, .formation-preset-slot { transition: none; }

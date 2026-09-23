@@ -57,6 +57,15 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(upgraded["schema_version"], cf.SCHEMA_VERSION)
         self.assertEqual(upgraded["formations"], records)
 
+    def test_ranked_policy_roundtrip_keeps_old_records(self):
+        ranked = _record(id="pf2", slots={"2": {
+            "selection_policy": "locked_highest_level",
+            "sword_catalog_id": "touken_003_mikazuki_munechika", "name_zh": "三日月宗近",
+            "form_status": "normal"}})
+        records = [_record(), ranked]
+        cf.save_formations(records)
+        self.assertEqual(cf.load_formations(), records)
+
     def test_missing_file_is_empty(self):
         self.assertEqual(cf.load_formations(), [])
 
@@ -165,6 +174,16 @@ class ValidateTests(unittest.TestCase):
         self.assertIsNone(cf.validate_formation(
             _record(slots={"1": {"name_zh": "三日月宗近"}})))
 
+    def test_ranked_policy_requires_catalog_and_form(self):
+        base = {"selection_policy": "locked_highest_level",
+                "sword_catalog_id": "touken_003_mikazuki_munechika", "form_status": "normal"}
+        self.assertIsNone(cf.validate_formation(_record(slots={"1": base})))
+        for bad in ({**base, "form_status": "unknown"},
+                    {**base, "sword_catalog_id": ""},
+                    {**base, "observation_id": "9:1"},
+                    {**base, "selection_policy": "anything"}):
+            self.assertIsNotNone(cf.validate_formation(_record(slots={"1": bad})))
+
     def test_id_format(self):
         for bad in ("PF1", "pf-1", "pf 1", "pf_1", "p.f1", "", 123):
             self.assertIsNotNone(cf.validate_formation(_record(id=bad)),
@@ -187,6 +206,35 @@ def _pool_entry(oid, catalog, name, level=99, **extra):
 
 
 class ResolvePresetTests(unittest.TestCase):
+    def test_ranked_resolves_without_archive(self):
+        ranked = {"selection_policy": "locked_highest_level",
+                  "sword_catalog_id": "touken_003_mikazuki_munechika", "name_zh": "三日月宗近",
+                  "form_status": "normal"}
+        result = cf.resolve_formation_slots(_record(slots={"1": ranked}),
+                                            {"done": False, "reason": "没有刀账"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"], ranked)
+
+    def test_ranked_duplicate_catalog_stops_before_game(self):
+        ranked = {"selection_policy": "locked_highest_level",
+                  "sword_catalog_id": "touken_003_mikazuki_munechika", "form_status": "normal"}
+        result = cf.resolve_formation_slots(_record(slots={"1": ranked,
+                                                        "2": {**ranked, "form_status": "kiwame"}}),
+                                            {"done": False})
+        self.assertFalse(result["ok"])
+
+    def test_ranked_and_old_name_only_slot_still_conflict(self):
+        ranked = {"selection_policy": "locked_highest_level",
+                  "sword_catalog_id": "touken_003_mikazuki_munechika",
+                  "form_status": "normal"}
+        old = {"name_zh": "三日月宗近", "level": 99}
+        entry = _pool_entry("9:1", "touken_003_mikazuki_munechika",
+                            "三日月宗近")
+        result = cf.resolve_formation_slots(_record(slots={"1": ranked, "2": old}),
+                                            {"done": True, "entries": [entry]})
+        self.assertFalse(result["ok"])
+        self.assertIn("不能重复", result["reason"])
+
     def test_observation_id_links_directly(self):
         entry = _pool_entry("9:1", "touken_003", "三日月宗近")
         record = _record(slots={"1": {"observation_id": "9:1",

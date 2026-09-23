@@ -23,7 +23,8 @@ from unittest.mock import patch
 import numpy as np
 
 from touken.flows.formation_editor import (
-    FormationEditorMixin, decide_match, normalize_target, parse_selection_rows,
+    FormationEditorMixin, decide_match, decide_locked_highest,
+    recognize_selection_lock, normalize_target, parse_selection_rows,
     row_conflicts_target, slot_matches_target,
     FORBIDDEN_DEPART_CLICKS, ALREADY_CORRECT, AMBIGUOUS, CHANGED,
     INVALID_REQUEST, NOT_FOUND, SCREEN_UNRECOGNIZED, UNAVAILABLE,
@@ -351,6 +352,50 @@ def _ok_row(y=300, **kw):
 # ==================== 纯函数 ====================
 
 class PureFunctionTests(unittest.TestCase):
+    def test_single_page_blank_bottom_is_independent_end_evidence(self):
+        maa, host = _std_setup(pages=[[_ok_row(y=195)]])
+        frame = np.full((720, 1280, 3), (214, 220, 221), dtype=np.uint8)
+        with patch.object(host, "_read_list_page", return_value=([{"y": 195}], 0)), \
+             patch.object(maa, "screenshot", return_value=frame):
+            self.assertTrue(FormationEditorMixin._list_single_page_sighted(host))
+            frame[510:590, 200:1100] = (10, 20, 30)
+            self.assertFalse(FormationEditorMixin._list_single_page_sighted(host))
+
+    def test_lock_requires_gold_field_and_white_icon(self):
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        frame[275:295, 18:23] = (20, 170, 220)
+        frame[270:315, 26:52] = (245, 245, 245)
+        self.assertEqual(recognize_selection_lock(frame, 300), "locked")
+        self.assertEqual(recognize_selection_lock(frame, 170), "unknown")
+        frame[270:315, 26:52] = 0
+        self.assertEqual(recognize_selection_lock(frame, 300), "unknown")
+
+    def test_ranked_requires_unique_locked_highest(self):
+        target = {"sword_catalog_id": MIKA}
+        rows = [{"sword_catalog_id": MIKA, "level": 95, "lock_status": "locked"},
+                {"sword_catalog_id": MIKA, "level": 99, "lock_status": "locked"}]
+        result = decide_locked_highest([rows], target)
+        self.assertEqual(result["status"], "unique")
+        self.assertIs(result["row"], rows[1])
+        self.assertEqual(decide_locked_highest([rows, [dict(rows[1])]], target)["status"],
+                         "ambiguous")
+        rows[0]["level"] = 99
+        self.assertEqual(decide_locked_highest([rows], target)["status"], "ambiguous")
+        rows[0]["lock_status"] = "unknown"
+        self.assertEqual(decide_locked_highest([rows], target)["status"], "ambiguous")
+
+    def test_ranked_cross_page_overlap_needs_two_anchors(self):
+        target = {"sword_catalog_id": MIKA}
+        top = {"sword_catalog_id": MIKA, "level": 99, "fatigue": 80,
+               "lock_status": "locked", "y": 550}
+        anchor = {"sword_catalog_id": KOGI, "level": 90, "fatigue": 70,
+                  "lock_status": "locked", "y": 450}
+        next_top = {**top, "y": 200}
+        next_anchor = {**anchor, "y": 100}
+        result = decide_locked_highest([[anchor, top], [next_anchor, next_top]], target)
+        self.assertEqual(result["status"], "unique")
+        self.assertIs(result["row"], top)
+
 
     def test_normalize_target_from_pool_entry(self):
         """反例钉死（2026-09-15 P0）：kiwame_date 是显现日期，每振都有，
@@ -606,6 +651,32 @@ _DECOY_PAGE = [_row("三日月宗近", 200, level=99, fatigue=100)]
 
 
 class ExecutorFlowTests(unittest.TestCase):
+    def test_ranked_preset_picks_locked_highest_after_complete_scan(self):
+        low = _row("压切长谷部", 300, level=35, fatigue=60)
+        high = _row("压切长谷部", 300, level=40, fatigue=60,
+                    becomes=_slot(3, catalog=HASEBE, name="压切长谷部", level=40))
+        maa, host = _std_setup(pages=[[low], [high]])
+        maa.single_page_sighted = False
+        original_read = host._read_list_page
+        def read_locked():
+            rows, bad = original_read()
+            for row in rows:
+                row["lock_status"] = "locked"
+            return rows, bad
+        def filtered(_target):
+            if False:
+                yield None
+            return True
+        target = {"selection_policy": "locked_highest_level",
+                  "sword_catalog_id": HASEBE, "name_zh": "压切长谷部",
+                  "form_status": "normal"}
+        with patch.object(host, "_read_list_page", side_effect=read_locked), \
+             patch.object(host, "_apply_list_filter", side_effect=filtered):
+            result = _run(host, target=target)
+        self.assertEqual(result["result"], CHANGED)
+        self.assertEqual(host.teams[2][2]["level"], 40)
+        _assert_never_departs(self, maa)
+
 
     def test_formation_shell_change_first_page(self):
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100),

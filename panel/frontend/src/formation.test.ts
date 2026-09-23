@@ -95,6 +95,12 @@ describe('预设编队', () => {
     expect(validatePresetDraft({ ...ok, target_team: 6 })).toContain('部队')
     expect(validatePresetDraft({ ...ok, target_team: 2.5 })).toContain('部队')
     expect(validatePresetDraft({ ...ok, slots: {} })).toBeNull()
+    expect(validatePresetDraft({ ...ok, slots: { '1': {
+      selection_policy: 'locked_highest_level', sword_catalog_id: '00005', form_status: 'normal',
+    } } })).toBeNull()
+    expect(validatePresetDraft({ ...ok, slots: { '1': {
+      selection_policy: 'locked_highest_level', sword_catalog_id: '00005',
+    } } })).toContain('形态')
   })
 
   it('格子小字：有快照显示「名字（形态 · 等级）」，空槽显示「不动」', () => {
@@ -102,6 +108,8 @@ describe('预设编队', () => {
     expect(presetSlotSummary(preset().slots['2'])).toBe('三日月宗近（极 · Lv.99）')
     expect(presetSlotSummary({ name_zh: '小狐丸', form_status: 'normal' })).toBe('小狐丸（普通）')
     expect(presetSlotSummary({ sword_catalog_id: '00005' })).toBe('00005（未确认）')
+    expect(presetSlotSummary({ selection_policy: 'locked_highest_level',
+      name_zh: '小狐丸', form_status: 'kiwame' })).toBe('小狐丸（极 · 上锁最高级）')
   })
 
   it('选刀池：没认出名字的候选禁选，有图鉴号兜底或缺等级的照常能选', () => {

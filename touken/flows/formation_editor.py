@@ -224,6 +224,7 @@ def normalize_target(target):
         status = target.get("form_status")
         form = status if status in ("normal", "kiwame") else None
     out = {"observation_id": target.get("observation_id"),
+           "selection_policy": target.get("selection_policy"),
            "sword_catalog_id": sid,
            "name": name,
            "form": form,
@@ -368,6 +369,29 @@ def parse_selection_rows(tokens):
     return rows, unreadable
 
 
+def recognize_selection_lock(image, name_y):
+    """只正面确认列表左侧黄底白锁；其余一律 unknown，不猜未上锁。
+
+    ROI 以刀名 y 动态定位，不把连续滚动名单伪装成固定行。阈值来自
+    2026-09-24 MuMu 显存帧的顶部和三段滚动帧；半截行不取证。
+    """
+    if image is None or getattr(image, "shape", None) != (720, 1280, 3):
+        return "unknown"
+    y = int(name_y)
+    if not 180 <= y <= 620:
+        return "unknown"
+    gold = image[y - 25:y - 5, 18:23]
+    icon = image[y - 30:y + 15, 26:52]
+    if gold.shape != (20, 5, 3) or icon.shape != (45, 26, 3):
+        return "unknown"
+    gold_pixels = ((gold[:, :, 0] < 70) & (gold[:, :, 1] > 130)
+                   & (gold[:, :, 2] > 180))
+    white_pixels = ((icon[:, :, 0] > 225) & (icon[:, :, 1] > 225)
+                    & (icon[:, :, 2] > 225))
+    return "locked" if gold_pixels.mean() >= 0.85 and \
+        white_pixels.mean() >= 0.45 else "unknown"
+
+
 def page_fingerprint(rows):
     """一页的指纹：翻页停滞/绕圈检测与回退定位用。"""
     return tuple(sorted((r["sword_catalog_id"] or r["name_raw"] or "?",
@@ -485,6 +509,60 @@ def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
                   "目标是其一，拒绝下点")
     return {"status": "ambiguous", "candidates": candidates,
             "missing_evidence": missing_evidence, "reason": reason}
+
+
+def decide_locked_highest(pages, target, unreadable_rows=0):
+    """完整名单中只选确认上锁的同名刀，等级最高必须唯一。"""
+    # 连续滚动的相邻视口会重叠。只有至少两行独立锚点给出同一位移，
+    # 才合并跨页副本；证据不足时保留两条，宁可判并列也不误选。
+    duplicates = set()
+    def signature(row):
+        return (row.get("sword_catalog_id"), row.get("level"),
+                row.get("fatigue"))
+    for p in range(1, len(pages)):
+        prev, cur = pages[p - 1], pages[p]
+        pairs = []
+        for before in prev:
+            sig = signature(before)
+            if sig[0] is None:
+                continue
+            old_matches = [x for x in prev if signature(x) == sig]
+            new_matches = [(j, x) for j, x in enumerate(cur) if signature(x) == sig]
+            if (len(old_matches) == len(new_matches) == 1
+                    and before.get("y") is not None
+                    and new_matches[0][1].get("y") is not None):
+                j, after = new_matches[0]
+                pairs.append((j, after["y"] - before["y"]))
+        for shift in {delta for _, delta in pairs if delta != 0}:
+            matching = [j for j, delta in pairs if abs(delta - shift) <= 4]
+            if len(matching) >= 2:
+                duplicates.update((p, j) for j in matching)
+                break
+    candidates = [(p, r) for p, rows in enumerate(pages) for j, r in enumerate(rows)
+                  if (p, j) not in duplicates
+                  and r.get("sword_catalog_id") == target["sword_catalog_id"]]
+    if not candidates:
+        return {"status": "not_found", "reason": "名单里没有这位刀剑"}
+    locked = [(p, r) for p, r in candidates if r.get("lock_status") == "locked"
+              and r.get("level") is not None]
+    highest = max((r["level"] for _, r in locked), default=None)
+    uncertain = [(p, r) for p, r in candidates
+                 if r.get("level") is None or
+                 (r.get("lock_status") != "locked" and
+                  (highest is None or r["level"] >= highest))]
+    if unreadable_rows or uncertain:
+        return {"status": "ambiguous", "candidates": [_row_summary(r) for _, r in candidates],
+                "missing_evidence": ["锁/等级/名字"],
+                "reason": "名单有锁、等级或名字没认清，无法证明上锁刀中的最高级"}
+    if highest is None:
+        return {"status": "not_found", "reason": "没有确认上锁的同名刀"}
+    top = [(p, r) for p, r in locked if r["level"] == highest]
+    if len(top) != 1:
+        return {"status": "ambiguous", "candidates": [_row_summary(r) for _, r in top],
+                "missing_evidence": [],
+                "reason": f"上锁刀中 Lv{highest} 有 {len(top)} 条，无法唯一确定"}
+    page, row = top[0]
+    return {"status": "unique", "page": page, "row": row, "evidence_gaps": []}
 
 
 def _row_summary(row):
@@ -613,6 +691,19 @@ class FormationEditorMixin:
             pt = self.maa.ocr(_FILTER_OPEN_TEXT,
                               roi_4to4(*_FILTER_OPEN_ROI))
             if not pt:
+                # 已套过筛选时入口文字变成「筛选中」。同一按钮、同一 ROI。
+                pt = self.maa.ocr("筛选中", roi_4to4(*_FILTER_OPEN_ROI))
+            if not pt:
+                # 真机上「筛选中」的细白字偶发完全读不出。列表标题正面
+                # 命中、且同源帧按钮内部是深灰时，才用标定过的按钮中心。
+                image = self.maa.screenshot(force=True)
+                title, title_roi = _LIST_TITLE
+                if (getattr(image, "shape", None) == (720, 1280, 3)
+                        and self.maa.ocr(title, roi_4to4(*title_roi))
+                        and max(int(v) for v in image[100, 850]) < 75
+                        and max(int(v) for v in image[85, 830]) < 75):
+                    pt = Point(850, 100)
+            if not pt:
                 time.sleep(0.5)
                 continue
             self.maa.click(pt)
@@ -620,7 +711,7 @@ class FormationEditorMixin:
         self.maa.screenshot(force=True)
         return bool(self.maa.ocr(text, roi_4to4(*roi)))
 
-    def _click_panel_button(self, text, roi=None):
+    def _click_panel_button(self, text, roi=None, require_selected=False):
         """面板里按文字（exact）找按钮并点。Returns 找没找到。"""
         self.maa.screenshot(force=True)
         pt = self.maa.ocr(text, roi_4to4(*(roi or _FILTER_PANEL_ROI)),
@@ -629,6 +720,18 @@ class FormationEditorMixin:
             return False
         self.maa.click(pt)
         time.sleep(0.5)
+        if require_selected:
+            image = self.maa.screenshot(force=True)
+            if image is None or getattr(image, "shape", None) != (720, 1280, 3):
+                return False
+            # 实际运行帧：已选按钮为绿底，未选为深灰。点在文字中心，
+            # 左上偏 45×14px 取底色，避开白色字和按钮右侧斜角。
+            x, y = int(pt.x) - 45, int(pt.y) - 14
+            if not (0 <= x < 1280 and 0 <= y < 720):
+                return False
+            b, g, r = (int(v) for v in image[y, x])
+            if not (b < 70 and g > 125 and r > 90):
+                return False
         return True
 
     def _apply_list_filter(self, tgt):
@@ -670,11 +773,14 @@ class FormationEditorMixin:
             if not self._open_filter_panel():
                 yield "[编队] 重置筛选后叫不回筛选面板，停"
                 return False
-        if not self._click_panel_button(stype, _FILTER_TYPE_ROI):
+        ranked = tgt.get("selection_policy") == "locked_highest_level"
+        if not self._click_panel_button(stype, _FILTER_TYPE_ROI,
+                                        require_selected=ranked):
             yield f"[编队] 筛选面板里认不到「{stype}」按钮，停"
             return False
         if form_text and not self._click_panel_button(form_text,
-                                                      _FILTER_FORM_ROI):
+                                                      _FILTER_FORM_ROI,
+                                                      require_selected=ranked):
             yield f"[编队] 筛选面板里认不到「{form_text}」按钮，停"
             return False
         if not self._click_panel_button(_FILTER_CONFIRM_TEXT,
@@ -727,6 +833,9 @@ class FormationEditorMixin:
         max_pages = int(max_pages or cfg.get("max_pages") or _MAX_PAGES)
 
         tgt, err = normalize_target(target)
+        ranked = bool(tgt and tgt.get("selection_policy") == "locked_highest_level")
+        if ranked and tgt.get("form") not in ("normal", "kiwame"):
+            err = "按等级选人需要明确普通/极形态"
         if err or not isinstance(team_no, int) or team_no not in _TEAM_TAB \
                 or not isinstance(slot_no, int) or not 1 <= slot_no <= 6:
             reason = err or f"team_no/slot_no 越界（{team_no}/{slot_no}）"
@@ -772,7 +881,7 @@ class FormationEditorMixin:
                  else None)
             # 刀剑等级增长可与旧目标不同；其余可见指纹在完整刀账中唯一
             # 才能证明是同一振。形态章漏识别不能单独否决这条实例证据。
-        if m is True:
+        if m is True and not ranked:
             yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
             return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
                                 "换人前已确认目标就在该槽位，未做任何换人点击",
@@ -822,7 +931,8 @@ class FormationEditorMixin:
                                 before=slot_before, team_before=team_before,
                                 pages_scanned=len(pages),
                                 scan_status=scan_status)
-        verdict = decide_match(pages, tgt, match_fields, unreadable)
+        verdict = (decide_locked_highest(pages, tgt, unreadable) if ranked
+                   else decide_match(pages, tgt, match_fields, unreadable))
         if verdict["status"] == "not_found":
             yield f"[编队] 翻遍 {len(pages)} 页没找到目标：{verdict['reason']}"
             return self._finish(NOT_FOUND, team_no, slot_no, tgt,
@@ -845,6 +955,9 @@ class FormationEditorMixin:
         #    实读为准
         target_page = verdict["page"]
         row = verdict["row"]
+        if ranked:
+            tgt["level"] = row["level"]
+            match_fields = ("name", "level")
         yield (f"[编队] 唯一匹配在第 {target_page + 1} 页："
                f"{row['name']} Lv{row.get('level') or '?'}")
         row = yield from self._goto_page(bars, target_page, tgt, row,
@@ -1005,9 +1118,12 @@ class FormationEditorMixin:
 
     def _read_list_page(self):
         """当前帧读列表页。Returns (rows, unreadable)。"""
-        self.maa.screenshot(force=True)
+        image = self.maa.screenshot(force=True)
         tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
-        return self._parse_selection_rows(tokens)
+        rows, unreadable = self._parse_selection_rows(tokens)
+        for row in rows:
+            row["lock_status"] = recognize_selection_lock(image, row["y"])
+        return rows, unreadable
 
     def _scan_selection_list(self, max_pages):
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
@@ -1199,12 +1315,26 @@ class FormationEditorMixin:
     def _list_single_page_sighted(self):
         """单页名单（筛选后常态）的到底证据通道。
 
-        单页时回翻核验无从谈起，需要独立视觉证据回答「这一页就是
-        全部」——候选：右缘滑轨消失（内容不足一屏）或滑块满轨贴底。
-        两者都还没真机标定，标定完成前保守 False（宁可 stalled，
-        绝不拿没验证过的证据称底）。测试经子类注入剧本证据。
+        真机 2026-09-24「剑＋初」短名单：前三行从 y≈195 排到
+        y≈394，下方是连续灰色空白。扫描已先确认连续前滑
+        不再改变行指纹，此处只接受顶部可见行加下方大面积同色空白；
+        滑轨仍显示短滑块，不能把它当到底证据。测试经子类注入。
         """
-        return False
+        rows, unreadable = self._read_list_page()
+        if unreadable or not 1 <= len(rows) <= 4:
+            return False
+        if not (180 <= min(r["y"] for r in rows) <= 220
+                and max(r["y"] for r in rows) <= 510):
+            return False
+        image = self.maa.screenshot(force=True)
+        if image is None or getattr(image, "shape", None) != (720, 1280, 3):
+            return False
+        start = max(r["y"] for r in rows) + 65
+        band = image[start:680, 100:1200].astype("int16")
+        if band.shape[0] < 80:
+            return False
+        median = np.median(band.reshape(-1, 3), axis=0)
+        return bool((np.abs(band - median).max(axis=2) < 8).mean() >= 0.99)
 
     def _goto_page(self, bars, target_idx, target, scanned_row,
                    match_fields):
@@ -1219,15 +1349,12 @@ class FormationEditorMixin:
         单页名单（筛选后常态）根本不用导航：首帧就该命中。"""
         b_target = bars[target_idx] if target_idx < len(bars) else None
         for _attempt in range(_GOTO_MAX_SWIPES):
-            self.maa.screenshot(force=True)
-            rows, _bad = self._parse_selection_rows(
-                self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+            rows, _bad = self._read_list_page()
             hit = self._match_target_row(rows, target, scanned_row,
                                          match_fields)
             if hit is not None:
                 # 落地复核：强制重读一帧，证据要连续两帧都成立
-                rows2, _bad2 = self._parse_selection_rows(
-                    self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+                rows2, _bad2 = self._read_list_page()
                 hit2 = self._match_target_row(rows2, target, scanned_row,
                                               match_fields)
                 if hit2 is None:
@@ -1241,8 +1368,7 @@ class FormationEditorMixin:
             if b == b_target:
                 # 地标到了但行不在视野/证据不过：多为 OCR 偶发漏行，
                 # 原地重读一次还不行就如实失败
-                rows3, _bad3 = self._parse_selection_rows(
-                    self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+                rows3, _bad3 = self._read_list_page()
                 hit3 = self._match_target_row(rows3, target, scanned_row,
                                               match_fields)
                 if hit3 is not None:
@@ -1259,6 +1385,8 @@ class FormationEditorMixin:
         条件——零冲突且无缺证据的唯一行（落地阶段不比扫描阶段宽）。"""
         hits = [r for r in rows
                 if r.get("sword_catalog_id") == target["sword_catalog_id"]
+                and (target.get("selection_policy") != "locked_highest_level"
+                     or r.get("lock_status") == "locked")
                 and not row_conflicts_target(r, target, match_fields)
                 and not row_evidence_gaps(r, target, match_fields)]
         if len(hits) != 1:
@@ -1272,9 +1400,7 @@ class FormationEditorMixin:
 
     def _relocate_row(self, target, scanned_row, match_fields):
         """重读当前帧找目标行（_match_target_row 的读帧包装）。"""
-        self.maa.screenshot(force=True)
-        rows, _bad = self._parse_selection_rows(
-            self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or [])
+        rows, _bad = self._read_list_page()
         return self._match_target_row(rows, target, scanned_row,
                                       match_fields)
 

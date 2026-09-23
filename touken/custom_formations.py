@@ -88,6 +88,17 @@ def validate_formation(record: dict, existing: list[dict] | None = None) -> str 
         has_name = isinstance(nm, str) and bool(nm.strip())
         if not has_id and not has_name:
             return f"槽位 {key} 缺身份：sword_catalog_id/name_zh 至少给一样"
+        policy = entry.get("selection_policy")
+        if policy not in (None, "locked_highest_level"):
+            return f"槽位 {key} 的选人方式不认识"
+        if policy == "locked_highest_level":
+            if not has_id or entry.get("form_status") not in ("normal", "kiwame"):
+                return f"槽位 {key} 需明确刀剑图鉴号和普通/极形态"
+            if entry.get("observation_id"):
+                return f"槽位 {key} 不能同时指定一振和按等级选人"
+            from . import sword_db
+            if sid not in sword_db.all_swords():
+                return f"槽位 {key} 的刀剑图鉴号不在名册里"
     fid = record.get("id")
     if fid is not None:
         if not isinstance(fid, str) or not _ID_RE.match(fid):
@@ -189,24 +200,42 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
     slots = record.get("slots") or {}
     if not slots:
         return {"ok": False, "reason": "这套预设一个位置都没指定"}
-    if candidate_pool is None:
-        candidate_pool = _current_candidate_pool()
-    if not candidate_pool.get("done"):
-        return {"ok": False,
-                "reason": candidate_pool.get("reason")
-                or "没有可信的完整刀账，先跑一次刀帐盘点"}
+    exact_slots = {key: saved for key, saved in slots.items()
+                   if saved.get("selection_policy") != "locked_highest_level"}
+    if exact_slots:
+        if candidate_pool is None:
+            candidate_pool = _current_candidate_pool()
+        if not candidate_pool.get("done"):
+            return {"ok": False,
+                    "reason": candidate_pool.get("reason")
+                    or "指定具体一振的槽位需要可信的完整刀账"}
+    else:
+        candidate_pool = candidate_pool or {}
+
+    # 同一图鉴号的普通/极刀不能同队。整队开工前检查，避免套到一半。
+    seen_catalog = {}
+    for key in sorted(slots, key=int):
+        sid = slots[key].get("sword_catalog_id")
+        if sid and sid in seen_catalog:
+            return {"ok": False, "reason":
+                    f"{seen_catalog[sid]}号位和{key}号位不能重复指定同一位刀"}
+        if sid:
+            seen_catalog[sid] = key
 
     entries = candidate_pool.get("entries") or []
     from .formation_identity import cultivation_pairs
     from .flows.naihanka import _load_naihanka_state
     cultivation = cultivation_pairs(_load_naihanka_state(),
                                     candidate_pool.get("observed_at"),
-                                    (candidate_pool.get("source") or {}).get("snapshot_id"))
+                                    (candidate_pool.get("source") or {}).get("snapshot_id")) if exact_slots else {}
     by_oid = {entry.get("observation_id"): entry for entry in entries
               if entry.get("observation_id")}
     resolved = {}
     for key in sorted(slots, key=int):
         saved = slots[key]
+        if saved.get("selection_policy") == "locked_highest_level":
+            resolved[key] = saved
+            continue
         direct = by_oid.get(saved.get("observation_id"))
         if direct is not None and _fingerprint_matches(saved, direct,
                                                       cultivation):
@@ -223,8 +252,17 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
                     "reason": f"{key}号位「{label}」在最新刀账里仍有 {len(matches)} 振分不清"}
         resolved[key] = matches[0]
 
+    resolved_catalog = {}
+    for key in sorted(resolved, key=int):
+        sid = resolved[key].get("sword_catalog_id")
+        if sid and sid in resolved_catalog:
+            return {"ok": False, "reason":
+                    f"{resolved_catalog[sid]}号位和{key}号位不能重复指定同一位刀"}
+        if sid:
+            resolved_catalog[sid] = key
+
     from .honmaru_profile import formation_conflicts
-    conflicts = formation_conflicts(list(resolved.values()))
+    conflicts = formation_conflicts([resolved[key] for key in exact_slots])
     if conflicts:
         slots_text = []
         for conflict in conflicts:

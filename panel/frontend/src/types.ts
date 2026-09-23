@@ -604,6 +604,7 @@ export interface HonmaruFormationProfile {
 
 /** 预设里一个槽位存的刀剑档案快照；槽位可缺省（=应用时该位置不动） */
 export interface CustomFormationSlotEntry {
+  selection_policy?: 'locked_highest_level'
   observation_id?: string
   sword_catalog_id?: string
   same_team_exclusion_key?: string

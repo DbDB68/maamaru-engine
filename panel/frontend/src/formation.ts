@@ -55,6 +55,12 @@ export function validatePresetDraft(draft: Pick<CustomFormation, 'name' | 'targe
   if (!Number.isInteger(draft.target_team) || draft.target_team < 1 || draft.target_team > 5) {
     return '目标部队只能选部队一到部队五。'
   }
+  for (const [slot, entry] of Object.entries(draft.slots || {})) {
+    if (entry.selection_policy === 'locked_highest_level' &&
+        (!entry.sword_catalog_id || !['normal', 'kiwame'].includes(entry.form_status || ''))) {
+      return `${slot} 号位请明确刀名和普通／极形态。`
+    }
+  }
   return null
 }
 
@@ -64,6 +70,7 @@ export function presetSlotSummary(entry: CustomFormationSlotEntry | null | undef
   const name = entry.name_zh || entry.sword_catalog_id || '没认出名字'
   const form = entry.form_status === 'kiwame' ? '极'
     : entry.form_status === 'normal' ? '普通' : '未确认'
+  if (entry.selection_policy === 'locked_highest_level') return `${name}（${form} · 上锁最高级）`
   const bits = [form, entry.level != null ? `Lv.${entry.level}` : ''].filter(Boolean).join(' · ')
   return bits ? `${name}（${bits}）` : name
 }
