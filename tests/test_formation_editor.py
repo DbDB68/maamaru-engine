@@ -369,6 +369,9 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(recognize_selection_lock(frame, 170), "unknown")
         frame[270:315, 26:52] = 0
         self.assertEqual(recognize_selection_lock(frame, 300), "unknown")
+        frame[275:295, 18:23] = (169, 169, 170)
+        frame[270:315, 26:52] = (245, 245, 245)
+        self.assertEqual(recognize_selection_lock(frame, 300), "unlocked")
 
     def test_ranked_requires_unique_locked_highest(self):
         target = {"sword_catalog_id": MIKA}
@@ -383,6 +386,12 @@ class PureFunctionTests(unittest.TestCase):
         self.assertEqual(decide_locked_highest([rows], target)["status"], "ambiguous")
         rows[0]["lock_status"] = "unknown"
         self.assertEqual(decide_locked_highest([rows], target)["status"], "ambiguous")
+        rows[0]["lock_status"] = "unlocked"
+        self.assertEqual(decide_locked_highest([rows], target)["status"], "unique")
+        rows[1]["level"] = 90  # 更高级的未上锁刀也不能抢候选
+        self.assertEqual(decide_locked_highest([rows], target)["row"], rows[1])
+        rows[1]["lock_status"] = "unlocked"
+        self.assertEqual(decide_locked_highest([rows], target)["status"], "not_found")
 
     def test_ranked_cross_page_overlap_needs_two_anchors(self):
         target = {"sword_catalog_id": MIKA}

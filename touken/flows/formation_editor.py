@@ -370,10 +370,10 @@ def parse_selection_rows(tokens):
 
 
 def recognize_selection_lock(image, name_y):
-    """只正面确认列表左侧黄底白锁；其余一律 unknown，不猜未上锁。
+    """从列表左侧底色与白锁区确认 locked/unlocked；其余 unknown。
 
     ROI 以刀名 y 动态定位，不把连续滚动名单伪装成固定行。阈值来自
-    2026-09-24 MuMu 显存帧的顶部和三段滚动帧；半截行不取证。
+    2026-09-24 MuMu 显存帧：黄底闭锁与灰底开锁同屏取样；半截行不取证。
     """
     if image is None or getattr(image, "shape", None) != (720, 1280, 3):
         return "unknown"
@@ -386,10 +386,18 @@ def recognize_selection_lock(image, name_y):
         return "unknown"
     gold_pixels = ((gold[:, :, 0] < 70) & (gold[:, :, 1] > 130)
                    & (gold[:, :, 2] > 180))
+    gray_pixels = ((gold.min(axis=2) > 130) & (gold.max(axis=2) < 210)
+                   & ((gold.max(axis=2).astype("int16")
+                       - gold.min(axis=2).astype("int16")) <= 3))
     white_pixels = ((icon[:, :, 0] > 225) & (icon[:, :, 1] > 225)
                     & (icon[:, :, 2] > 225))
-    return "locked" if gold_pixels.mean() >= 0.85 and \
-        white_pixels.mean() >= 0.45 else "unknown"
+    if white_pixels.mean() < 0.45:
+        return "unknown"
+    if gold_pixels.mean() >= 0.85:
+        return "locked"
+    if gray_pixels.mean() >= 0.85:
+        return "unlocked"
+    return "unknown"
 
 
 def page_fingerprint(rows):
@@ -547,9 +555,10 @@ def decide_locked_highest(pages, target, unreadable_rows=0):
               and r.get("level") is not None]
     highest = max((r["level"] for _, r in locked), default=None)
     uncertain = [(p, r) for p, r in candidates
-                 if r.get("level") is None or
-                 (r.get("lock_status") != "locked" and
-                  (highest is None or r["level"] >= highest))]
+                 if r.get("lock_status") != "unlocked" and
+                 (r.get("level") is None or
+                  (r.get("lock_status") != "locked" and
+                   (highest is None or r["level"] >= highest)))]
     if unreadable_rows or uncertain:
         return {"status": "ambiguous", "candidates": [_row_summary(r) for _, r in candidates],
                 "missing_evidence": ["锁/等级/名字"],
