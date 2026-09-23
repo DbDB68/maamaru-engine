@@ -757,14 +757,16 @@ class FormationEditorMixin:
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "换前观察失败：整页读不出", entry_shell=shell)
         m = slot_matches_target(slot_before, tgt, match_fields)
-        if m is not False and tgt.get("observation_id"):
+        nonlevel_fields = tuple(field for field in match_fields if field != "level")
+        nonlevel_match = slot_matches_target(slot_before, tgt, nonlevel_fields)
+        if nonlevel_match is not False and tgt.get("observation_id"):
             link = self._formation_link_visible_slot(slot_no, slot_before)
             slot_before["visible_link"] = link
             m = (True if link.get("status") == "linked" and
                  link.get("observation_id") == tgt["observation_id"]
                  else None)
-            # 名字/等级相同仍可能是另一振；形态章偶尔漏识别时，完整刀账中
-            # 唯一的当前可见指纹也能正面确认就是这振。
+            # 刀剑等级增长可与旧目标不同；其余可见指纹在完整刀账中唯一
+            # 才能证明是同一振。形态章漏识别不能单独否决这条实例证据。
         if m is True:
             yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
             return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,

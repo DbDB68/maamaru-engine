@@ -678,6 +678,23 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertNotEqual(result["result"], ALREADY_CORRECT)
         self.assertTrue(any(x == _SWAP_X for x, _y in maa.clicks))
 
+    def test_level_up_same_unique_instance_still_skips(self):
+        maa, host = _std_setup(pages=[])
+        host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
+                                 level=36)
+        result = _run(host)  # 预设旧档案是 Lv35，实例链接仍唯一
+        self.assertEqual(result["result"], ALREADY_CORRECT)
+        self.assertFalse(any(x == _SWAP_X for x, _y in maa.clicks))
+
+    def test_level_up_without_unique_instance_does_not_skip(self):
+        maa, host = _std_setup(pages=[])
+        host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
+                                 level=36)
+        host.visible_link = {"status": "ambiguous", "observation_id": None}
+        result = _run(host)
+        self.assertNotEqual(result["result"], ALREADY_CORRECT)
+        self.assertTrue(any(x == _SWAP_X for x, _y in maa.clicks))
+
     def test_already_correct_requires_proven_form(self):
         """形态读不出且实例也未能唯一链接：不能零点击宣称正确。"""
         pages = [[_ok_row(300)], _DECOY_PAGE]

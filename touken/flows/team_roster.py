@@ -363,6 +363,8 @@ def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
     if any(slot.get(key) is None for key in
            ("level", "tou_level", "survival_max")):
         return {"status": "insufficient", "observation_id": None}
+    if not isinstance(slot["level"], int) or isinstance(slot["level"], bool):
+        return {"status": "insufficient", "observation_id": None}
     stats = slot.get("stats") or {}
     if any(stats.get(key) is None for key in _STAT_NAMES):
         return {"status": "insufficient", "observation_id": None}
@@ -370,8 +372,13 @@ def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
     for entry in entries:
         if entry.get("sword_catalog_id") != slot["sword_catalog_id"]:
             continue
+        # 等级会自然上涨，不能当实例身份证；只拒绝等级倒退与其他可见
+        # 指纹冲突。完整刀账若有多振同指纹，下面仍会判 ambiguous。
+        archived_level = entry.get("level")
+        if not isinstance(archived_level, int) or slot["level"] < archived_level:
+            continue
         if any(entry.get(key) != slot[key] for key in
-               ("level", "tou_level", "survival_max")):
+               ("tou_level", "survival_max")):
             continue
         archived = entry.get("stats") or {}
         if all(archived.get(key) == stats[key] for key in _STAT_NAMES):

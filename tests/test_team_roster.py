@@ -581,7 +581,13 @@ class CombinedSlotEvidenceTests(unittest.TestCase):
                         stats={**stats, "机动": 99})]
         self.assertEqual(link_visible_slot(slot, entries),
                          {"status": "linked", "observation_id": "snapshot:1"})
+        self.assertEqual(link_visible_slot({**slot, "level": 92}, entries),
+                         {"status": "linked", "observation_id": "snapshot:1"})
         self.assertEqual(link_visible_slot(slot, entries + [dict(entries[0])]),
+                         {"status": "ambiguous", "observation_id": None})
+        self.assertEqual(link_visible_slot({**slot, "level": 92},
+                                           entries + [dict(entries[0],
+                                                           observation_id="snapshot:3")]),
                          {"status": "ambiguous", "observation_id": None})
         self.assertEqual(link_visible_slot({**slot, "stats": {"生存": 73}}, entries),
                          {"status": "insufficient", "observation_id": None})

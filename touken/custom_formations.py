@@ -116,13 +116,13 @@ def find_formation(formations, fid) -> dict | None:
 
 
 _FINGERPRINT_FIELDS = (
-    "sword_catalog_id", "name_zh", "form_status", "level", "tou_level",
+    "sword_catalog_id", "name_zh", "form_status", "tou_level",
     "survival_max", "kiwame_date",
 )
 
 
 def _fingerprint_matches(saved: dict, current: dict) -> bool:
-    """旧预设也能迁移：只拿它当时实际保存过的字段参与当前刀账匹配。"""
+    """旧预设可重连：等级只准增长；其余已保存的可见指纹必须吻合。"""
     for field in _FINGERPRINT_FIELDS:
         expected = saved.get(field)
         if expected in (None, "", "unknown", "ambiguous"):
@@ -130,6 +130,21 @@ def _fingerprint_matches(saved: dict, current: dict) -> bool:
         if current.get(field) != expected:
             return False
     expected_stats = saved.get("stats")
+    saved_level = saved.get("level")
+    if saved_level is not None:
+        current_level = current.get("level")
+        if (not isinstance(saved_level, int) or isinstance(saved_level, bool)
+                or not isinstance(current_level, int)
+                or isinstance(current_level, bool)
+                or current_level < saved_level):
+            return False
+        if current_level > saved_level and not (
+                any(saved.get(key) is not None for key in
+                    ("tou_level", "survival_max", "kiwame_date"))
+                or (isinstance(expected_stats, dict) and
+                    any(value is not None for value in expected_stats.values()))):
+            # 旧版只存「刀名＋等级」时，升级后无法排除是另一振同名刀。
+            return False
     if isinstance(expected_stats, dict):
         current_stats = current.get("stats") or {}
         for key, value in expected_stats.items():

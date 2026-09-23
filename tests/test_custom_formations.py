@@ -208,6 +208,38 @@ class ResolvePresetTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["slots"]["1"]["observation_id"], "10:7")
 
+    def test_level_up_relinks_with_stable_unique_fingerprint(self):
+        entry = _pool_entry("10:7", "touken_003", "三日月宗近", level=91,
+                            tou_level=4, survival_max=60,
+                            stats={"打击": 68})
+        saved = {**entry, "observation_id": "9:1", "level": 90}
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": saved}),
+            {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["level"], 91)
+
+    def test_level_up_without_stable_evidence_stays_unresolved(self):
+        entry = _pool_entry("10:7", "touken_003", "三日月宗近", level=91)
+        saved = {"observation_id": "9:1", "sword_catalog_id": "touken_003",
+                 "name_zh": "三日月宗近", "level": 90}
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": saved}),
+            {"done": True, "entries": [entry]})
+        self.assertFalse(result["ok"])
+
+    def test_level_up_with_same_fingerprint_on_two_swords_is_ambiguous(self):
+        entries = [_pool_entry(oid, "touken_118", "压切长谷部", level=level,
+                               tou_level=4, survival_max=60,
+                               stats={"打击": 68})
+                   for oid, level in (("10:7", 91), ("10:8", 92))]
+        saved = {**entries[0], "observation_id": "9:1", "level": 90}
+        result = cf.resolve_formation_slots(
+            _record(slots={"1": saved}),
+            {"done": True, "entries": entries})
+        self.assertFalse(result["ok"])
+        self.assertIn("2 振分不清", result["reason"])
+
     def test_legacy_ambiguous_same_name_level_is_rejected_before_clicks(self):
         entries = [_pool_entry("9:1", "touken_118", "压切长谷部"),
                    _pool_entry("9:2", "touken_118", "压切长谷部")]
