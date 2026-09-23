@@ -41,6 +41,7 @@ import re
 from pathlib import Path
 
 from .. import sword_db
+from ..formation_identity import GROWTH_STATS, growth_stats_match
 from ..maa_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
 from ..roi_registry import FORMATION_ROW_DEFAULTS
@@ -356,7 +357,7 @@ def _slot_name_from_combined(raw: str, slot: int):
     return text, False
 
 
-def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
+def link_visible_slot(slot: dict, entries: list[dict], cultivation=None) -> dict:
     """当前槽与完整刀账按可见指纹链接；缺字段、重复或过期都不猜实例。"""
     if slot.get("slot_status") != "occupied" or not slot.get("sword_catalog_id"):
         return {"status": "insufficient", "observation_id": None}
@@ -366,8 +367,9 @@ def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
     if not isinstance(slot["level"], int) or isinstance(slot["level"], bool):
         return {"status": "insufficient", "observation_id": None}
     stats = slot.get("stats") or {}
-    if any(stats.get(key) is None for key in _STAT_NAMES):
+    if any(stats.get(key) is None for key in GROWTH_STATS):
         return {"status": "insufficient", "observation_id": None}
+    cultivation = cultivation or {}
     matches = []
     for entry in entries:
         if entry.get("sword_catalog_id") != slot["sword_catalog_id"]:
@@ -377,11 +379,14 @@ def link_visible_slot(slot: dict, entries: list[dict]) -> dict:
         archived_level = entry.get("level")
         if not isinstance(archived_level, int) or slot["level"] < archived_level:
             continue
-        if any(entry.get(key) != slot[key] for key in
-               ("tou_level", "survival_max")):
+        if entry.get("tou_level") != slot["tou_level"]:
             continue
         archived = entry.get("stats") or {}
-        if all(archived.get(key) == stats[key] for key in _STAT_NAMES):
+        if growth_stats_match(
+                archived, stats, entry.get("name_zh") or "", cultivation,
+                old_survival_max=entry.get("survival_max"),
+                new_survival_max=slot["survival_max"],
+                observation_id=entry.get("observation_id")):
             matches.append(entry)
     if len(matches) == 1 and matches[0].get("observation_id"):
         return {"status": "linked",

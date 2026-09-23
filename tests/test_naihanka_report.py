@@ -109,6 +109,22 @@ class DiffSnapshotTests(unittest.TestCase):
         self.assertEqual(nr.diff_snapshots(None, {"安宅切": {"机动": 48}}), [])
 
 
+class TableDuplicateNameTests(unittest.TestCase):
+    def test_same_name_in_two_slots_is_not_overwritten_as_one_person(self):
+        from touken.maa_adapter import roi_4to4
+        farm_roi = roi_4to4(*nr.TABLE_OCR_REGIONS[1]).to_tuple()
+
+        def ocr(roi):
+            if roi.to_tuple() != farm_roi:
+                return []
+            return [("压切长谷部", _pt(500, 420)),
+                    ("55", _pt(760, 400)), ("39", _pt(820, 400)),
+                    ("压切长谷部", _pt(500, 510)),
+                    ("56", _pt(760, 490)), ("40", _pt(820, 490))]
+
+        self.assertNotIn("压切长谷部", nr.read_table_stats(ocr))
+
+
 class _FakeMaa:
     """观察窗剧本：先报告屏后内番表。"""
 
@@ -440,6 +456,34 @@ class SnapshotStreamTests(unittest.TestCase):
             messages = list(flow.naihanka_snapshot_stream())
             self.assertEqual(messages, [])  # 没旧快照不瞎报
             self.assertTrue((Path(td) / "naihanka.json").exists())
+
+    def test_cultivation_gain_keeps_unique_instance_evidence(self):
+        from touken.maa_adapter import roi_4to4
+        farm_roi = roi_4to4(*nr.TABLE_OCR_REGIONS[1]).to_tuple()
+
+        class Maa(_FakeMaa):
+            def ocr_all(self, roi):
+                if roi.to_tuple() == farm_roi:
+                    return [("压切长谷部", _pt(500, 420)),
+                            ("56", _pt(760, 400)), ("39", _pt(820, 400))]
+                return []
+
+        pool = {"done": True, "source": {"snapshot_id": 24},
+                "entries": [{"observation_id": "24:1",
+                             "name_zh": "压切长谷部",
+                             "stats": {"生存": 55, "侦察": 39}}]}
+        flow = _Flow(Maa(None, report_frames=0))
+        flow._naihanka_gains = []
+        with tempfile.TemporaryDirectory() as td, \
+                patch("touken.flows.naihanka.STATUS_DIR", Path(td)), \
+                patch("touken.honmaru_profile.get_honmaru_profile",
+                      return_value={"candidate_pool": pool}):
+            (Path(td) / "naihanka.json").write_text(json.dumps({
+                "stats": {"压切长谷部": {"生存": 55, "侦察": 39}},
+            }), encoding="utf-8")
+            list(flow.naihanka_snapshot_stream())
+            state = json.loads((Path(td) / "naihanka.json").read_text("utf-8"))
+            self.assertEqual(state["cultivation_evidence"]["24:1"]["生存"], 56)
 
 
 if __name__ == "__main__":

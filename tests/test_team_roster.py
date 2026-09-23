@@ -578,7 +578,7 @@ class CombinedSlotEvidenceTests(unittest.TestCase):
                 "stats": stats}
         entries = [dict(slot, observation_id="snapshot:1"),
                    dict(slot, observation_id="snapshot:2",
-                        stats={**stats, "机动": 99})]
+                        stats={**stats, "侦察": 99})]
         self.assertEqual(link_visible_slot(slot, entries),
                          {"status": "linked", "observation_id": "snapshot:1"})
         self.assertEqual(link_visible_slot({**slot, "level": 92}, entries),
@@ -593,6 +593,47 @@ class CombinedSlotEvidenceTests(unittest.TestCase):
                          {"status": "insufficient", "observation_id": None})
         self.assertEqual(link_visible_slot({**slot, "level": 90}, entries),
                          {"status": "stale", "observation_id": None})
+
+    def test_other_stats_do_not_identify_non_cultivation_swords(self):
+        stats = {"生存": 55, "侦察": 39, "打击": 80, "防御": 80,
+                 "机动": 80, "冲力": 80, "隐蔽": 80, "必杀": 80}
+        slot = {"slot_status": "occupied", "sword_catalog_id": "same-sword",
+                "level": 91, "tou_level": 9, "survival_max": 55,
+                "stats": {**stats, "打击": 81}}
+        entries = [dict(slot, observation_id="snapshot:1", stats=stats)]
+        self.assertEqual(link_visible_slot(slot, entries),
+                         {"status": "linked", "observation_id": "snapshot:1"})
+        entries.append(dict(entries[0], observation_id="snapshot:2",
+                            stats={**stats, "打击": 90}))
+        self.assertEqual(link_visible_slot(slot, entries),
+                         {"status": "ambiguous", "observation_id": None})
+
+    def test_cultivation_growth_requires_table_pair_and_six_other_stats(self):
+        stats = {"生存": 55, "侦察": 39, "打击": 80, "防御": 80,
+                 "机动": 80, "冲力": 80, "隐蔽": 80, "必杀": 80}
+        old = {"slot_status": "occupied", "sword_catalog_id": "same-sword",
+               "name_zh": "测试刀", "level": 90, "tou_level": 9,
+               "survival_max": 55, "stats": stats,
+               "observation_id": "snapshot:1"}
+        slot = dict(old, level=91, survival_max=56,
+                    stats={**stats, "生存": 56, "侦察": 40})
+        self.assertEqual(link_visible_slot(slot, [old])["status"], "stale")
+        table = {"测试刀": {"生存": 56, "侦察": 40}}
+        self.assertEqual(link_visible_slot(slot, [old], table)["status"], "linked")
+        larger = {**slot, "survival_max": 57,
+                  "stats": {**slot["stats"], "生存": 57}}
+        self.assertEqual(link_visible_slot(
+            larger, [old], {"测试刀": {"生存": 57, "侦察": 40}})
+            ["status"], "stale")
+        self.assertEqual(link_visible_slot(
+            larger, [old], {"oid:snapshot:1": {"生存": 57, "侦察": 40}})
+            ["status"], "linked")
+        self.assertEqual(link_visible_slot(
+            {**slot, "stats": {**slot["stats"], "打击": 81}}, [old], table)
+            ["status"], "stale")
+        duplicate = dict(old, observation_id="snapshot:2")
+        self.assertEqual(link_visible_slot(slot, [old, duplicate], table)
+                         ["status"], "ambiguous")
 
 
 class NameMatchTests(unittest.TestCase):

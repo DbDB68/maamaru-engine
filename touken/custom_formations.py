@@ -117,11 +117,12 @@ def find_formation(formations, fid) -> dict | None:
 
 _FINGERPRINT_FIELDS = (
     "sword_catalog_id", "name_zh", "form_status", "tou_level",
-    "survival_max", "kiwame_date",
+    "kiwame_date",
 )
 
 
-def _fingerprint_matches(saved: dict, current: dict) -> bool:
+def _fingerprint_matches(saved: dict, current: dict,
+                         cultivation=None) -> bool:
     """旧预设可重连：等级只准增长；其余已保存的可见指纹必须吻合。"""
     for field in _FINGERPRINT_FIELDS:
         expected = saved.get(field)
@@ -145,11 +146,28 @@ def _fingerprint_matches(saved: dict, current: dict) -> bool:
                     any(value is not None for value in expected_stats.values()))):
             # 旧版只存「刀名＋等级」时，升级后无法排除是另一振同名刀。
             return False
-    if isinstance(expected_stats, dict):
-        current_stats = current.get("stats") or {}
-        for key, value in expected_stats.items():
-            if value is not None and current_stats.get(key) != value:
-                return False
+    current_stats = current.get("stats") or {}
+    from .formation_identity import GROWTH_STATS, growth_stats_match
+    has_pair = (isinstance(expected_stats, dict)
+                and all(expected_stats.get(key) is not None and
+                        current_stats.get(key) is not None
+                        for key in GROWTH_STATS))
+    if has_pair:
+        if not growth_stats_match(
+                expected_stats, current_stats, saved.get("name_zh") or "",
+                cultivation or {}, old_survival_max=saved.get("survival_max"),
+                new_survival_max=current.get("survival_max"),
+                observation_id=current.get("observation_id")):
+            return False
+    else:
+        # 旧预设没存齐生存/侦察，沿用所有已保存字段的严格比对。
+        if (saved.get("survival_max") is not None and
+                current.get("survival_max") != saved["survival_max"]):
+            return False
+        if isinstance(expected_stats, dict):
+            for key, value in expected_stats.items():
+                if value is not None and current_stats.get(key) != value:
+                    return False
     return True
 
 
@@ -179,17 +197,23 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
                 or "没有可信的完整刀账，先跑一次刀帐盘点"}
 
     entries = candidate_pool.get("entries") or []
+    from .formation_identity import cultivation_pairs
+    from .flows.naihanka import _load_naihanka_state
+    cultivation = cultivation_pairs(_load_naihanka_state(),
+                                    candidate_pool.get("observed_at"),
+                                    (candidate_pool.get("source") or {}).get("snapshot_id"))
     by_oid = {entry.get("observation_id"): entry for entry in entries
               if entry.get("observation_id")}
     resolved = {}
     for key in sorted(slots, key=int):
         saved = slots[key]
         direct = by_oid.get(saved.get("observation_id"))
-        if direct is not None and _fingerprint_matches(saved, direct):
+        if direct is not None and _fingerprint_matches(saved, direct,
+                                                      cultivation):
             matches = [direct]
         else:
             matches = [entry for entry in entries
-                       if _fingerprint_matches(saved, entry)]
+                       if _fingerprint_matches(saved, entry, cultivation)]
         label = saved.get("name_zh") or saved.get("sword_catalog_id") or "未识别刀剑"
         if not matches:
             return {"ok": False,

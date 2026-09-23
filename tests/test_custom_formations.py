@@ -240,6 +240,45 @@ class ResolvePresetTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("2 振分不清", result["reason"])
 
+    def test_cultivation_pair_change_relinks_only_with_matching_table(self):
+        stats = {"生存": 55, "侦察": 39, "打击": 80, "防御": 80,
+                 "机动": 80, "冲力": 80, "隐蔽": 80, "必杀": 80}
+        old = _pool_entry("9:1", "touken_003", "三日月宗近", level=90,
+                          tou_level=4, survival_max=55, stats=stats)
+        new = _pool_entry("10:7", "touken_003", "三日月宗近", level=91,
+                          tou_level=4, survival_max=56,
+                          stats={**stats, "生存": 56, "侦察": 40})
+        pool = {"done": True, "observed_at": 1789992100, "entries": [new]}
+        state = {"stats_at": "2026-09-22 21:33:18",
+                 "stats": {"三日月宗近": {"生存": 56, "侦察": 40}}}
+        with patch("touken.flows.naihanka._load_naihanka_state",
+                   return_value=state):
+            self.assertTrue(cf.resolve_formation_slots(
+                _record(slots={"1": old}), pool)["ok"])
+        with patch("touken.flows.naihanka._load_naihanka_state",
+                   return_value={}):
+            self.assertFalse(cf.resolve_formation_slots(
+                _record(slots={"1": old}), pool)["ok"])
+
+    def test_non_cultivation_pair_stays_distinct_even_if_other_stats_change(self):
+        stats = {"生存": 55, "侦察": 39, "打击": 80, "防御": 80,
+                 "机动": 80, "冲力": 80, "隐蔽": 80, "必杀": 80}
+        old = _pool_entry("9:1", "touken_003", "三日月宗近", level=90,
+                          tou_level=4, survival_max=55, stats=stats)
+        same = _pool_entry("10:7", "touken_003", "三日月宗近", level=91,
+                           tou_level=4, survival_max=55,
+                           stats={**stats, "打击": 81})
+        different = _pool_entry("10:8", "touken_003", "三日月宗近", level=91,
+                                tou_level=4, survival_max=55,
+                                stats={**stats, "侦察": 40})
+        with patch("touken.flows.naihanka._load_naihanka_state",
+                   return_value={}):
+            result = cf.resolve_formation_slots(
+                _record(slots={"1": old}),
+                {"done": True, "entries": [same, different]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["observation_id"], "10:7")
+
     def test_legacy_ambiguous_same_name_level_is_rejected_before_clicks(self):
         entries = [_pool_entry("9:1", "touken_118", "压切长谷部"),
                    _pool_entry("9:2", "touken_118", "压切长谷部")]

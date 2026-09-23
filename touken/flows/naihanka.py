@@ -260,6 +260,15 @@ class NaihankaMixin:
                 {"name": gd["name"], "stat": gd["stat"],
                  "old": gd["old"], "new": gd["new"]} for gd in extra])
 
+        # 耕作的生存/侦察涨值若能由旧值唯一落到完整刀账的一振，留给编队
+        # 识别使用；轮换下一批内番后仍能认出这振。无法唯一认人则不记。
+        try:
+            from ..formation_identity import record_cultivation_growth
+            from ..honmaru_profile import get_honmaru_profile
+            state = record_cultivation_growth(
+                state, table, get_honmaru_profile().get("candidate_pool") or {})
+        except Exception:
+            pass  # 内番记账是附加证据，不影响本次快照保存
         state["stats"] = table
         state["stats_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         _save_naihanka_state(state)

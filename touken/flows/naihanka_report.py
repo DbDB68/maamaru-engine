@@ -146,6 +146,8 @@ def read_report_gains(img, ocr_func) -> list:
 def read_table_stats(ocr_func) -> dict:
     """读今日内番表：{刀名: {属性: 值}}。读不全的槽整个跳过（不编数）。"""
     table = {}
+    seen_names = set()
+    duplicate_names = set()
     for ci, region in enumerate(TABLE_OCR_REGIONS):
         try:
             tokens = ocr_func(roi_4to4(*region))
@@ -156,13 +158,20 @@ def read_table_stats(ocr_func) -> dict:
                 TABLE_VALUES_SPLIT_Y, TABLE_NAMES_SPLIT_Y):
             if not slot["name"]:
                 continue
+            if slot["name"] in seen_names:
+                duplicate_names.add(slot["name"])
+            seen_names.add(slot["name"])
             stats = {}
             for side, label in enumerate(TABLE_STATS[ci]):
                 v = slot["values"][side]
                 if v is not None:
                     stats[label] = v
             if stats:
-                table[slot["name"]] = stats
+                if slot["name"] not in duplicate_names:
+                    table[slot["name"]] = stats
+    # 表屏只认刀名，没有实例编号；同名两振不能互相覆盖。
+    for name in duplicate_names:
+        table.pop(name, None)
     return table
 
 

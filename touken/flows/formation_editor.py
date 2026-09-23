@@ -594,7 +594,12 @@ class FormationEditorMixin:
             return {"status": "insufficient", "observation_id": None}
         observed = dict(slot)
         observed["stats"] = self._read_slot_stats(slot_no)
-        return link_visible_slot(observed, pool.get("entries") or [])
+        from ..formation_identity import cultivation_pairs
+        from .naihanka import _load_naihanka_state
+        cultivation = cultivation_pairs(_load_naihanka_state(),
+                                        pool.get("observed_at"),
+                                        (pool.get("source") or {}).get("snapshot_id"))
+        return link_visible_slot(observed, pool.get("entries") or [], cultivation)
 
     # ---- 筛选/排序面板 ----
 
