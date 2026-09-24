@@ -4,6 +4,7 @@ from unittest.mock import patch
 from touken.flows.battle import BattleMixin
 from touken.flows.sortie import SortieMixin
 from touken.flows.osaka import OsakaMixin
+from touken.flows.raid import RaidMixin
 from touken.maa_adapter import Point
 
 
@@ -1175,6 +1176,86 @@ class SafeDepartChainTests(unittest.TestCase):
         self.assertEqual(result, (True, False))
         self.assertEqual(host.departs, 2)
         self.assertFalse(any("防止重复消费" in m for m in msgs), msgs)
+
+
+class _RaidLoopTime:
+    """战斗循环的假钟：time() 每次前进 30s（秒过 20s 冷静期），sleep 空转。"""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def time(self):
+        self.now += 30.0
+        return self.now
+
+    def sleep(self, _seconds):
+        pass
+
+
+class _RaidLoopHost(RaidMixin):
+    def __init__(self, maa, raid_cfg):
+        self.maa = maa
+        self.config = {"raid": raid_cfg}
+
+    def _click_point(self, _point):
+        pass
+
+    def quick_peek(self, tag=""):
+        pass
+
+    def recover_network_stream(self):
+        if False:
+            yield
+        return False
+
+
+def _raid_loop_cfg(extra=None):
+    cfg = {
+        "round_end": {
+            "template": "lulian/ui陆联.png",
+            "roi": [320, 55, 640, 135],
+            "threshold": 0.9,
+        },
+        "battle_ocr": {"expected": "战斗", "roi": [1034, 586, 1154, 646]},
+        "skip_tap": [775, 695],
+    }
+    cfg.update(extra or {})
+    return cfg
+
+
+class RaidRoundEndVariantTests(unittest.TestCase):
+    """一圈结束判定要同时认陆联/海联横幅（2026-09-24 海联接线）。"""
+
+    def _run(self, maa, cfg):
+        host = _RaidLoopHost(maa, cfg)
+        with patch("touken.flows.raid.time", _RaidLoopTime()):
+            list(host.battle_loop_stream(need_battle=False))
+        return host._battle_loop_result
+
+    def test_round_ends_on_hailian_banner(self):
+        maa = FakeMaa(templates={"lulian/ui海联.png": (582, 94)})
+        cfg = _raid_loop_cfg({
+            "round_end_hailian": {
+                "template": "lulian/ui海联.png",
+                "roi": [320, 55, 880, 140],
+                "threshold": 0.9,
+            },
+        })
+        self.assertEqual(self._run(maa, cfg), (True, 0))
+        hailian_calls = [t for t, _ in maa.template_calls
+                         if t == "lulian/ui海联.png"]
+        self.assertTrue(hailian_calls)
+
+    def test_round_still_ends_on_lulian_banner(self):
+        maa = FakeMaa(templates={"lulian/ui陆联.png": (480, 95)})
+        self.assertEqual(self._run(maa, _raid_loop_cfg()), (True, 0))
+
+    def test_missing_round_end_raises(self):
+        cfg = _raid_loop_cfg()
+        del cfg["round_end"]
+        host = _RaidLoopHost(FakeMaa(), cfg)
+        with self.assertRaises(KeyError):
+            list(host.battle_loop_stream(need_battle=False))
 
 
 if __name__ == "__main__":

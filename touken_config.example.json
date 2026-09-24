@@ -953,6 +953,9 @@
     "ui_title": {
       "template": "lulian/ui陆联.png"
     },
+    "ui_title_hailian": {
+      "template": "lulian/ui海联.png"
+    },
     "deploy_button": {
       "ocr": {
         "expected": ["部队", "选择"],
@@ -1020,6 +1023,16 @@
         55,
         640,
         135
+      ],
+      "threshold": 0.9
+    },
+    "round_end_hailian": {
+      "template": "lulian/ui海联.png",
+      "roi": [
+        320,
+        55,
+        880,
+        140
       ],
       "threshold": 0.9
     },

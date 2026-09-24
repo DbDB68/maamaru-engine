@@ -1,4 +1,4 @@
-﻿{
+{
     "product":  "Maamaru",
     "version":  "0.1.6",
     "data_schema":  1,
@@ -1233,6 +1233,11 @@
                       "path":  "resource/base/image/lulian/ui陆联.png",
                       "size":  34917,
                       "sha256":  "9ef863c7f15df05c9cdc049c0189bf08488138c5f07457e2d963752b121c5770"
+                  },
+                  {
+                      "path":  "resource/base/image/lulian/ui海联.png",
+                      "size":  45337,
+                      "sha256":  "9d67d50971ce84f4b68b2f0e6dd946315a5b1737630224dc2d7cbbb1ed61cd9d"
                   },
                   {
                       "path":  "resource/base/image/battle/部队恢复.png",

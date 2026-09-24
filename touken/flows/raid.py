@@ -68,12 +68,20 @@ class RaidMixin:
             return
 
         # ========== 2. 进入联队战界面 ==========
-        # 点"活动"按钮，等 ui陆联 标题出现（可能已经在联队战界面，那就直接过）
-        entered = False
+        # 点"活动"按钮，等联队战标题出现（可能已经在联队战界面，那就直接过）。
+        # 陆联/海联横幅不一样，两个模板都认；认到哪个就上报哪个变体。
+        ui_title_variants = [("lulian", cfg["ui_title"]["template"])]
+        hailian_title = cfg.get("ui_title_hailian")
+        if hailian_title:
+            ui_title_variants.append(("hailian", hailian_title["template"]))
+        entered = None
         for _ in range(6):
             self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["ui_title"]["template"]):
-                entered = True
+            for variant, template in ui_title_variants:
+                if self.maa.template_match(template):
+                    entered = variant
+                    break
+            if entered:
                 break
             entry = self.maa.template_match(cfg["activity_entry"]["template"])
             if entry:
@@ -85,9 +93,7 @@ class RaidMixin:
             yield "[RAID] 进不去联队战界面（活动结束了？）"
             return
         yield "[RAID] 到达联队战界面"
-        # 上报仪表盘：陆联还是海联。现在只截了 ui陆联，所以必为陆联；
-        # 以后有海联标题模板后，在这里加分支写 "raid:hailian" 即可
-        self.set_progress("raid:lulian")
+        self.set_progress(f"raid:{entered}")
 
         # ========== 3. 逐圈跑 ==========
         for round_no in range(1, max_rounds + 1):
@@ -241,10 +247,19 @@ class RaidMixin:
         cfg = self.config.get(cfg_key, {})
         battles = 0
         round_done = False
-        end_cfg = cfg["round_end"]
-        # roi 可留空：有的模板（RGBA 的 ui南瓜）在 MAA 的 roi 匹配下会神秘不中，
-        # 全屏 + 高阈值一样稳，标题本身够独特
-        end_roi = roi_4to4(*end_cfg["roi"]) if end_cfg.get("roi") else None
+        # 一圈结束 = 活动标题回到屏幕。联队战陆联/海联横幅不一样，
+        # round_end 之外的变体（round_end_hailian）一并认。
+        end_checks = []
+        for key in ("round_end", "round_end_hailian"):
+            end_cfg = cfg.get(key)
+            if not end_cfg:
+                continue
+            # roi 可留空：有的模板（RGBA 的 ui南瓜）在 MAA 的 roi 匹配下会神秘不中，
+            # 全屏 + 高阈值一样稳，标题本身够独特
+            end_roi = roi_4to4(*end_cfg["roi"]) if end_cfg.get("roi") else None
+            end_checks.append((end_cfg["template"], end_roi, end_cfg["threshold"]))
+        if not end_checks:
+            raise KeyError(f"{cfg_key} 配置缺 round_end")
         battle_cfg = cfg["battle_ocr"]
         battle_roi = roi_4to4(*battle_cfg["roi"])
 
@@ -292,8 +307,11 @@ class RaidMixin:
 
             # 一圈结束？（活动标题回到屏幕上，高阈值防战斗中误认）
             if (battles >= 1 or not need_battle) and time.time() - battle_loop_start > END_CHECK_GRACE_SEC:
-                if self.maa.template_match(end_cfg["template"], end_roi, end_cfg["threshold"]):
-                    round_done = True
+                for end_template, end_roi, end_threshold in end_checks:
+                    if self.maa.template_match(end_template, end_roi, end_threshold):
+                        round_done = True
+                        break
+                if round_done:
                     break
 
             # 都不是 → 点安全区跳对话/动画
