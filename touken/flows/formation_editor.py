@@ -1218,7 +1218,12 @@ class FormationEditorMixin:
                 status = "blind"       # 翻页后整页失明
                 break
             fp = page_fingerprint(rows)
-            if fps and fp == fps[-1]:
+            bar = self._scrollbar_bottom()
+            # 同一滑块位置不算新页：真机 OCR 偶发把同一帧的等级/名字
+            # 读出不同指纹；位置没变时继续走到底核验，而不是伪造页序。
+            same_position = (fps and bar is not None
+                             and bars[-1] is not None and bar == bars[-1])
+            if fps and (fp == fps[-1] or same_position):
                 stalls += 1
                 if stalls >= _STALL_LIMIT:
                     outcome, recovered = self._verify_bottom(
@@ -1241,7 +1246,7 @@ class FormationEditorMixin:
             fps.append(fp)
             # 每页记下右缘滑块底缘（绝对位置），给重定位当导航地标；
             # 读不出就存 None，目标页没地标时重定位如实失败
-            bars.append(self._scrollbar_bottom())
+            bars.append(bar)
             unreadable += bad
             current_idx = len(pages) - 1
             stalls = 0

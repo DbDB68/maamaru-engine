@@ -1157,6 +1157,33 @@ class BottomProofTests(unittest.TestCase):
         self.assertEqual(decide_clicks, [])
         _assert_never_departs(self, maa)
 
+    def test_swallowed_swipes_with_ocr_jitter_are_stalled(self):
+        """真机反例：滑块没动，同一页 OCR 指纹 A/B/A 抖动，不算三页。"""
+        maa, host = _std_setup(
+            pages=[self._full_page(0), self._full_page(1)],
+            swallow_swipes=True)
+        maa.in_list = True
+        original_read = host._read_list_page
+        reads = 0
+        def jittering_read():
+            nonlocal reads
+            rows, bad = original_read()
+            reads += 1
+            rows[0]["fatigue"] = 90 + reads % 2
+            return rows, bad
+        with patch.object(host, "_read_list_page", side_effect=jittering_read), \
+             patch("touken.flows.formation_editor.time.sleep", lambda *_: None):
+            gen = host._scan_selection_list(10)
+            while True:
+                try:
+                    next(gen)
+                except StopIteration as stop:
+                    pages, _fps, _bars, _idx, _bad, status = stop.value
+                    break
+        self.assertEqual(status, "stalled")
+        self.assertEqual(len(pages), 1)
+        self.assertGreaterEqual(reads, 3)
+
     def test_mid_scan_swallowed_swipes_cannot_fake_bottom(self):
         """精确回归（老大独立复现）：page0→page1 成功，page1 上第 2、3 次
         前滑被吞，之后反向滑和前滑全部正常。旧实现的回翻复归在 page1 上
