@@ -120,6 +120,8 @@ _POS_MARK = re.compile(r"^[一二三四五]\s*之\s*[一二三四五六]?$")  # 
 _EDGE_ROW_Y = 640                   # 页缘行阈值（ROI 底 700）：底部行及其
                                     # 小字（y≈640~685）翻页后必然重现于页
                                     # 中部复核，乱码留待那时裁决
+_TOP_EDGE_ROW_Y = 180               # 顶缘截断行：首屏完整姓名从 y≈196 起；
+                                    # 翻页后 y<180 的半行在前一页已出现
 _ROW_MERGE_DY = 25                  # 同一行碎 token 归并的 y 容差
 _ROW_ATTACH_DY = 40                 # 疲劳/等级 token 归属名字行的 y 容差
 _MAX_PAGES = 60                     # 翻页安全阀（防死循环），不是"全表"同义词；
@@ -129,8 +131,10 @@ _BOTTOM_PROOF_STAGES = 2            # 到底核验的独立阶段数：每阶段
                                     # 验证滑块贴底+反滑回落+恢复贴底；恢复
                                     # 欠程帧不比指纹，贴底帧指纹与候选页
                                     # 一致才计有效阶段
-_SWIPE_NEXT = (640, 550, 640, 200, 800)   # 下一页（sakura/repair 实测 800ms）
+_SWIPE_NEXT = (640, 550, 640, 200, 800)   # 原精确预设翻页手势
 _SWIPE_PREV = (640, 200, 640, 550, 800)
+_SWIPE_RANKED_NEXT = (640, 500, 640, 330, 800)  # 2026-09-24 真机：内容
+_SWIPE_RANKED_PREV = (640, 330, 640, 500, 800)  # 移约 308px，重叠完整行
 _GOTO_MAX_SWIPES = 12                   # 重定位安全阀：滑块地标导航正常
                                         # 几次就到；翻满还没落地如实失败
 # 选择列表右缘滚动条（_list_end_sighted 的独立末端证据通道，
@@ -257,7 +261,8 @@ def parse_selection_rows(tokens):
     校正；归并行整体校正不上时，恰好一个碎 token 能过名册则采纳它
     （其余是小字误读噪声，真机常客）。姓名带里的其他乱码仍计入
     unreadable（保守阻断），唯二例外：行内小字区误读（下方 50px
-    内紧跟可校正名字行，丢弃不计）与页缘乱码（y>_EDGE_ROW_Y，
+    内紧跟可校正名字行，丢弃不计）与页缘乱码（y<_TOP_EDGE_ROW_Y
+    或 y>_EDGE_ROW_Y，
     翻页后必然送回页中部复核，留待那时裁决）。
 
     等级/疲劳（2026-09-22 真机校准）：行内四行小字同在 x∈[440,640)
@@ -330,12 +335,10 @@ def parse_selection_rows(tokens):
             if 0 < gap <= 50 and _sid_of(lines[idx + 1][1]) is not None:
                 continue            # 行内小字区误读：丢弃，不算读不清的名字
         if sid is None:
-            # 页缘乱码（底部 50px）不计入全表 unreadable：翻页位移
-            # ~350px 必然把它送回下一页中部重新裁决（读清了自然参与
-            # 匹配，仍读不清则以非页缘身份计入）。裁决点击只落在证据
-            # 充分的确认行上，漏算页缘乱码不会点错人；代价是目标恰好
-            # 是末页页缘乱码行时报 not_found（安全方向）。
-            if y <= _EDGE_ROW_Y:
+            # 上下页缘的半截行不计入全表 unreadable：顶缘已在前一页
+            # 露出，底缘会在下一页出现。首屏完整姓名始于 y≈196。
+            # 只忽略乱码计数，不凭半行作点击证据。
+            if _TOP_EDGE_ROW_Y <= y <= _EDGE_ROW_Y:
                 unreadable += 1
         info = sword_db.all_swords().get(sid) if sid else None
         level = fatigue = None
@@ -402,8 +405,13 @@ def recognize_selection_lock(image, name_y):
 
 def page_fingerprint(rows):
     """一页的指纹：翻页停滞/绕圈检测与回退定位用。"""
-    return tuple(sorted((r["sword_catalog_id"] or r["name_raw"] or "?",
-                         r["level"], r["fatigue"]) for r in rows))
+    parts = ((r["sword_catalog_id"] or r["name_raw"] or "?",
+              r["level"], r["fatigue"]) for r in rows)
+    # 同名多振有的行等级/疲劳漏读时，Python 不能直接比较 None 与整数；
+    # 保留 None 作为证据缺口，只用排序键稳定化页指纹。
+    return tuple(sorted(parts, key=lambda item: (
+        item[0], -1 if item[1] is None else item[1],
+        -1 if item[2] is None else item[2])))
 
 
 def row_conflicts_target(row, target, match_fields):
@@ -522,30 +530,68 @@ def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
 def decide_locked_highest(pages, target, unreadable_rows=0):
     """完整名单中只选确认上锁的同名刀，等级最高必须唯一。"""
     # 连续滚动的相邻视口会重叠。只有至少两行独立锚点给出同一位移，
-    # 才合并跨页副本；证据不足时保留两条，宁可判并列也不误选。
+    # 才合并跨页副本；半截行可缺字段，但已读字段不得互相矛盾。
+    # 同一页的同名行永不合并，证据不足时宁可判并列。
     duplicates = set()
-    def signature(row):
-        return (row.get("sword_catalog_id"), row.get("level"),
-                row.get("fatigue"))
+    def compatible(before, after):
+        if (before.get("sword_catalog_id") is None or
+                before.get("sword_catalog_id") != after.get("sword_catalog_id")):
+            return False
+        for field in ("level", "fatigue", "lock_status"):
+            left, right = before.get(field), after.get(field)
+            if field == "lock_status":
+                left = None if left == "unknown" else left
+                right = None if right == "unknown" else right
+            if left is not None and right is not None and left != right:
+                return False
+        return True
+    def evidence(row):
+        return (sum(row.get(field) is not None for field in ("level", "fatigue"))
+                + (row.get("lock_status") in ("locked", "unlocked")),
+                _TOP_EDGE_ROW_Y <= (row.get("y") or 0) <= _EDGE_ROW_Y)
     for p in range(1, len(pages)):
         prev, cur = pages[p - 1], pages[p]
-        pairs = []
-        for before in prev:
-            sig = signature(before)
-            if sig[0] is None:
-                continue
-            old_matches = [x for x in prev if signature(x) == sig]
-            new_matches = [(j, x) for j, x in enumerate(cur) if signature(x) == sig]
-            if (len(old_matches) == len(new_matches) == 1
-                    and before.get("y") is not None
-                    and new_matches[0][1].get("y") is not None):
-                j, after = new_matches[0]
-                pairs.append((j, after["y"] - before["y"]))
-        for shift in {delta for _, delta in pairs if delta != 0}:
-            matching = [j for j, delta in pairs if abs(delta - shift) <= 4]
-            if len(matching) >= 2:
-                duplicates.update((p, j) for j in matching)
-                break
+        shifts = {after["y"] - before["y"]
+                  for before in prev for after in cur
+                  if before.get("y") is not None and after.get("y") is not None
+                  and after["y"] < before["y"]
+                  and compatible(before, after)
+                  and (before.get("level") is not None or
+                       after.get("level") is not None)}
+        mappings = set()
+        for shift in shifts:
+            matches = []
+            for i, before in enumerate(prev):
+                if before.get("y") is None:
+                    continue
+                forward = [j for j, after in enumerate(cur)
+                           if after.get("y") is not None
+                           and abs(after["y"] - before["y"] - shift) <= 4
+                           and compatible(before, after)]
+                if len(forward) != 1:
+                    continue
+                j = forward[0]
+                reverse = [k for k, other in enumerate(prev)
+                           if other.get("y") is not None
+                           and abs(cur[j]["y"] - other["y"] - shift) <= 4
+                           and compatible(other, cur[j])]
+                if reverse == [i]:
+                    matches.append((i, j))
+            if len(matches) >= 2 and len({j for _, j in matches}) == len(matches):
+                # 两个不同 y 的物理行支持同一位移；已读字段相容。
+                # 同名并列也能作锚点，但竞争位移同样有两行时不猜。
+                mappings.add(frozenset(matches))
+        if not mappings:
+            continue
+        best_size = max(len(mapping) for mapping in mappings)
+        best = [mapping for mapping in mappings if len(mapping) == best_size]
+        if len(best) != 1:
+            continue
+        for i, j in best[0]:
+            if evidence(cur[j]) > evidence(prev[i]):
+                duplicates.add((p - 1, i))
+            else:
+                duplicates.add((p, j))
     candidates = [(p, r) for p, rows in enumerate(pages) for j, r in enumerate(rows)
                   if (p, j) not in duplicates
                   and r.get("sword_catalog_id") == target["sword_catalog_id"]]
@@ -923,8 +969,12 @@ class FormationEditorMixin:
         # 5) 全表扫描（指纹停滞=到底 / 绕圈 / 截断三种结局分明），
         #    只有确定扫到底的完整扫描才允许裁决唯一——截断名单上的
         #    "唯一"既找不到后段目标，也证明不了全局唯一
+        swipe_next, swipe_prev = (
+            (_SWIPE_RANKED_NEXT, _SWIPE_RANKED_PREV) if ranked else
+            (_SWIPE_NEXT, _SWIPE_PREV))
         pages, fps, bars, current_idx, unreadable, scan_status = \
-            yield from self._scan_selection_list(max_pages)
+            yield from self._scan_selection_list(
+                max_pages, swipe_next=swipe_next, swipe_prev=swipe_prev)
         if scan_status != "complete":
             why = {"truncated": "触达安全上限仍未到底",
                    "loop": "翻页指纹绕圈，页序异常",
@@ -969,8 +1019,9 @@ class FormationEditorMixin:
             match_fields = ("name", "level")
         yield (f"[编队] 唯一匹配在第 {target_page + 1} 页："
                f"{row['name']} Lv{row.get('level') or '?'}")
-        row = yield from self._goto_page(bars, target_page, tgt, row,
-                                         match_fields)
+        row = yield from self._goto_page(
+            bars, target_page, tgt, row, match_fields,
+            swipe_next=swipe_next, swipe_prev=swipe_prev)
         if row is None:
             yield "[编队] 无法在列表里重新定位目标行，停（未点决定）"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
@@ -1134,7 +1185,8 @@ class FormationEditorMixin:
             row["lock_status"] = recognize_selection_lock(image, row["y"])
         return rows, unreadable
 
-    def _scan_selection_list(self, max_pages):
+    def _scan_selection_list(self, max_pages, *, swipe_next=_SWIPE_NEXT,
+                             swipe_prev=_SWIPE_PREV):
         """逐页 OCR 全表。Returns (pages, fps, current_idx, unreadable, status)。
 
         status 四态分明——「滑不动」和「确认到底」是两件事：
@@ -1169,13 +1221,14 @@ class FormationEditorMixin:
             if fps and fp == fps[-1]:
                 stalls += 1
                 if stalls >= _STALL_LIMIT:
-                    outcome, recovered = self._verify_bottom(fps)
+                    outcome, recovered = self._verify_bottom(
+                        fps, swipe_next=swipe_next, swipe_prev=swipe_prev)
                     if outcome != "advanced":
                         status = outcome           # complete / stalled
                         break
                     pending = recovered            # 候选页之后还有页：继续扫
                     continue
-                self.maa.swipe(*_SWIPE_NEXT)
+                self.maa.swipe(*swipe_next)
                 time.sleep(1.2)
                 continue
             if fp in fps:
@@ -1195,14 +1248,15 @@ class FormationEditorMixin:
             if len(pages) >= max_pages:
                 status = "truncated"
                 break
-            self.maa.swipe(*_SWIPE_NEXT)
+            self.maa.swipe(*swipe_next)
             time.sleep(1.2)
         yield (f"[编队] 列表扫描 {len(pages)} 页"
                f"（{'已到底' if status == 'complete' else '未到底：' + status}，"
                f"读不清 {unreadable} 行）")
         return pages, fps, bars, current_idx, unreadable, status
 
-    def _verify_bottom(self, fps):
+    def _verify_bottom(self, fps, *, swipe_next=_SWIPE_NEXT,
+                       swipe_prev=_SWIPE_PREV):
         """停滞后的「到底」多阶段核验，主仪器是右缘滑块底缘的绝对位置
         （免疫滑动欠程/被吞，2026-09-22 探针标定：贴底恒 689；一次反滑
         689→482；单次恢复滑欠程只回 588，再滑一次才重新钳到 689——
@@ -1241,14 +1295,14 @@ class FormationEditorMixin:
                 # 滑块没贴底：候选页不是底，停滞是前滑被吞——续滑把
                 # 新页找回来交还主循环（找不回/失明就 stalled）。
                 for _retry in range(2):
-                    self.maa.swipe(*_SWIPE_NEXT)
+                    self.maa.swipe(*swipe_next)
                     time.sleep(1.2)
                     rows, bad = self._read_list_page()
                     if rows and page_fingerprint(rows) != candidate_fp:
                         return "advanced", (rows, bad)
                 return "stalled", None
             # 候选页自称贴底：先正面验证反向滑动有效……
-            self.maa.swipe(*_SWIPE_PREV)
+            self.maa.swipe(*swipe_prev)
             time.sleep(1.2)
             rows, _bad = self._read_list_page()
             b1 = self._scrollbar_bottom()
@@ -1262,7 +1316,7 @@ class FormationEditorMixin:
             # 帧才与候选页比对。
             restored = False
             for _retry in range(3):
-                self.maa.swipe(*_SWIPE_NEXT)
+                self.maa.swipe(*swipe_next)
                 time.sleep(1.2)
                 rows, bad = self._read_list_page()
                 b2 = self._scrollbar_bottom()
@@ -1346,7 +1400,8 @@ class FormationEditorMixin:
         return bool((np.abs(band - median).max(axis=2) < 8).mean() >= 0.99)
 
     def _goto_page(self, bars, target_idx, target, scanned_row,
-                   match_fields):
+                   match_fields, *, swipe_next=_SWIPE_NEXT,
+                   swipe_prev=_SWIPE_PREV):
         """把目标行翻回视野，返回落地帧实读的目标行（点决定的坐标
         以它为准）；证据不足/找不到就返回 None，绝不乱点。
 
@@ -1384,7 +1439,7 @@ class FormationEditorMixin:
                     return hit3
                 yield "[编队] 已到目标页位置但目标行读不出来，停"
                 return None
-            self.maa.swipe(*(_SWIPE_NEXT if b < b_target else _SWIPE_PREV))
+            self.maa.swipe(*(swipe_next if b < b_target else swipe_prev))
             time.sleep(1.2)
         yield f"[编队] 重定位翻满 {_GOTO_MAX_SWIPES} 次仍未找到目标行，停"
         return None

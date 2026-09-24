@@ -24,7 +24,7 @@ import numpy as np
 
 from touken.flows.formation_editor import (
     FormationEditorMixin, decide_match, decide_locked_highest,
-    recognize_selection_lock, normalize_target, parse_selection_rows,
+    recognize_selection_lock, page_fingerprint, normalize_target, parse_selection_rows,
     row_conflicts_target, slot_matches_target,
     FORBIDDEN_DEPART_CLICKS, ALREADY_CORRECT, AMBIGUOUS, CHANGED,
     INVALID_REQUEST, NOT_FOUND, SCREEN_UNRECOGNIZED, UNAVAILABLE,
@@ -352,6 +352,17 @@ def _ok_row(y=300, **kw):
 # ==================== 纯函数 ====================
 
 class PureFunctionTests(unittest.TestCase):
+    def test_page_fingerprint_keeps_missing_level_and_fatigue(self):
+        rows = [
+            {"sword_catalog_id": MIKA, "name_raw": "三日月宗近",
+             "level": None, "fatigue": 80},
+            {"sword_catalog_id": MIKA, "name_raw": "三日月宗近",
+             "level": 99, "fatigue": None},
+        ]
+        fingerprint = page_fingerprint(rows)
+        self.assertEqual(fingerprint, page_fingerprint(list(reversed(rows))))
+        self.assertIn((MIKA, None, 80), fingerprint)
+
     def test_single_page_blank_bottom_is_independent_end_evidence(self):
         maa, host = _std_setup(pages=[[_ok_row(y=195)]])
         frame = np.full((720, 1280, 3), (214, 220, 221), dtype=np.uint8)
@@ -404,6 +415,79 @@ class PureFunctionTests(unittest.TestCase):
         result = decide_locked_highest([[anchor, top], [next_anchor, next_top]], target)
         self.assertEqual(result["status"], "unique")
         self.assertIs(result["row"], top)
+
+    def test_ranked_overlap_merges_partial_rows_by_measured_shift(self):
+        target = {"sword_catalog_id": MIKA}
+        first = {"sword_catalog_id": MIKA, "level": 99, "fatigue": 80,
+                 "lock_status": "locked", "y": 273}
+        second = {**first, "y": 373}
+        anchor_a = {"sword_catalog_id": KOGI, "level": 90, "fatigue": 70,
+                    "lock_status": "locked", "y": 472}
+        anchor_b = {"sword_catalog_id": IMA, "level": 1, "fatigue": 49,
+                    "lock_status": "locked", "y": 571}
+        pages = [[first, second, anchor_a, anchor_b],
+                 [{**first, "level": None, "lock_status": "unknown", "y": 169},
+                  {**second, "y": 268},
+                  {**anchor_a, "y": 367}, {**anchor_b, "y": 467}]]
+        result = decide_locked_highest(pages, target)
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertEqual(len(result["candidates"]), 2)
+        # 同名同级的两振仍各算一振；只有跨页重复被消去。
+        one = [[first, anchor_a, anchor_b], pages[1][0:1] + pages[1][2:]]
+        result = decide_locked_highest(one, target)
+        self.assertEqual(result["status"], "unique")
+        self.assertIs(result["row"], first)
+
+    def test_ranked_overlap_does_not_merge_conflicting_known_values(self):
+        target = {"sword_catalog_id": MIKA}
+        top = {"sword_catalog_id": MIKA, "level": 99, "fatigue": 80,
+               "lock_status": "locked", "y": 550}
+        anchor_a = {"sword_catalog_id": KOGI, "level": 90, "fatigue": 70,
+                    "lock_status": "locked", "y": 350}
+        anchor_b = {"sword_catalog_id": IMA, "level": 1, "fatigue": 49,
+                    "lock_status": "locked", "y": 450}
+        pages = [[anchor_a, anchor_b, top],
+                 [{**anchor_a, "y": 250}, {**anchor_b, "y": 350},
+                  {**top, "fatigue": 81, "y": 450}]]
+        self.assertEqual(decide_locked_highest(pages, target)["status"],
+                         "ambiguous")
+
+    def test_ranked_overlap_uses_lock_to_distinguish_same_name_anchors(self):
+        target = {"sword_catalog_id": MIKA}
+        free = {"sword_catalog_id": MIKA, "level": 1, "fatigue": 49,
+                "lock_status": "unlocked", "y": 461}
+        kept = {**free, "lock_status": "locked", "y": 558}
+        other = {"sword_catalog_id": MAEDA, "level": 1, "fatigue": 49,
+                 "lock_status": "unknown", "y": 658}
+        pages = [[free, kept, other],
+                 [{**free, "level": None, "lock_status": "unknown", "y": 169},
+                  {**kept, "y": 270},
+                  {**other, "lock_status": "unlocked", "y": 369}]]
+        result = decide_locked_highest(pages, target)
+        self.assertEqual(result["status"], "unique")
+        self.assertIs(result["row"], kept)
+
+    def test_ranked_overlap_partial_lock_gets_full_next_page_evidence(self):
+        target = {"sword_catalog_id": MIKA}
+        free = {"sword_catalog_id": MIKA, "level": 1, "fatigue": 49,
+                "lock_status": "unlocked", "y": 536}
+        partial = {**free, "lock_status": "unknown", "y": 635}
+        pages = [[free, partial],
+                 [{**free, "y": 195},
+                  {**partial, "lock_status": "locked", "y": 295}]]
+        result = decide_locked_highest(pages, target)
+        self.assertEqual(result["status"], "unique")
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["row"]["y"], 295)
+
+    def test_ranked_overlap_competing_shifts_stay_ambiguous(self):
+        target = {"sword_catalog_id": MIKA}
+        row = {"sword_catalog_id": MIKA, "level": 99, "fatigue": 80,
+               "lock_status": "locked"}
+        pages = [[{**row, "y": 400}, {**row, "y": 500}],
+                 [{**row, "y": 200}, {**row, "y": 300}, {**row, "y": 400}]]
+        self.assertEqual(decide_locked_highest(pages, target)["status"],
+                         "ambiguous")
 
 
     def test_normalize_target_from_pool_entry(self):
@@ -511,6 +595,12 @@ class PureFunctionTests(unittest.TestCase):
         rows, unreadable = parse_selection_rows(tokens)
         self.assertEqual(unreadable, 0)
         self.assertEqual(len(rows), 2)          # 行还在，只是不计数
+
+    def test_top_edge_garbage_not_counted(self):
+        rows, unreadable = parse_selection_rows(
+            [("出司", _P(128, 139)), ("小狐丸", _P(139, 245))])
+        self.assertEqual(unreadable, 0)
+        self.assertEqual(len(rows), 2)
 
     def test_position_markers_never_pollute_name_band(self):
         """真机布局：名字左侧的"N之M"位置标记/锁图标不算读不清的名字。"""
@@ -684,6 +774,7 @@ class ExecutorFlowTests(unittest.TestCase):
             result = _run(host, target=target)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(host.teams[2][2]["level"], 40)
+        self.assertIn((640, 500, 640, 330, 800), maa.swipes)
         _assert_never_departs(self, maa)
 
 
@@ -700,6 +791,7 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(len(result["team_before"]), 6)
         self.assertNotIn("after", result)
         self.assertNotIn("team_after", result)
+        self.assertIn((640, 550, 640, 200, 800), maa.swipes)
         self.assertIn((_DECIDE_X, 300 - 22), maa.clicks)
         self.assertEqual(maa.shell, "formation")   # 保持原入口上下文
         ev = [e for e in host.events
