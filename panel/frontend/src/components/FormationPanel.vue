@@ -27,6 +27,24 @@ const emit = defineEmits<{ stop: []; notify: [message: string] }>()
 
 const TEAM_LABELS = ['部队一', '部队二', '部队三', '部队四', '部队五']
 const MAX_PRESETS = 5 // 后端合同：预设编队最多存 5 套
+const TREASURE_OPTIONS = [
+  { label: '曜变天目', value: '曜变天目' },
+  { label: '狮子螺钿鞍', value: '狮子螺钿鞍' },
+  { label: '南蛮胴具足', value: '南蛮胴具足' },
+  { label: '鍔·月下梅树透图', value: '锷·月下梅树透图' },
+  { label: '鍔·双鹤', value: '锷·双鹤' },
+  { label: '三所物·菊', value: '三所物·菊' },
+  { label: '三所物·狮子', value: '三所物·狮子' },
+] as const
+const TROOP_SPECIAL = [
+  { label: '轻步兵（新春）', value: '轻步兵·新春' },
+  { label: '轻骑兵（新春）', value: '轻骑兵·新春' },
+] as const
+const TROOP_KINDS = [
+  '轻步兵', '投石兵', '枪兵', '重步兵', '盾兵', '轻骑兵',
+  '重骑兵', '精锐兵', '弓兵', '铳兵', '水炮兵',
+] as const
+const TROOP_GRADES = ['中', '上', '特上'] as const
 
 const profile = ref<HonmaruFormationProfile | null>(null)
 const catalog = ref<Array<{ id: string; name: string; name_zh: string; type: string }>>([])
@@ -232,6 +250,28 @@ function setSlotTroop(no: number, position: number, value: string) {
   draftSlots.value = next
 }
 
+function troopKind(name: string) {
+  return name.replace(/·(中|上|特上)$/, '')
+}
+
+function troopGrade(name: string) {
+  return name.match(/·(中|上|特上)$/)?.[1] || '特上'
+}
+
+function selectSlotTroopKind(no: number, position: number, kind: string) {
+  const current = draftSlots.value[String(no)]?.troops?.[String(position)] || ''
+  setSlotTroop(no, position, !kind || !TROOP_KINDS.some(item => item === kind)
+    ? kind : `${kind}·${troopGrade(current)}`)
+}
+
+function selectSlotTroopGrade(no: number, position: number, grade: string) {
+  const current = draftSlots.value[String(no)]?.troops?.[String(position)] || ''
+  const kind = troopKind(current)
+  if (kind && TROOP_KINDS.some(item => item === kind)) {
+    setSlotTroop(no, position, `${kind}·${grade}`)
+  }
+}
+
 function setSlotTreasure(no: number, field: 'name' | 'level' | 'affection', value: string) {
   const next = cloneSlots(draftSlots.value)
   const entry = next[String(no)]
@@ -239,6 +279,11 @@ function setSlotTreasure(no: number, field: 'name' | 'level' | 'affection', valu
   const treasure = entry.treasure || { name: '', level: 1, affection: 0 }
   entry.treasure = { ...treasure, [field]: field === 'name' ? value : Number(value) }
   draftSlots.value = next
+}
+
+function selectSlotTreasure(no: number, name: string) {
+  if (!name) clearSlotTreasure(no)
+  else setSlotTreasure(no, 'name', name)
 }
 
 function clearSlotTreasure(no: number) {
@@ -398,19 +443,37 @@ onMounted(() => { load(); loadPresets() })
 
             <div v-if="equipmentSlot != null && draftSlots[String(equipmentSlot)]" class="formation-treasure-editor">
               <b>{{ equipmentSlot }}号位的装备</b>
-              <p>刀装按第 1／2／3 格填写游戏显示的完整名称（含品级，例如「轻步兵·特上」）。不填写的格子保持原样；如果这振刀没有该格，会停止应用。</p>
+              <p>每格先选种类，再选品级；新春刀装不用选品级。留空的格子保持原样；这振刀没有该格或仓库找不到时会停止应用。</p>
               <div class="formation-preset-form">
-                <label v-for="position in [1, 2, 3]" :key="position" class="formation-preset-field">
+                <div v-for="position in [1, 2, 3]" :key="position" class="formation-preset-field">
                   <span>刀装第 {{ position }} 格</span>
-                  <input :value="draftSlots[String(equipmentSlot)].troops?.[String(position)] || ''" type="text" placeholder="不指定" @input="setSlotTroop(equipmentSlot!, position, ($event.target as HTMLInputElement).value)">
-                </label>
+                  <div class="formation-troop-selects">
+                    <select :aria-label="`刀装第 ${position} 格种类`" :value="troopKind(draftSlots[String(equipmentSlot)].troops?.[String(position)] || '')" @change="selectSlotTroopKind(equipmentSlot!, position, ($event.target as HTMLSelectElement).value)">
+                      <option value="">不指定</option>
+                      <option v-if="draftSlots[String(equipmentSlot)].troops?.[String(position)] && !TROOP_KINDS.some(kind => kind === troopKind(draftSlots[String(equipmentSlot)].troops?.[String(position)] || '')) && !TROOP_SPECIAL.some(item => item.value === troopKind(draftSlots[String(equipmentSlot)].troops?.[String(position)] || ''))" :value="troopKind(draftSlots[String(equipmentSlot)].troops?.[String(position)] || '')">{{ draftSlots[String(equipmentSlot)].troops?.[String(position)] }}</option>
+                      <optgroup label="活动刀装">
+                        <option v-for="item in TROOP_SPECIAL" :key="item.value" :value="item.value">{{ item.label }}</option>
+                      </optgroup>
+                      <optgroup label="普通刀装">
+                        <option v-for="kind in TROOP_KINDS" :key="kind" :value="kind">{{ kind }}</option>
+                      </optgroup>
+                    </select>
+                    <select v-if="TROOP_KINDS.some(kind => kind === troopKind(draftSlots[String(equipmentSlot)].troops?.[String(position)] || ''))" :aria-label="`刀装第 ${position} 格品级`" :value="troopGrade(draftSlots[String(equipmentSlot)].troops?.[String(position)] || '')" @change="selectSlotTroopGrade(equipmentSlot!, position, ($event.target as HTMLSelectElement).value)">
+                      <option v-for="grade in TROOP_GRADES" :key="grade" :value="grade">{{ grade }}</option>
+                    </select>
+                  </div>
+                </div>
               </div>
               <b class="formation-equipment-subtitle">宝物</b>
               <p>选填。按游戏里的名称、等级、爱用度填写；同样信息的宝物有多件时会停下，避免选错。</p>
               <div class="formation-preset-form">
                 <label class="formation-preset-field">
                   <span>宝物名称</span>
-                  <input :value="draftSlots[String(equipmentSlot)].treasure?.name || ''" type="text" placeholder="例如：锷·月下梅树透图" @input="setSlotTreasure(equipmentSlot!, 'name', ($event.target as HTMLInputElement).value)">
+                  <select :value="draftSlots[String(equipmentSlot)].treasure?.name || ''" @change="selectSlotTreasure(equipmentSlot!, ($event.target as HTMLSelectElement).value)">
+                    <option value="">不指定</option>
+                    <option v-if="draftSlots[String(equipmentSlot)].treasure?.name && !TREASURE_OPTIONS.some(option => option.value === draftSlots[String(equipmentSlot)].treasure?.name)" :value="draftSlots[String(equipmentSlot)].treasure?.name">{{ draftSlots[String(equipmentSlot)].treasure?.name }}</option>
+                    <option v-for="option in TREASURE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
                 </label>
                 <label class="formation-preset-field">
                   <span>等级</span>
@@ -528,6 +591,8 @@ onMounted(() => { load(); loadPresets() })
 .formation-preset-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .formation-preset-field { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }
 .formation-preset-field input, .formation-preset-field select { width: 100%; min-width: 0; padding: 8px 10px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 8px; }
+.formation-troop-selects { display: grid; grid-template-columns: minmax(0, 1fr) 68px; gap: 6px; }
+.formation-troop-selects select:only-child { grid-column: 1 / -1; }
 .formation-preset-warn { margin: 10px 0 0; padding: 8px 11px; color: #7a5312; background: color-mix(in srgb, #f4e8cf 72%, var(--paper-card)); border: 1px solid #d9bd84; border-radius: 8px; font-size: 12px; }
 .formation-preset-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 .formation-preset-slots li { position: relative; min-width: 0; }
