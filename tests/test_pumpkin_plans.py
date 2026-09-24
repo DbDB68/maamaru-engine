@@ -112,8 +112,11 @@ class PumpkinPlanTests(unittest.TestCase):
             self.assertIn("runs", keys, name)
         for name in ("raid", "pumpkin"):
             keys = [field.get("key") for field in scripts[name]["params"]]
-            self.assertNotIn("auto_march", keys, name)
             self.assertNotIn("repair_threshold", keys, name)
+        raid_keys = [field.get("key") for field in scripts["raid"]["params"]]
+        pumpkin_keys = [field.get("key") for field in scripts["pumpkin"]["params"]]
+        self.assertIn("auto_march", raid_keys)
+        self.assertNotIn("auto_march", pumpkin_keys)
         for name in ("sortie", "yosari"):
             keys = [field.get("key") for field in scripts[name]["params"]]
             self.assertIn("auto_march", keys, name)
