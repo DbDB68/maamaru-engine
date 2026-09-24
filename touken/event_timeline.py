@@ -154,6 +154,7 @@ def _entry(name: str, card: dict, abacus: dict | None,
             "free_runs": abacus.get("free_runs"),
             "keys_obtained": abacus.get("keys_obtained"),
             "mechanics": abacus.get("mechanics"),
+            "currency": abacus.get("currency"),
             "tama_current": abacus.get("tama_current"),
             "tama_observed_at": abacus.get("tama_observed_at"),
             "tama_target": abacus.get("tama_target"),
@@ -175,7 +176,8 @@ def _summary_for(name: str, card: dict, periods: list[dict]) -> dict | None:
     """本期归档的收官小结；这期没跑（没归档）返回 None。
 
     字段随机理走：edocastle 出钥匙口径（keys_*），hanafuda 出玉口径
-    （tama_*），前端按 mechanics 渲染文案。
+    （tama_*），raid 出泛化货币口径（currency_* + currency 名），
+    前端按 mechanics 渲染文案。
     """
     from .event_history import period_key
     key = period_key(name, card)
@@ -187,9 +189,20 @@ def _summary_for(name: str, card: dict, periods: list[dict]) -> dict | None:
         if period.get("mechanics") == "hanafuda":
             return {
                 "mechanics": "hanafuda",
+                "currency": period.get("currency") or "玉",
                 "runs": period.get("runs"),
                 "tama_per_run": period.get("tama_per_run"),
                 "total_tama": period.get("total_tama"),
+                "koban_spent": period.get("koban_spent"),
+                "period": key,
+            }
+        if period.get("mechanics") == "raid":
+            return {
+                "mechanics": "raid",
+                "currency": period.get("currency") or "夜光贝",
+                "runs": period.get("runs"),
+                "currency_per_run": period.get("currency_per_run"),
+                "currency_total": period.get("currency_total"),
                 "koban_spent": period.get("koban_spent"),
                 "period": key,
             }

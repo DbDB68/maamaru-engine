@@ -601,7 +601,10 @@ def _build_raid(agent, config_path, params):
         team_no=team_no,
         difficulty_no=_i(params, "map_no", 4),
         auto_buy_ticket=_bool(params.get("auto_refill", False)),
-        max_buys=runs)
+        max_buys=runs,
+        auto_march=_bool(params.get("auto_march", True)),
+        rotate_captain=_bool(params.get("rotate_captain", False)),
+        rotate_captain_margin=_i(params, "rotate_captain_margin", 10))
 
 
 def _build_pumpkin(agent, config_path, params):
@@ -1107,7 +1110,12 @@ register_script("raid", "联队战", "",
                          "default": "4"},
                         _team_field("3"),
                         _run_count_field(ticket=True, default=3),
-                        _ticket_refill_field()])
+                        _ticket_refill_field(),
+                        {"key": "auto_march", "type": "toggle",
+                         "label": "自动行军委托", "default": True,
+                         "help": "每圈出阵前挂自动行军委托（部队长需特化/极化）；"
+                                 "挂不上就自动回退手动打法。"},
+                        *_captain_rotation_fields()])
 register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
                 _wrap_inventory("南瓜", _build_pumpkin),
                 params=[{"key": "difficulty", "type": "select", "label": "打哪张图",
@@ -3084,9 +3092,22 @@ async def api_save_event_estimate(request: Request):
     return {"ok": True, "card": card}
 
 
+@app.post("/api/planning/event-target")
+async def api_save_event_target(request: Request):
+    """保存玩家给本期活动定下的货币目标（玉/夜光贝同口径）。"""
+    body = await request.json()
+    from touken import advisor
+    try:
+        card = advisor.save_currency_target(
+            STATUS_DIR, str(body.get("event") or ""), body.get("target"))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
+    return {"ok": True, "card": card}
+
+
 @app.post("/api/planning/hanafuda-target")
 async def api_save_hanafuda_target(request: Request):
-    """保存玩家给本期秘宝之里定下的玉目标。"""
+    """老前端兼容口：保存玩家给本期秘宝之里定下的玉目标。"""
     body = await request.json()
     from touken import advisor
     try:

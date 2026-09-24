@@ -1240,6 +1240,26 @@
                       "sha256":  "9d67d50971ce84f4b68b2f0e6dd946315a5b1737630224dc2d7cbbb1ed61cd9d"
                   },
                   {
+                      "path":  "resource/base/image/lulian/ui海联确认.png",
+                      "size":  15531,
+                      "sha256":  "46234a66625af1b5c69efe91a54d4c1928a5d15e0986d8ab8d3433a99213f25d"
+                  },
+                  {
+                      "path":  "resource/base/image/lulian/ui海联确定.png",
+                      "size":  3530,
+                      "sha256":  "e94fc853777073ee7fcea5097c76d7ee6bf2373d3cb3e79fcab77f6aafbb8345"
+                  },
+                  {
+                      "path":  "resource/base/image/lulian/ui勾选.png",
+                      "size":  1275,
+                      "sha256":  "c5cdc3a0f0f2345c2e13286ffe432f722d6e915c73bb70385b2169f4732f3a3d"
+                  },
+                  {
+                      "path":  "resource/base/image/lulian/ui委托勾选.png",
+                      "size":  1950,
+                      "sha256":  "d5b53c918e13f6128b5f046b34c7284a7c549191d838b8b8750f052b636c162f"
+                  },
+                  {
                       "path":  "resource/base/image/battle/部队恢复.png",
                       "size":  10438,
                       "sha256":  "f14293f3b4ab8ddd3ed206e983a1335aa5d675dc1f7d69aea4cea509a2bf72db"

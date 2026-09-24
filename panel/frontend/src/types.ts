@@ -358,6 +358,7 @@ export interface EventsCalendar {
 export interface EventAbacus {
   event: string
   mechanics?: string | null
+  currency?: string | null
   goal_mode?: 'budget' | 'stock_target'
   goal_resource?: string
   start_date: string | null
@@ -421,6 +422,7 @@ export interface EventTimelineBudget {
   free_runs?: number | null
   keys_obtained?: number | null
   mechanics?: string | null
+  currency?: string | null
   tama_current?: number | null
   tama_observed_at?: number | null
   tama_target?: number | null
@@ -484,13 +486,16 @@ export interface EventTimelineEntry {
 
 // 刚收官活动的本期小结（来自 event_history 归档）
 export interface EventPeriodSummary {
-  mechanics: 'edocastle' | 'hanafuda' | null
+  mechanics: 'edocastle' | 'hanafuda' | 'raid' | null
+  currency?: string | null
   runs: number | null
   keys_per_run?: number | null
   keys_total?: number | null
   full_clear?: boolean
   tama_per_run?: number | null
   total_tama?: number | null
+  currency_per_run?: number | null
+  currency_total?: number | null
   koban_spent: number | null
   period: string
 }

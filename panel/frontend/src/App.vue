@@ -33,9 +33,9 @@ const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
 function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
 function openExpeditionPlanning() { selected.value = '$schedule'; tab.value = 'tasks' }
-function openActivityTask(script: 'hanafuda', loops: number) {
+function openActivityTask(script: 'hanafuda' | 'raid', loops: number) {
   if (!scripts.value[script]) {
-    message.value = '当前模式不能直接打开秘宝之里配置'
+    message.value = `当前模式不能直接打开${script === 'raid' ? '联队战' : '秘宝之里'}配置`
     return
   }
   params.value[script] = { ...(params.value[script] || {}), runs: loops }

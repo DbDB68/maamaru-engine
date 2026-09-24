@@ -12,6 +12,8 @@
      "koban_spent": 15000,
      "closed_at": 1694...}]}
   花札期次把钥匙三件套换成 "runs", "total_tama", "tama_per_run"。
+  联队战期次用泛化字段 "runs", "currency", "currency_total",
+  "currency_per_run"（currency 记货币名，如「夜光贝」）。
 
 规矩：只新增或安全迁移（备份+原子替换），原始记录永不删除。
 """
@@ -65,7 +67,8 @@ def load_history(status_dir: Path) -> list[dict]:
     return [p for p in periods if isinstance(p, dict)
             and p.get("event") and p.get("start_date")
             and (isinstance(p.get("keys_per_run"), (int, float))
-                 or isinstance(p.get("tama_per_run"), (int, float)))]
+                 or isinstance(p.get("tama_per_run"), (int, float))
+                 or isinstance(p.get("currency_per_run"), (int, float)))]
 
 
 def _save_history(status_dir: Path, periods: list[dict]) -> None:
@@ -176,8 +179,9 @@ def archive_if_finished(store, name: str, card: dict, status_dir: Path, *,
         return None  # 还没收摊
     mechanics = card.get("mechanics")
     if mechanics == "hanafuda":
-        from .advisor import measured_tama_per_run
-        measured = measured_tama_per_run(store, card=card)
+        from .advisor import measured_currency_per_run
+        measured = measured_currency_per_run(store, card=card,
+                                             mechanics="hanafuda")
         if not measured:
             return None
         period = {
@@ -187,8 +191,30 @@ def archive_if_finished(store, name: str, card: dict, status_dir: Path, *,
             "mechanics": mechanics,
             "rules": rules_fingerprint(card),
             "runs": measured["runs"],
-            "total_tama": measured.get("tama_total"),
+            "currency": card.get("currency") or "玉",
+            # 玉期次沿用老的 total_tama/tama_per_run 键，既有档案行为不变
+            "total_tama": measured.get("currency_total"),
             "tama_per_run": round(measured["per_run"], 2),
+            # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
+            "koban_spent": _koban_spent(store, card),
+            "closed_at": time.time(),
+        }
+    elif mechanics == "raid":
+        from .advisor import measured_currency_per_run
+        measured = measured_currency_per_run(store, card=card,
+                                             mechanics="raid")
+        if not measured:
+            return None
+        period = {
+            "event": name,
+            "start_date": (card.get("start_date")
+                           or str(card.get("start_at") or "")[:10]),
+            "mechanics": mechanics,
+            "rules": rules_fingerprint(card),
+            "runs": measured["runs"],
+            "currency": card.get("currency") or "夜光贝",
+            "currency_total": measured.get("currency_total"),
+            "currency_per_run": round(measured["per_run"], 2),
             # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
             "koban_spent": _koban_spent(store, card),
             "closed_at": time.time(),

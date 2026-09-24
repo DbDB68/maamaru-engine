@@ -513,7 +513,9 @@ class BattleMixin:
                             team_record_saved: bool = False,
                             auto_refill: bool = False,
                             rotate_captain: bool = False,
-                            rotate_captain_margin: int = 10):
+                            rotate_captain_margin: int = 10,
+                            prepare_team_stream=None,
+                            refill_state: dict | None = None):
         """通用安全出阵链：部队选择页已打开之后调用，串起——
 
         选择部队 → 出阵前伤势检查 → （可选）保存记录一 → 即刻出阵 →
@@ -528,6 +530,8 @@ class BattleMixin:
         - cfg["ticket_recover"]：联队战式“补充→恢复1个→确定”。
         没配对应模板就不认（票尽时二次确认会等不到，安全停）。
         每圈最多补一张（refill_done），补完又弹说明没补上，停手防重复消费。
+        prepare_team_stream 在选队和伤势检查之后、即刻出阵之前执行玩法准备；
+        refill_state 在确实补票后写入 used，供玩法遵守本次运行的购买上限。
 
         Yields 日志；返回 (ok, team_record_saved)。ok=False 表示已安全
         停下（没出发），调用方直接收工，不要再点任何确认。
@@ -558,6 +562,9 @@ class BattleMixin:
                 yield (f"{tag} ⚠️ 没能安全保存记录一，已停止；"
                        "请查看是否有确认弹窗未处理")
                 return False, team_record_saved
+
+        if prepare_team_stream is not None:
+            yield from prepare_team_stream()
 
         equip_retries = 0
         refill_done = False
@@ -608,6 +615,8 @@ class BattleMixin:
                         yield f"{tag} 已顺手关闭补充弹窗"
                     return False, team_record_saved
                 refill_done = True
+                if refill_state is not None:
+                    refill_state["used"] = True
                 self._record_ticket_refill(cfg, tag)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
@@ -645,6 +654,8 @@ class BattleMixin:
                 self.maa.click(confirm)
                 time.sleep(1.5)
                 refill_done = True
+                if refill_state is not None:
+                    refill_state["used"] = True
                 self._record_ticket_refill(cfg, tag)
                 yield f"{tag} 🎫 票已用小判补上一张，重新点即刻出阵"
                 continue
@@ -693,10 +704,7 @@ class BattleMixin:
             self.maa.screenshot(force=True)
             if not prompt_template or self.maa.template_match(prompt_template):
                 confirm = cfg.get("confirm_button", {})
-                template = confirm.get("template")
-                roi_raw = confirm.get("roi")
-                button = self.maa.template_match(
-                    template, roi_4to4(*roi_raw) if roi_raw else None)
+                button = self._match_template_config(confirm)
                 if button:
                     self.maa.click(button)
                     time.sleep(1.5)

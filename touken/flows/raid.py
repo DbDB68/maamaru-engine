@@ -4,21 +4,39 @@
 
 流程（教材 + 旧 raid.json 思路）：
   本丸 → 目录 → 出阵 → 活动 → 联队战界面 → 选难度（固定坐标）
-  → 部队选择 → 选部队（固定坐标点两下）→ 即刻出阵
-  → 确认弹窗（可选三倍枡）→ 确定
-  → 战斗循环：安全区点击跳动画 + OCR"战斗"按钮连点
-  → 回到联队战界面 = 一圈结束
+  → 部队选择 → 选部队（固定坐标点两下）→（可选）自动换队长
+  →（可选）自动行军委托：点自动行军 → 委托 → ✕ 关对话框
+  → 即刻出阵
+  → 确认弹窗（陆联旧弹窗 / 海联鱼笼弹窗双形态；可选三倍鱼笼）
+  → 确定
+  → 战斗循环：委托全自动（靠冷静期+横幅判圈结束）或手动 OCR"战斗"连点
+  → 回到联队战界面 = 一圈结束，差分夜光贝记账
 
 安全说明：
   - 联队战每场血量重置，无碎刀风险
   - 刀装未满警告（继续出阵/整备刀装弹窗）按教材规矩：停下上报，不擅自动
   - 手形不足自动补充（补充→恢复1个→确定）：补充.png 没截到，
     暂用 OCR 识别"补充"二字，标记【未实测】，等真没票了再验证
+  - 三倍鱼笼是甲州金道具：持有数 OCR 读出来 >0 才勾，读不出/为 0 绝不点
+  - 自动行军委托挂不上（队长没特化/极化、对话框没开）就回退手动打法，
+    绝不在原地卡死
 """
 
+import re
 import time
 
 from ..maa_adapter import roi_4to4
+
+
+def _ocr_int(maa, roi_raw) -> int | None:
+    """OCR 区域里只接受一个完整数值；多个数字混在一起时不猜。"""
+    try:
+        tokens = maa.ocr_all(roi_4to4(*roi_raw))
+        numbers = [match.replace(",", "") for text, _ in tokens or []
+                   for match in re.findall(r"\d[\d,]*", str(text))]
+        return int(numbers[0]) if len(numbers) == 1 else None
+    except Exception:
+        return None
 
 
 class RaidMixin:
@@ -26,16 +44,23 @@ class RaidMixin:
 
     def raid_stream(self, max_rounds: int = 1, team_no: int = None,
                     use_triple: bool = True, max_buys: int = None,
-                    difficulty_no: int = 4, auto_buy_ticket: bool = None):
+                    difficulty_no: int = 4, auto_buy_ticket: bool = None,
+                    auto_march: bool = None, rotate_captain: bool = None,
+                    rotate_captain_margin: int = None):
         """
         流式跑联队战
 
         Args:
             max_rounds: 跑几圈（一圈 = 选难度到回到联队战界面）
             team_no: 部队编号，默认读配置 raid.team_no
-            use_triple: 是否在确认弹窗勾三倍枡（已勾选会跳过，游戏有记忆）
+            use_triple: 是否在确认弹窗勾三倍枡/三倍鱼笼（已勾选会跳过，
+                        游戏有记忆）
             max_buys: 本次最多小判买几次手形（加班模式用），
                       不给就读配置 raid.max_buys_per_run
+            auto_march: 每圈出阵前挂自动行军委托（海联新功能），挂不上就
+                        回退手动打法；默认开
+            rotate_captain: 每圈出阵前是否把疲劳最低的队员换到队长位
+            rotate_captain_margin: 最低疲劳与现队长相差多少才换
 
         Yields:
             str: 执行状态消息
@@ -56,6 +81,15 @@ class RaidMixin:
         if str(team_no) not in teams:
             yield f"[RAID] 配置里没有部队{team_no}的坐标"
             return
+
+        if auto_march is None:
+            auto_march = True
+        if rotate_captain is None:
+            rotate_captain = bool(cfg.get("rotate_captain", False))
+        if rotate_captain_margin is None:
+            rotate_captain_margin = int(cfg.get("rotate_captain_margin", 10))
+        # 委托配置缺块（老安装没补到键）就当没开，流程照旧手动打
+        march_cfg = cfg.get("auto_march") if auto_march else None
 
         self._ticket_buys = 0  # 本次运行的小判买票计数
 
@@ -94,6 +128,8 @@ class RaidMixin:
             return
         yield "[RAID] 到达联队战界面"
         self.set_progress(f"raid:{entered}")
+        if entered != "hailian":
+            march_cfg = None
 
         # ========== 3. 逐圈跑 ==========
         for round_no in range(1, max_rounds + 1):
@@ -103,6 +139,8 @@ class RaidMixin:
             yield f"[RAID] ===== 第 {round_no}/{max_rounds} 圈 ====="
 
             # 3.1 选难度。旧配置只有图4坐标；其他图未标定时安全停止。
+            #     夜光贝在本圈出发前先读一次家底（回到主界面再读一次算差分）。
+            shells_before = self._read_shells_total(cfg)
             targets = cfg.get("difficulty_targets", {})
             target = targets.get(str(difficulty_no))
             if target is None and difficulty_no == 4:
@@ -125,95 +163,92 @@ class RaidMixin:
                 yield "[RAID] 部队选择界面没打开，本圈放弃"
                 continue
 
-            # 3.3 选部队（固定坐标，点两下确认）
-            self._pick_team(team_no)
+            # 3.3 统一出阵链：选队、伤势、刀装、补票和重伤拦截都在这里。
+            # 海联使用自己的确认标题和按钮；标题认错时安全链不会放行。
+            departure_cfg = dict(cfg)
+            if entered == "hailian":
+                if (not cfg.get("confirm_ui_hailian", {}).get("template")
+                        or not cfg.get("confirm_button_hailian", {}).get("template")):
+                    yield "[RAID] 海联确认弹窗配置不全，本次不出阵"
+                    return
+                departure_cfg["confirm_ui"] = cfg.get("confirm_ui_hailian", {})
+                departure_cfg["confirm_button"] = cfg.get(
+                    "confirm_button_hailian", {})
+            delegated = {"enabled": False}
 
-            # 3.4 点"即刻出阵"
-            if not self._click_depart(cfg):
-                yield "[RAID] 找不到即刻出阵按钮，本圈放弃"
-                continue
+            def prepare_team():
+                if march_cfg:
+                    delegated["enabled"] = bool(
+                        (yield from self._raid_auto_march_stream(march_cfg)))
+                    if not delegated["enabled"]:
+                        yield "[RAID] 本圈回退手动打法"
 
-            # 3.5 出阵后的分支：刀装警告 / 确认弹窗 / 手形不足
-            self.maa.screenshot(force=True)
-
-            # 刀装未满警告 → 安全取消整备，给后续日课让路
-            equip_cancelled = self._cancel_equip_warning(cfg)
-            if equip_cancelled is not None:
-                if equip_cancelled:
-                    yield "[RAID] ⚠️ 刀装未满警告；已取消出阵并返回部队选择，本次跳过"
-                else:
-                    yield "[RAID] ⚠️ 刀装未满警告；没能安全取消整备，本次出阵停止"
+            refill_state = {"used": False}
+            max_buys_allowed = int(cfg.get("max_buys_per_run", 10))
+            allow_refill = (bool(cfg.get("auto_buy_ticket", False))
+                            and self._ticket_buys < max_buys_allowed)
+            ok, _ = yield from self._safe_depart_stream(
+                departure_cfg, team_no, "[RAID]", repair_threshold="heavy",
+                auto_refill=allow_refill,
+                rotate_captain=rotate_captain,
+                rotate_captain_margin=rotate_captain_margin,
+                prepare_team_stream=prepare_team if march_cfg else None,
+                refill_state=refill_state)
+            if refill_state["used"]:
+                self._ticket_buys += 1
+            if not ok:
+                yield "[RAID] 出阵安全检查没通过，本次停止"
                 return
 
-            # 手形不足弹窗 → 按配置决定买不买
-            if not self.maa.template_match(cfg["confirm_ui"]["template"]):
-                rec_cfg = cfg["ticket_recover"]
-                if not self.maa.template_match(rec_cfg["popup_button"]["template"]):
-                    yield "[RAID] 既没确认弹窗也没补充弹窗，卡在未知画面，停"
-                    return
-
-                buys = getattr(self, "_ticket_buys", 0)
-                max_buys = cfg.get("max_buys_per_run", 10)
-                if not cfg.get("auto_buy_ticket", False) or buys >= max_buys:
-                    reason = "配置不自动买" if not cfg.get("auto_buy_ticket", False) else f"本次已买 {buys} 次到上限"
-                    yield f"[RAID] 手形耗尽（{reason}），点关闭收工"
-                    close = self.maa.template_match(rec_cfg["close_button"]["template"])
-                    if close:
-                        self.maa.click(close)
-                    return
-
-                yield f"[RAID] 手形不足，小判自动补充（本次第 {buys + 1} 次买）..."
-                for rec_msg in self._recover_ticket_stream(cfg, tag="[RAID]"):
-                    yield rec_msg
-                if not self._recover_ok:
-                    yield "[RAID] 手形补充失败，停"
-                    return
-                self._ticket_buys = buys + 1
-                # 当前没有同源画面证据能确认这套 UI 的实际小判金额；先保留
-                # “确实补过票”的玩法事实，等活动开放实测后再接标准流水。
-                self._record_ticket_refill(cfg, "[RAID]")
-
-                # 补充完重新点即刻出阵
-                self._click_depart(cfg)
-                self.maa.screenshot(force=True)
-                if not self.maa.template_match(cfg["confirm_ui"]["template"]):
-                    yield "[RAID] 补充手形后还是没看到确认弹窗，停"
-                    return
-
-            # 3.6 确认弹窗：勾三倍枡（游戏有记忆，已勾会跳过）→ 确定
+            # 3.6 活动专用道具确认；有道具才勾，没有就直接确认出阵。
+            popup_variant = entered
             if use_triple:
-                tri = cfg["triple"]
-                check_roi = roi_4to4(*tri["check_roi"])
-                self.maa.screenshot(force=True)
-                if self.maa.template_match(tri["check_template"], check_roi):
-                    yield "[RAID] 三倍枡已勾选，跳过"
-                else:
-                    self._click_point(tri["click"])
-                    time.sleep(0.3)
-                    yield "[RAID] 已勾三倍枡"
+                fish3 = cfg.get("fish_basket3")
+                if fish3 and popup_variant == "hailian":
+                    for tri_msg in self._use_fish_basket3_stream(fish3):
+                        yield tri_msg
+                elif popup_variant == "lulian":
+                    tri = cfg["triple"]
+                    check_roi = roi_4to4(*tri["check_roi"])
+                    self.maa.screenshot(force=True)
+                    if self.maa.template_match(tri["check_template"], check_roi):
+                        yield "[RAID] 三倍枡已勾选，跳过"
+                    else:
+                        self._click_point(tri["click"])
+                        time.sleep(0.3)
+                        yield "[RAID] 已勾三倍枡"
 
-            confirm_cfg = cfg["confirm_button"]
-            confirm_roi = roi_4to4(*confirm_cfg["roi"]) if "roi" in confirm_cfg else None
-            confirm = self.maa.template_match(confirm_cfg["template"], confirm_roi)
-            if not confirm:
+            if not self._confirm_departure(departure_cfg):
                 yield "[RAID] 找不到确认弹窗的确定按钮，本圈放弃"
-                continue
-            self.maa.click(confirm)
-            time.sleep(2.0)
+                return
             yield "[RAID] 出发，进入战斗循环"
 
-            # 3.7 战斗循环：安全区跳动画 + OCR"战斗"连点，回联队战界面 = 一圈完
-            for battle_msg in self.battle_loop_stream():
-                yield battle_msg
+            # 3.7 战斗循环：委托全自动（靠冷静期+横幅判圈结束）或手动
+            #     OCR"战斗"连点，回联队战界面 = 一圈完
+            if delegated["enabled"]:
+                for battle_msg in self.battle_loop_stream(
+                        need_battle=False, max_iter=1200):
+                    yield battle_msg
+            else:
+                for battle_msg in self.battle_loop_stream():
+                    yield battle_msg
             round_done, battles = self._battle_loop_result
 
             if round_done:
                 if hasattr(self, "record_event"):
-                    self.record_event("raid.round_completed",
-                                      difficulty=difficulty_no,
-                                      sequence=round_no, battles=battles,
-                                      triple=bool(use_triple))
-                yield f"[RAID] 第 {round_no} 圈结束，打了 {battles} 场"
+                    payload = {"difficulty": difficulty_no,
+                               "sequence": round_no,
+                               "battle_taps": battles,
+                               "triple": bool(use_triple)}
+                    shells_after = self._read_shells_total(cfg)
+                    if shells_after is not None:
+                        payload["shells_total"] = shells_after
+                        if shells_before is not None:
+                            gained = shells_after - shells_before
+                            if 0 <= gained <= 100_000:
+                                payload["shells"] = gained
+                    self.record_event("raid.round_completed", **payload)
+                yield f"[RAID] 第 {round_no} 圈结束"
             else:
                 yield f"[RAID] ⚠️ 战斗循环超过安全上限，强制停（打了 {battles} 场），你去看看卡哪了"
                 return
@@ -221,13 +256,118 @@ class RaidMixin:
         yield "[RAID] 全部圈数跑完，收工"
         return
 
+    # ---------- 海联确认弹窗 / 鱼笼 / 委托 / 夜光贝 ----------
+
+    def _use_fish_basket3_stream(self, fish3: dict):
+        """海联弹窗勾三倍鱼笼。甲州金道具，规矩：
+        持有数 OCR 读出来 >0 才勾；读不出或为 0 绝不点；已勾跳过；
+        点完验不上也不再补点（再点一下反而会取消勾选）。"""
+        count_roi = fish3.get("count_ocr", {}).get("roi")
+        held = _ocr_int(self.maa, count_roi) if count_roi else None
+        if held is None:
+            yield "[RAID] 三倍鱼笼持有数没读出来，不碰甲州金道具"
+            return
+        if held <= 0:
+            yield "[RAID] 三倍鱼笼持有 0，跳过勾选（甲州金道具不白买）"
+            return
+        check_roi = roi_4to4(*fish3["check_roi"])
+        self.maa.screenshot(force=True)
+        if self.maa.template_match(fish3["check_template"], check_roi):
+            yield "[RAID] 三倍鱼笼已勾选，跳过"
+            return
+        self._click_point(fish3["click"])
+        time.sleep(0.5)
+        self.maa.screenshot(force=True)
+        if self.maa.template_match(fish3["check_template"], check_roi):
+            yield f"[RAID] 已勾三倍鱼笼（持有 {held}）"
+        else:
+            yield ("[RAID] ⚠️ 三倍鱼笼点完没验上，不再补点"
+                   "（防反而取消勾选），你手动瞅一眼")
+
+    def _raid_auto_march_stream(self, march_cfg: dict):
+        """海联自动行军（委托）：点自动行军按钮 → 等对话框 → 点委托 →
+        回读勾选 → ✕ 关闭。任何一步认不出来都安全回退手动打法，
+        绝不卡死。委托状态跨圈持续，每圈重开只核对勾选。"""
+        dlg = march_cfg.get("dialog_ocr", {})
+        dlg_roi_raw = dlg.get("roi")
+        dep = march_cfg.get("delegate_ocr", {})
+        dep_roi_raw = dep.get("roi")
+        selected_template = march_cfg.get("selected_template")
+        selected_roi_raw = march_cfg.get("selected_roi")
+        close = march_cfg.get("close")
+        if not (march_cfg.get("button") and dlg_roi_raw
+                and dep_roi_raw and selected_template and selected_roi_raw
+                and close):
+            yield "[RAID] 自动行军配置不全，本圈手动打"
+            return False
+        self.maa.screenshot(force=True)
+        self._click_point(march_cfg["button"])
+        opened = False
+        for _ in range(10):
+            time.sleep(0.6)
+            self.maa.screenshot(force=True)
+            if self.maa.ocr(expected=dlg["expected"],
+                            roi=roi_4to4(*dlg_roi_raw)):
+                opened = True
+                break
+        if not opened:
+            yield ("[RAID] 自动行军对话框没开（队长没特化/极化？），"
+                   "本圈手动打")
+            return False
+        selected_roi = roi_4to4(*selected_roi_raw)
+        if self.maa.template_match(selected_template, selected_roi):
+            self._click_point(close)
+            time.sleep(0.8)
+            yield "[RAID] 自动行军委托已勾选，本圈继续使用"
+            return True
+        delegate = None
+        for _ in range(6):
+            hit = self.maa.ocr(expected=dep["expected"],
+                               roi=roi_4to4(*dep_roi_raw))
+            if hit:
+                delegate = hit
+                break
+            time.sleep(0.4)
+            self.maa.screenshot(force=True)
+        if not delegate:
+            self._click_point(close)
+            time.sleep(0.8)
+            yield ("[RAID] 委托按钮认不出（队长没特化/极化？），"
+                   "已关对话框，本圈手动打")
+            return False
+        self.maa.click(delegate)
+        time.sleep(0.8)
+        self.maa.screenshot(force=True)
+        selected = self.maa.template_match(selected_template, selected_roi)
+        self._click_point(close)
+        time.sleep(1.0)
+        if not selected:
+            yield "[RAID] 委托后没有读到勾选，本圈手动打"
+            return False
+        # 复查：对话框说明文字应已消失；没消失再补一下 ✕
+        self.maa.screenshot(force=True)
+        if self.maa.ocr(expected=dlg["expected"],
+                        roi=roi_4to4(*dlg_roi_raw)):
+            self._click_point(close)
+            time.sleep(0.8)
+        yield "[RAID] ✓ 已挂自动行军委托，本圈全自动"
+        return True
+
+    def _read_shells_total(self, cfg) -> int | None:
+        """读联队战主界面的夜光贝累计数（记账用，读不出不挡路）。"""
+        ocr_cfg = cfg.get("shells_total_ocr", {})
+        roi_raw = ocr_cfg.get("roi")
+        if not roi_raw:
+            return None
+        return _ocr_int(self.maa, roi_raw)
+
     # ---------- 战斗循环（独立公开，中途断线也能单独恢复）----------
 
     _battle_loop_result: tuple = (False, 0)
 
     def battle_loop_stream(self, cfg_key: str = "raid", tag: str = "[RAID]",
                            need_battle: bool = True, debug_dir: str = None,
-                           fought: int = None):
+                           fought: int = None, max_iter: int = 300):
         """
         战斗循环：OCR"战斗"连点下一场，安全区跳动画，回到活动界面算一圈完。
         结果放在 self._battle_loop_result = (是否完成, 打了几场)。
@@ -243,6 +383,8 @@ class RaidMixin:
         fought: 心跳里显示的场数。内部 battles 数的是"点过几次战斗按钮"，
                 全自动战斗（南瓜）永远点不到按钮、恒为 0，会吓人，
                 所以全自动模式由外层把已出阵次数传进来显示。
+        max_iter: 安全上限迭代数，防死循环。委托全自动的圈比手动慢
+                （一场场自动打），上限要给大些。
         """
         cfg = self.config.get(cfg_key, {})
         battles = 0
@@ -271,12 +413,12 @@ class RaidMixin:
         battle_loop_start = time.time()
         END_CHECK_GRACE_SEC = 20
 
-        for _i in range(300):  # 安全上限，防死循环
+        for _i in range(max_iter):  # 安全上限，防死循环
             # 心跳日志：每 5 次报一次进度，卡死时能看到日志停在哪
             # 场数显示：全自动战斗（南瓜）内部 battles 恒 0，用外层传的 fought
             if _i % 5 == 0:
                 shown = fought if fought is not None else battles
-                yield f"{tag} 战斗循环心跳 {_i}/300（已打 {shown} 场）"
+                yield f"{tag} 战斗循环心跳 {_i}/{max_iter}（已打 {shown} 场）"
                 self.quick_peek(tag=cfg_key)  # 顺路拍顶栏家底，零导航（60s 节流）
             self.maa.screenshot(force=True)
 

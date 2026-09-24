@@ -1032,6 +1032,12 @@ class HanafudaPlanTests(unittest.TestCase):
         self.assertEqual(local["秘宝之里"]["unrelated"], "kept")
         self.assertTrue(local["秘宝之里"]["tama_target_period"])
 
+    def test_old_hanafuda_target_entry_rejects_raid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                advisor.save_hanafuda_tama_target(
+                    Path(tmp), "联队战", 300_000)
+
     def test_too_few_samples_means_no_estimate(self):
         events = [
             {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 307, "tama_total": 6663}},
@@ -1317,6 +1323,36 @@ class WindowImpactTests(unittest.TestCase):
     def test_unknown_mechanics_returns_none(self):
         self.assertIsNone(advisor.window_impact(
             "神秘活动", {"mechanics": "???"}, today=self.TODAY))
+
+
+class RaidCurrencyPlanTests(unittest.TestCase):
+    def test_shells_use_raid_events_and_unknown_ticket_price_stays_unknown(self):
+        class Store:
+            def recent_events(self, limit=100, event_type=None):
+                if event_type != "raid.round_completed":
+                    return []
+                return [
+                    {"ts": _hanafuda_ts("09-24 12:00"),
+                     "payload": {"shells": 500, "shells_total": 1500}},
+                    {"ts": _hanafuda_ts("09-24 12:05"),
+                     "payload": {"shells": 600, "shells_total": 2100}},
+                    {"ts": _hanafuda_ts("09-24 12:10"),
+                     "payload": {"shells": 700, "shells_total": 2800}},
+                ]
+
+        card = {"mechanics": "raid", "currency": "夜光贝",
+                "start_at": "2026-09-24T10:00:00+08:00",
+                "end_at": "2026-10-15T05:00:00+08:00",
+                "ticket_cap": 6, "refill_hours": [5, 17],
+                "refill_amount": 3}
+        plan = advisor.currency_plan(
+            Store(), card, mechanics="raid",
+            now_dt=datetime.fromisoformat("2026-09-24T13:00:00+08:00"))
+        self.assertEqual(plan["currency"], "夜光贝")
+        self.assertEqual(plan["tama_current"], 2800)
+        self.assertEqual(plan["tama_per_loop"], 600)
+        self.assertEqual(plan["runs_needed"], 496)
+        self.assertIsNone(plan["koban_cost"])
 
 
 class ModeledWindowGoalTests(unittest.TestCase):

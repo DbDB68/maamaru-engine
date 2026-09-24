@@ -1,10 +1,10 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from touken.flows.battle import BattleMixin
 from touken.flows.sortie import SortieMixin
 from touken.flows.osaka import OsakaMixin
-from touken.flows.raid import RaidMixin
+from touken.flows.raid import RaidMixin, _ocr_int
 from touken.maa_adapter import Point
 
 
@@ -1059,6 +1059,31 @@ class _RecoverDepartHost(_SafeDepartHost):
 class SafeDepartChainTests(unittest.TestCase):
     """选队→伤势→刀装→重伤拦截的编排语义：各玩法只准调用，不准手搓。"""
 
+    def test_second_confirmation_uses_its_configured_threshold(self):
+        maa = FakeMaa(templates={"海联确认": Point(640, 179),
+                                 "海联确定": Point(648, 610)})
+        host = _SafeDepartHost(maa=maa)
+        cfg = {"confirm_ui": {"template": "海联确认"},
+               "confirm_button": {"template": "海联确定",
+                                  "roi": [500, 560, 800, 660],
+                                  "threshold": 0.8}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(host._confirm_departure(cfg))
+        self.assertIn(("海联确定", 0.8), maa.template_thresholds)
+
+    def test_activity_preparation_runs_after_injury_check(self):
+        host = _SafeDepartHost()
+
+        def prepare():
+            host.steps.append("prepare")
+            yield "委托尝试"
+
+        msgs, result = _drain_chain(
+            host, prepare_team_stream=prepare)
+        self.assertEqual(result, (True, False))
+        self.assertIn("委托尝试", msgs)
+        self.assertLess(host.steps.index("injury"), host.steps.index("prepare"))
+
     def test_pre_depart_injury_over_threshold_stops(self):
         msgs, result = _drain_chain(
             _SafeDepartHost(injury="重伤"), repair_threshold="heavy")
@@ -1221,6 +1246,102 @@ def _raid_loop_cfg(extra=None):
     }
     cfg.update(extra or {})
     return cfg
+
+
+class RaidDepartureSafetyTests(unittest.TestCase):
+    def test_lulian_keeps_triple_click_and_skips_hailian_march(self):
+        agent = Mock()
+        agent.config = {
+            "raid": {
+                "ui_title": {"template": "raid-title"},
+                "activity_entry": {"template": "entry"},
+                "difficulty_target": [1118, 328],
+                "auto_march": {"button": [1203, 407]},
+                "fish_basket3": {"click": [345, 487]},
+                "triple": {"click": [326, 308],
+                           "check_template": "old-triple-selected",
+                           "check_roi": [309, 295, 345, 332]},
+            },
+            "team_select": {"teams": {"3": {}}},
+        }
+        agent.current_location = "出阵"
+        agent.navigate_to_stream.return_value = iter(())
+        agent._expedition_takeover_requested.return_value = False
+        agent.maa.template_match.side_effect = (
+            lambda template, *a, **kw: Point(500, 100)
+            if template == "raid-title" else None)
+        agent._find_deploy_button.return_value = Point(1150, 620)
+        agent._wait_for_team_select.return_value = True
+
+        def ready(*_args, **_kwargs):
+            if False:
+                yield
+            return True, False
+
+        agent._safe_depart_stream.side_effect = ready
+        agent._confirm_departure.return_value = True
+        agent.battle_loop_stream.return_value = iter(())
+        agent._battle_loop_result = (True, 1)
+        agent._read_shells_total.return_value = None
+        with patch("touken.flows.raid.time.sleep"):
+            list(RaidMixin.raid_stream(agent, max_rounds=1, team_no=3))
+        self.assertIsNone(
+            agent._safe_depart_stream.call_args.kwargs["prepare_team_stream"])
+        agent._raid_auto_march_stream.assert_not_called()
+        agent._click_point.assert_any_call([326, 308])
+        agent._use_fish_basket3_stream.assert_not_called()
+        recorded = agent.record_event.call_args
+        self.assertEqual(recorded.args[0], "raid.round_completed")
+        self.assertEqual(recorded.kwargs["battle_taps"], 1)
+        self.assertNotIn("battles", recorded.kwargs)
+
+    def test_zero_fish_baskets_are_never_selected(self):
+        maa = FakeMaa(ocr_tokens=[[("0", Point(600, 540))]])
+        host = _RaidLoopHost(maa, {})
+        messages = list(host._use_fish_basket3_stream({
+            "count_ocr": {"roi": [515, 515, 665, 560]},
+            "check_roi": [325, 465, 365, 507],
+            "check_template": "lulian/ui勾选.png",
+            "click": [345, 487],
+        }))
+        self.assertTrue(any("持有 0" in msg for msg in messages))
+        self.assertEqual(maa.clicks, [])
+
+    def test_ocr_count_rejects_multiple_numbers(self):
+        maa = Mock()
+        maa.ocr_all.return_value = [("3,000/300,000", Point(10, 10))]
+        self.assertIsNone(_ocr_int(maa, [0, 0, 100, 100]))
+        maa.ocr_all.return_value = [("3,000", Point(10, 10))]
+        self.assertEqual(_ocr_int(maa, [0, 0, 100, 100]), 3000)
+
+    def test_raid_stops_when_shared_departure_gate_rejects(self):
+        agent = Mock()
+        agent.config = {
+            "raid": {"ui_title": {"template": "raid-title"},
+                     "activity_entry": {"template": "entry"},
+                     "difficulty_target": [1118, 328]},
+            "team_select": {"teams": {"3": {}}}}
+        agent.current_location = "出阵"
+        agent.navigate_to_stream.return_value = iter(())
+        agent._expedition_takeover_requested.return_value = False
+        agent.maa.template_match.side_effect = (
+            lambda template, *a, **kw: Point(500, 100)
+            if template == "raid-title" else None)
+        agent._find_deploy_button.return_value = Point(1150, 620)
+        agent._wait_for_team_select.return_value = True
+
+        def blocked(*_args, **_kwargs):
+            yield "伤势门闩停"
+            return False, False
+
+        agent._safe_depart_stream.side_effect = blocked
+        with patch("touken.flows.raid.time.sleep"):
+            messages = list(RaidMixin.raid_stream(
+                agent, max_rounds=1, team_no=3, auto_march=False))
+        self.assertIn("伤势门闩停", messages)
+        agent._safe_depart_stream.assert_called_once()
+        agent._confirm_departure.assert_not_called()
+        agent._click_depart.assert_not_called()
 
 
 class RaidRoundEndVariantTests(unittest.TestCase):

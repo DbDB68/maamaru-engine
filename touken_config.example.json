@@ -982,8 +982,21 @@
     "equip_warning_button": {
       "template": "team/继续出阵.png"
     },
+    "injury_deny_button": {
+      "template": "否.png"
+    },
+    "injury_stamps": {
+      "重伤": {"template": "battle/ui重伤.png", "threshold": 0.88},
+      "中伤": {"template": "battle/中伤.png", "threshold": 0.88},
+      "轻伤": {"template": "battle/轻伤.png", "threshold": 0.88}
+    },
+    "injury_stamp_roi": [220, 90, 340, 690],
+    "injury_status_roi": [0, 90, 570, 690],
     "confirm_ui": {
       "template": "team/ui出阵确认.png"
+    },
+    "confirm_ui_hailian": {
+      "template": "lulian/ui海联确认.png"
     },
     "confirm_button": {
       "template": "通用_确定.png",
@@ -993,6 +1006,16 @@
         742,
         637
       ]
+    },
+    "confirm_button_hailian": {
+      "template": "lulian/ui海联确定.png",
+      "roi": [
+        500,
+        560,
+        800,
+        660
+      ],
+      "threshold": 0.8
     },
     "triple": {
       "click": [
@@ -1005,6 +1028,65 @@
         295,
         345,
         332
+      ]
+    },
+    "fish_basket3": {
+      "click": [
+        345,
+        487
+      ],
+      "check_template": "lulian/ui勾选.png",
+      "check_roi": [
+        325,
+        465,
+        365,
+        507
+      ],
+      "count_ocr": {
+        "roi": [
+          515,
+          515,
+          665,
+          560
+        ]
+      }
+    },
+    "auto_march": {
+      "button": [
+        1203,
+        407
+      ],
+      "dialog_ocr": {
+        "expected": "可以委托部队长进行自动行军",
+        "roi": [
+          430,
+          150,
+          850,
+          200
+        ]
+      },
+      "delegate_ocr": {
+        "expected": "委托",
+        "roi": [
+          700,
+          575,
+          880,
+          630
+        ]
+      },
+      "selected_template": "lulian/ui委托勾选.png",
+      "selected_roi": [670, 550, 740, 615],
+      "close": [
+        1040,
+        48
+      ]
+    },
+    "shells_total_ocr": {
+      "roi": [
+        880,
+        195,
+        1070,
+        250
       ]
     },
     "battle_ocr": {

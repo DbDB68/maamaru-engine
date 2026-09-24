@@ -20,7 +20,7 @@ const emit = defineEmits<{
   (event: 'add-goal', abacus: EventAbacus): void
   (event: 'add-stock-goal', abacus: EventAbacus, target: number): void
   (event: 'save-tama-target', name: string, target: number): void
-  (event: 'open-activity', script: 'hanafuda', loops: number): void
+  (event: 'open-activity', script: 'hanafuda' | 'raid', loops: number): void
 }>()
 
 const estimateInputs = ref<Record<string, string>>({})
@@ -39,7 +39,7 @@ onBeforeUnmount(() => window.clearInterval(clockTimer))
 watch(() => props.abacuses, (items) => {
   for (const item of items) {
     if (item.keys_per_run != null) estimateInputs.value[item.event] = String(item.keys_per_run)
-    if (item.mechanics === 'hanafuda' && item.tama_target != null) tamaTargetInputs.value[item.event] = String(item.tama_target)
+    if (isCurrencyMechanics(item.mechanics) && item.tama_target != null) tamaTargetInputs.value[item.event] = String(item.tama_target)
   }
 }, { immediate: true })
 
@@ -103,6 +103,21 @@ function axisMoment(entry: EventTimelineEntry, group: string) {
 
 function abacusFor(entry: EventTimelineEntry) {
   return abacusByName.value.get(entry.name)
+}
+
+// 代币档线型活动（花札「玉」、联队战「夜光贝」）：同一套规划卡，文案按 currency 走
+const CURRENCY_MECHANICS = new Set(['hanafuda', 'raid'])
+
+function isCurrencyMechanics(mechanics: string | null | undefined) {
+  return CURRENCY_MECHANICS.has(String(mechanics || ''))
+}
+
+function currencyOf(entry: EventTimelineEntry) {
+  return entry.budget?.currency || abacusFor(entry)?.currency || '玉'
+}
+
+function currencyScript(mechanics: string | null | undefined): 'hanafuda' | 'raid' {
+  return mechanics === 'raid' ? 'raid' : 'hanafuda'
 }
 
 function goalFor(entry: EventTimelineEntry) {
@@ -191,11 +206,12 @@ function experienceLabel(entry: EventTimelineEntry) {
 function eventSummary(entry: EventTimelineEntry) {
   const abacus = abacusFor(entry)
   if (!abacus) return entry.note
-  if (abacus.mechanics === 'hanafuda') {
+  if (isCurrencyMechanics(abacus.mechanics)) {
+    const currency = abacus.currency || '玉'
     const goalLabel = abacus.tama_target_custom ? '本期目标' : '最高档'
-    if (abacus.tama_current == null) return `目标${goalLabel} ${fmt(abacus.tama_target || 300000)} 玉`
+    if (abacus.tama_current == null) return `目标${goalLabel} ${fmt(abacus.tama_target || 300000)} ${currency}`
     if (!abacus.tama_remaining) return `${goalLabel}已经拿到啦 🎉`
-    return `已攒 ${fmt(abacus.tama_current)} 玉，离${goalLabel}还差 ${fmt(abacus.tama_remaining)} 玉`
+    return `已攒 ${fmt(abacus.tama_current)} ${currency}，离${goalLabel}还差 ${fmt(abacus.tama_remaining)} ${currency}`
   }
   if (abacus.runs_needed != null) {
     const ticketNote = entry.budget?.koban_cost === 0 ? ' · 免费手形够目标' : ''
@@ -231,14 +247,15 @@ function tamaProgress(entry: EventTimelineEntry) {
 function tamaEstimateText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget) return ''
+  const currency = currencyOf(entry)
   if (budget.runs_needed == null) {
     return budget.tama_samples
       ? `已记 ${fmt(budget.tama_samples)} 圈，样本还不够稳，再完成几圈后可估算。`
-      : '平均每圈带多少玉还没数过，再完成几圈后可估算。'
+      : `平均每圈带多少${currency}还没数过，再完成几圈后可估算。`
   }
   if (budget.runs_needed === 0) return ''
   const time = budget.estimated_seconds != null ? `，挂机约 ${paceDuration(budget.estimated_seconds)}` : ''
-  return `按本期 ${fmt(budget.tama_samples)} 圈实测平均每圈约 ${fmt(budget.tama_per_loop)} 玉，还要打约 ${fmt(budget.runs_needed)} 圈${time}。`
+  return `按本期 ${fmt(budget.tama_samples)} 圈实测平均每圈约 ${fmt(budget.tama_per_loop)} ${currency}，还要打约 ${fmt(budget.runs_needed)} 圈${time}。`
 }
 
 function tamaTimeText(entry: EventTimelineEntry) {
@@ -284,18 +301,22 @@ function tamaBatchNote(entry: EventTimelineEntry) {
 
 function openTamaBatch(entry: EventTimelineEntry) {
   const plan = tamaBatchPlan(entry)
-  if (plan?.runs) emit('open-activity', 'hanafuda', plan.runs)
+  if (plan?.runs) emit('open-activity', currencyScript(entry.budget?.mechanics), plan.runs)
 }
 
 function tamaTicketText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget || budget.runs_needed === 0 || budget.free_tickets_remaining == null) return ''
+  const currency = currencyOf(entry)
   const base = `到收摊白票还能领 ${fmt(budget.free_tickets_remaining)} 张`
   if (budget.paid_tickets == null) return `${base}（手上现存的没算进来）。`
   if (budget.paid_tickets > 0) {
-    return `${base}；手头现有令牌还没读，先按 0 张保守算，最多再补 ${fmt(budget.paid_tickets)} 张 ≈ ${fmt(budget.koban_cost)} 小判。`
+    if (budget.koban_cost != null) {
+      return `${base}；手头现有令牌还没读，先按 0 张保守算，最多再补 ${fmt(budget.paid_tickets)} 张 ≈ ${fmt(budget.koban_cost)} 小判。`
+    }
+    return `${base}；手头现有令牌还没读，先按 0 张保守算，最多再补 ${fmt(budget.paid_tickets)} 张（票价还没核实，先不折算）。`
   }
-  return `${base}，只算这些白票也已够，不用花小判。`
+  return `${base}，只算这些白票也已够，不用花钱补票。`
 }
 
 function budgetText(entry: EventTimelineEntry) {
@@ -368,21 +389,21 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="!entry.summary" class="ended-empty">这期狐之助没跑，没留下数据。</p>
                 <template v-else>
                   <b v-if="entry.summary.full_clear" class="ended-clear">四座宝库全开 🎉</b>
-                  <p v-if="entry.summary.mechanics === 'hanafuda'">跑了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.tama_per_run }} 玉 · 共拿 {{ fmt(entry.summary.total_tama) }} 玉</p>
-                  <p v-else>打了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.keys_per_run }} 把 · 共拿 {{ fmt(entry.summary.keys_total) }} 把</p>
+                  <p v-if="isCurrencyMechanics(entry.summary.mechanics)">跑了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ fmt(entry.summary.currency_per_run ?? entry.summary.tama_per_run) }} {{ entry.summary.currency || currencyOf(entry) }} · 共拿 {{ fmt(entry.summary.currency_total ?? entry.summary.total_tama) }} {{ entry.summary.currency || currencyOf(entry) }}</p>
+                  <p v-else>打了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ fmt(entry.summary.keys_per_run) }} 把 · 共拿 {{ fmt(entry.summary.keys_total) }} 把</p>
                   <p v-if="entry.summary.koban_spent != null">{{ entry.summary.koban_spent > 0 ? `补票花了 ${fmt(entry.summary.koban_spent)} 小判` : '白票全程够用，一个小判没花' }}</p>
                   <small>本期数据已归档，下期复刻狐之助会参考。</small>
                 </template>
               </section>
 
-              <section v-if="group.key === 'ongoing' && entry.budget?.mechanics === 'hanafuda'" class="event-tama-plan">
+              <section v-if="group.key === 'ongoing' && entry.budget && isCurrencyMechanics(entry.budget.mechanics)" class="event-tama-plan">
                 <header>
-                  <span><small>当前累计</small><b>{{ entry.budget.tama_current == null ? '待第一圈记账' : `${fmt(entry.budget.tama_current)} 玉` }}</b></span>
-                  <span><small>{{ entry.budget.tama_target_custom ? '我的目标' : '最高档目标' }}</small><b>{{ fmt(entry.budget.tama_target || 300000) }} 玉</b></span>
+                  <span><small>当前累计</small><b>{{ entry.budget.tama_current == null ? '待第一圈记账' : `${fmt(entry.budget.tama_current)} ${currencyOf(entry)}` }}</b></span>
+                  <span><small>{{ entry.budget.tama_target_custom ? '我的目标' : '最高档目标' }}</small><b>{{ fmt(entry.budget.tama_target || 300000) }} {{ currencyOf(entry) }}</b></span>
                 </header>
                 <div v-if="entry.budget.tama_current != null" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
                 <p v-if="entry.budget.tama_remaining === 0">{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}已经拿到啦 🎉 剩下的手形想刷就刷。</p>
-                <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} 玉。</p>
+                <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} {{ currencyOf(entry) }}。</p>
                 <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
                 <section v-if="tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
                   <span>
@@ -399,10 +420,10 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <details class="tama-target-editor">
                   <summary>修改本期目标</summary>
                   <div>
-                    <input v-model="tamaTargetInputs[entry.name]" type="number" min="1" max="10000000" step="1000" aria-label="本期目标玉数">
+                    <input v-model="tamaTargetInputs[entry.name]" type="number" min="1" max="10000000" step="1000" :aria-label="`本期目标${currencyOf(entry)}数`">
                     <button type="button" class="primary" :disabled="targetSaving === entry.name" @click="submitTamaTarget(entry)">{{ targetSaving === entry.name ? '保存中……' : '保存目标' }}</button>
                   </div>
-                  <small>默认按最高档 300,000 玉计算；改后只影响本期，复刻时会恢复默认。</small>
+                  <small>默认按最高档 300,000 {{ currencyOf(entry) }} 计算；改后只影响本期，复刻时会恢复默认。</small>
                 </details>
               </section>
 
@@ -422,7 +443,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p>{{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 实测 {{ fmt(paceFor(entry)!.loops) }} 圈 · {{ selectedPaceWindow(entry) === 'event' ? '只算时间，手形另算' : '连续挂机，不预留收尾时间' }}</p>
               </section>
 
-              <div v-if="entry.budget && entry.budget.mechanics !== 'hanafuda' && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
+              <div v-if="entry.budget && !isCurrencyMechanics(entry.budget.mechanics) && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
                   <small>{{ entry.budget.sufficient === true || entry.budget.koban_cost === 0 ? '活动预算' : '预算缺口' }}</small>
                   <b>{{ budgetHeadline(entry) }}</b>

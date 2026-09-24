@@ -98,6 +98,23 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(summary["koban_spent"], 18000)
         self.assertNotIn("keys_per_run", summary)
 
+    def test_recently_ended_raid_shows_shell_summary(self):
+        cards = {"联队战": _card(mechanics="raid", currency="夜光贝",
+                               start_date="2026-09-24", end_date="2026-10-15")}
+        periods = [{"event": "联队战", "start_date": "2026-09-24",
+                    "mechanics": "raid", "runs": 120,
+                    "currency": "夜光贝", "currency_total": 301200,
+                    "currency_per_run": 2510.0, "koban_spent": None,
+                    "rules": {}}]
+        after = datetime(2026, 10, 17, 15, 0, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], [],
+                                           periods=periods, now=after)
+        summary = tl["ended"][0]["summary"]
+        self.assertEqual(summary["mechanics"], "raid")
+        self.assertEqual(summary["currency"], "夜光贝")
+        self.assertEqual(summary["currency_total"], 301200)
+        self.assertNotIn("keys_per_run", summary)
+
     def test_ended_edocastle_summary_keeps_keys_shape(self):
         # 显式 mechanics 的钥匙期次：字段一字不差
         cards = {"江户城潜入调查": _card(mechanics="edocastle",

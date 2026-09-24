@@ -16,7 +16,7 @@ import PlanningOverview from './PlanningOverview.vue'
 const emit = defineEmits<{
   goalSaved: []
   openExpedition: []
-  openActivity: [script: 'hanafuda', loops: number]
+  openActivity: [script: 'hanafuda' | 'raid', loops: number]
 }>()
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
@@ -270,17 +270,19 @@ async function goalFromStockTarget(abacus: EventAbacus, target: number) {
 
 async function saveTamaTarget(event: string, target: number) {
   goalNotice.value = ''
+  const currency = planning.value?.events
+    ?.find(item => item.event === event)?.currency || '玉'
   if (!Number.isInteger(target) || target < 1 || target > 10_000_000) {
-    error.value = '目标玉数请填 1 到 10,000,000 之间的整数。'
+    error.value = `目标${currency}数请填 1 到 10,000,000 之间的整数。`
     return
   }
   error.value = ''
   tamaTargetSaving.value = event
   try {
-    await api.saveHanafudaTarget(event, target)
+    await api.saveEventTarget(event, target)
     await load()
-    goalNotice.value = `「${event}」本期目标已改为 ${target.toLocaleString()} 玉。`
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '玉目标保存失败' }
+    goalNotice.value = `「${event}」本期目标已改为 ${target.toLocaleString()} ${currency}。`
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '活动目标保存失败' }
   finally { tamaTargetSaving.value = '' }
 }
 

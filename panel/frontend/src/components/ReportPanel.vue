@@ -15,7 +15,7 @@ import type { ChartSeries } from './report/reportModel'
 const emit = defineEmits<{
   'open-wishlist': []
   'open-expedition': []
-  'open-activity': [script: 'hanafuda', loops: number]
+  'open-activity': [script: 'hanafuda' | 'raid', loops: number]
 }>()
 const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning' }>()
 

@@ -32,6 +32,22 @@ _MAX_TARGET = 100_000_000
 # 这些天进账结构完全不同（活动图/门票/钥匙），和平常不能一锅端
 _EVENT_SOURCE_HEADS = ("osaka", "edocastle", "raid", "pumpkin")
 
+# 代币档线型活动（§25.3）：秘宝之里「玉」、联队战「夜光贝」共用同一套
+# 规划口径（默认冲满档、本期可自定目标、telemetry 实测场均/圈速、白票
+# 回票）。只有事件名、payload 字段和单圈可信上限按机理区分。
+CURRENCY_MECHANICS = {
+    "hanafuda": {"event_type": "hanafuda.run_completed",
+                 "delta_field": "tama",
+                 "total_field": "tama_total",
+                 "loop_cap": 10_000},
+    "raid": {"event_type": "raid.round_completed",
+             "delta_field": "shells",
+             "total_field": "shells_total",
+             "loop_cap": 100_000},
+}
+# 两种货币满档都是 300,000
+DEFAULT_CURRENCY_TARGET = 300_000
+
 
 def _today() -> date:
     return datetime.now(_TZ).date()
@@ -995,8 +1011,9 @@ def get_planning(store, goals_path: Path, *,
     for abacus in abacuses:
         card = cards.get(abacus.get("event")) or {}
         abacus["mechanics"] = card.get("mechanics")
-        if card.get("mechanics") == "hanafuda":
-            abacus.update(hanafuda_plan(store, card, now_dt=now_dt))
+        if abacus["mechanics"] in CURRENCY_MECHANICS:
+            abacus.update(currency_plan(store, card, now_dt=now_dt,
+                                        mechanics=abacus["mechanics"]))
         if abacus.get("goal_mode") == "stock_target":
             abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
             abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
@@ -1096,26 +1113,31 @@ def save_key_estimate(status_dir: Path, event: str, keys_per_run) -> dict:
     return cards[event]
 
 
-def save_hanafuda_tama_target(status_dir: Path, event: str, target) -> dict:
-    """保存本期秘宝之里的玉目标；复刻换期后自动回到最高档默认值。"""
+def save_currency_target(status_dir: Path, event: str, target, *,
+                         mechanics: str = None) -> dict:
+    """保存本期活动货币目标（玉/夜光贝同口径）；复刻换期后自动回默认满档。"""
     cards = load_event_cards(status_dir)
     card = cards.get(event)
-    if not card or card.get("mechanics") != "hanafuda":
-        raise ValueError(f"「{event}」不是可设置玉目标的秘宝之里活动")
+    card_mechanics = (card or {}).get("mechanics")
+    if (not card or card_mechanics not in CURRENCY_MECHANICS
+            or (mechanics is not None and card_mechanics != mechanics)):
+        raise ValueError(f"「{event}」不是可设置货币目标的活动")
+    currency = card.get("currency") or "玉"
     if isinstance(target, bool):
-        raise ValueError("目标玉数得是整数")
+        raise ValueError(f"目标{currency}数得是整数")
     try:
-        tama_target = int(target)
+        currency_target = int(target)
     except (TypeError, ValueError):
-        raise ValueError("目标玉数得是整数")
-    if tama_target != target or not 1 <= tama_target <= 10_000_000:
-        raise ValueError("目标玉数不对劲（1 到 10,000,000 之间的整数）")
+        raise ValueError(f"目标{currency}数得是整数")
+    if currency_target != target or not 1 <= currency_target <= 10_000_000:
+        raise ValueError(f"目标{currency}数不对劲（1 到 10,000,000 之间的整数）")
     path = Path(status_dir) / EVENTS_META_LOCAL
     try:
         local = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         local = {}
-    local.setdefault(event, {})["tama_target"] = tama_target
+    # 本地覆盖键两种机理共用（老档案里就叫 tama_target，不改名）
+    local.setdefault(event, {})["tama_target"] = currency_target
     from .event_history import period_key
     period = period_key(event, card)
     if period:
@@ -1123,8 +1145,14 @@ def save_hanafuda_tama_target(status_dir: Path, event: str, target) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(local, ensure_ascii=False, indent=2),
                     encoding="utf-8")
-    return {**card, "tama_target": tama_target,
+    return {**card, "tama_target": currency_target,
             "tama_target_period": period}
+
+
+def save_hanafuda_tama_target(status_dir: Path, event: str, target) -> dict:
+    """保存本期秘宝之里的玉目标；复刻换期后自动回到最高档默认值。"""
+    return save_currency_target(status_dir, event, target,
+                                mechanics="hanafuda")
 
 
 # 一圈钥匙的合理上限：实测 9~37 把，OCR 读岔会产生 10157 这种垃圾值
@@ -1243,35 +1271,42 @@ def _card_window(card: dict):
     return None, None, False
 
 
-def latest_hanafuda_tama(store, card: dict) -> dict | None:
-    """取本期秘宝之里最近一次读到的活动总玉数，绝不串到复刻活动。
+def latest_currency_total(store, card: dict, *, mechanics: str) -> dict | None:
+    """取本期最近一次读到的活动货币累计数，绝不串到复刻活动。
 
     按事件时间戳取最新，不依赖 store 返回顺序。
     """
+    total_field = CURRENCY_MECHANICS[mechanics]["total_field"]
     latest = None
-    for ts, payload in _hanafuda_period_events(store, card):
-        total = payload.get("tama_total")
+    for ts, payload in _currency_period_events(store, card,
+                                               mechanics=mechanics):
+        total = payload.get(total_field)
         if isinstance(total, (int, float)) and total >= 0:
             latest = {"current": int(total), "observed_at": ts}
     return latest
 
 
-def _hanafuda_window_ts(card: dict) -> tuple[float | None, float | None,
+def latest_hanafuda_tama(store, card: dict) -> dict | None:
+    """本期秘宝之里最近一次读到的活动总玉数（花札专用口）。"""
+    return latest_currency_total(store, card, mechanics="hanafuda")
+
+
+def _currency_window_ts(card: dict) -> tuple[float | None, float | None,
                                              datetime | None, datetime | None]:
-    """花札卡的活动窗口 → (start_ts, end_ts, start_dt, end_dt)。"""
+    """活动货币卡的活动窗口 → (start_ts, end_ts, start_dt, end_dt)。"""
     start_dt, end_dt, _ = _card_window(card)
     return ((start_dt.timestamp() if start_dt else None),
             (end_dt.timestamp() if end_dt else None),
             start_dt, end_dt)
 
 
-def _hanafuda_period_events(store, card: dict, *,
+def _currency_period_events(store, card: dict, *, mechanics: str,
                             limit: int = 100) -> list[tuple[float, dict]]:
-    """本期窗口内的花札圈记录，按时间升序。只此一条数据源。"""
-    start_ts, end_ts, _, _ = _hanafuda_window_ts(card)
+    """本期窗口内的活动货币记录，按时间升序。只此一条数据源。"""
+    start_ts, end_ts, _, _ = _currency_window_ts(card)
+    event_type = CURRENCY_MECHANICS[mechanics]["event_type"]
     events = []
-    for event in store.recent_events(
-            limit=limit, event_type="hanafuda.run_completed"):
+    for event in store.recent_events(limit=limit, event_type=event_type):
         ts = event.get("ts")
         if not isinstance(ts, (int, float)):
             continue
@@ -1285,28 +1320,44 @@ def _hanafuda_period_events(store, card: dict, *,
     return events
 
 
-def measured_tama_per_run(store, *, card: dict) -> dict | None:
-    """实测场均玉：本期窗口内 hanafuda.run_completed 的 tama 增量平均。
+def measured_currency_per_run(store, *, card: dict,
+                              mechanics: str) -> dict | None:
+    """实测场均货币：本期窗口内事件的增量字段平均。
 
-    与 hanafuda_plan 同一数据源、同一样本过滤（OCR 读岔的 0 和巨大值
-    不进均值）；归属只看卡窗口，不串复刻期。归档要算全期总玉，
+    与 currency_plan 同一数据源、同一样本过滤（OCR 读岔的 0 和巨大值
+    不进均值）；归属只看卡窗口，不串复刻期。归档要算全期总量，
     拉满 store 单查询上限，不吃默认 100 条的截断。没样本返回 None。
     """
-    deltas = [float(payload["tama"]) for _, payload
-              in _hanafuda_period_events(store, card, limit=1001)
-              if isinstance(payload.get("tama"), (int, float))
-              and 0 < payload["tama"] <= HANAFUDA_TAMA_LOOP_CAP]
+    spec = CURRENCY_MECHANICS[mechanics]
+    delta_field = spec["delta_field"]
+    deltas = [float(payload[delta_field]) for _, payload
+              in _currency_period_events(store, card, mechanics=mechanics,
+                                         limit=1001)
+              if isinstance(payload.get(delta_field), (int, float))
+              and 0 < payload[delta_field] <= spec["loop_cap"]]
     if not deltas:
         return None
     return {"per_run": sum(deltas) / len(deltas), "runs": len(deltas),
-            "tama_total": int(sum(deltas))}
+            "currency_total": int(sum(deltas))}
+
+
+def measured_tama_per_run(store, *, card: dict) -> dict | None:
+    """实测场均玉（花札专用口）：与 hanafuda_plan 同源同样本过滤。"""
+    measured = measured_currency_per_run(store, card=card,
+                                         mechanics="hanafuda")
+    if measured:
+        measured["tama_total"] = measured.pop("currency_total")
+    return measured
 
 
 # 秘宝之里默认冲最高档 300,000 玉；玩家可以为当期改成自己的目标。
-HANAFUDA_TAMA_TARGET = 300_000
+HANAFUDA_TAMA_TARGET = DEFAULT_CURRENCY_TARGET
 # 一圈玉增量的可信范围：超难实测一圈约 300~1,000 玉；OCR 读岔会出 0 或
 # 巨大值，超出 10 倍余量的样本不进均值
-HANAFUDA_TAMA_LOOP_CAP = 10_000
+HANAFUDA_TAMA_LOOP_CAP = CURRENCY_MECHANICS["hanafuda"]["loop_cap"]
+# 联队战一圈 10 场（可能带十倍鱼笼），夜光贝单圈上限放宽到 100,000：
+# OCR 读岔的垃圾值照样被这个盖子挡在均值外
+RAID_SHELLS_LOOP_CAP = CURRENCY_MECHANICS["raid"]["loop_cap"]
 # 一圈时长的可信上限：图内监控 25 分钟就超时收圈，间隔再长多半是隔天再跑
 HANAFUDA_LOOP_SECONDS_CAP = 1800
 # 样本下限：达不到就老实说“再完成几圈后可估算”，绝不拿一两个样本外推
@@ -1314,44 +1365,54 @@ HANAFUDA_TAMA_MIN_SAMPLES = 3
 HANAFUDA_PACE_MIN_SAMPLES = 2
 
 
-def _hanafuda_tama_target(card: dict) -> int:
-    """取本期自定目标；跨期的本地覆盖不沿用。"""
+def _currency_target(card: dict) -> int:
+    """取本期自定货币目标；跨期的本地覆盖不沿用。"""
     target = card.get("tama_target")
     if not isinstance(target, int) or isinstance(target, bool) or target <= 0:
-        return HANAFUDA_TAMA_TARGET
+        return DEFAULT_CURRENCY_TARGET
     target_period = card.get("tama_target_period")
     if target_period:
-        from .event_history import period_key
-        if target_period != period_key("秘宝之里", card):
-            return HANAFUDA_TAMA_TARGET
+        start = card.get("start_date") or str(card.get("start_at") or "")[:10]
+        if not start or not str(target_period).endswith("@" + start):
+            return DEFAULT_CURRENCY_TARGET
     return target
 
 
-def hanafuda_plan(store, card: dict, *, now_dt: datetime) -> dict:
-    """秘宝之里行动规划：默认冲最高档，也支持本期自定玉目标。
+def _hanafuda_tama_target(card: dict) -> int:
+    """花札口径的兼容口：老调用点/test 都在用。"""
+    return _currency_target(card)
 
-    数据源只有 hanafuda.run_completed 一条事件流，三件事同源、互不重复
-    计数：tama_total 取最近一次读到的活动累计（现状）；tama 增量算场均
-    玉（速率）；相邻圈记录的间隔算圈速（速率）。剩余圈数 = 剩余玉 ÷
-    场均玉，剩余时间 = 圈数 × 圈速，补票 = 圈数 − 未来白票。
+
+def currency_plan(store, card: dict, *, now_dt: datetime,
+                  mechanics: str) -> dict:
+    """代币档线型活动行动规划：默认冲最高档，也支持本期自定货币目标。
+
+    数据源只有一条事件流，三件事同源、互不重复计数：total 取最近一次
+    读到的活动累计（现状）；增量字段算场均（速率）；相邻记录的间隔算
+    圈速（速率）。剩余圈数 = 剩余货币 ÷ 场均，剩余时间 = 圈数 × 圈速，
+    补票 = 圈数 − 未来白票。输出键沿用 tama_* 命名（前端契约），
+    另带 currency 供文案参数化。
     """
-    _, _, start_dt, end_dt = _hanafuda_window_ts(card)
-    events = _hanafuda_period_events(store, card)
-    deltas = [float(payload["tama"]) for _, payload in events
-              if isinstance(payload.get("tama"), (int, float))
-              and 0 < payload["tama"] <= HANAFUDA_TAMA_LOOP_CAP]
+    spec = CURRENCY_MECHANICS[mechanics]
+    delta_field = spec["delta_field"]
+    _, _, start_dt, end_dt = _currency_window_ts(card)
+    events = _currency_period_events(store, card, mechanics=mechanics)
+    deltas = [float(payload[delta_field]) for _, payload in events
+              if isinstance(payload.get(delta_field), (int, float))
+              and 0 < payload[delta_field] <= spec["loop_cap"]]
     intervals = [later - earlier
                  for (earlier, _), (later, _) in zip(events, events[1:])
                  if 0 < later - earlier <= HANAFUDA_LOOP_SECONDS_CAP]
-    tama = latest_hanafuda_tama(store, card)
-    tama_target = _hanafuda_tama_target(card)
+    total = latest_currency_total(store, card, mechanics=mechanics)
+    target = _currency_target(card)
     plan = {
-        "tama_target": tama_target,
-        "tama_target_custom": tama_target != HANAFUDA_TAMA_TARGET,
-        "tama_current": tama["current"] if tama else None,
-        "tama_observed_at": tama["observed_at"] if tama else None,
-        "tama_remaining": (max(0, tama_target - tama["current"])
-                           if tama else None),
+        "currency": card.get("currency") or "玉",
+        "tama_target": target,
+        "tama_target_custom": target != DEFAULT_CURRENCY_TARGET,
+        "tama_current": total["current"] if total else None,
+        "tama_observed_at": total["observed_at"] if total else None,
+        "tama_remaining": (max(0, target - total["current"])
+                           if total else None),
         "tama_per_loop": None,
         "tama_samples": len(deltas),
         "runs_needed": None,
@@ -1376,7 +1437,7 @@ def hanafuda_plan(store, card: dict, *, now_dt: datetime) -> dict:
     if plan["tama_per_loop"] is None or plan["tama_current"] is None:
         return plan  # 样本不够，或当前累计还没读到——不硬算
     import math
-    remaining = max(0, tama_target - plan["tama_current"])
+    remaining = max(0, target - plan["tama_current"])
     plan["runs_needed"] = math.ceil(
         remaining / plan["tama_per_loop"]) if remaining else 0
     if plan["runs_needed"] and plan["seconds_per_loop"]:
@@ -1388,9 +1449,16 @@ def hanafuda_plan(store, card: dict, *, now_dt: datetime) -> dict:
     free = plan["free_tickets_remaining"]
     if free is not None:
         plan["paid_tickets"] = max(0, plan["runs_needed"] - free)
-        plan["koban_cost"] = (plan["paid_tickets"]
-                              * int(card.get("ticket_price") or 0))
+        # 卡上没写票价（未核实）就不给小判估算，前端也不展示预算块
+        price = card.get("ticket_price")
+        if price:
+            plan["koban_cost"] = plan["paid_tickets"] * int(price)
     return plan
+
+
+def hanafuda_plan(store, card: dict, *, now_dt: datetime) -> dict:
+    """秘宝之里行动规划 = currency_plan 的花札口（输出字段名不变）。"""
+    return currency_plan(store, card, now_dt=now_dt, mechanics="hanafuda")
 
 
 def _remaining_free_tickets(card: dict, start_dt: datetime | None,

@@ -61,7 +61,7 @@ function eventDetail(item: any) {
   if (item.event_type === 'edocastle.run_completed') return `带回 ${Number(p.keys || 0).toLocaleString()} 把钥匙`
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 完成 1 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 王点前主动返回本丸`
-  if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${p.battles ?? 0} 场战斗`
+  if (item.event_type === 'raid.round_completed') return `难度 ${p.difficulty ?? '未指定'} · ${Number.isFinite(Number(p.shells)) && Number(p.shells) > 0 ? `带回 ${Number(p.shells).toLocaleString()} 夜光贝` : '完成一圈'}`
   if (item.event_type === 'pumpkin.sortie_completed') return `第 ${p.sequence ?? '？'} 次出阵`
   if (item.event_type === 'pumpkin.board_completed') return `完成第 ${p.sequence ?? '？'} 块板子`
   if (item.event_type === 'pumpkin.token_used') return `累计使用 ${p.used ?? '？'} 枚`
