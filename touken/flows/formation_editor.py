@@ -1101,6 +1101,39 @@ class FormationEditorMixin:
             yield (f"[预设编队] 卡在{slot_no}号位：{reason}，"
                    "预设没应用完，队伍现在是半套，去看看")
             return False
+        equipment_slots = [(int(key), entry)
+                          for key, entry in slots.items()
+                          if isinstance(entry, dict)
+                          and (entry.get("treasure") or entry.get("troops"))]
+        if equipment_slots:
+            from .formation_treasure import equip_preset_treasure_stream
+            from .formation_troops import equip_preset_troop_stream
+            for slot_no, equipment in equipment_slots:
+                current_team = self._formation_read_team()
+                current = (current_team[slot_no - 1]
+                           if current_team and len(current_team) >= slot_no else {})
+                expected = slots[str(slot_no)]
+                expected_id = expected.get("sword_catalog_id")
+                if (current.get("slot_status") != "occupied"
+                        or not expected_id
+                        or current.get("sword_catalog_id") != expected_id):
+                    yield (f"[预设编队] {slot_no}号位的刀剑未能重新确认，"
+                           "装备不换，预设没应用完")
+                    return False
+                for position, name in sorted(equipment.get("troops", {}).items()):
+                    equipped = yield from equip_preset_troop_stream(
+                        self, slot_no, int(position), name)
+                    if not equipped:
+                        yield (f"[预设编队] {slot_no}号位第{position}格刀装没装妥，"
+                               "预设没应用完，绝不继续出发")
+                        return False
+                if equipment.get("treasure"):
+                    equipped = yield from equip_preset_treasure_stream(
+                        self, slot_no, equipment["treasure"])
+                    if not equipped:
+                        yield (f"[预设编队] {slot_no}号位的宝物没装妥，"
+                               "预设没应用完，绝不继续出发")
+                        return False
         yield (f"[预设编队] ✓ 『{name}』已覆盖部队{team_no}："
                f"换好 {changed} 位，{already} 位本来就在")
         return True

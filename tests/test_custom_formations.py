@@ -184,6 +184,34 @@ class ValidateTests(unittest.TestCase):
                     {**base, "selection_policy": "anything"}):
             self.assertIsNotNone(cf.validate_formation(_record(slots={"1": bad})))
 
+    def test_treasure_requires_visible_fingerprint_and_single_assignment(self):
+        sword = {"selection_policy": "locked_highest_level",
+                 "sword_catalog_id": "touken_003_mikazuki_munechika",
+                 "form_status": "normal"}
+        treasure = {"name": "锷·月下梅树透图", "level": 1, "affection": 0}
+        self.assertIsNone(cf.validate_formation(
+            _record(slots={"1": {**sword, "treasure": treasure}})))
+        self.assertIsNotNone(cf.validate_formation(
+            _record(slots={"1": {**sword, "treasure": {**treasure, "name": ""}}})))
+        self.assertIsNotNone(cf.validate_formation(
+            _record(slots={"1": {**sword, "treasure": treasure},
+                           "2": {**sword, "treasure": treasure}})))
+        self.assertIsNone(cf.validate_formation(
+            _record(slots={"1": {**sword, "treasure": treasure},
+                           "2": {"name_zh": "今剑", "treasure":
+                                 {**treasure, "name": "三所物·菊"}}})))
+
+    def test_troop_positions_require_full_names(self):
+        sword = {"selection_policy": "locked_highest_level",
+                 "sword_catalog_id": "touken_003_mikazuki_munechika",
+                 "form_status": "normal"}
+        self.assertIsNone(cf.validate_formation(_record(
+            slots={"1": {**sword, "troops": {"1": "轻步兵·特上",
+                                             "3": "盾兵·特上"}}})))
+        for bad in ({"4": "盾兵·特上"}, {"1": ""}, {"2": 123}):
+            self.assertIsNotNone(cf.validate_formation(_record(
+                slots={"1": {**sword, "troops": bad}})))
+
     def test_id_format(self):
         for bad in ("PF1", "pf-1", "pf 1", "pf_1", "p.f1", "", 123):
             self.assertIsNotNone(cf.validate_formation(_record(id=bad)),
@@ -244,6 +272,23 @@ class ResolvePresetTests(unittest.TestCase):
             record, {"done": True, "entries": [entry]})
         self.assertTrue(result["ok"])
         self.assertIs(result["slots"]["1"], entry)
+
+    def test_exact_slot_keeps_equipment_after_archive_relink(self):
+        entry = _pool_entry("9:1", "touken_003", "三日月宗近")
+        treasure = {"name": "锷·月下梅树透图", "level": 1, "affection": 0}
+        troops = {"1": "轻步兵·特上", "3": "盾兵·特上"}
+        record = _record(slots={"1": {"observation_id": "9:1",
+                                            "sword_catalog_id": "touken_003",
+                                            "name_zh": "三日月宗近", "level": 99,
+                                            "treasure": treasure,
+                                            "troops": troops}})
+        result = cf.resolve_formation_slots(record,
+                                             {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["treasure"], treasure)
+        self.assertEqual(result["slots"]["1"]["troops"], troops)
+        self.assertNotIn("treasure", entry)
+        self.assertNotIn("troops", entry)
 
     def test_new_snapshot_relinks_by_saved_fingerprint(self):
         entry = _pool_entry("10:7", "touken_003", "三日月宗近",
@@ -405,6 +450,10 @@ class _PresetHost(FormationEditorMixin):
         return self._ensure_results.get(slot_no,
                                         {"result": CHANGED, "reason": ""})
 
+    def _formation_read_team(self):
+        return [{"slot_status": "occupied",
+                 "sword_catalog_id": "touken_003_mikazuki_munechika"}]
+
 
 SLOTS = {
     "1": {"sword_catalog_id": "touken_003_mikazuki_munechika",
@@ -428,6 +477,27 @@ def _apply(host, team_no=3, slots=None, name="演练预设"):
 
 
 class ApplyStreamTests(unittest.TestCase):
+    def test_troop_failure_stops_preset_before_departure(self):
+        host = _PresetHost({})
+        slots = {"1": {**SLOTS["1"], "troops": {"1": "轻步兵·特上"}}}
+        with patch("touken.flows.formation_troops.equip_preset_troop_stream",
+                   return_value=iter(["[刀装] 名称没找到，停"])) as equip:
+            ok, msgs = _apply(host, slots=slots)
+        self.assertFalse(ok)
+        self.assertTrue(equip.called)
+        self.assertIn("绝不继续出发", msgs[-1])
+
+    def test_treasure_failure_stops_preset_before_departure(self):
+        host = _PresetHost({})
+        treasure = {"name": "锷·月下梅树透图", "level": 1, "affection": 0}
+        slots = {"1": {**SLOTS["1"], "treasure": treasure}}
+        with patch("touken.flows.formation_treasure.equip_preset_treasure_stream",
+                   return_value=iter(["[宝物] 仓库数量不明，停"])) as equip:
+            ok, msgs = _apply(host, slots=slots)
+        self.assertFalse(ok)
+        self.assertTrue(equip.called)
+        self.assertIn("绝不继续出发", msgs[-1])
+
     def test_all_ok_reports_summary_and_true(self):
         host = _PresetHost({2: {"result": ALREADY_CORRECT, "reason": ""}})
         ok, msgs = _apply(host)

@@ -99,6 +99,36 @@ def validate_formation(record: dict, existing: list[dict] | None = None) -> str 
             from . import sword_db
             if sid not in sword_db.all_swords():
                 return f"槽位 {key} 的刀剑图鉴号不在名册里"
+        treasure = entry.get("treasure")
+        if treasure is not None:
+            if (not isinstance(treasure, dict)
+                    or not isinstance(treasure.get("name"), str)
+                    or not treasure["name"].strip()
+                    or not isinstance(treasure.get("level"), int)
+                    or isinstance(treasure["level"], bool)
+                    or treasure["level"] < 1
+                    or not isinstance(treasure.get("affection"), int)
+                    or isinstance(treasure["affection"], bool)
+                    or treasure["affection"] < 0):
+                return f"槽位 {key} 的宝物需填写名称、等级和爱用度"
+        troops = entry.get("troops")
+        if troops is not None:
+            if (not isinstance(troops, dict)
+                    or any(slot not in ("1", "2", "3")
+                           or not isinstance(name, str) or not name.strip()
+                           for slot, name in troops.items())):
+                return f"槽位 {key} 的刀装需按第 1／2／3 格填写游戏中的完整名称"
+    seen_treasures = {}
+    for key, entry in slots.items():
+        treasure = entry.get("treasure")
+        if not treasure:
+            continue
+        fingerprint = (treasure["name"].strip(), treasure["level"],
+                       treasure["affection"])
+        if fingerprint in seen_treasures:
+            return (f"{seen_treasures[fingerprint]}号位和{key}号位不能重复"
+                    "指定同一件宝物；同款多实例尚未辨认")
+        seen_treasures[fingerprint] = key
     fid = record.get("id")
     if fid is not None:
         if not isinstance(fid, str) or not _ID_RE.match(fid):
@@ -250,11 +280,17 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
         if len(matches) > 1:
             return {"ok": False,
                     "reason": f"{key}号位「{label}」在最新刀账里仍有 {len(matches)} 振分不清"}
-        resolved[key] = matches[0]
+        resolved[key] = ({**matches[0],
+                          **({"treasure": saved["treasure"]} if saved.get("treasure") else {}),
+                          **({"troops": saved["troops"]} if saved.get("troops") else {})}
+                         if saved.get("treasure") or saved.get("troops") else matches[0])
 
     resolved_catalog = {}
     for key in sorted(resolved, key=int):
         sid = resolved[key].get("sword_catalog_id")
+        if (resolved[key].get("treasure") or resolved[key].get("troops")) and not sid:
+            return {"ok": False, "reason":
+                    f"{key}号位带装备时，需先在名册里确认刀剑身份"}
         if sid and sid in resolved_catalog:
             return {"ok": False, "reason":
                     f"{resolved_catalog[sid]}号位和{key}号位不能重复指定同一位刀"}

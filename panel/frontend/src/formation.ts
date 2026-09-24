@@ -60,6 +60,18 @@ export function validatePresetDraft(draft: Pick<CustomFormation, 'name' | 'targe
         (!entry.sword_catalog_id || !['normal', 'kiwame'].includes(entry.form_status || ''))) {
       return `${slot} 号位请明确刀名和普通／极形态。`
     }
+    if (entry.treasure && (typeof entry.treasure.name !== 'string' || !entry.treasure.name.trim() || !Number.isInteger(entry.treasure.level)
+      || entry.treasure.level < 1 || !Number.isInteger(entry.treasure.affection)
+      || entry.treasure.affection < 0)) return `${slot} 号位的宝物需填写名称、等级和爱用度。`
+    if (entry.troops && Object.entries(entry.troops).some(([position, name]) =>
+      !['1', '2', '3'].includes(position) || typeof name !== 'string' || !name.trim())) {
+      return `${slot} 号位的刀装需按第 1／2／3 格填写游戏中的完整名称。`
+    }
+  }
+  const treasureKeys = Object.values(draft.slots || {}).filter(entry => entry.treasure)
+    .map(entry => `${entry.treasure!.name.trim()}|${entry.treasure!.level}|${entry.treasure!.affection}`)
+  if (new Set(treasureKeys).size !== treasureKeys.length) {
+    return '同一件宝物不能指定给多个位置；同款多件暂时分不清。'
   }
   return null
 }
@@ -70,9 +82,10 @@ export function presetSlotSummary(entry: CustomFormationSlotEntry | null | undef
   const name = entry.name_zh || entry.sword_catalog_id || '没认出名字'
   const form = entry.form_status === 'kiwame' ? '极'
     : entry.form_status === 'normal' ? '普通' : '未确认'
-  if (entry.selection_policy === 'locked_highest_level') return `${name}（${form} · 上锁最高级）`
+  const equipment = [entry.troops && Object.keys(entry.troops).length ? `刀装 ${Object.keys(entry.troops).length} 格` : '', entry.treasure ? `宝物：${entry.treasure.name || '未填'}` : ''].filter(Boolean).join(' · ')
+  if (entry.selection_policy === 'locked_highest_level') return `${name}（${form} · 上锁最高级）${equipment ? ` · ${equipment}` : ''}`
   const bits = [form, entry.level != null ? `Lv.${entry.level}` : ''].filter(Boolean).join(' · ')
-  return bits ? `${name}（${bits}）` : name
+  return (bits ? `${name}（${bits}）` : name) + (equipment ? ` · ${equipment}` : '')
 }
 
 // 预设的选刀池：没认出名字的候选（没图鉴号也没名字）禁选——存进去也分辨

@@ -620,6 +620,8 @@ export interface CustomFormationSlotEntry {
   kiwame_date?: string
   source_snapshot_id?: number
   observed_at?: number
+  treasure?: { name: string; level: number; affection: number }
+  troops?: Record<string, string>
 }
 
 export interface CustomFormation {

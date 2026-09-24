@@ -112,6 +112,24 @@ describe('预设编队', () => {
       name_zh: '小狐丸', form_status: 'kiwame' })).toBe('小狐丸（极 · 上锁最高级）')
   })
 
+  it('宝物需完整可见条件；不同宝物可分配多槽，同一件不能重复', () => {
+    const treasure = { name: '锷·月下梅树透图', level: 1, affection: 0 }
+    const slot = { name_zh: '小狐丸', treasure }
+    expect(validatePresetDraft({ name: '出阵', target_team: 3, slots: { '1': slot } })).toBeNull()
+    expect(presetSlotSummary(slot)).toContain('宝物：锷·月下梅树透图')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': { ...slot, treasure: { ...treasure, name: '' } } } })).toContain('宝物')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': slot, '2': { name_zh: '今剑', treasure } } })).toContain('不能指定给多个位置')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': slot, '2': { name_zh: '今剑', treasure: { ...treasure, name: '三所物·菊' } } } })).toBeNull()
+    const equipped = { ...slot, troops: { '1': '轻步兵·特上', '3': '盾兵·特上' } }
+    expect(validatePresetDraft({ name: '出阵', target_team: 3, slots: { '1': equipped } })).toBeNull()
+    expect(presetSlotSummary(equipped)).toContain('刀装 2 格')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': { ...slot, troops: { '4': '轻步兵·特上' } } } })).toContain('刀装')
+  })
+
   it('选刀池：没认出名字的候选禁选，有图鉴号兜底或缺等级的照常能选', () => {
     expect(presetCandidatePickable(entry())).toBe(true)
     expect(presetCandidatePickable(entry({ name_zh: null, sword_catalog_id: null }))).toBe(false)

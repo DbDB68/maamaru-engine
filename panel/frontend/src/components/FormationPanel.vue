@@ -97,6 +97,7 @@ const draftName = ref('')
 const draftTeam = ref(1)
 const draftSlots = ref<Record<string, CustomFormationSlotEntry>>({})
 const pickerSlot = ref<number | null>(null) // 正在选刀的格子
+const equipmentSlot = ref<number | null>(null)
 const pickerMode = ref<'ranked' | 'exact'>('ranked')
 const presetQuery = ref('')
 const presetSaving = ref(false)
@@ -147,6 +148,7 @@ function openPresetEditor(preset?: CustomFormation) {
     draftSlots.value = {}
   }
   pickerSlot.value = null
+  equipmentSlot.value = null
   presetQuery.value = ''
   presetMessage.value = ''
   presetFailed.value = false
@@ -157,11 +159,18 @@ function closePresetEditor() {
   if (presetSaving.value) return
   editorOpen.value = false
   pickerSlot.value = null
+  equipmentSlot.value = null
 }
 
 function togglePresetPicker(no: number) {
   pickerSlot.value = pickerSlot.value === no ? null : no
+  equipmentSlot.value = null
   presetQuery.value = ''
+}
+
+function toggleEquipmentEditor(no: number) {
+  equipmentSlot.value = equipmentSlot.value === no ? null : no
+  pickerSlot.value = null
 }
 
 function assignRankedSword(sword: { id: string; name: string; name_zh: string }, form: 'normal' | 'kiwame') {
@@ -170,6 +179,8 @@ function assignRankedSword(sword: { id: string; name: string; name_zh: string },
   next[String(pickerSlot.value)] = {
     selection_policy: 'locked_highest_level', sword_catalog_id: sword.id,
     name_zh: sword.name_zh || sword.name, form_status: form,
+    ...(next[String(pickerSlot.value)]?.treasure ? { treasure: next[String(pickerSlot.value)].treasure } : {}),
+    ...(next[String(pickerSlot.value)]?.troops ? { troops: next[String(pickerSlot.value)].troops } : {}),
   }
   draftSlots.value = next
   const rest = [1, 2, 3, 4, 5, 6].find(no => no !== pickerSlot.value && !next[String(no)])
@@ -192,6 +203,8 @@ function assignPresetCandidate(entry: FormationCandidate) {
     ...(entry.kiwame_date ? { kiwame_date: entry.kiwame_date } : {}),
     ...(entry.source_snapshot_id != null ? { source_snapshot_id: entry.source_snapshot_id } : {}),
     ...(entry.observed_at != null ? { observed_at: entry.observed_at } : {}),
+    ...(next[String(pickerSlot.value)]?.treasure ? { treasure: next[String(pickerSlot.value)].treasure } : {}),
+    ...(next[String(pickerSlot.value)]?.troops ? { troops: next[String(pickerSlot.value)].troops } : {}),
   }
   draftSlots.value = next
   presetMessage.value = ''
@@ -203,6 +216,34 @@ function assignPresetCandidate(entry: FormationCandidate) {
 function clearPresetSlot(no: number) {
   const next = cloneSlots(draftSlots.value)
   delete next[String(no)]
+  draftSlots.value = next
+  if (equipmentSlot.value === no) equipmentSlot.value = null
+}
+
+function setSlotTroop(no: number, position: number, value: string) {
+  const next = cloneSlots(draftSlots.value)
+  const entry = next[String(no)]
+  if (!entry) return
+  const troops = { ...(entry.troops || {}) }
+  if (value.trim()) troops[String(position)] = value.trim()
+  else delete troops[String(position)]
+  if (Object.keys(troops).length) entry.troops = troops
+  else delete entry.troops
+  draftSlots.value = next
+}
+
+function setSlotTreasure(no: number, field: 'name' | 'level' | 'affection', value: string) {
+  const next = cloneSlots(draftSlots.value)
+  const entry = next[String(no)]
+  if (!entry) return
+  const treasure = entry.treasure || { name: '', level: 1, affection: 0 }
+  entry.treasure = { ...treasure, [field]: field === 'name' ? value : Number(value) }
+  draftSlots.value = next
+}
+
+function clearSlotTreasure(no: number) {
+  const next = cloneSlots(draftSlots.value)
+  delete next[String(no)]?.treasure
   draftSlots.value = next
 }
 
@@ -323,7 +364,7 @@ onMounted(() => { load(); loadPresets() })
                 </select>
               </label>
             </div>
-            <p class="formation-hintline">按刀名选上锁最高级，或从刀账指定具体一振；留空的格子应用时保持原样。</p>
+            <p class="formation-hintline">按刀名选上锁最高级，或从刀账指定具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
             <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
             <ol class="formation-preset-slots">
               <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
@@ -345,8 +386,43 @@ onMounted(() => { load(); loadPresets() })
                   title="清除，恢复成不动"
                   @click="clearPresetSlot(no)"
                 >×</button>
+                <button
+                  v-if="draftSlots[String(no)]"
+                  type="button"
+                  class="formation-equipment-open secondary"
+                  :aria-expanded="equipmentSlot === no"
+                  @click="toggleEquipmentEditor(no)"
+                >{{ equipmentSlot === no ? '收起装备' : '设置装备（刀装／宝物）' }}</button>
               </li>
             </ol>
+
+            <div v-if="equipmentSlot != null && draftSlots[String(equipmentSlot)]" class="formation-treasure-editor">
+              <b>{{ equipmentSlot }}号位的装备</b>
+              <p>刀装按第 1／2／3 格填写游戏显示的完整名称（含品级，例如「轻步兵·特上」）。不填写的格子保持原样；如果这振刀没有该格，会停止应用。</p>
+              <div class="formation-preset-form">
+                <label v-for="position in [1, 2, 3]" :key="position" class="formation-preset-field">
+                  <span>刀装第 {{ position }} 格</span>
+                  <input :value="draftSlots[String(equipmentSlot)].troops?.[String(position)] || ''" type="text" placeholder="不指定" @input="setSlotTroop(equipmentSlot!, position, ($event.target as HTMLInputElement).value)">
+                </label>
+              </div>
+              <b class="formation-equipment-subtitle">宝物</b>
+              <p>选填。按游戏里的名称、等级、爱用度填写；同样信息的宝物有多件时会停下，避免选错。</p>
+              <div class="formation-preset-form">
+                <label class="formation-preset-field">
+                  <span>宝物名称</span>
+                  <input :value="draftSlots[String(equipmentSlot)].treasure?.name || ''" type="text" placeholder="例如：锷·月下梅树透图" @input="setSlotTreasure(equipmentSlot!, 'name', ($event.target as HTMLInputElement).value)">
+                </label>
+                <label class="formation-preset-field">
+                  <span>等级</span>
+                  <input :value="draftSlots[String(equipmentSlot)].treasure?.level ?? 1" type="number" min="1" @input="setSlotTreasure(equipmentSlot!, 'level', ($event.target as HTMLInputElement).value)">
+                </label>
+                <label class="formation-preset-field">
+                  <span>爱用度</span>
+                  <input :value="draftSlots[String(equipmentSlot)].treasure?.affection ?? 0" type="number" min="0" @input="setSlotTreasure(equipmentSlot!, 'affection', ($event.target as HTMLInputElement).value)">
+                </label>
+              </div>
+              <button v-if="draftSlots[String(equipmentSlot)].treasure" type="button" class="secondary" @click="clearSlotTreasure(equipmentSlot!)">不指定宝物</button>
+            </div>
 
             <div v-if="pickerSlot != null" class="formation-preset-picker">
               <div class="formation-picker-modes" role="group" aria-label="选刀方式">
@@ -412,6 +488,10 @@ onMounted(() => { load(); loadPresets() })
 .formation-workspace { overflow: hidden; }
 .formation-notice { margin: 12px 18px 16px; padding: 10px 13px; color: #9f3d28; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border: 1px solid #d8a195; border-radius: 8px; font-size: 12px; }
 .formation-hintline { margin: 8px 18px 14px; color: var(--ink-dim); font-size: 12px; }
+.formation-treasure-editor { margin: 12px 18px; padding: 12px; border: 1px solid var(--paper-line); border-radius: 9px; }
+.formation-treasure-editor p { margin: 5px 0 10px; color: var(--ink-dim); font-size: 12px; }
+.formation-treasure-editor .secondary { margin-top: 9px; }
+.formation-equipment-subtitle { display: block; margin-top: 14px; }
 .formation-search { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 9px; margin-bottom: 9px; color: var(--ink-dim); font-size: 12px; }
 .formation-search input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--paper-line); border-radius: 8px; }
 .formation-search em { font-style: normal; white-space: nowrap; }
@@ -456,6 +536,7 @@ onMounted(() => { load(); loadPresets() })
 .formation-preset-slot span { font-size: 12px; overflow-wrap: anywhere; }
 .formation-preset-slot.filled { background: color-mix(in srgb, var(--fox-gold-pale) 45%, var(--paper)); }
 .formation-preset-slot.active { border-color: var(--fox-gold); box-shadow: 3px 3px 0 color-mix(in srgb, var(--paper-line) 60%, transparent); }
+.formation-equipment-open { width: 100%; margin-top: 5px; min-height: 30px; padding: 5px 8px; font-size: 11px; }
 .formation-preset-clear { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; color: var(--ink-dim); background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 50%; font-size: 12px; line-height: 1; cursor: pointer; }
 .formation-preset-clear:hover { color: #8f3524; border-color: #d8a195; }
 .formation-preset-picker { margin-top: 10px; }
