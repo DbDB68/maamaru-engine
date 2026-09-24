@@ -1203,7 +1203,7 @@ def resolve_keys_per_run(store, name: str, card: dict, periods: list[dict],
     previous = find_matching_period(
         periods, name, rules_fingerprint(card),
         str(card.get("start_date") or "")[:10] or None)
-    if previous:
+    if previous and isinstance(previous.get("keys_per_run"), (int, float)):
         return {"per_run": float(previous["keys_per_run"]),
                 "runs": previous.get("runs"),
                 "source": "history",
@@ -1265,12 +1265,13 @@ def _hanafuda_window_ts(card: dict) -> tuple[float | None, float | None,
             start_dt, end_dt)
 
 
-def _hanafuda_period_events(store, card: dict) -> list[tuple[float, dict]]:
+def _hanafuda_period_events(store, card: dict, *,
+                            limit: int = 100) -> list[tuple[float, dict]]:
     """本期窗口内的花札圈记录，按时间升序。只此一条数据源。"""
     start_ts, end_ts, _, _ = _hanafuda_window_ts(card)
     events = []
     for event in store.recent_events(
-            limit=100, event_type="hanafuda.run_completed"):
+            limit=limit, event_type="hanafuda.run_completed"):
         ts = event.get("ts")
         if not isinstance(ts, (int, float)):
             continue
@@ -1282,6 +1283,23 @@ def _hanafuda_period_events(store, card: dict) -> list[tuple[float, dict]]:
         events.append((float(ts), payload if isinstance(payload, dict) else {}))
     events.sort(key=lambda item: item[0])
     return events
+
+
+def measured_tama_per_run(store, *, card: dict) -> dict | None:
+    """实测场均玉：本期窗口内 hanafuda.run_completed 的 tama 增量平均。
+
+    与 hanafuda_plan 同一数据源、同一样本过滤（OCR 读岔的 0 和巨大值
+    不进均值）；归属只看卡窗口，不串复刻期。归档要算全期总玉，
+    拉满 store 单查询上限，不吃默认 100 条的截断。没样本返回 None。
+    """
+    deltas = [float(payload["tama"]) for _, payload
+              in _hanafuda_period_events(store, card, limit=1001)
+              if isinstance(payload.get("tama"), (int, float))
+              and 0 < payload["tama"] <= HANAFUDA_TAMA_LOOP_CAP]
+    if not deltas:
+        return None
+    return {"per_run": sum(deltas) / len(deltas), "runs": len(deltas),
+            "tama_total": int(sum(deltas))}
 
 
 # 秘宝之里默认冲最高档 300,000 玉；玩家可以为当期改成自己的目标。

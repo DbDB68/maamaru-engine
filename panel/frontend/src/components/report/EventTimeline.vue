@@ -368,7 +368,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="!entry.summary" class="ended-empty">这期狐之助没跑，没留下数据。</p>
                 <template v-else>
                   <b v-if="entry.summary.full_clear" class="ended-clear">四座宝库全开 🎉</b>
-                  <p>打了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.keys_per_run }} 把 · 共拿 {{ fmt(entry.summary.keys_total) }} 把</p>
+                  <p v-if="entry.summary.mechanics === 'hanafuda'">跑了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.tama_per_run }} 玉 · 共拿 {{ fmt(entry.summary.total_tama) }} 玉</p>
+                  <p v-else>打了 {{ fmt(entry.summary.runs) }} 圈 · 场均 {{ entry.summary.keys_per_run }} 把 · 共拿 {{ fmt(entry.summary.keys_total) }} 把</p>
                   <p v-if="entry.summary.koban_spent != null">{{ entry.summary.koban_spent > 0 ? `补票花了 ${fmt(entry.summary.koban_spent)} 小判` : '白票全程够用，一个小判没花' }}</p>
                   <small>本期数据已归档，下期复刻狐之助会参考。</small>
                 </template>

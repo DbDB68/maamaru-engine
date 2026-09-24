@@ -172,7 +172,11 @@ def _entry(name: str, card: dict, abacus: dict | None,
 
 
 def _summary_for(name: str, card: dict, periods: list[dict]) -> dict | None:
-    """本期归档的收官小结；这期没跑（没归档）返回 None。"""
+    """本期归档的收官小结；这期没跑（没归档）返回 None。
+
+    字段随机理走：edocastle 出钥匙口径（keys_*），hanafuda 出玉口径
+    （tama_*），前端按 mechanics 渲染文案。
+    """
     from .event_history import period_key
     key = period_key(name, card)
     if not key:
@@ -180,9 +184,19 @@ def _summary_for(name: str, card: dict, periods: list[dict]) -> dict | None:
     for period in periods or []:
         if f"{period.get('event')}@{period.get('start_date')}" != key:
             continue
+        if period.get("mechanics") == "hanafuda":
+            return {
+                "mechanics": "hanafuda",
+                "runs": period.get("runs"),
+                "tama_per_run": period.get("tama_per_run"),
+                "total_tama": period.get("total_tama"),
+                "koban_spent": period.get("koban_spent"),
+                "period": key,
+            }
         obtained = period.get("keys_total")
         goal = card.get("keys_total")
         return {
+            "mechanics": period.get("mechanics"),
             "runs": period.get("runs"),
             "keys_per_run": period.get("keys_per_run"),
             "keys_total": obtained,

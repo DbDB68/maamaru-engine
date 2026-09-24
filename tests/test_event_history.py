@@ -20,16 +20,27 @@ def _edo_card(**overrides):
     return card
 
 
-class _Store:
-    """events: [(ts, payload)] 直接喂 edocastle.run_completed。"""
+def _hana_card(**overrides):
+    card = {"mechanics": "hanafuda", "start_date": "2026-09-10",
+            "end_date": "2026-09-24", "ticket_price": 300,
+            "ticket_cap": 6, "refill_amount": 3, "note": ""}
+    card.update(overrides)
+    return card
 
-    def __init__(self, events, refills=None):
-        self._events = events
+
+class _Store:
+    """events/hana_events: [(ts, payload)] 直接喂对应 run_completed 流。"""
+
+    def __init__(self, events=None, refills=None, hana_events=None):
+        self._events = events or []
         self._refills = refills or []
+        self._hana_events = hana_events or []
 
     def recent_events(self, limit=100, event_type=None):
         if event_type == "edocastle.run_completed":
             return [{"ts": ts, "payload": p} for ts, p in self._events]
+        if event_type == "hanafuda.run_completed":
+            return [{"ts": ts, "payload": p} for ts, p in self._hana_events]
         if event_type == "ticket.refilled":
             return [{"ts": ts, "payload": p} for ts, p in self._refills]
         return []
@@ -115,6 +126,88 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(loaded[0]["koban_spent"], 900)
 
 
+class HanafudaArchiveTests(unittest.TestCase):
+    def test_hanafuda_period_archives_by_tama(self):
+        card = _hana_card()
+        store = _Store(hana_events=[
+            (_ts(2026, 9, 12), {"tama": 666, "tama_total": 7329}),
+            (_ts(2026, 9, 12, 13), {"tama": 773, "tama_total": 8768}),
+            (_ts(2026, 9, 13), {"tama": 300, "tama_total": 9068}),
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            # 还没收摊：不归档
+            self.assertIsNone(event_history.archive_if_finished(
+                store, "秘宝之里", card, Path(tmp),
+                now=datetime(2026, 9, 20, tzinfo=_TZ)))
+            period = event_history.archive_if_finished(
+                store, "秘宝之里", card, Path(tmp),
+                now=datetime(2026, 9, 25, tzinfo=_TZ))
+            self.assertIsNotNone(period)
+            self.assertEqual(period["mechanics"], "hanafuda")
+            self.assertEqual(period["runs"], 3)
+            self.assertEqual(period["total_tama"], 1739)
+            self.assertAlmostEqual(period["tama_per_run"], 579.67, places=2)
+            self.assertNotIn("keys_per_run", period)
+            # 再来一遍：幂等
+            self.assertIsNone(event_history.archive_if_finished(
+                store, "秘宝之里", card, Path(tmp),
+                now=datetime(2026, 9, 26, tzinfo=_TZ)))
+            loaded = event_history.load_history(Path(tmp))
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0]["total_tama"], 1739)
+
+    def test_hanafuda_garbage_and_out_of_window_samples_dropped(self):
+        card = _hana_card()
+        store = _Store(hana_events=[
+            (_ts(2026, 9, 12), {"tama": 0, "tama_total": 7000}),  # 零增量
+            (_ts(2026, 9, 12, 13), {"tama": 50000,
+                                    "tama_total": 57000}),  # 超上限
+            (_ts(2026, 9, 1), {"tama": 666, "tama_total": 666}),  # 上期
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(event_history.archive_if_finished(
+                store, "秘宝之里", card, Path(tmp),
+                now=datetime(2026, 9, 25, tzinfo=_TZ)))
+            self.assertEqual(event_history.load_history(Path(tmp)), [])
+
+    def test_hanafuda_archive_records_koban_spent(self):
+        card = _hana_card()
+        store = _Store(
+            hana_events=[(_ts(2026, 9, 12), {"tama": 666,
+                                             "tama_total": 7329})],
+            refills=[(_ts(2026, 9, 12), {"delta": -300, "ticket_price": 300})])
+        with tempfile.TemporaryDirectory() as tmp:
+            period = event_history.archive_if_finished(
+                store, "秘宝之里", card, Path(tmp),
+                now=datetime(2026, 9, 25, tzinfo=_TZ))
+            self.assertEqual(period["koban_spent"], 300)
+
+    def test_unknown_mechanics_never_archives(self):
+        # 没归档口径的机理（大阪城等）：窗口里躺着别的流数据也不许张冠李戴
+        card = {"mechanics": "osaka", "start_date": "2026-08-13",
+                "end_date": "2026-08-27"}
+        store = _Store([(_ts(2026, 8, 20), {"keys": 5})])
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(event_history.archive_if_finished(
+                store, "大阪城", card, Path(tmp),
+                now=datetime(2026, 8, 28, tzinfo=_TZ)))
+            self.assertEqual(event_history.load_history(Path(tmp)), [])
+
+    def test_load_history_keeps_both_period_shapes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            event_history.append_period(Path(tmp), {
+                "event": "江户城潜入调查", "start_date": "2026-08-27",
+                "mechanics": "edocastle", "runs": 46,
+                "keys_total": 899, "keys_per_run": 19.54, "rules": {}})
+            event_history.append_period(Path(tmp), {
+                "event": "秘宝之里", "start_date": "2026-09-10",
+                "mechanics": "hanafuda", "runs": 400,
+                "total_tama": 300000, "tama_per_run": 750.0, "rules": {}})
+            loaded = event_history.load_history(Path(tmp))
+            self.assertEqual({p["event"] for p in loaded},
+                             {"江户城潜入调查", "秘宝之里"})
+
+
 class AttributionTests(unittest.TestCase):
     def test_period_marker_wins(self):
         card = _edo_card()
@@ -185,6 +278,35 @@ class ResolveChainTests(unittest.TestCase):
                                          card2, [])
         self.assertEqual(r["source"], "estimate")
         self.assertEqual(r["per_run"], 3)
+
+    def test_tama_period_does_not_crash_keys_chain(self):
+        # 玉口径期次没有 keys_per_run：不许炸，也不许进钥匙取值链
+        card = _hana_card()
+        history = [{"event": "秘宝之里", "start_date": "2025-09-11",
+                    "mechanics": "hanafuda",
+                    "rules": event_history.rules_fingerprint(card),
+                    "runs": 400, "total_tama": 300000,
+                    "tama_per_run": 750.0}]
+        r = advisor.resolve_keys_per_run(_Store(), "秘宝之里", card, history)
+        self.assertIsNone(r)
+
+    def test_mixed_archive_does_not_break_keys_chain(self):
+        # 同一份档案里钥匙期次、玉期次混存：江户城照常参考钥匙上期，
+        # 玉期次不许串进来捣乱
+        card = _edo_card()
+        history = [
+            {"event": "秘宝之里", "start_date": "2026-09-10",
+             "mechanics": "hanafuda",
+             "rules": event_history.rules_fingerprint(_hana_card()),
+             "runs": 400, "total_tama": 300000, "tama_per_run": 750.0},
+            {"event": "江户城潜入调查", "start_date": "2025-03-01",
+             "rules": event_history.rules_fingerprint(card),
+             "runs": 286, "keys_per_run": 5.1},
+        ]
+        r = advisor.resolve_keys_per_run(_Store([]), "江户城潜入调查",
+                                         card, history)
+        self.assertEqual(r["source"], "history")
+        self.assertEqual(r["per_run"], 5.1)
 
 
 class AbacusResolutionTests(unittest.TestCase):

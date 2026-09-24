@@ -77,6 +77,47 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(len(tl["ended"]), 1)
         self.assertIsNone(tl["ended"][0]["summary"])
 
+    def test_recently_ended_hanafuda_shows_tama_summary(self):
+        cards = {"秘宝之里": _card(mechanics="hanafuda",
+                                   start_date="2026-09-10",
+                                   end_date="2026-09-24")}
+        periods = [{"event": "秘宝之里", "start_date": "2026-09-10",
+                    "mechanics": "hanafuda",
+                    "runs": 400, "total_tama": 301200,
+                    "tama_per_run": 753.0, "koban_spent": 18000,
+                    "rules": {}}]
+        after = datetime(2026, 9, 26, 15, 0, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], [],
+                                           periods=periods, now=after)
+        self.assertEqual(len(tl["ended"]), 1)
+        summary = tl["ended"][0]["summary"]
+        self.assertEqual(summary["mechanics"], "hanafuda")
+        self.assertEqual(summary["runs"], 400)
+        self.assertEqual(summary["tama_per_run"], 753.0)
+        self.assertEqual(summary["total_tama"], 301200)
+        self.assertEqual(summary["koban_spent"], 18000)
+        self.assertNotIn("keys_per_run", summary)
+
+    def test_ended_edocastle_summary_keeps_keys_shape(self):
+        # 显式 mechanics 的钥匙期次：字段一字不差
+        cards = {"江户城潜入调查": _card(mechanics="edocastle",
+                                       start_date="2026-08-27",
+                                       end_date="2026-09-05",
+                                       keys_total=1500)}
+        periods = [{"event": "江户城潜入调查", "start_date": "2026-08-27",
+                    "mechanics": "edocastle",
+                    "runs": 46, "keys_total": 899, "keys_per_run": 19.54,
+                    "koban_spent": 4800, "rules": {}}]
+        after = datetime(2026, 9, 7, 15, 0, tzinfo=_TZ)
+        tl = event_timeline.build_timeline(cards, [], [],
+                                           periods=periods, now=after)
+        summary = tl["ended"][0]["summary"]
+        self.assertEqual(summary["mechanics"], "edocastle")
+        self.assertEqual(summary["keys_per_run"], 19.54)
+        self.assertEqual(summary["keys_total"], 899)
+        self.assertFalse(summary["full_clear"])
+        self.assertNotIn("tama_per_run", summary)
+
     def test_grace_period_expires_after_a_week(self):
         cards = {"江户城潜入调查": _card(start_date="2026-08-27",
                                        end_date="2026-09-05")}

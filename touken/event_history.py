@@ -11,6 +11,7 @@
      "runs": 286, "keys_total": 1459, "keys_per_run": 5.1,
      "koban_spent": 15000,
      "closed_at": 1694...}]}
+  花札期次把钥匙三件套换成 "runs", "total_tama", "tama_per_run"。
 
 规矩：只新增或安全迁移（备份+原子替换），原始记录永不删除。
 """
@@ -63,7 +64,8 @@ def load_history(status_dir: Path) -> list[dict]:
         return []
     return [p for p in periods if isinstance(p, dict)
             and p.get("event") and p.get("start_date")
-            and isinstance(p.get("keys_per_run"), (int, float))]
+            and (isinstance(p.get("keys_per_run"), (int, float))
+                 or isinstance(p.get("tama_per_run"), (int, float)))]
 
 
 def _save_history(status_dir: Path, periods: list[dict]) -> None:
@@ -172,23 +174,45 @@ def archive_if_finished(store, name: str, card: dict, status_dir: Path, *,
         return None
     if now <= end_dt:
         return None  # 还没收摊
-    from .advisor import measured_keys_per_run  # 避免模块级循环依赖
-    measured = measured_keys_per_run(store, name=name, card=card)
-    if not measured:
-        return None
-    period = {
-        "event": name,
-        "start_date": (card.get("start_date")
-                       or str(card.get("start_at") or "")[:10]),
-        "mechanics": card.get("mechanics"),
-        "rules": rules_fingerprint(card),
-        "runs": measured["runs"],
-        "keys_total": measured.get("keys_total"),
-        "keys_per_run": round(measured["per_run"], 2),
-        # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
-        "koban_spent": _koban_spent(store, card),
-        "closed_at": time.time(),
-    }
+    mechanics = card.get("mechanics")
+    if mechanics == "hanafuda":
+        from .advisor import measured_tama_per_run
+        measured = measured_tama_per_run(store, card=card)
+        if not measured:
+            return None
+        period = {
+            "event": name,
+            "start_date": (card.get("start_date")
+                           or str(card.get("start_at") or "")[:10]),
+            "mechanics": mechanics,
+            "rules": rules_fingerprint(card),
+            "runs": measured["runs"],
+            "total_tama": measured.get("tama_total"),
+            "tama_per_run": round(measured["per_run"], 2),
+            # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
+            "koban_spent": _koban_spent(store, card),
+            "closed_at": time.time(),
+        }
+    elif mechanics == "edocastle":
+        from .advisor import measured_keys_per_run  # 避免模块级循环依赖
+        measured = measured_keys_per_run(store, name=name, card=card)
+        if not measured:
+            return None
+        period = {
+            "event": name,
+            "start_date": (card.get("start_date")
+                           or str(card.get("start_at") or "")[:10]),
+            "mechanics": mechanics,
+            "rules": rules_fingerprint(card),
+            "runs": measured["runs"],
+            "keys_total": measured.get("keys_total"),
+            "keys_per_run": round(measured["per_run"], 2),
+            # 遥测有保留期，补票花费趁归档落盘，以后不怕被清
+            "koban_spent": _koban_spent(store, card),
+            "closed_at": time.time(),
+        }
+    else:
+        return None  # 没归档口径的机理不归档，宁缺毋滥
     if append_period(status_dir, period):
         return period
     return None

@@ -133,5 +133,121 @@ class MergeHistoryTests(unittest.TestCase):
         self.assertEqual(merged, [])
 
 
+class FetchArticleRetryTests(unittest.TestCase):
+    """正文抓取退避重试：-509/网络错误重试，永久错误码不重试。纯逻辑不碰网。"""
+
+    def test_retry_until_success(self):
+        calls = []
+
+        def fake_fetch(cvid):
+            calls.append(cvid)
+            if len(calls) < 3:
+                return {"code": -509, "message": "请求过于频繁"}
+            return {"code": 0, "message": "ok",
+                    "data": {"content": "<p>正文</p>"}}
+
+        sleeps = []
+        text = crawler.fetch_article_text("42", fetch=fake_fetch,
+                                          sleep=sleeps.append)
+        self.assertEqual(text.strip(), "正文")
+        self.assertEqual(calls, ["42", "42", "42"])
+        self.assertEqual(sleeps, [10.0, 30.0])
+
+    def test_final_failure_raises_after_full_backoff(self):
+        def fake_fetch(cvid):
+            return {"code": -509, "message": "请求过于频繁"}
+
+        sleeps = []
+        with self.assertRaises(RuntimeError) as ctx:
+            crawler.fetch_article_text(7, fetch=fake_fetch,
+                                       sleep=sleeps.append)
+        self.assertIn("-509", str(ctx.exception))
+        self.assertEqual(sleeps, [10.0, 30.0, 60.0])
+
+    def test_permanent_error_code_not_retried(self):
+        def fake_fetch(cvid):
+            return {"code": -404, "message": "文章不存在"}
+
+        sleeps = []
+        with self.assertRaises(RuntimeError) as ctx:
+            crawler.fetch_article_text(7, fetch=fake_fetch,
+                                       sleep=sleeps.append)
+        self.assertIn("-404", str(ctx.exception))
+        self.assertEqual(sleeps, [])
+
+    def test_network_error_retried(self):
+        attempts = [0]
+
+        def fake_fetch(cvid):
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise OSError("connection reset")
+            return {"code": 0, "message": "ok", "data": {"content": "x"}}
+
+        text = crawler.fetch_article_text(7, fetch=fake_fetch,
+                                          sleep=lambda s: None)
+        self.assertEqual(text.strip(), "x")
+        self.assertEqual(attempts[0], 2)
+
+
+class FillScheduleCandidatesTests(unittest.TestCase):
+    """单篇正文补抓：成功记候选并清旧错，最终失败记 last_fetch_error 留痕。"""
+
+    PUB = datetime(2026, 9, 22, 12, 0).timestamp()
+    NOW = 1758000000.0
+
+    def _item(self, **extra):
+        item = {"title": "9月22日更新公告", "publish_time": self.PUB,
+                "update_date": "2026-09-24",
+                "url": "https://www.bilibili.com/read/cv999"}
+        item.update(extra)
+        return item
+
+    def test_success_records_candidates_and_clears_old_error(self):
+        item = self._item(last_fetch_error="旧错", last_fetch_error_at=1.0)
+        text = ("1、全新活动「联队战 ~海边之阵~」开启\n"
+                "【活动时间】9月24日10:00 - 10月15日5:00")
+
+        def fake_fetch(cvid):
+            self.assertEqual(cvid, "999")
+            return text
+
+        crawler.fill_schedule_candidates([item], now=self.NOW,
+                                         fetch=fake_fetch,
+                                         sleep=lambda s: None)
+        self.assertEqual(item["schedule_candidates"][0]["name"],
+                         "联队战 ~海边之阵~")
+        self.assertEqual(item["candidate_schema_version"],
+                         crawler.CANDIDATE_SCHEMA_VERSION)
+        self.assertEqual(item["candidates_extracted_at"], self.NOW)
+        self.assertNotIn("last_fetch_error", item)
+        self.assertNotIn("last_fetch_error_at", item)
+
+    def test_final_failure_records_last_fetch_error(self):
+        def fake_fetch(cvid):
+            raise RuntimeError("正文接口限流 code=-509 请求过于频繁")
+
+        item = self._item()
+        crawler.fill_schedule_candidates([item], now=self.NOW,
+                                         fetch=fake_fetch,
+                                         sleep=lambda s: None)
+        self.assertIn("-509", item["last_fetch_error"])
+        self.assertEqual(item["last_fetch_error_at"], self.NOW)
+        self.assertNotIn("schedule_candidates", item)
+
+    def test_fresh_candidates_skip_fetch(self):
+        item = self._item(schedule_candidates=[{"name": "秘宝之里"}],
+                          candidate_schema_version=crawler.CANDIDATE_SCHEMA_VERSION,
+                          candidates_extracted_at=time.time())
+        calls = []
+
+        crawler.fill_schedule_candidates([item], now=self.NOW,
+                                         fetch=lambda cvid: calls.append(cvid)
+                                         or "不该抓",
+                                         sleep=lambda s: None)
+        self.assertEqual(calls, [])
+        self.assertEqual(item["schedule_candidates"], [{"name": "秘宝之里"}])
+
+
 if __name__ == "__main__":
     unittest.main()

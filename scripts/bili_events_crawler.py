@@ -24,6 +24,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 
 OFFICIAL_MID = 396483168  # 刀剑乱舞-ONLINE-中文版
@@ -69,19 +70,53 @@ def _signed_get(opener, mixin, url, params):
     return json.loads(opener.open(full, timeout=15).read())
 
 
-def fetch_announcements(pages: int = 2, page_size: int = 20) -> list[dict]:
+# 接口撞限流（B 站 -509）或网络抖动时的退避节奏：最多重试 3 次，
+# 间隔 10s/30s/60s。cron 一天一轮，单篇最坏多扛 100s，换公告不再无声留空
+FETCH_RETRY_BACKOFF = (10.0, 30.0, 60.0)
+
+
+class _FatalFetchError(RuntimeError):
+    """接口明确拒绝（非限流的错误码），重试无意义，直接抛。"""
+
+
+def _run_with_retry(operation: Callable[[], object], *,
+                    backoff: tuple[float, ...] = FETCH_RETRY_BACKOFF,
+                    sleep=time.sleep):
+    """operation 抛普通异常就按 backoff 退避重跑，用尽仍失败抛最后一次异常。"""
+    last_exc = None
+    for attempt in range(len(backoff) + 1):
+        if attempt:
+            sleep(backoff[attempt - 1])
+        try:
+            return operation()
+        except _FatalFetchError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+    raise last_exc
+
+
+def fetch_announcements(pages: int = 2, page_size: int = 20,
+                        *, sleep=time.sleep) -> list[dict]:
     opener, mixin = _open_session()
     articles = []
     for page in range(1, pages + 1):
-        resp = _signed_get(
-            opener, mixin,
-            "https://api.bilibili.com/x/space/wbi/article",
-            {"mid": OFFICIAL_MID, "ps": page_size, "pn": page,
-             "sort": "publish_time"})
-        if resp.get("code") != 0:
-            raise RuntimeError(f"B站接口返回 code={resp.get('code')} "
-                               f"{resp.get('message')}（可能被风控，明天再试）")
-        batch = (resp.get("data") or {}).get("articles") or []
+        def _once():
+            resp = _signed_get(
+                opener, mixin,
+                "https://api.bilibili.com/x/space/wbi/article",
+                {"mid": OFFICIAL_MID, "ps": page_size, "pn": page,
+                 "sort": "publish_time"})
+            if resp.get("code") != 0:
+                if resp.get("code") == -509:
+                    raise RuntimeError(f"列表接口限流 code=-509 "
+                                       f"{resp.get('message')}")
+                raise _FatalFetchError(
+                    f"B站接口返回 code={resp.get('code')} "
+                    f"{resp.get('message')}（可能被风控，明天再试）")
+            return (resp.get("data") or {}).get("articles") or []
+
+        batch = _run_with_retry(_once, sleep=sleep)
         if not batch:
             break
         articles.extend(batch)
@@ -89,17 +124,31 @@ def fetch_announcements(pages: int = 2, page_size: int = 20) -> list[dict]:
     return articles
 
 
-def fetch_article_text(cvid: int | str) -> str:
-    """抓公告正文纯文本。read 网页版已 302 到 opus（正文靠 JS 渲染拿不到），
-    改用 x/article/view 接口，免登录免 WBI。"""
+def _article_json(cvid: int | str) -> dict:
     req = urllib.request.Request(
         f"https://api.bilibili.com/x/article/view?id={cvid}",
         headers={"User-Agent": USER_AGENT,
                  "Referer": "https://www.bilibili.com/"})
-    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
-    if data.get("code") != 0:
-        raise RuntimeError(f"正文接口返回 code={data.get('code')} "
-                           f"{data.get('message')}")
+    return json.loads(urllib.request.urlopen(req, timeout=15).read())
+
+
+def fetch_article_text(cvid: int | str, *, fetch=None,
+                       sleep=time.sleep) -> str:
+    """抓公告正文纯文本。read 网页版已 302 到 opus（正文靠 JS 渲染拿不到），
+    改用 x/article/view 接口，免登录免 WBI。-509/超时/断网按 FETCH_RETRY_BACKOFF
+    退避重试；别的错误码是永久失败，不重试直接抛。"""
+    fetch = fetch or _article_json
+
+    def _once():
+        data = fetch(cvid)
+        code = data.get("code")
+        if code == 0:
+            return data
+        if code == -509:
+            raise RuntimeError(f"正文接口限流 code=-509 {data.get('message')}")
+        raise _FatalFetchError(f"正文接口返回 code={code} {data.get('message')}")
+
+    data = _run_with_retry(_once, sleep=sleep)
     raw = (data.get("data") or {}).get("content") or ""
     raw = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.S)
     raw = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.S)
@@ -225,6 +274,35 @@ def merge_history(old: list[dict], new: list[dict]) -> list[dict]:
                   reverse=True)
 
 
+def fill_schedule_candidates(items: list[dict], *, now: float | None = None,
+                             fetch=None, sleep=time.sleep) -> list[dict]:
+    """抓正文找活动时间候选。对合并后的全量做：老公告上次没抓到的补票，
+    候选超过一周的重抓（公告会修订、规则会升级），新鲜候选跳过。
+    单篇最终失败不拖垮整批，错误记 last_fetch_error/last_fetch_error_at
+    留痕；重抓成功就清掉旧错误。"""
+    now = time.time() if now is None else now
+    fetch = fetch or fetch_article_text
+    for item in items:
+        if not _needs_schedule_fetch(item, now):
+            continue
+        cvid = item["url"].rsplit("cv", 1)[-1]
+        try:
+            text = fetch(cvid)
+            item.pop("last_fetch_error", None)
+            item.pop("last_fetch_error_at", None)
+            found = extract_schedule_candidates(text, item["publish_time"])
+            if found:
+                item["schedule_candidates"] = found
+                item["candidate_schema_version"] = CANDIDATE_SCHEMA_VERSION
+                item["candidates_extracted_at"] = now
+        except Exception as exc:
+            item["last_fetch_error"] = str(exc)[:200]
+            item["last_fetch_error_at"] = now
+            print(f"[爬虫] cv{cvid} 正文抓取失败：{exc}", file=sys.stderr)
+        sleep(3)  # 正文接口风控敏感，宁可慢不可 429
+    return items
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, help="events.json 输出路径")
@@ -242,22 +320,7 @@ def main() -> int:
     except (OSError, ValueError):
         old_items = []
     merged = merge_history(old_items, new_items)
-    # 抓正文找活动时间候选。对合并后的全量做：老公告上次没抓到的这次补票，
-    # 候选超过一周的重抓（公告会修订、规则会升级），新鲜候选跳过
-    for item in merged:
-        if not _needs_schedule_fetch(item, time.time()):
-            continue
-        cvid = item["url"].rsplit("cv", 1)[-1]
-        try:
-            text = fetch_article_text(cvid)
-            found = extract_schedule_candidates(text, item["publish_time"])
-            if found:
-                item["schedule_candidates"] = found
-                item["candidate_schema_version"] = CANDIDATE_SCHEMA_VERSION
-                item["candidates_extracted_at"] = time.time()
-        except Exception as exc:  # 单篇失败不拖垮整批
-            print(f"[爬虫] cv{cvid} 正文抓取失败：{exc}", file=sys.stderr)
-        time.sleep(3)  # 正文接口风控敏感，宁可慢不可 429
+    fill_schedule_candidates(merged)
     payload = {
         "generated_at": time.time(),
         "source": f"bilibili:{OFFICIAL_MID}",

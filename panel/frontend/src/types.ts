@@ -484,10 +484,13 @@ export interface EventTimelineEntry {
 
 // 刚收官活动的本期小结（来自 event_history 归档）
 export interface EventPeriodSummary {
+  mechanics: 'edocastle' | 'hanafuda' | null
   runs: number | null
-  keys_per_run: number | null
-  keys_total: number | null
-  full_clear: boolean
+  keys_per_run?: number | null
+  keys_total?: number | null
+  full_clear?: boolean
+  tama_per_run?: number | null
+  total_tama?: number | null
   koban_spent: number | null
   period: string
 }

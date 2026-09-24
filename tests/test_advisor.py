@@ -884,6 +884,64 @@ def _hanafuda_ts(text: str) -> float:
         f"2026-{text}:00+08:00").timestamp()
 
 
+class MeasuredTamaPerRunTests(unittest.TestCase):
+    """归档用的实测场均玉：与 hanafuda_plan 同源同样本过滤。"""
+
+    CARD = {"mechanics": "hanafuda",
+            "start_at": "2026-09-10T10:00:00+08:00",
+            "end_at": "2026-09-24T05:00:00+08:00"}
+
+    @staticmethod
+    def _store(events: list) -> object:
+        class _Store:
+            def __init__(self):
+                self.requested_limit = None
+
+            def recent_events(self, limit=100, event_type=None):
+                self.requested_limit = limit
+                if event_type == "hanafuda.run_completed":
+                    return list(events)
+                return []
+        return _Store()
+
+    def test_averages_window_deltas(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 666}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 773}},
+        ]
+        m = advisor.measured_tama_per_run(self._store(events), card=self.CARD)
+        self.assertEqual(m["runs"], 2)
+        self.assertEqual(m["tama_total"], 1439)
+        self.assertAlmostEqual(m["per_run"], 719.5)
+
+    def test_garbage_and_out_of_window_dropped(self):
+        events = [
+            {"ts": _hanafuda_ts("09-12 18:41"), "payload": {"tama": 0}},
+            {"ts": _hanafuda_ts("09-12 18:46"), "payload": {"tama": 50000}},
+            {"ts": _hanafuda_ts("09-08 12:00"), "payload": {"tama": 500}},
+            {"ts": _hanafuda_ts("09-12 18:51"), "payload": {"tama": 300}},
+        ]
+        m = advisor.measured_tama_per_run(self._store(events), card=self.CARD)
+        self.assertEqual(m["runs"], 1)
+        self.assertEqual(m["tama_total"], 300)
+
+    def test_no_valid_samples_means_none(self):
+        events = [{"ts": _hanafuda_ts("09-12 18:41"),
+                   "payload": {"tama_total": 100}}]
+        self.assertIsNone(advisor.measured_tama_per_run(
+            self._store(events), card=self.CARD))
+        self.assertIsNone(advisor.measured_tama_per_run(
+            self._store([]), card=self.CARD))
+
+    def test_archive_query_pulls_full_period_capacity(self):
+        # 归档要算全期总玉：一次拉满 store 单查询上限，不吃 100 条截断
+        store = self._store([{"ts": _hanafuda_ts("09-12 18:41"),
+                              "payload": {"tama": 666}}])
+        m = advisor.measured_tama_per_run(store, card=self.CARD)
+        self.assertEqual(store.requested_limit, 1001)
+        self.assertEqual(m["runs"], 1)
+
+
 class HanafudaPlanTests(unittest.TestCase):
     """秘宝之里行动规划：默认最高档，也支持仅对本期生效的自定目标。"""
 
