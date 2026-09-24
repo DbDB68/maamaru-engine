@@ -18,7 +18,7 @@
   - 手形不足自动补充（补充→恢复1个→确定）：补充.png 没截到，
     暂用 OCR 识别"补充"二字，标记【未实测】，等真没票了再验证
   - 三倍鱼笼是甲州金道具：持有数 OCR 读出来 >0 才勾，读不出/为 0 绝不点
-  - 自动行军委托挂不上（队长没特化/极化、对话框没开）就回退手动打法，
+  - 自动行军委托挂不上（对话框没开或没验到勾选）就回退手动打法，
     绝不在原地卡死
 """
 
@@ -311,8 +311,7 @@ class RaidMixin:
                 opened = True
                 break
         if not opened:
-            yield ("[RAID] 自动行军对话框没开（队长没特化/极化？），"
-                   "本圈手动打")
+            yield "[RAID] 自动行军对话框没开，本圈手动打"
             return False
         selected_roi = roi_4to4(*selected_roi_raw)
         if self.maa.template_match(selected_template, selected_roi):
@@ -332,8 +331,7 @@ class RaidMixin:
         if not delegate:
             self._click_point(close)
             time.sleep(0.8)
-            yield ("[RAID] 委托按钮认不出（队长没特化/极化？），"
-                   "已关对话框，本圈手动打")
+            yield "[RAID] 委托按钮认不出，已关对话框，本圈手动打"
             return False
         self.maa.click(delegate)
         time.sleep(0.8)

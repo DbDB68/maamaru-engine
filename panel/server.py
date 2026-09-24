@@ -1113,8 +1113,8 @@ register_script("raid", "联队战", "",
                         _ticket_refill_field(),
                         {"key": "auto_march", "type": "toggle",
                          "label": "自动行军委托", "default": True,
-                         "help": "每圈出阵前挂自动行军委托（部队长需特化/极化）；"
-                                 "挂不上就自动回退手动打法。"},
+                         "help": "每圈出阵前尝试委托自动行军；"
+                                 "游戏未允许委托或没能确认勾选时，本圈改为手动打法。"},
                         *_captain_rotation_fields()])
 register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是哪把刀，不想要的自动烧令牌换板子",
                 _wrap_inventory("南瓜", _build_pumpkin),
