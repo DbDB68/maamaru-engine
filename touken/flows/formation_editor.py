@@ -1104,10 +1104,12 @@ class FormationEditorMixin:
         equipment_slots = [(int(key), entry)
                           for key, entry in slots.items()
                           if isinstance(entry, dict)
-                          and (entry.get("treasure") or entry.get("troops"))]
+                          and any(entry.get(field) for field in
+                                  ("troops", "horse", "charm", "treasure"))]
         if equipment_slots:
             from .formation_treasure import equip_preset_treasure_stream
             from .formation_troops import equip_preset_troop_stream
+            from .formation_accessory import equip_preset_accessory_stream
             for slot_no, equipment in equipment_slots:
                 current_team = self._formation_read_team()
                 current = (current_team[slot_no - 1]
@@ -1127,6 +1129,14 @@ class FormationEditorMixin:
                         yield (f"[预设编队] {slot_no}号位第{position}格刀装没装妥，"
                                "预设没应用完，绝不继续出发")
                         return False
+                for kind, label in (("horse", "马"), ("charm", "御守")):
+                    if equipment.get(kind):
+                        equipped = yield from equip_preset_accessory_stream(
+                            self, slot_no, kind, equipment[kind])
+                        if not equipped:
+                            yield (f"[预设编队] {slot_no}号位的{label}没装妥，"
+                                   "预设没应用完，绝不继续出发")
+                            return False
                 if equipment.get("treasure"):
                     equipped = yield from equip_preset_treasure_stream(
                         self, slot_no, equipment["treasure"])

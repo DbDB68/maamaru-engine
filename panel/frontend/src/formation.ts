@@ -67,7 +67,12 @@ export function validatePresetDraft(draft: Pick<CustomFormation, 'name' | 'targe
       !['1', '2', '3'].includes(position) || typeof name !== 'string' || !name.trim())) {
       return `${slot} 号位的刀装需按第 1／2／3 格填写游戏中的完整名称。`
     }
+    if (entry.horse != null && (typeof entry.horse !== 'string' || !entry.horse.trim())) return `${slot} 号位的马匹名称不正确。`
+    if (entry.charm != null && (typeof entry.charm !== 'string' || !entry.charm.trim())) return `${slot} 号位的御守名称不正确。`
   }
+  const uniqueHorses = Object.values(draft.slots || {}).map(entry => entry.horse?.trim())
+    .filter((horse): horse is string => typeof horse === 'string' && horse.length > 0 && !['白毛', '鹿毛', '青毛'].includes(horse))
+  if (new Set(uniqueHorses).size !== uniqueHorses.length) return '同一匹马不能指定给多个位置。'
   const treasureKeys = Object.values(draft.slots || {}).filter(entry => entry.treasure)
     .map(entry => `${entry.treasure!.name.trim()}|${entry.treasure!.level}|${entry.treasure!.affection}`)
   if (new Set(treasureKeys).size !== treasureKeys.length) {
@@ -82,7 +87,7 @@ export function presetSlotSummary(entry: CustomFormationSlotEntry | null | undef
   const name = entry.name_zh || entry.sword_catalog_id || '没认出名字'
   const form = entry.form_status === 'kiwame' ? '极'
     : entry.form_status === 'normal' ? '普通' : '未确认'
-  const equipment = [entry.troops && Object.keys(entry.troops).length ? `刀装 ${Object.keys(entry.troops).length} 格` : '', entry.treasure ? `宝物：${entry.treasure.name || '未填'}` : ''].filter(Boolean).join(' · ')
+  const equipment = [entry.troops && Object.keys(entry.troops).length ? `刀装 ${Object.keys(entry.troops).length} 格` : '', entry.horse ? `马：${entry.horse}` : '', entry.charm ? `御守：${entry.charm}` : '', entry.treasure ? `宝物：${entry.treasure.name || '未填'}` : ''].filter(Boolean).join(' · ')
   if (entry.selection_policy === 'locked_highest_level') return `${name}（${form} · 上锁最高级）${equipment ? ` · ${equipment}` : ''}`
   const bits = [form, entry.level != null ? `Lv.${entry.level}` : ''].filter(Boolean).join(' · ')
   return (bits ? `${name}（${bits}）` : name) + (equipment ? ` · ${equipment}` : '')

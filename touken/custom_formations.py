@@ -118,6 +118,19 @@ def validate_formation(record: dict, existing: list[dict] | None = None) -> str 
                            or not isinstance(name, str) or not name.strip()
                            for slot, name in troops.items())):
                 return f"槽位 {key} 的刀装需按第 1／2／3 格填写游戏中的完整名称"
+        for equipment_key, label in (("horse", "马匹"), ("charm", "御守")):
+            value = entry.get(equipment_key)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                return f"槽位 {key} 的{label}名称不正确"
+    seen_horses = {}
+    for key, entry in slots.items():
+        horse = entry.get("horse")
+        if not horse or horse in ("白毛", "鹿毛", "青毛"):
+            continue
+        horse = horse.strip()
+        if horse in seen_horses:
+            return f"{seen_horses[horse]}号位和{key}号位不能重复指定同名马"
+        seen_horses[horse] = key
     seen_treasures = {}
     for key, entry in slots.items():
         treasure = entry.get("treasure")
@@ -282,13 +295,17 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
                     "reason": f"{key}号位「{label}」在最新刀账里仍有 {len(matches)} 振分不清"}
         resolved[key] = ({**matches[0],
                           **({"treasure": saved["treasure"]} if saved.get("treasure") else {}),
-                          **({"troops": saved["troops"]} if saved.get("troops") else {})}
-                         if saved.get("treasure") or saved.get("troops") else matches[0])
+                          **({"troops": saved["troops"]} if saved.get("troops") else {}),
+                          **({"horse": saved["horse"]} if saved.get("horse") else {}),
+                          **({"charm": saved["charm"]} if saved.get("charm") else {})}
+                         if any(saved.get(key) for key in ("treasure", "troops", "horse", "charm"))
+                         else matches[0])
 
     resolved_catalog = {}
     for key in sorted(resolved, key=int):
         sid = resolved[key].get("sword_catalog_id")
-        if (resolved[key].get("treasure") or resolved[key].get("troops")) and not sid:
+        if any(resolved[key].get(field) for field in
+               ("treasure", "troops", "horse", "charm")) and not sid:
             return {"ok": False, "reason":
                     f"{key}号位带装备时，需先在名册里确认刀剑身份"}
         if sid and sid in resolved_catalog:

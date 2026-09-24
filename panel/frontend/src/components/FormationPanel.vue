@@ -45,6 +45,15 @@ const TROOP_KINDS = [
   '重骑兵', '精锐兵', '弓兵', '铳兵', '水炮兵',
 ] as const
 const TROOP_GRADES = ['中', '上', '特上'] as const
+const HORSE_OPTIONS = [
+  { label: '王庭', value: '01王庭' }, { label: '三国黑', value: '02三国黑' },
+  { label: '松风', value: '03松风' }, { label: '小云雀', value: '04小云雀' },
+  { label: '高楯黑', value: '05高楯黑' }, { label: '花柑子', value: '06花柑子' },
+  { label: '青海波', value: '07青海波' }, { label: '望月', value: '08望月' },
+  ...['白毛', '鹿毛', '青毛'].map(name => ({ label: name, value: name })),
+  ...['一', '二', '三', '四', '五', '六', '七', '八'].map(no => ({ label: `祝${no}号`, value: `祝${no}号` })),
+]
+const CHARM_OPTIONS = ['御守', '御守·极', '御守·桃'] as const
 
 const profile = ref<HonmaruFormationProfile | null>(null)
 const catalog = ref<Array<{ id: string; name: string; name_zh: string; type: string }>>([])
@@ -199,6 +208,8 @@ function assignRankedSword(sword: { id: string; name: string; name_zh: string },
     name_zh: sword.name_zh || sword.name, form_status: form,
     ...(next[String(pickerSlot.value)]?.treasure ? { treasure: next[String(pickerSlot.value)].treasure } : {}),
     ...(next[String(pickerSlot.value)]?.troops ? { troops: next[String(pickerSlot.value)].troops } : {}),
+    ...(next[String(pickerSlot.value)]?.horse ? { horse: next[String(pickerSlot.value)].horse } : {}),
+    ...(next[String(pickerSlot.value)]?.charm ? { charm: next[String(pickerSlot.value)].charm } : {}),
   }
   draftSlots.value = next
   const rest = [1, 2, 3, 4, 5, 6].find(no => no !== pickerSlot.value && !next[String(no)])
@@ -223,6 +234,8 @@ function assignPresetCandidate(entry: FormationCandidate) {
     ...(entry.observed_at != null ? { observed_at: entry.observed_at } : {}),
     ...(next[String(pickerSlot.value)]?.treasure ? { treasure: next[String(pickerSlot.value)].treasure } : {}),
     ...(next[String(pickerSlot.value)]?.troops ? { troops: next[String(pickerSlot.value)].troops } : {}),
+    ...(next[String(pickerSlot.value)]?.horse ? { horse: next[String(pickerSlot.value)].horse } : {}),
+    ...(next[String(pickerSlot.value)]?.charm ? { charm: next[String(pickerSlot.value)].charm } : {}),
   }
   draftSlots.value = next
   presetMessage.value = ''
@@ -284,6 +297,15 @@ function setSlotTreasure(no: number, field: 'name' | 'level' | 'affection', valu
 function selectSlotTreasure(no: number, name: string) {
   if (!name) clearSlotTreasure(no)
   else setSlotTreasure(no, 'name', name)
+}
+
+function setSlotAccessory(no: number, field: 'horse' | 'charm', value: string) {
+  const next = cloneSlots(draftSlots.value)
+  const entry = next[String(no)]
+  if (!entry) return
+  if (value) entry[field] = value
+  else delete entry[field]
+  draftSlots.value = next
 }
 
 function clearSlotTreasure(no: number) {
@@ -437,7 +459,7 @@ onMounted(() => { load(); loadPresets() })
                   class="formation-equipment-open secondary"
                   :aria-expanded="equipmentSlot === no"
                   @click="toggleEquipmentEditor(no)"
-                >{{ equipmentSlot === no ? '收起装备' : '设置装备（刀装／宝物）' }}</button>
+                >{{ equipmentSlot === no ? '收起装备' : '设置装备（刀装／马／御守／宝物）' }}</button>
               </li>
             </ol>
 
@@ -463,6 +485,24 @@ onMounted(() => { load(); loadPresets() })
                     </select>
                   </div>
                 </div>
+              </div>
+              <div class="formation-preset-form formation-accessory-form">
+                <label class="formation-preset-field">
+                  <span>马匹</span>
+                  <select :value="draftSlots[String(equipmentSlot)].horse || ''" @change="setSlotAccessory(equipmentSlot!, 'horse', ($event.target as HTMLSelectElement).value)">
+                    <option value="">不指定</option>
+                    <option v-if="draftSlots[String(equipmentSlot)].horse && !HORSE_OPTIONS.some(option => option.value === draftSlots[String(equipmentSlot)].horse)" :value="draftSlots[String(equipmentSlot)].horse">{{ draftSlots[String(equipmentSlot)].horse }}</option>
+                    <option v-for="option in HORSE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+                <label class="formation-preset-field">
+                  <span>御守</span>
+                  <select :value="draftSlots[String(equipmentSlot)].charm || ''" @change="setSlotAccessory(equipmentSlot!, 'charm', ($event.target as HTMLSelectElement).value)">
+                    <option value="">不指定</option>
+                    <option v-if="draftSlots[String(equipmentSlot)].charm && !CHARM_OPTIONS.some(option => option === draftSlots[String(equipmentSlot)].charm)" :value="draftSlots[String(equipmentSlot)].charm">{{ draftSlots[String(equipmentSlot)].charm }}</option>
+                    <option v-for="option in CHARM_OPTIONS" :key="option" :value="option">{{ option }}</option>
+                  </select>
+                </label>
               </div>
               <b class="formation-equipment-subtitle">宝物</b>
               <p>选填。按游戏里的名称、等级、爱用度填写；同样信息的宝物有多件时会停下，避免选错。</p>
@@ -555,6 +595,7 @@ onMounted(() => { load(); loadPresets() })
 .formation-treasure-editor p { margin: 5px 0 10px; color: var(--ink-dim); font-size: 12px; }
 .formation-treasure-editor .secondary { margin-top: 9px; }
 .formation-equipment-subtitle { display: block; margin-top: 14px; }
+.formation-accessory-form { margin-top: 14px; }
 .formation-search { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto; align-items: center; gap: 9px; margin-bottom: 9px; color: var(--ink-dim); font-size: 12px; }
 .formation-search input { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--paper-line); border-radius: 8px; }
 .formation-search em { font-style: normal; white-space: nowrap; }

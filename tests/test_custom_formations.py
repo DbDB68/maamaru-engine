@@ -212,6 +212,22 @@ class ValidateTests(unittest.TestCase):
             self.assertIsNotNone(cf.validate_formation(_record(
                 slots={"1": {**sword, "troops": bad}})))
 
+    def test_horse_and_charm_names_are_optional_but_nonempty(self):
+        sword = {"sword_catalog_id": "touken_003_mikazuki_munechika",
+                 "name_zh": "三日月宗近"}
+        self.assertIsNone(cf.validate_formation(_record(
+            slots={"1": {**sword, "horse": "08望月", "charm": "御守·极"}})))
+        for key in ("horse", "charm"):
+            for bad in ("", "  ", 1):
+                self.assertIsNotNone(cf.validate_formation(_record(
+                    slots={"1": {**sword, key: bad}})))
+        self.assertIn("同名马", cf.validate_formation(_record(slots={
+            "1": {**sword, "horse": "08望月"},
+            "2": {**sword, "horse": "08望月"}})))
+        self.assertIsNone(cf.validate_formation(_record(slots={
+            "1": {**sword, "horse": "白毛"},
+            "2": {**sword, "horse": "白毛"}})))
+
     def test_id_format(self):
         for bad in ("PF1", "pf-1", "pf 1", "pf_1", "p.f1", "", 123):
             self.assertIsNotNone(cf.validate_formation(_record(id=bad)),
@@ -477,6 +493,18 @@ def _apply(host, team_no=3, slots=None, name="演练预设"):
 
 
 class ApplyStreamTests(unittest.TestCase):
+    def test_accessory_failure_stops_preset_before_departure(self):
+        for kind, name in (("horse", "08望月"), ("charm", "御守")):
+            with self.subTest(kind=kind):
+                host = _PresetHost({})
+                slots = {"1": {**SLOTS["1"], kind: name}}
+                with patch("touken.flows.formation_accessory.equip_preset_accessory_stream",
+                           return_value=iter([f"[{kind}] 没找到，停"])) as equip:
+                    ok, msgs = _apply(host, slots=slots)
+                self.assertFalse(ok)
+                equip.assert_called_once_with(host, 1, kind, name)
+                self.assertIn("绝不继续出发", msgs[-1])
+
     def test_troop_failure_stops_preset_before_departure(self):
         host = _PresetHost({})
         slots = {"1": {**SLOTS["1"], "troops": {"1": "轻步兵·特上"}}}

@@ -622,6 +622,8 @@ export interface CustomFormationSlotEntry {
   observed_at?: number
   treasure?: { name: string; level: number; affection: number }
   troops?: Record<string, string>
+  horse?: string
+  charm?: string
 }
 
 export interface CustomFormation {

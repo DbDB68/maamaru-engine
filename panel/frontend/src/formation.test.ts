@@ -130,6 +130,21 @@ describe('预设编队', () => {
       slots: { '1': { ...slot, troops: { '4': '轻步兵·特上' } } } })).toContain('刀装')
   })
 
+  it('马和御守保留指定名称，并拒绝空名称', () => {
+    const slot = { name_zh: '小狐丸', horse: '08望月', charm: '御守·极' }
+    expect(validatePresetDraft({ name: '出阵', target_team: 3, slots: { '1': slot } })).toBeNull()
+    expect(presetSlotSummary(slot)).toContain('马：08望月')
+    expect(presetSlotSummary(slot)).toContain('御守：御守·极')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': { ...slot, horse: ' ' } } })).toContain('马匹')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': { ...slot, charm: '' } } })).toContain('御守')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': slot, '2': { name_zh: '今剑', horse: '08望月' } } })).toContain('同一匹马')
+    expect(validatePresetDraft({ name: '出阵', target_team: 3,
+      slots: { '1': { ...slot, horse: '白毛' }, '2': { name_zh: '今剑', horse: '白毛' } } })).toBeNull()
+  })
+
   it('选刀池：没认出名字的候选禁选，有图鉴号兜底或缺等级的照常能选', () => {
     expect(presetCandidatePickable(entry())).toBe(true)
     expect(presetCandidatePickable(entry({ name_zh: null, sword_catalog_id: null }))).toBe(false)
