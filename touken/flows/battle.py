@@ -98,6 +98,23 @@ class BattleMixin:
         return self.maa.template_match(
             template, roi, threshold=float(item.get("threshold", 0.7)))
 
+    def _match_departure_prompt(self, cfg: dict):
+        """确认页可用原有模板，或用限定区域识别顶部「出阵」。"""
+        prompt = cfg.get("confirm_ui", {})
+        ocr_cfg = prompt.get("ocr", {})
+        if ocr_cfg:
+            roi_raw = ocr_cfg.get("roi")
+            if not roi_raw or not ocr_cfg.get("expected"):
+                return None
+            title = self.maa.ocr(
+                ocr_cfg["expected"], roi_4to4(*roi_raw),
+                match_mode=ocr_cfg.get("match_mode", "exact"))
+            if not title:
+                return None
+            # 顶部标题也会出现在其他出阵相关弹窗；同时核对确认按钮。
+            return self._match_template_config(cfg.get("confirm_button", {}))
+        return self._match_template_config(prompt)
+
     def _wait_for_team_record_page(self, record_config: dict,
                                    attempts: int = 10) -> bool:
         """部队记录页同时有“进行记录”和“使用记录”，认任意一个即可。"""
@@ -578,8 +595,7 @@ class BattleMixin:
             # “确定”曾以 0.706 擦线命中绿色“补充”，若先查补票会被误判成
             # 又缺票并触发防重复消费。看到标题就结束补票分支，交给调用方
             # 的 _confirm_departure 正常点击确定。
-            confirm_ui = cfg.get("confirm_ui", {})
-            if self._match_template_config(confirm_ui):
+            if self._match_departure_prompt(cfg):
                 break
 
             # 江户城/联队战同款两层令牌恢复 UI：不足弹窗先点“补充”，
@@ -699,10 +715,9 @@ class BattleMixin:
         没配 target 的玩法只用模板，绝不盲点。
         """
         prompt = cfg.get("confirm_ui", {})
-        prompt_template = prompt.get("template")
         for _ in range(10):
             self.maa.screenshot(force=True)
-            if not prompt_template or self.maa.template_match(prompt_template):
+            if not prompt or self._match_departure_prompt(cfg):
                 confirm = cfg.get("confirm_button", {})
                 button = self._match_template_config(confirm)
                 if button:

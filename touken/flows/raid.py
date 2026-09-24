@@ -7,7 +7,7 @@
   → 部队选择 → 选部队（固定坐标点两下）→（可选）自动换队长
   →（可选）自动行军委托：点自动行军 → 委托 → ✕ 关对话框
   → 即刻出阵
-  → 确认弹窗（陆联旧弹窗 / 海联鱼笼弹窗双形态；可选三倍鱼笼）
+  → 确认弹窗（陆联旧弹窗 / 海联普通或特别合战场；可选三倍鱼笼）
   → 确定
   → 战斗循环：委托全自动（靠冷静期+横幅判圈结束）或手动 OCR"战斗"连点
   → 回到联队战界面 = 一圈结束，差分夜光贝记账
@@ -24,8 +24,10 @@
 
 import re
 import time
+from datetime import datetime
 
 from ..maa_adapter import roi_4to4
+from ..runtime_paths import DEBUG_DIR
 
 
 def _ocr_int(maa, roi_raw) -> int | None:
@@ -41,6 +43,17 @@ def _ocr_int(maa, roi_raw) -> int | None:
 
 class RaidMixin:
     """联队战流程。依赖宿主类的 navigate_to_stream、_click_point。"""
+
+    def _save_raid_failure_frame(self, reason: str):
+        """停在未知界面时留下运行帧，供事后定位。"""
+        try:
+            DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+            path = DEBUG_DIR / f"raid_{reason}_{datetime.now():%Y%m%d_%H%M%S}.png"
+            if self.maa.save_screenshot(str(path), force=True):
+                return path
+        except Exception:
+            pass
+        return None
 
     def raid_stream(self, max_rounds: int = 1, team_no: int = None,
                     use_triple: bool = True, max_buys: int = None,
@@ -154,20 +167,22 @@ class RaidMixin:
             # 3.2 点"部队选择"，OCR 验证标题
             deploy = self._find_deploy_button(cfg)
             if not deploy:
-                yield "[RAID] 找不到部队选择按钮，本圈放弃"
-                continue
+                self._save_raid_failure_frame("deploy_missing")
+                yield "[RAID] 找不到部队选择按钮，已留图并停止"
+                return
             self.maa.click(deploy)
             time.sleep(1.5)
 
             if not self._wait_for_team_select(cfg, attempts=10):
-                yield "[RAID] 部队选择界面没打开，本圈放弃"
-                continue
+                self._save_raid_failure_frame("team_select_missing")
+                yield "[RAID] 部队选择界面没打开，已留图并停止"
+                return
 
             # 3.3 统一出阵链：选队、伤势、刀装、补票和重伤拦截都在这里。
             # 海联使用自己的确认标题和按钮；标题认错时安全链不会放行。
             departure_cfg = dict(cfg)
             if entered == "hailian":
-                if (not cfg.get("confirm_ui_hailian", {}).get("template")
+                if (not cfg.get("confirm_ui_hailian", {}).get("ocr")
                         or not cfg.get("confirm_button_hailian", {}).get("template")):
                     yield "[RAID] 海联确认弹窗配置不全，本次不出阵"
                     return
@@ -219,7 +234,8 @@ class RaidMixin:
                         yield "[RAID] 已勾三倍枡"
 
             if not self._confirm_departure(departure_cfg):
-                yield "[RAID] 找不到确认弹窗的确定按钮，本圈放弃"
+                self._save_raid_failure_frame("confirm_missing")
+                yield "[RAID] 找不到出阵确认，已留图并停止"
                 return
             yield "[RAID] 出发，进入战斗循环"
 

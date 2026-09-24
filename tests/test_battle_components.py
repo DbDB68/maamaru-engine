@@ -1071,6 +1071,36 @@ class SafeDepartChainTests(unittest.TestCase):
             self.assertTrue(host._confirm_departure(cfg))
         self.assertIn(("海联确定", 0.8), maa.template_thresholds)
 
+    def test_hailian_departure_title_accepts_special_popup_button(self):
+        """特别合战场正文不同，但顶部标题和确定按钮与普通海联相同。"""
+        maa = Mock()
+        maa.ocr.return_value = Point(640, 79)
+        maa.template_match.return_value = Point(648, 610)
+        host = _SafeDepartHost(maa=maa)
+        cfg = {"confirm_ui": {"ocr": {"expected": "出阵",
+                                       "roi": [510, 48, 770, 112],
+                                       "match_mode": "exact"}},
+               "confirm_button": {"template": "lulian/ui海联确定.png",
+                                  "roi": [500, 560, 800, 660],
+                                  "threshold": 0.8}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertTrue(host._confirm_departure(cfg))
+        maa.ocr.assert_called_with("出阵", unittest.mock.ANY,
+                                   match_mode="exact")
+        maa.click.assert_called_once_with(Point(648, 610))
+
+    def test_departure_title_alone_never_clicks(self):
+        maa = Mock()
+        maa.ocr.return_value = Point(640, 79)
+        maa.template_match.return_value = None
+        host = _SafeDepartHost(maa=maa)
+        cfg = {"confirm_ui": {"ocr": {"expected": "出阵",
+                                       "roi": [510, 48, 770, 112]}},
+               "confirm_button": {"template": "lulian/ui海联确定.png"}}
+        with patch("touken.flows.battle.time.sleep"):
+            self.assertFalse(host._confirm_departure(cfg))
+        maa.click.assert_not_called()
+
     def test_activity_preparation_runs_after_injury_check(self):
         host = _SafeDepartHost()
 
@@ -1249,6 +1279,30 @@ def _raid_loop_cfg(extra=None):
 
 
 class RaidDepartureSafetyTests(unittest.TestCase):
+    def test_missing_team_screen_stops_instead_of_trying_next_round(self):
+        agent = Mock()
+        agent.config = {
+            "raid": {"ui_title": {"template": "raid-title"},
+                     "activity_entry": {"template": "entry"},
+                     "difficulty_target": [1118, 328]},
+            "team_select": {"teams": {"3": {}}}}
+        agent.current_location = "出阵"
+        agent.navigate_to_stream.return_value = iter(())
+        agent._expedition_takeover_requested.return_value = False
+        agent.maa.template_match.side_effect = (
+            lambda template, *a, **kw: Point(500, 100)
+            if template == "raid-title" else None)
+        agent._find_deploy_button.return_value = Point(1150, 620)
+        agent._wait_for_team_select.return_value = False
+
+        with patch("touken.flows.raid.time.sleep"):
+            messages = list(RaidMixin.raid_stream(
+                agent, max_rounds=3, team_no=3, auto_march=False))
+        agent._save_raid_failure_frame.assert_called_once_with(
+            "team_select_missing")
+        self.assertEqual(agent._find_deploy_button.call_count, 1)
+        self.assertFalse(any("全部圈数跑完" in msg for msg in messages))
+
     def test_lulian_keeps_triple_click_and_skips_hailian_march(self):
         agent = Mock()
         agent.config = {

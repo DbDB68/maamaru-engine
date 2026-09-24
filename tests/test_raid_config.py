@@ -16,12 +16,14 @@ class RaidConfigMigrationTests(unittest.TestCase):
     def test_old_raid_config_gets_new_fields_with_backup(self):
         template = json.loads(EXAMPLE.read_text(encoding="utf-8-sig"))
         old = json.loads(json.dumps(template))
-        new_keys = ("confirm_ui_hailian", "confirm_button_hailian",
+        new_keys = ("confirm_button_hailian",
                     "fish_basket3", "auto_march", "shells_total_ocr",
                     "injury_deny_button", "injury_stamps",
                     "injury_stamp_roi", "injury_status_roi")
         for key in new_keys:
             old["raid"].pop(key)
+        old["raid"]["confirm_ui_hailian"] = {
+            "template": "lulian/ui海联确认.png"}
         old["raid"]["team_no"] = 4
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "touken_config.json"
@@ -32,6 +34,10 @@ class RaidConfigMigrationTests(unittest.TestCase):
             merged = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(merged["raid"]["team_no"], 4)
             self.assertTrue(all(f"raid.{key}" in added for key in new_keys))
+            self.assertIn("raid.confirm_ui_hailian.ocr", added)
+            self.assertEqual(merged["raid"]["confirm_ui_hailian"]["ocr"]["expected"], "出阵")
+            self.assertEqual(merged["raid"]["confirm_ui_hailian"]["template"],
+                             "lulian/ui海联确认.png")
             self.assertEqual(len(list(backup_dir.glob("*.json"))), 1)
             before = json.loads(next(backup_dir.glob("*.json"))
                                 .read_text(encoding="utf-8"))

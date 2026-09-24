@@ -996,7 +996,11 @@
       "template": "team/ui出阵确认.png"
     },
     "confirm_ui_hailian": {
-      "template": "lulian/ui海联确认.png"
+      "ocr": {
+        "expected": "出阵",
+        "roi": [510, 48, 770, 112],
+        "match_mode": "exact"
+      }
     },
     "confirm_button": {
       "template": "通用_确定.png",
