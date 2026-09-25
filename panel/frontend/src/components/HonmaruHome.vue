@@ -51,7 +51,7 @@ const active = computed(() => props.busy || props.activity?.active)
 const homeName = computed(() => profile.value.honmaru_name || '我的本丸')
 const entries = computed(() => {
   const personal = notes.value.map(note => ({ key: `note-${note.id}`, ts: note.created_at, note, run: null as any }))
-  const work = filter.value === 'notes' ? [] : runs.value.map(run => ({ key: `run-${run.run_id}`, ts: Number(run.started_at), note: null as HonmaruNote | null, run }))
+  const work = filter.value === 'notes' ? [] : runs.value.map(run => ({ key: `run-${run.run_id}`, ts: Number(run.ended_at || run.started_at), note: null as HonmaruNote | null, run }))
   return [...personal, ...work].sort((a, b) => b.ts - a.ts)
 })
 const visibleEntries = computed(() => entries.value.slice(0, limit.value))
@@ -116,6 +116,41 @@ function resource(name: string) {
   return typeof value === 'number' ? value.toLocaleString() : '未记录'
 }
 function dateLabel(date: string) { return date === today.value ? '今天' : date.replaceAll('-', '.') }
+const runPostKinds: Record<string, { label: string; icon: string; scene: string }> = {
+  sortie: { label: '出阵手记', icon: 'sortie.png', scene: 'honmaru_sortie_stage.png' },
+  yosari: { label: '异去手记', icon: 'yosari.png', scene: 'honmaru_sortie_stage.png' },
+  osaka: { label: '大阪城手记', icon: 'digging.png', scene: 'honmaru_sortie_stage.png' },
+  edocastle: { label: '江户城手记', icon: 'edocastle.png', scene: 'honmaru_sortie_stage.png' },
+  hanafuda: { label: '秘宝之里手记', icon: 'hanafuda.png', scene: 'honmaru_sortie_stage.png' },
+  raid: { label: '联队战手记', icon: 'raid.png', scene: 'honmaru_sortie_stage.png' },
+  pumpkin: { label: '南瓜手记', icon: 'pumpkin.png', scene: 'honmaru_sortie_stage.png' },
+  expedition: { label: '远征来信', icon: 'expedition.png', scene: 'honmaru_garden_stage.png' },
+  smith: { label: '锻刀手记', icon: 'forge.png', scene: 'honmaru_forge_stage.png' },
+  daily: { label: '日课手记', icon: 'daily.png', scene: 'honmaru_garden_stage.png' },
+}
+function runPostKind(run: any) {
+  return runPostKinds[String(run.script)] || { label: '本丸执务', icon: 'office.svg', scene: 'honmaru_garden_stage.png' }
+}
+function runPostText(run: any) {
+  const loops = Number(run.loops) || 0
+  if (run.status === 'failed') return `这趟没能顺利收工。${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
+  if (run.status === 'stopped') return `这趟按你的意思停下了。${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
+  if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
+  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在本丸账里。`
+  return '这趟执务已经收工，完成了哪些事，可以翻开本丸账看看。'
+}
+function runPostFacts(run: any) {
+  const facts: string[] = []
+  const teams = [...new Set((Array.isArray(run.loop_records) ? run.loop_records : [])
+    .map((record: any) => Number(record.team_no))
+    .filter((team: number) => Number.isInteger(team) && team >= 1 && team <= 5))]
+  if (teams.length === 1) facts.push(`第 ${teams[0]} 部队`)
+  const changes = Object.entries(run.attributed_resource_delta || {})
+    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value !== 0)
+    .slice(0, 2)
+  for (const [name, value] of changes) facts.push(`${name} ${signed(value as number)}`)
+  return facts
+}
 function eventMoment(event: EventTimelineEntry) {
   if (timeline.value?.ongoing.includes(event)) {
     if (event.days_left === 0) return '今天结束'
@@ -253,16 +288,16 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
       <p class="profile-footnote">庭院里有熟悉的身影，<br>这里有慢慢积攒的日常。</p>
     </aside>
 
-    <section class="honmaru-journal" aria-label="本丸近况">
+    <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2><p>今天，也在这里留一页。</p></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
       <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? (activity?.label || '本丸正在执务') : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && activity?.step">{{ activity.step }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
-      <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸近况</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
+      <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">
         <h3 class="journal-date">{{ dateLabel(group.date) }}<span v-if="group.date === today">{{ today.replaceAll('-', '.') }}</span></h3>
-        <article v-for="entry in group.entries" :key="entry.key" class="journal-entry" :class="{ 'personal-entry': entry.note }">
-          <template v-if="entry.note"><header><span class="entry-kind">我的小记</span><time>{{ eventTime(entry.ts) }}</time><button type="button" class="home-text-button" @click="writeNote(entry.note)">修改</button></header><p class="entry-body">{{ entry.note.body }}</p><small v-if="entry.note.updated_at" class="entry-updated">修改于 {{ eventTime(entry.note.updated_at) }}</small></template>
-          <template v-else><header><span class="entry-kind">执务记录</span><time>{{ eventTime(entry.ts) }}</time><span class="entry-status" :class="{ 'needs-attention': entry.run.status === 'failed' }">{{ runStatusLabel(entry.run) }}</span></header><h4>{{ runTitle(entry.run) }}</h4><button type="button" class="home-text-button" @click="emit('report')">到本丸账查看 →</button></template>
+        <article v-for="entry in group.entries" :key="entry.key" class="journal-entry" :class="{ 'personal-entry': entry.note, 'attention-entry': entry.run?.status === 'failed' }">
+          <template v-if="entry.note"><header class="entry-head"><span class="entry-avatar personal-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt=""><span v-else aria-hidden="true">{{ (profile.saniwa_name || '审').slice(0, 1) }}</span></span><span class="entry-identity"><strong>{{ profile.saniwa_name || '审神者' }}</strong><small>我的小记 · <time>{{ eventTime(entry.ts) }}</time></small></span><button type="button" class="home-text-button" @click="writeNote(entry.note)">修改</button></header><p class="entry-body">{{ entry.note.body }}</p><small v-if="entry.note.updated_at" class="entry-updated">修改于 {{ eventTime(entry.note.updated_at) }}</small></template>
+          <template v-else><header class="entry-head"><span class="entry-avatar fox-avatar"><img :src="'/static/img/fox_frames/v2/idle/transparent/frame_01.png'" alt=""></span><span class="entry-identity"><strong>狐之助</strong><small>{{ runPostKind(entry.run).label }} · <time>{{ eventTime(entry.ts) }}</time></small></span><span class="entry-status" :class="{ 'needs-attention': entry.run.status === 'failed' }">{{ runStatusLabel(entry.run) }}</span></header><div class="entry-scene" :style="{ backgroundImage: `url('/static/img/${runPostKind(entry.run).scene}')` }" aria-hidden="true"><span class="scene-stamp"><img :src="`/static/img/ui/${runPostKind(entry.run).icon}`" alt=""></span></div><div class="entry-story"><h4>{{ runTitle(entry.run) }}</h4><p>{{ runPostText(entry.run) }}</p><div v-if="runPostFacts(entry.run).length" class="entry-facts"><span v-for="fact in runPostFacts(entry.run)" :key="fact">{{ fact }}</span></div></div><footer><button type="button" class="home-text-button" @click="emit('records')">翻开这趟记录 →</button></footer></template>
         </article>
       </section>
       <button v-if="entries.length > limit" class="journal-more home-text-button" type="button" @click="limit += 12">再翻一些记录 ↓</button>
@@ -367,15 +402,30 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-day { margin-top: 24px; }
 .honmaru-home .journal-date { font-size: 13px; display: flex; align-items: center; gap: 10px; margin-bottom: 13px; color: var(--home-green); }
 .journal-date span { font-size: 10px; color: var(--ink-dim); font-weight: 400; }
-.journal-entry { padding: 17px 18px; margin-bottom: 12px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: var(--r-md); }
+.journal-entry { padding: 15px 17px; margin-bottom: 16px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: var(--r-md); box-shadow: 0 3px 12px #3d32290b; overflow: hidden; }
+.journal-entry.attention-entry { border-color: #d7aa9d; }
 .journal-entry.personal-entry { position: relative; border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 3px), 97% 100%, 93% calc(100% - 2px), 88% 100%, 82% calc(100% - 2px), 76% 100%, 69% calc(100% - 2px), 62% 100%, 54% calc(100% - 2px), 47% 100%, 39% calc(100% - 2px), 31% 100%, 23% calc(100% - 2px), 15% 100%, 8% calc(100% - 2px), 0 100%); }
 .journal-entry.personal-entry::after { content: ''; position: absolute; top: 0; right: 0; width: 11px; height: 11px; background: linear-gradient(225deg, var(--paper) 0 47%, #c9bda7 50% 57%, #eee6d5 60%); }
 .journal-entry.personal-entry header button { margin-right: 8px; }
-.journal-entry header { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 10px; font-size: 10px; color: var(--ink-dim); }
-.journal-entry header button, .entry-status { margin-left: auto; font-size: 10px; }
-.entry-kind { color: #7c715e; }
+.journal-entry .entry-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.entry-head > button, .entry-status { margin-left: auto; }
+.entry-avatar { flex: 0 0 36px; display: grid; place-items: center; width: 36px; height: 36px; overflow: hidden; border-radius: 50%; background: #e8ecdf; }
+.entry-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.fox-avatar img { width: 42px; height: 42px; object-fit: cover; object-position: center 46%; image-rendering: pixelated; }
+.personal-avatar { color: #5e6d57; font-size: 16px; font-weight: 700; }
+.entry-identity { display: grid; min-width: 0; gap: 2px; }
+.entry-identity strong { font-size: 12px; font-weight: 600; }
+.entry-identity small { color: var(--ink-dim); font-size: 10px; }
+.entry-scene { position: relative; height: 105px; margin: 0 0 13px; border-radius: 5px; background-color: #e7dfcc; background-position: center 62%; background-size: cover; }
+.scene-stamp { position: absolute; right: 10px; bottom: -11px; display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid var(--paper-card); border-radius: 50%; background: #e8ecdf; box-shadow: 0 2px 5px #3d32292b; }
+.scene-stamp img { width: 19px; height: 19px; object-fit: contain; }
+.entry-story { padding: 0 1px; }
+.entry-story p { margin-top: 7px; color: var(--ink-dim); font-size: 12px; line-height: 1.7; }
+.entry-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.entry-facts span { padding: 4px 8px; color: var(--home-green); background: #e9eee5; border-radius: 4px; font-size: 10px; }
+.journal-entry footer { margin-top: 13px; padding-top: 7px; border-top: 1px solid var(--paper-line); }
 .honmaru-home .entry-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.9; }
-.journal-entry h4 { font-size: 14px; font-weight: 500; margin-bottom: 10px; }
+.journal-entry h4 { font-size: 15px; font-weight: 600; }
 .entry-updated { display: block; color: var(--ink-dim); font-size: 10px; margin-top: 12px; }
 .entry-status.needs-attention { color: #a03f32; }
 .journal-more { display: block; margin: 18px auto; text-align: center; }
