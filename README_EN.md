@@ -37,7 +37,7 @@ The first two modes share the same ledger on your PC. The Android version is ful
 
 ## A Typical Day with Maamaru
 
-**Choose a task → set the team, stop conditions, and resource permissions → start.**
+**Choose a task → set the team, stop conditions, and resource permissions → start.** You can also apply a team preset when you want a specific lineup.
 
 While a task is running, the log keeps telling you what Maamaru is doing. Severe injuries, missing entry tokens, failed recognition, and network timeouts all have explicit stop and recovery rules. You do not need to supervise every click, but you always retain control over the goal, team composition, and acceptable risk.
 
@@ -82,10 +82,11 @@ The Android APK is an offline preview of this ledger. It can record resources, b
 ## What Maamaru Can Do Today
 
 - **Dailies and expeditions:** Combine login rewards, the daily shop visit, PvP practice, expeditions, internal affairs, forging, dismantling, refinement, mission rewards, inbox collection, and inventory snapshots into a one-click daily routine—or arrange them in any order with a custom workflow.
-- **Sorties and events:** Normal battle maps, Chapter 1 of Iko, Underground Treasure Chest, Edo Castle Infiltration Investigation E4, Regiment Battle, and the Pumpkin event. Each mode keeps its own meaning for run counts, teams, injury rules, and spending.
+- **Sorties and events:** Normal battle maps, Chapter 1 of Iko, Underground Treasure Chest, Edo Castle Infiltration Investigation E4, Treasure Trove, Regiment Battle (including the seaside map), and the Pumpkin event. Each mode keeps its own meaning for run counts, teams, injury rules, and spending.
+- **Sword roster and team presets:** Read-only roster scans keep duplicate swords as separate entries. Before departure, a preset can arrange six positions and specified equipment. Maamaru stops if it cannot verify a candidate, lock status, or equipment change.
 - **Safety supervision:** Severe-injury blocking, injury-based stopping, repair-and-resume, troop replenishment, automatic captain rotation, interrupted-run recovery, a watchdog, and explicit end-of-run actions.
 - **Reports:** Summaries of sorties, events, forging, drops, resource changes, and unusual days. A wish-list sword gets an extra notification when obtained; if the name cannot be read, Maamaru does not pretend otherwise.
-- **Planning:** Estimates for Iko runs, play time, and koban based on measured pace; suggestions for where to obtain resources; and dedicated cards for forging shortages and Hakata koban spending.
+- **Planning:** Estimates for supported event runs, play time, and koban based on your Honmaru's records; a custom jade goal for the current Treasure Trove event; and accumulated seashells for Regiment Battle. Resource goals include suggestions for where to obtain them.
 - **Honmaru ledger:** Manual transactions, current balances, events, goals, history, Excel/CSV import and export, and backups. Automated and player-entered records are counted separately.
 - **Errors in plain language:** Incident cards give a conclusion, likely causes, a next step, and a direct route back to the relevant task. A task that did not actually finish is never shown as a clean success.
 
@@ -115,6 +116,7 @@ Download a package from [GitHub Releases](https://github.com/DbDB68/maamaru-engi
 ## Current Limits
 
 - Edo Castle automation supports E4 only; other difficulties are not planned. Iko currently supports Chapter 1 only.
+- Team presets and equipment changes are still in trial. Start with a team you can easily restore, and check the result before using a preset for an important unattended run.
 - When the game controls marching, it also controls routes and formations. Maamaru chooses forks and formations only in its manual-marching mode.
 - The Pumpkin event automation never buys extra tokens. It stops safely when none remain.
 - Retreating before a boss, reading fatigue, captain rotation by drag, and reconnecting after a dropped connection all depend on the actual screen. Maamaru stops instead of guessing when it cannot verify the state.
@@ -123,7 +125,7 @@ Download a package from [GitHub Releases](https://github.com/DbDB68/maamaru-engi
 
 ## What's Next
 
-v0.6.0 introduced Custom Workflows and the My Honmaru home screen. v0.6.1 added event planning and Iko data cards. The project is now in an observation period: real cases of getting stuck, confusing people, producing mismatched records, or making correction difficult take priority over adding pages for the sake of a new version. Desktop–Android ledger sync will remain a recorded request until there is evidence that people use the mobile ledger regularly. See the [near-term roadmap](docs/product-roadmap.md) (Chinese).
+v0.8.0 brought team presets into actual tasks and completed the Regiment Battle seaside run. The next priority is real-device feedback about stalls, recognition mistakes, mismatched records, and changes that are hard to correct—especially while checking preset teams and equipment. Desktop–Android ledger sync remains a request to evaluate against actual use.
 
 ## Reporting a Problem
 
