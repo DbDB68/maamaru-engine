@@ -98,14 +98,11 @@ function goalForResource(resource: string) {
 
 const resourceRows = computed(() => resourceNames.map(name => {
   const row = (ledger.value?.per_resource || []).find(item => item.resource === name)
-  const rate = planning.value?.rates?.[name]
-  return { name, before: row?.opening ?? null, current: row?.closing ?? null,
+  return { name, before: row?.opening ?? null, current: planning.value?.current?.[name] ?? null,
     delta: row?.total_delta ?? null, attributed: row?.attributed_delta ?? 0,
     unattributed: row?.unattributed_delta ?? null, observations: row?.observation_count ?? 0,
-    confidence: row?.confidence || 'low', rate: rate?.daily ?? null,
-    rateDays: rate?.days_observed ?? 0, goal: goalForResource(name) }
+    confidence: row?.confidence || 'low', goal: goalForResource(name) }
 }))
-const rateWindowLabel = computed(() => `近 ${planning.value?.rate_window_days || 14} 天平常日均`)
 
 function goalSummary(goal: PlanningGoalAdvice) {
   if (goal.status === 'done') return '目标已经达成'
@@ -1160,6 +1157,18 @@ onMounted(async () => {
       </div>
       <template v-if="honmaruTab === 'report'">
       <template v-if="view === 'chart'">
+        <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
+          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></header>
+          <div class="resource-ledger-grid">
+            <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
+              <small>{{ row.name }}</small>
+              <strong>{{ row.current == null ? '—' : row.current.toLocaleString() }}</strong>
+              <span class="resource-change" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
+              <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
+            </article>
+          </div>
+          <p class="resource-overview-note">数量取近 {{ planning?.rate_window_days || 14 }} 天最近一次记录；没有记录的项目留空。切换时间范围只改变变化数字。</p>
+        </section>
         <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
           <header>
             <div><small>狐之助从账里圈出的三笔</small><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
@@ -1210,7 +1219,7 @@ onMounted(async () => {
         </section>
 
         <section class="resource-ledger" :class="{ loading }">
-          <header><div><h3>家底概览</h3><p>{{ ledgerDateRange }}的变化</p></div><div class="ledger-actions"><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
+          <header><div><h3>账本与手账</h3><p>{{ ledgerDateRange }}的变化依据</p></div><div class="ledger-actions"><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
           <section v-if="ledgerTransferOpen" class="ledger-transfer" aria-labelledby="ledger-transfer-title">
             <header><div><h4 id="ledger-transfer-title">带走或带回账本</h4><p>自动流水只导出；导入只增加你的手动记录。</p></div><button type="button" class="inventory-close" aria-label="关闭账本进出" @click="ledgerTransferOpen = false">×</button></header>
             <div class="ledger-export-actions">
@@ -1266,13 +1275,6 @@ onMounted(async () => {
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
             <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '保存中……' : editingInventoryId ? '保存修改' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false; editingInventoryId = null">取消</button></div>
           </form>
-          <div class="resource-ledger-grid">
-            <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
-              <small>{{ row.name }}</small><strong>{{ signed(row.delta) }}</strong><span v-if="row.current != null">当前 {{ row.current.toLocaleString() }}</span><span v-else>尚未观察到</span>
-              <span v-if="row.rate != null" class="resource-rate" :title="`按最近 ${planning?.rate_window_days || 14} 天里 ${row.rateDays} 个有完整记录的平常日计算`">{{ rateWindowLabel }} {{ signed(Math.round(row.rate)) }}/日</span>
-              <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
-            </article>
-          </div>
           <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
         </section>
 
@@ -1462,7 +1464,6 @@ onMounted(async () => {
 .hand-entry-actions { display: flex; align-items: center; gap: 2px; }
 .hand-entry-actions button { padding: 3px 6px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; cursor: pointer; }
 .hand-entry-actions button.danger { color: var(--danger); }
-.resource-ledger-grid .resource-rate { margin-top: 5px; color: var(--fox-gold-deep); line-height: 1.35; }
 .resource-goal-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin-top: 7px; padding: 5px 7px; color: var(--ink); background: var(--fox-gold-pale); border: 0; border-left: 3px solid var(--fox-gold); text-align: left; cursor: pointer; }
 .resource-goal-link span { color: var(--ink); line-height: 1.35; }
 .resource-goal-link em { flex: 0 0 auto; color: var(--fox-gold-deep); font-size: 10px; font-style: normal; white-space: nowrap; }
