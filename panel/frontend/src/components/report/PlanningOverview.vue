@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceSuggestion } from './resourceSuggestion'
+import ForgePityEstimate from './ForgePityEstimate.vue'
 
 const props = defineProps<{
   planning: PlanningReport
@@ -92,11 +93,15 @@ function fmt(value: number | null | undefined) {
       </ul>
       <button type="button" class="secondary" @click="emit('openExpedition')">去安排小判远征</button>
     </article>
+    <div v-if="forgeMode === 'ten' && planning.resource_watch?.ten_forge" class="forge-pity-wrap">
+      <ForgePityEstimate :ten-forge="planning.resource_watch.ten_forge" />
+    </div>
   </section>
 </template>
 
 <style scoped>
 .planning-overview { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 10px; }
+.forge-pity-wrap { grid-column: 1 / -1; padding: 4px 17px 15px; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); }
 .planning-focus { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 16px; border-left: 3px solid var(--fox-gold-deep); background: var(--fox-gold-pale); }
 .planning-focus > div { min-width: 0; }
 .planning-focus small { display: block; color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; }
