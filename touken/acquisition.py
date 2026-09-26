@@ -19,7 +19,7 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 _MAPS_FILE = _DATA_DIR / "expedition_maps.json"
 _SOURCES_FILE = _DATA_DIR / "acquisition_sources.json"
 
-_EXPEDITION_CAVEAT = "按大成功收益排的，实际看远征手气；括号里是队伍等级要求。"
+_EXPEDITION_CAVEAT = "表中是大成功时的固定收益；普通成功收益不同，别把大成功当成每次必得。括号里是队伍等级要求。"
 # 掉率出处见 gameplay_meta.json 的 note：日服玩家实测，样本混着加倍期，国服待核
 _FRAGMENT_RATE_SOURCE = ("掉率来自日服玩家实测，样本还混着加倍活动期，国服实际可能更低；"
                          "自家实测攒够数据后会换成自家的。")
