@@ -457,6 +457,8 @@ class GetPlanningTests(unittest.TestCase):
                         {"resource": "玉钢", "closing": 2000},
                         {"resource": "冷却材", "closing": 6000},
                         {"resource": "砥石", "closing": 3000},
+                        {"resource": "委托符", "closing": 3},
+                        {"resource": "加速符", "closing": 20},
                     ],
                     "daily_series": [],
                     "attributions": [
@@ -475,11 +477,36 @@ class GetPlanningTests(unittest.TestCase):
                 _WatchStore(), Path(tmp) / "goals.json",
                 forge_recipe=[1000, 500, 1000, 500],
                 today=now.date(), now=now)
-        self.assertEqual(planning["resource_watch"]["forge_capacity"], 4)
-        self.assertEqual(planning["resource_watch"]["limiting"], ["玉钢"])
+        self.assertEqual(planning["resource_watch"]["forge_capacity"], 3)
+        self.assertEqual(planning["resource_watch"]["limiting"], ["委托符"])
+        ten = planning["resource_watch"]["ten_forge"]
+        self.assertEqual(ten["forge_capacity"], 0)
+        self.assertIn("委托符", ten["limiting"])
+        self.assertNotIn("加速符", planning["resource_watch"]["limiting"])
         self.assertEqual(planning["koban_watch"]["current"], 120000)
         self.assertEqual(planning["koban_watch"]["confirmed_spending"], 300)
         self.assertEqual(planning["koban_watch"]["spending_days"], 14)
+
+        class _SpeedupStore(_WatchStore):
+            def resource_ledger(self, from_ts, to_ts):
+                ledger = super().resource_ledger(from_ts, to_ts)
+                for row in ledger["per_resource"]:
+                    if row["resource"] in ("木炭", "玉钢", "冷却材", "砥石"):
+                        row["closing"] = 100000
+                    elif row["resource"] == "委托符":
+                        row["closing"] = 100
+                    elif row["resource"] == "加速符":
+                        row["closing"] = 5
+                return ledger
+
+        with tempfile.TemporaryDirectory() as tmp:
+            speedup_plan = advisor.get_planning(
+                _SpeedupStore(), Path(tmp) / "goals.json",
+                forge_recipe=[1000, 500, 1000, 500],
+                today=now.date(), now=now)
+        watch = speedup_plan["resource_watch"]
+        self.assertNotIn("加速符", watch["limiting"])
+        self.assertEqual(watch["ten_forge"]["limiting"], ["加速符"])
 
 
 class EventGoalTests(unittest.TestCase):

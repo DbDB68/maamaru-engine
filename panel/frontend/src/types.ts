@@ -318,6 +318,11 @@ export interface PlanningReport {
     resources: { resource: string; current: number | null; per_forge: number; forge_capacity: number | null }[]
     forge_capacity: number | null
     limiting: string[]
+    ten_forge?: {
+      resources: { resource: string; current: number | null; per_forge: number; forge_capacity: number | null }[]
+      forge_capacity: number | null
+      limiting: string[]
+    }
   }
   koban_watch?: {
     current: number | null

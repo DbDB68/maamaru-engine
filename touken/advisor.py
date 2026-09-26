@@ -981,20 +981,30 @@ def get_planning(store, goals_path: Path, *,
             or any(not isinstance(value, (int, float)) or value <= 0
                    for value in forge_recipe)):
         forge_recipe = [700, 700, 700, 700]
-    resource_rows = []
-    for name, cost in zip(forge_resources, forge_recipe):
-        balance = current.get(name)
-        resource_rows.append({
-            "resource": name, "current": balance, "per_forge": int(cost),
-            "forge_capacity": (None if balance is None
-                               else max(0, int(balance // cost))),
-        })
-    known_capacities = [row["forge_capacity"] for row in resource_rows
-                        if row["forge_capacity"] is not None]
-    forge_capacity = min(known_capacities) if len(known_capacities) == 4 else None
-    limiting = ([row["resource"] for row in resource_rows
-                 if row["forge_capacity"] == forge_capacity]
-                if forge_capacity is not None else [])
+    def forge_watch(costs):
+        rows = []
+        for name, cost in costs:
+            balance = current.get(name)
+            rows.append({
+                "resource": name, "current": balance, "per_forge": int(cost),
+                "forge_capacity": (None if balance is None
+                                   else max(0, int(balance // cost))),
+            })
+        capacities = [row["forge_capacity"] for row in rows]
+        capacity = min(capacities) if all(value is not None for value in capacities) else None
+        return {
+            "resources": rows,
+            "forge_capacity": capacity,
+            "limiting": ([row["resource"] for row in rows
+                          if row["forge_capacity"] == capacity]
+                         if capacity is not None else []),
+        }
+
+    normal_forge = forge_watch([*zip(forge_resources, forge_recipe),
+                                ("委托符", 1)])
+    ten_forge = forge_watch([*[(name, cost * 10)
+                               for name, cost in zip(forge_resources, forge_recipe)],
+                             ("委托符", 9), ("加速符", 10)])
     confirmed_spending = sum(
         -int(round(item.get("delta") or 0))
         for item in ledger.get("attributions", [])
@@ -1035,11 +1045,7 @@ def get_planning(store, goals_path: Path, *,
         "current": current,
         "koban_per_floor": floor_yield,
         "osaka_floor_speed": floor_speed,
-        "resource_watch": {
-            "resources": resource_rows,
-            "forge_capacity": forge_capacity,
-            "limiting": limiting,
-        },
+        "resource_watch": {**normal_forge, "ten_forge": ten_forge},
         "koban_watch": {
             "current": koban_current,
             "reserved": reserved,

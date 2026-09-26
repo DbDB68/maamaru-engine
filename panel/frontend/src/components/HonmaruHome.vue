@@ -96,7 +96,7 @@ const briefChanges = computed(() => {
 const resourceBrief = computed(() => {
   const parts: string[] = []
   const limiting = resourceWatch.value?.limiting || []
-  if (limiting.length) parts.push(`${limiting.join('、')}还是四项资源里最少的`)
+  if (limiting.length) parts.push(`按普通锻刀的配比，${limiting.join('、')}会先卡住`)
   if (todayKobanSpending.value === 0) parts.push('小判今日没有新的支出')
   else if (todayKobanSpending.value != null) parts.push(`小判今日已记下 ${fmt(todayKobanSpending.value)} 支出`)
   const event = nearestEvent.value
@@ -318,7 +318,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <h2><span aria-hidden="true">⚒</span> {{ resourceWatch?.forge_capacity == null ? '等待资源盘点' : `现在最缺${resourceWatch.limiting.join('、') || '的资源'}` }}</h2>
         <p v-if="resourceWatch?.forge_capacity != null" class="planning-lead">还能锻 <b class="pencil-mark">{{ fmt(resourceWatch.forge_capacity) }}</b> 炉</p>
         <div class="forge-meter" role="progressbar" aria-label="最短资源相对余量" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="forgeCapacityPercent"><i :style="{ width: `${forgeCapacityPercent}%` }" /></div>
-        <p class="planning-note">四项资源按当前配比折算；まあ丸只提醒最先卡住的那项。</p>
+        <p class="planning-note">按四材料和委托符折算普通锻刀；十连限锻可去规划里看。</p>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划调整 →</button>
       </section>
       <section class="home-planning-card home-koban-card">
