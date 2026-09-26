@@ -238,6 +238,20 @@ class DayTimelineMiscTests(unittest.TestCase):
             plan = dtl._hanafuda_active_plan(_today_at(12, 0), self.store)
         self.assertIsNone(plan)
 
+    def test_raid_counts_only_this_game_day_rounds(self):
+        now = _today_at(12, 0)
+        plan = {"runs_needed": 302, "seconds_per_loop": 420,
+                "seconds_to_end": 18 * 86400, "tama_remaining": 280000}
+        events = [(_today_at(3, 59), {}), (_today_at(4, 1), {}),
+                  (_today_at(9, 0), {})]
+        with patch("touken.advisor.load_event_cards",
+                   return_value={"联队战": {"mechanics": "raid"}}), \
+             patch("touken.advisor.currency_plan", return_value=plan), \
+             patch("touken.advisor._currency_period_events", return_value=events):
+            result = dtl._raid_active_plan(now, self.store)
+        self.assertEqual(result["completed_today"], 2)
+        self.assertEqual(dtl._raid_daily_runs(result), 15)
+
 
 class DayTimelineSuggestWindowsTests(unittest.TestCase):
     """suggest_windows 纯函数：占用段手工注入。"""
@@ -285,6 +299,26 @@ class DayTimelineSuggestWindowsTests(unittest.TestCase):
         blocks, shortfall = dtl.suggest_windows(480, [], 0)
         self.assertEqual(blocks, [])
         self.assertEqual(shortfall, 0)
+
+    def test_raid_windows_fit_whole_rounds_around_dispatch(self):
+        occupied = [{"start_min": 538, "end_min": 545,
+                     "label": "09:00 部队三派遣"}]
+        blocks, missing = dtl.suggest_round_windows(480, occupied, 18, 420)
+        self.assertEqual([(b["start_min"], b["runs"], b["duration_min"])
+                          for b in blocks], [(480, 8, 56), (545, 10, 70)])
+        self.assertEqual(missing, 0)
+
+    def test_raid_windows_report_rounds_that_cannot_fit(self):
+        occupied = [{"start_min": 535, "end_min": 1440,
+                     "label": "活动收摊"}]
+        blocks, missing = dtl.suggest_round_windows(480, occupied, 10, 420)
+        self.assertEqual(blocks[0]["runs"], 7)
+        self.assertEqual(missing, 3)
+
+    def test_raid_long_window_uses_two_task_sized_batches(self):
+        blocks, missing = dtl.suggest_round_windows(0, [], 205, 120)
+        self.assertEqual([b["runs"] for b in blocks], [99, 99])
+        self.assertEqual(missing, 7)
 
 
 class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
@@ -367,6 +401,54 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         out = self._build(_today_at(8, 0), cfg, plan, team_no=3)
         self.assertEqual(out["suggestions"],
                          [{"start_min": 480, "duration_min": 120, "note": ""}])
+
+    def test_raid_daily_rounds_split_around_same_team_expedition(self):
+        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
+                     "enabled": True}])
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        with patch.object(dtl, "_raid_active_plan", return_value=plan), \
+             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
+            out = dtl.build_day_timeline(
+                _today_at(8, 0), cfg=cfg, store=self.store,
+                script_labels={}, raid_team_no=3)
+        self.assertEqual(out["activity"]["target_runs"], 18)
+        self.assertEqual(out["activity"]["planned_runs"], 18)
+        self.assertEqual([(b["start_min"], b["runs"]) for b in out["suggestions"]],
+                         [(480, 16), (690, 2)])
+        self.assertEqual(out["shortfall_seconds"], 0)
+
+    def test_unknown_raid_team_avoids_every_expedition_shift(self):
+        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
+                     "enabled": True}])
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        with patch.object(dtl, "_raid_active_plan", return_value=plan), \
+             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
+            out = dtl.build_day_timeline(
+                _today_at(9, 55), cfg=cfg, store=self.store,
+                script_labels={}, raid_team_no=None)
+        self.assertEqual(out["suggestions"][0]["start_min"], 690)
+
+    def test_raid_without_measured_pace_makes_no_schedule(self):
+        with patch.object(dtl, "_raid_active_plan", return_value=None), \
+             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
+            out = dtl.build_day_timeline(
+                _today_at(8, 0), cfg=_cfg([]), store=self.store,
+                script_labels={})
+        self.assertIsNone(out["activity"])
+        self.assertIsNone(out["suggestions"])
+
+    def test_running_task_waits_for_fresh_raid_progress(self):
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        with patch.object(dtl, "_raid_active_plan", return_value=plan), \
+             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
+            out = dtl.build_day_timeline(
+                _today_at(8, 0), cfg=_cfg([]), store=self.store,
+                script_labels={}, active={"script": "raid"})
+        self.assertIsNone(out["suggestions"])
+        self.assertIn("收工", out["hint"])
 
 
 if __name__ == "__main__":

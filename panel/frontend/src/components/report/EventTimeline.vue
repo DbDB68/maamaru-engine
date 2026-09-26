@@ -405,7 +405,8 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="entry.budget.tama_remaining === 0">{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}已经拿到啦 🎉 剩下的手形想刷就刷。</p>
                 <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} {{ currencyOf(entry) }}。</p>
                 <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
-                <section v-if="tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
+                <p v-if="entry.budget.mechanics === 'raid' && entry.budget.runs_needed" class="tama-action">{{ entry.budget.seconds_per_loop ? '今天具体挂几圈、几点开工，请看上方「今天的时间表」；它会避开已启用的远征班次。' : '本期实测圈速还不够；再完成几圈后，时间表才能安排联队战的挂机时段。' }}</p>
+                <section v-if="entry.budget.mechanics !== 'raid' && tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
                   <span>
                     <small>现在这一锅</small>
                     <b v-if="tamaBatchPlan(entry)!.runs">先挂 {{ fmt(tamaBatchPlan(entry)!.runs) }} 圈</b>

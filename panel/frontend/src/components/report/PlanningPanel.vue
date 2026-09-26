@@ -12,6 +12,7 @@ import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
 import GameplayPlanner from './GameplayPlanner.vue'
 import PlanningOverview from './PlanningOverview.vue'
+import DayTimeline from '../DayTimeline.vue'
 
 const emit = defineEmits<{
   goalSaved: []
@@ -380,6 +381,7 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
+    <DayTimeline collapsible />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" @open-expedition="emit('openExpedition')" />
     <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 

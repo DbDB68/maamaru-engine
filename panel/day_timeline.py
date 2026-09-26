@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from . import scheduler
 
 DAY_MINUTES = 24 * 60
+SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 # 建议层的避让口径
 DAILY_RESET_WINDOW = (3 * 60 + 50, 4 * 60 + 10)  # 03:50–04:10 领旧日课+重登
@@ -145,7 +147,7 @@ def _hanafuda_active_plan(now: float, store) -> dict | None:
         from touken import advisor
         from touken.runtime_paths import STATE_DIR
         cards = advisor.load_event_cards(STATE_DIR)
-        now_dt = datetime.fromtimestamp(now)
+        now_dt = datetime.fromtimestamp(now, SHANGHAI_TZ)
         for card in (cards or {}).values():
             if not isinstance(card, dict) or card.get("mechanics") != "hanafuda":
                 continue
@@ -156,6 +158,52 @@ def _hanafuda_active_plan(now: float, store) -> dict | None:
     except Exception:
         pass
     return None
+
+
+def _raid_active_plan(now: float, store) -> dict | None:
+    """只使用已确认的本期联队战卡与实测圈数／圈速。"""
+    if store is None:
+        return None
+    try:
+        from touken import advisor
+        from touken.runtime_paths import STATE_DIR
+        cards = advisor.load_event_cards(STATE_DIR)
+        now_dt = datetime.fromtimestamp(now, SHANGHAI_TZ)
+        for card in (cards or {}).values():
+            if not isinstance(card, dict) or card.get("mechanics") != "raid":
+                continue
+            plan = advisor.currency_plan(store, card, now_dt=now_dt,
+                                         mechanics="raid")
+            if (plan.get("runs_needed") and plan.get("seconds_per_loop")
+                    and plan.get("seconds_to_end") and plan["seconds_to_end"] > 0
+                    and plan.get("tama_remaining")):
+                game_day = now_dt.replace(hour=4, minute=0, second=0,
+                                          microsecond=0)
+                if now_dt < game_day:
+                    game_day -= timedelta(days=1)
+                period_events = advisor._currency_period_events(
+                    store, card, mechanics="raid", limit=1001)
+                observed_at = plan.get("tama_observed_at") or now
+                plan["completed_today"] = sum(
+                    1 for ts, _ in period_events
+                    if game_day.timestamp() <= ts <= min(now, observed_at))
+                plan["game_day_started_at"] = game_day.timestamp()
+                plan["now"] = now
+                return plan
+    except Exception:
+        pass
+    return None
+
+
+def _raid_daily_runs(plan: dict) -> int:
+    """活动卡的日均圈数扣掉本丸换日后已完成的圈，不让目标边跑边重置。"""
+    runs = int(plan["runs_needed"])
+    completed = int(plan.get("completed_today") or 0)
+    elapsed = max(0, plan.get("now", 0) - plan.get("game_day_started_at", 0))
+    days_left = (plan["seconds_to_end"] + elapsed) / 86400
+    original_target = min(runs + completed,
+                          max(1, math.ceil((runs + completed) / days_left)))
+    return min(runs, max(0, original_target - completed))
 
 
 def _hanafuda_hint(plan: dict | None) -> str | None:
@@ -241,9 +289,60 @@ def suggest_windows(now_min: float, occupied: list[dict],
     return blocks, remaining
 
 
+def suggest_round_windows(now_min: float, occupied: list[dict],
+                          needed_runs: int, seconds_per_loop: int) -> tuple[list[dict], int]:
+    """联队战建议只放完整圈；每段最多 99 圈，避免推荐任务表单填不下的数量。"""
+    if needed_runs <= 0 or seconds_per_loop <= 0:
+        return [], max(0, needed_runs)
+    cursor = max(0, min(math.ceil(now_min), DAY_MINUTES))
+    merged = []
+    for seg in sorted(occupied, key=lambda s: (s["start_min"], s["end_min"])):
+        start = max(0, int(seg["start_min"]))
+        end = min(DAY_MINUTES, int(seg["end_min"]))
+        if end <= start:
+            continue
+        if merged and start <= merged[-1][1]:
+            if end > merged[-1][1]:
+                merged[-1] = (merged[-1][0], end, merged[-1][2])
+        else:
+            merged.append((start, end, seg.get("label") or ""))
+
+    blocks = []
+    remaining = needed_runs
+
+    def fill(start: int, end: int, label: str) -> None:
+        nonlocal remaining
+        while remaining > 0 and len(blocks) < MAX_SUGGESTION_BLOCKS:
+            capacity = (end - start) * 60 // seconds_per_loop
+            runs = min(remaining, capacity, 99)
+            if runs <= 0:
+                return
+            duration = math.ceil(runs * seconds_per_loop / 60)
+            blocks.append({
+                "start_min": start,
+                "duration_min": duration,
+                "runs": runs,
+                "note": f"避开{label}" if label else "",
+            })
+            remaining -= runs
+            start += duration
+
+    for start, end, label in merged:
+        if remaining <= 0 or len(blocks) >= MAX_SUGGESTION_BLOCKS:
+            break
+        if end <= cursor:
+            continue
+        if start > cursor:
+            fill(cursor, start, label)
+        cursor = max(cursor, end)
+    if remaining > 0 and len(blocks) < MAX_SUGGESTION_BLOCKS and cursor < DAY_MINUTES:
+        fill(cursor, DAY_MINUTES, "")
+    return blocks, remaining
+
+
 def _occupied_segments(expedition_items: list[dict], cfg: dict,
-                       hanafuda_team_no: int | None) -> list[dict]:
-    """把三类占用段拼出来：日课刷新窗口、班次动作窗口、活动队的远征时段。"""
+                       activity_team_no: int | None) -> list[dict]:
+    """避开刷新、派遣动作和活动队外出；队伍未知时保守避开全部远征。"""
     occupied = [{
         "start_min": DAILY_RESET_WINDOW[0],
         "end_min": DAILY_RESET_WINDOW[1],
@@ -252,8 +351,9 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
     try:
         managed = scheduler.managed_teams(cfg)
     except Exception:
-        managed = set()
-    away_whole_shift = bool(hanafuda_team_no and hanafuda_team_no in managed)
+        managed = {int(e.get("team_no") or 0) for e in expedition_items
+                   if e.get("enabled")}
+    away_whole_shift = bool(activity_team_no and activity_team_no in managed)
     for e in expedition_items:
         if not e.get("enabled"):
             continue
@@ -267,10 +367,12 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
             "label": f"{when} {team}派遣",
         })
         # 活动队被远征排班管着时，整段远征队伍都不在家，出不了阵
-        if away_whole_shift and int(e.get("team_no") or 0) == hanafuda_team_no:
+        if activity_team_no is None or (away_whole_shift
+                                        and int(e.get("team_no") or 0) == activity_team_no):
             occupied.append({
                 "start_min": start,
-                "end_min": start + int(e.get("duration_min") or 0),
+                "end_min": start + int(e.get("duration_min") or 0)
+                if e.get("duration_min") else DAY_MINUTES,
                 "label": f"{when} {team}远征",
             })
     return occupied
@@ -279,7 +381,8 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
 def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        store=None, script_labels: dict | None = None,
                        active: dict | None = None,
-                       hanafuda_team_no: int | None = None) -> dict:
+                       hanafuda_team_no: int | None = None,
+                       raid_team_no: int | None = None) -> dict:
     """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。"""
     now = time.time() if now is None else now
     if cfg is None:
@@ -292,21 +395,55 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             store = None
     day_start, day_end = _day_window(now)
     expeditions = _expedition_items(cfg, now, day_start)
-    plan = _hanafuda_active_plan(now, store)
+    hanafuda_plan = _hanafuda_active_plan(now, store)
+    raid_plan = _raid_active_plan(now, store)
     suggestions = None
     shortfall_seconds = None
-    quota = _daily_quota_seconds(plan, day_end - now) if plan else None
-    if quota:
-        occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no)
-        now_min = (now - day_start) / 60
-        suggestions, shortfall_seconds = suggest_windows(now_min, occupied, quota)
+    activity = None
+    hint = None
+    now_min = (now - day_start) / 60
+    if hanafuda_plan and raid_plan:
+        hint = "秘宝之里和联队战都在进行，今天先不替你选活动；时间表仍显示远征班次。"
+    elif raid_plan:
+        daily_runs = _raid_daily_runs(raid_plan)
+        pace = int(raid_plan["seconds_per_loop"])
+        completed = int(raid_plan.get("completed_today") or 0)
+        if active and active.get("script"):
+            hint = "有任务正在运行；收工并记下圈数后，再按远征班次安排联队战。"
+        else:
+            occupied = _occupied_segments(expeditions, cfg, raid_team_no)
+            # 活动收摊前留五分钟收尾，不把一圈安排到收摊之后。
+            finish_min = math.floor(now_min + raid_plan["seconds_to_end"] / 60 - 5)
+            if finish_min < DAY_MINUTES:
+                occupied.append({"start_min": finish_min,
+                                 "end_min": DAY_MINUTES, "label": "活动收摊"})
+            suggestions, remaining_runs = suggest_round_windows(
+                now_min, occupied, daily_runs, pace)
+            shortfall_seconds = remaining_runs * pace
+            activity = {"name": "联队战", "target_runs": daily_runs,
+                        "planned_runs": daily_runs - remaining_runs,
+                        "completed_today": completed,
+                        "seconds_per_loop": pace}
+            pace_label = (f"{pace // 60} 分 {pace % 60} 秒" if pace >= 60
+                          else f"{pace} 秒")
+            hint = (f"联队战：今天已记 {completed} 圈，接下来按进度建议"
+                    f" {daily_runs} 圈；按本期实测每圈约 {pace_label}"
+                    "找远征空窗。只是建议，不会自动开工。")
+    else:
+        quota = (_daily_quota_seconds(hanafuda_plan, day_end - now)
+                 if hanafuda_plan else None)
+        if quota:
+            occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no)
+            suggestions, shortfall_seconds = suggest_windows(now_min, occupied, quota)
+        hint = _hanafuda_hint(hanafuda_plan)
     return {
         "now": now,
         "day_start": day_start,
         "markers": [{"time_min": 240, "label": "日课刷新", "kind": "daily_reset"}],
         "expeditions": expeditions,
         "runs": _run_items(store, active, day_start, day_end, script_labels),
-        "hint": _hanafuda_hint(plan),
+        "hint": hint,
+        "activity": activity,
         "suggestions": suggestions,
         "shortfall_seconds": shortfall_seconds,
     }

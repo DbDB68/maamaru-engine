@@ -2054,15 +2054,18 @@ async def api_day_timeline():
         active = {"script": runner.current_script,
                   "started": runner.current_started}
     hanafuda_team_no = None
+    raid_team_no = None
     try:
-        hanafuda_team_no = (json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-                            .get("hanafuda", {}).get("team_no"))
+        config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        hanafuda_team_no = config.get("hanafuda", {}).get("team_no")
+        raid_team_no = config.get("raid", {}).get("team_no")
     except Exception:
         pass
     return build_day_timeline(
         script_labels={k: v["label"] for k, v in _SCRIPTS.items()},
         active=active,
-        hanafuda_team_no=hanafuda_team_no)
+        hanafuda_team_no=hanafuda_team_no,
+        raid_team_no=raid_team_no)
 
 
 @app.post("/api/expedition-schedule")

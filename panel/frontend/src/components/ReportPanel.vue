@@ -8,7 +8,6 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import DayTimeline from './DayTimeline.vue'
 import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
@@ -1190,8 +1189,6 @@ onMounted(async () => {
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
           </footer>
         </section>
-
-        <DayTimeline collapsible />
 
         <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="openGapReport(unreportedGaps[0])">
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>

@@ -986,6 +986,7 @@ export interface DayTimelineRun {
 export interface DayTimelineSuggestion {
   start_min: number
   duration_min: number
+  runs?: number
   note: string
 }
 
@@ -998,4 +999,11 @@ export interface DayTimeline {
   hint: string | null
   suggestions: DayTimelineSuggestion[] | null
   shortfall_seconds: number | null
+  activity?: {
+    name: string
+    target_runs: number
+    planned_runs: number
+    completed_today: number
+    seconds_per_loop: number
+  } | null
 }

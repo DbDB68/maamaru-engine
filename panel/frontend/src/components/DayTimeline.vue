@@ -170,16 +170,17 @@ const suggestionBlocks = computed(() => {
   if (!suggestions) return []
   return suggestions.map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
-    const detail = `挂 ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
+    const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
+    const detail = `${s.runs != null ? `${s.runs} 圈 · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
     return {
       key: `suggest-${i}`,
       minute: s.start_min,
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
       cls: 'is-suggest',
-      title: `建议 ${range} ${detail}`,
-      text: '建议',
-      rowTitle: '挂机建议',
+      title: `${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`,
+      text: s.runs != null ? `${s.runs} 圈` : '建议',
+      rowTitle: activityLabel,
       rowDetail: `${range} ${detail}`,
       time: fmtMin(s.start_min),
       tone: 'is-suggest',
@@ -192,6 +193,8 @@ const suggestionBlocks = computed(() => {
 const shortfallText = computed(() => {
   const shortfall = data.value?.shortfall_seconds
   if (!shortfall || shortfall <= 0) return ''
+  const activity = data.value?.activity
+  if (activity) return `这张时间表在 24:00 前可安排 ${activity.planned_runs} / ${activity.target_runs} 圈，还差 ${activity.target_runs - activity.planned_runs} 圈排不下。`
   const covered = suggestionBlocks.value.reduce((sum, b) => sum + b.durationMin, 0)
   const lacking = Math.ceil(shortfall / 60)
   return `今天空窗只够约 ${durationText(covered)}，还差约 ${durationText(lacking)} 排不下。`
@@ -250,13 +253,18 @@ const compactHeading = computed(() => {
   return '今天留下的记录'
 })
 
-const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length)
+const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length + suggestionBlocks.value.length)
 const hiddenItemCount = computed(() => Math.max(0, totalItemCount.value - compactRows.value.length))
 const showDetails = computed(() => !props.collapsible || expanded.value)
 
 const caption = computed(() => {
   const running = runBlocks.value.find((block) => block.current)
   if (running) return `正在跑 ${running.rowTitle}`
+  const activity = data.value?.activity
+  if (activity) {
+    if (!activity.target_runs) return '联队战今天的进度已够，等下一次记账再更新'
+    return `联队战接下来建议 ${activity.target_runs} 圈 · 已找到 ${activity.planned_runs} 圈的空窗`
+  }
   const nextEnabled = expeditionBlocks.value
     .filter((block) => block.minute >= nowMin.value && block.enabled)
     .sort((a, b) => a.minute - b.minute)[0]
