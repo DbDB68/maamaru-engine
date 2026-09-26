@@ -33,7 +33,10 @@ class _SweepMaa:
         pass
 
     def exists(self, template, roi=None, threshold=0.7):
-        return template == "目录.png" and self.stage == "home"
+        return template == "目录.png" and self.stage in {
+            "home", "training_letter_notice", "training_letter_after",
+            "training_letter_archive",
+        }
 
     def template_match(self, template, roi=None, threshold=0.7):
         return None
@@ -48,6 +51,12 @@ class _SweepMaa:
                 return Point(640, 75)
             if expected == "取消" and match_mode == "exact":
                 return Point(496, 614)
+        if (self.stage == "training_letter_page" and expected == "致主人"
+                and match_mode == "exact"):
+            return Point(155, 130)
+        if self.stage in {"training_letter_notice", "training_letter_after",
+                          "training_letter_archive"} and expected == "书信":
+            return Point(580, 490)
         return None
 
     def ocr_all(self, roi):
@@ -62,6 +71,13 @@ class _SweepMaa:
             self.stage = "home"
         elif self.stage == "training_req" and pos == (496, 614):
             self.stage = "home"  # 婉拒后回本丸
+        elif pos == (993, 690):
+            self.stage = {
+                "training_letter_notice": "training_letter_page",
+                "training_letter_page": "training_letter_after",
+                "training_letter_after": "training_letter_archive",
+                "training_letter_archive": "home",
+            }.get(self.stage, self.stage)
         return True
 
 
@@ -150,6 +166,13 @@ class PopupSweepNewBranchTests(unittest.TestCase):
             arrived = flow._popup_sweep(max_rounds=6)
         self.assertTrue(arrived)
         self.assertEqual(flow.maa.clicks, [(496, 614)])
+
+    def test_training_letter_is_advanced_before_home_probe(self):
+        flow = _SweepFlow("training_letter_notice")
+        with patch("touken.flows.daily.time.sleep"):
+            arrived = flow._popup_sweep(max_rounds=8)
+        self.assertTrue(arrived)
+        self.assertEqual(flow.maa.clicks, [(993, 690)] * 4)
 
 
 if __name__ == "__main__":

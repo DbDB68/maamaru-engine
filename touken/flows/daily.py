@@ -710,6 +710,18 @@ class DailyMixin:
                 time.sleep(2.0)
                 clean = 0
                 continue
+            # 修行中的来信：狐之助说有信、全屏信纸、读完后的提示分别推进。
+            # 狐之助对话仍露着目录按钮，必须先认字再判定本丸已安静。
+            letter_roi = roi_4to4(360, 445, 800, 550)
+            if (self.maa.ocr("书信", letter_roi)
+                    or (not self.maa.exists("目录.png", threshold=0.7)
+                        and self.maa.ocr("致主人", roi_4to4(85, 85, 245, 170),
+                                         match_mode="exact"))):
+                print("[扫地] 修行来信，点过当前画面")
+                self.maa.click(Point(993, 690))
+                time.sleep(1.5)
+                clean = 0
+                continue
             # 远征结算屏：归来部队的收益先照实记账再点过（认不出记 unknown），
             # 不许盲点跳动画把账点没了——冤案二号之后扫地本来就负责收这块屏
             if hasattr(self, "observe_expedition_settlement"):
