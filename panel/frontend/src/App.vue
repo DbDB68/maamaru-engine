@@ -65,7 +65,7 @@ function workflowSaved(preset: WorkflowPreset) {
 }
 const loading = ref(true)
 const message = ref('')
-type AppTab = 'home' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
+type AppTab = 'home' | 'planning' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
 type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
 const lastWorkshopTab = ref<WorkshopTab>('office')
@@ -75,7 +75,7 @@ function openWorkshop() {
 }
 function openWorkshopTab(value: WorkshopTab) { tab.value = value }
 const ledgerMode = ref(false)
-const reportEntry = ref<'report' | 'records' | 'planning'>('report')
+const reportEntry = ref<'report' | 'records'>('report')
 const launcherAvailable = ref(false)
 const returningToLauncher = ref(false)
 const theme = ref<'washi' | 'pixel'>('washi')
@@ -458,7 +458,7 @@ async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarni
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
 function openIncidentEntry(entry: { tab?: string; script?: string }) {
   const target = String(entry.tab || 'report')
-  if (['home', 'tasks', 'workflow', 'report', 'archive', 'system'].includes(target)) tab.value = target as typeof tab.value
+  if (['home', 'planning', 'tasks', 'workflow', 'report', 'archive', 'system'].includes(target)) tab.value = target as typeof tab.value
   if (entry.script && scripts.value[entry.script]) selected.value = entry.script
 }
 
@@ -567,9 +567,9 @@ watch(tab, value => {
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
-          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">本丸账</button>
-          <button class="nav-archive" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀帐</button>
-          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">流程工房</button>
+          <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
+          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">功能</button>
+          <button class="nav-report" :class="{ active: tab === 'report' || tab === 'archive' }" @click="tab = 'report'">仓库</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
         </template>
       </nav>
@@ -581,13 +581,20 @@ watch(tab, value => {
         <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
       </div>
     </header>
-    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="流程工房">
-      <div class="workshop-title"><strong>流程工房</strong><small>看实况、搭流程，需要时再调玩法</small></div>
+    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
+      <div class="workshop-title"><strong>功能</strong><small>看实况、搭流程，需要时再调玩法</small></div>
       <div class="workshop-tabs">
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
         <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
         <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
+      </div>
+    </nav>
+    <nav v-if="!ledgerMode && (tab === 'report' || tab === 'archive')" class="workshop-nav warehouse-nav" aria-label="仓库">
+      <div class="workshop-title"><strong>仓库</strong><small>先看资源，再翻刀账</small></div>
+      <div class="workshop-tabs">
+        <button type="button" :class="{ active: tab === 'report' }" @click="tab = 'report'">资源与账本</button>
+        <button type="button" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀账</button>
       </div>
     </nav>
     <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onStageScroll">
@@ -665,7 +672,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="reportEntry = 'planning'; tab = 'report'" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">
@@ -742,7 +749,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'report'" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :initial-section="reportEntry" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->

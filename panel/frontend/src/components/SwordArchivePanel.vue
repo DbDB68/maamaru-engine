@@ -260,7 +260,7 @@ watch(inventoryRunning, (isRunning, wasRunning) => {
         <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
       <p v-if="!done && data" class="archive-notice">
-        这份档案还不可信{{ data.reason ? `：${data.reason}` : '' }}。先去「流程工房 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来对档案。
+        这份档案还不可信{{ data.reason ? `：${data.reason}` : '' }}。先去「功能 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来对档案。
       </p>
     </PaperCard>
 

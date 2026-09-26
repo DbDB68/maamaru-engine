@@ -96,7 +96,7 @@ const caretakerBrief = computed(() => {
   const latest = recentRuns.value.find(endedRecently)
   if (latest?.status === 'failed') return {
     tone: 'alert', title: `${runTitle(latest)}没有顺利收工`,
-    detail: '这轮已经停止操作，具体停在哪里可以去本丸账查看。',
+    detail: '这轮已经停止操作，具体停在哪里可以去仓库的记录查看。',
   }
   if (latest?.status === 'stopped') return {
     tone: 'calm', title: '这轮已按你的要求停止',
@@ -111,7 +111,7 @@ const caretakerBrief = computed(() => {
       .map((step: any) => step.name)
     return {
       tone: 'alert', title: '刚才日课有翻车项',
-      detail: failed.length ? `需要看一眼：${failed.join('、')}。` : '成绩单没有全绿，具体记录可以去本丸账查看。',
+      detail: failed.length ? `需要看一眼：${failed.join('、')}。` : '成绩单没有全绿，具体记录可以去仓库查看。',
     }
   }
 
@@ -150,7 +150,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
           <strong>{{ caretakerBrief.title }}</strong>
           <p>{{ caretakerBrief.detail }}</p>
         </div>
-        <button class="report-link" type="button" @click="emit('openReport')">查看本丸账 →</button>
+        <button class="report-link" type="button" @click="emit('openReport')">查看仓库记录 →</button>
       </PaperCard>
       <PaperCard variant="dashboard" class="resources-card">
         <h3>💰 家底 <small>{{ data?.inventory?.captured_at ? `快照 ${data.inventory.captured_at.slice(5, 16)}` : '' }}</small></h3>

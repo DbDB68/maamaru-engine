@@ -136,8 +136,8 @@ function runPostText(run: any) {
   if (run.status === 'failed') return `这趟没能顺利收工。${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
   if (run.status === 'stopped') return `这趟按你的意思停下了。${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
   if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
-  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在本丸账里。`
-  return '这趟执务已经收工，完成了哪些事，可以翻开本丸账看看。'
+  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在仓库的记录里。`
+  return '这趟执务已经收工，完成了哪些事，可以翻开仓库记录看看。'
 }
 function runPostFacts(run: any) {
   const facts: string[] = []
@@ -301,7 +301,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         </article>
       </section>
       <button v-if="entries.length > limit" class="journal-more home-text-button" type="button" @click="limit += 12">再翻一些记录 ↓</button>
-      <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('report')">更早的执务记录在本丸账里 →</button>
+      <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('records')">去仓库翻更早的记录 →</button>
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
@@ -319,7 +319,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p v-if="resourceWatch?.forge_capacity != null" class="planning-lead">还能锻 <b class="pencil-mark">{{ fmt(resourceWatch.forge_capacity) }}</b> 炉</p>
         <div class="forge-meter" role="progressbar" aria-label="最短资源相对余量" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="forgeCapacityPercent"><i :style="{ width: `${forgeCapacityPercent}%` }" /></div>
         <p class="planning-note">四项资源按当前配比折算；まあ丸只提醒最先卡住的那项。</p>
-        <button type="button" class="home-text-button" @click="emit('planning')">去本丸 · 规划调整 →</button>
+        <button type="button" class="home-text-button" @click="emit('planning')">去规划调整 →</button>
       </section>
       <section class="home-planning-card home-koban-card">
         <p class="home-eyebrow">博多账房</p>
@@ -330,7 +330,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
           <div><dt>近 {{ kobanWatch?.spending_days || 14 }} 天支出</dt><dd>{{ fmt(kobanWatch?.confirmed_spending) }}</dd></div>
         </dl>
         <p class="planning-note">{{ kobanWatch?.current == null ? '等盘点读到小判，再把能花的、留好的分开算清楚。' : `账上真正能动的是 ${fmt(kobanWatch.available)} 小判。` }}</p>
-        <button type="button" class="home-text-button" @click="emit('planning')">去本丸 · 规划安排 →</button>
+        <button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button>
       </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
@@ -340,9 +340,9 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
           <p class="planning-note">{{ nearestEvent.budget?.message || nearestEvent.note || '活动安排已经收在日程里。' }}</p>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
-        <button type="button" class="home-text-button" @click="emit('planning')">去本丸 · 规划查看 →</button>
+        <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
       </section>
-      <section class="home-inventory"><header><h2>家底一角</h2><button type="button" class="home-text-button" @click="emit('report')">本丸账 ↗</button></header><p class="home-muted">最近一次记录</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></section>
+      <section class="home-inventory"><header><h2>家底一角</h2><button type="button" class="home-text-button" @click="emit('report')">去仓库 ↗</button></header><p class="home-muted">最近一次记录</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></section>
     </aside>
 
     <dialog v-if="editingProfile || writing" ref="editor" class="home-dialog-shell" :aria-label="editingProfile ? '整理我的档案' : '写小记'" @cancel.prevent="!savingProfile && !savingNote && (editingProfile = writing = false)">

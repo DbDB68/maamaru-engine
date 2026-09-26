@@ -81,6 +81,7 @@ button { cursor: pointer; }
 .topnav .nav-office { --nav-icon: url('/static/img/ui/office.svg'); }
 .topnav .nav-tasks { --nav-icon: url('/static/img/ui/gear.png'); }
 .topnav .nav-report { --nav-icon: url('/static/img/ui/menuList.png'); }
+.topnav .nav-planning { --nav-icon: url('/static/img/ui/scrollVertical.png'); }
 .topnav .nav-lists { --nav-icon: url('/static/img/ui/menuList.png'); }
 .topnav .nav-schedule { --nav-icon: url('/static/img/ui/expedition.png'); }
 .topnav .nav-workflow { --nav-icon: url('/static/img/ui/workflow.svg'); }

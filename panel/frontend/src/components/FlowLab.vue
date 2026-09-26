@@ -306,7 +306,7 @@ async function run() {
     if (dirty.value && !await save()) return
     const result = await api.run('custom_flow', { flow_id: draft.value!.id })
     if (!result.ok) throw new Error('没有启动成功——可能有别的任务正在跑')
-    tell(`「${draft.value!.name}」已开跑，去流程工房的执务台看日志 →`)
+    tell(`「${draft.value!.name}」已开跑，去功能的执务台看日志 →`)
   } catch (e) { fail(e) } finally { starting.value = false }
 }
 

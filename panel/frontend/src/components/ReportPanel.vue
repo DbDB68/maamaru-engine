@@ -13,14 +13,16 @@ import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourc
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{
+  'open-planning': []
   'open-wishlist': []
   'open-expedition': []
   'open-activity': [script: 'hanafuda' | 'raid', loops: number]
 }>()
-const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning' }>()
+const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning'; pageSection?: 'report' | 'planning' }>()
 
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>(props.initialSection === 'planning' ? 'planning' : 'report')
+const currentSection = computed(() => props.pageSection || honmaruTab.value)
 const view = ref<'chart' | 'records'>(props.initialSection === 'records' ? 'records' : 'chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
@@ -131,7 +133,8 @@ function goalMeta(goal: PlanningGoalAdvice) {
 }
 
 async function openPlanning() {
-  honmaruTab.value = 'planning'
+  if (props.pageSection) emit('open-planning')
+  else honmaruTab.value = 'planning'
   await nextTick()
   document.querySelector('.report-panel')?.scrollIntoView({ block: 'start' })
 }
@@ -158,7 +161,7 @@ async function advanceLedgerOnboarding(step: 2 | 3) {
   try {
     ledgerOnboarding.value = await api.updateLedgerOnboarding('advance', step)
     if (step === 3) {
-      honmaruTab.value = 'planning'
+      await openPlanning()
       await nextTick()
       document.querySelector('.ledger-onboarding-goal')?.scrollIntoView({ block: 'start' })
     }
@@ -167,7 +170,7 @@ async function advanceLedgerOnboarding(step: 2 | 3) {
 }
 
 async function openOnboardingGoal() {
-  honmaruTab.value = 'planning'
+  await openPlanning()
   await nextTick()
   await planningPanelRef.value?.openCustomForm()
 }
@@ -1055,7 +1058,7 @@ async function importLedgerPreview() {
     if (ledgerOnboarding.value?.visible && ledgerOnboarding.value.step === 2) {
       try {
         ledgerOnboarding.value = await api.updateLedgerOnboarding('advance', 3)
-        honmaruTab.value = 'planning'
+        await openPlanning()
       } catch (cause) {
         error.value = cause instanceof Error ? cause.message : '旧账已导入，但首次设置进度保存失败'
       }
@@ -1142,20 +1145,20 @@ onMounted(async () => {
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" title="本丸账" subtitle="账目和接下来的打算">
+    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源、手账和记录' : '账目和接下来的打算'">
       <template #actions>
-        <div class="report-toolbar-actions">
+        <div v-if="!props.pageSection" class="report-toolbar-actions">
           <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
         </div>
       </template>
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
-      <div v-if="honmaruTab === 'report'" class="report-context-toolbar">
+      <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
       </div>
-      <template v-if="honmaruTab === 'report'">
+      <template v-if="currentSection === 'report'">
       <template v-if="view === 'chart'">
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
           <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></header>
