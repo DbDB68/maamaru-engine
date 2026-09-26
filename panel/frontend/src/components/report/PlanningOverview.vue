@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { PlanningGoalAdvice, PlanningReport } from '../../types'
+import { resourceSuggestion } from './resourceSuggestion'
 
 const props = defineProps<{
   planning: PlanningReport
@@ -8,6 +9,11 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ openExpedition: [] }>()
 
+// 只在本次面板会话中记住玩家改选的关注项，不写入目标或排班。
+const manualFocus = ref('')
+const focusOptions = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
+const suggestion = computed(() => resourceSuggestion(props.planning))
+const focusResource = computed(() => manualFocus.value || suggestion.value?.resource || '')
 const forgeMode = ref<'normal' | 'ten'>('normal')
 const watch = computed(() => forgeMode.value === 'ten'
   ? props.planning.resource_watch?.ten_forge
@@ -22,6 +28,19 @@ function fmt(value: number | null | undefined) {
 
 <template>
   <section class="planning-overview">
+    <div v-if="suggestion" class="planning-focus">
+      <div>
+        <small>{{ manualFocus ? '你选的关注项' : '狐之助的小建议' }}</small>
+        <strong>今天先惦记 {{ focusResource }}</strong>
+        <p>{{ manualFocus ? `先关注${focusResource}；要获得多少、何时动手仍由你决定。` : suggestion.reason }}</p>
+      </div>
+      <label>换个关注项
+        <select v-model="manualFocus">
+          <option value="">交给狐之助建议</option>
+          <option v-for="name in focusOptions" :key="name" :value="name">{{ name }}</option>
+        </select>
+      </label>
+    </div>
     <article class="resource-watch">
       <header>
         <div><small>锻刀资源</small><h3>哪样先不够用</h3></div>
@@ -78,6 +97,13 @@ function fmt(value: number | null | undefined) {
 
 <style scoped>
 .planning-overview { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 10px; }
+.planning-focus { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 16px; border-left: 3px solid var(--fox-gold-deep); background: var(--fox-gold-pale); }
+.planning-focus > div { min-width: 0; }
+.planning-focus small { display: block; color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; }
+.planning-focus strong { display: block; margin: 2px 0; font-size: 16px; }
+.planning-focus p { margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.5; }
+.planning-focus label { display: grid; flex: 0 0 auto; gap: 3px; color: var(--ink-dim); font-size: 10px; }
+.planning-focus select { max-width: 180px; padding: 5px 7px; border: 1px solid var(--paper-line); border-radius: 6px; background: var(--paper-card); color: var(--ink); font: inherit; }
 .planning-overview article { min-width: 0; padding: 17px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
 .planning-overview article > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .planning-overview article > header div { display: grid; gap: 2px; }
@@ -124,6 +150,8 @@ function fmt(value: number | null | undefined) {
   .planning-overview { grid-template-columns: 1fr; }
 }
 @media (max-width: 480px) {
+  .planning-focus { align-items: stretch; flex-direction: column; gap: 8px; }
+  .planning-focus select { max-width: 100%; }
   .planning-overview article { padding: 14px; }
   .forge-resources { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .forge-resources p:nth-child(n) { border-top: 1px solid var(--paper-line); border-left: 1px solid var(--paper-line); }
