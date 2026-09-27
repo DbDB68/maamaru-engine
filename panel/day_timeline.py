@@ -423,7 +423,10 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             activity = {"name": "联队战", "target_runs": daily_runs,
                         "planned_runs": daily_runs - remaining_runs,
                         "completed_today": completed,
-                        "seconds_per_loop": pace}
+                        "seconds_per_loop": pace,
+                        "remaining_runs": int(raid_plan["runs_needed"]),
+                        "event_end_at": now + raid_plan["seconds_to_end"],
+                        "occupied": occupied}
             pace_label = (f"{pace // 60} 分 {pace % 60} 秒" if pace >= 60
                           else f"{pace} 秒")
             hint = (f"联队战：今天已记 {completed} 圈，接下来按进度建议"

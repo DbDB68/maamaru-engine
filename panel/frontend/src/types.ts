@@ -990,6 +990,19 @@ export interface DayTimelineSuggestion {
   note: string
 }
 
+export interface DayRaidPlanBlock {
+  start_min: number
+  runs: number
+}
+
+export interface DayRaidBooking {
+  version: number
+  day_start: number
+  event_end_at: number
+  blocks: DayRaidPlanBlock[]
+  issues: string[]
+}
+
 export interface DayTimeline {
   now: number
   day_start: number
@@ -999,11 +1012,15 @@ export interface DayTimeline {
   hint: string | null
   suggestions: DayTimelineSuggestion[] | null
   shortfall_seconds: number | null
+  booking: DayRaidBooking | null
   activity?: {
     name: string
     target_runs: number
     planned_runs: number
     completed_today: number
     seconds_per_loop: number
+    remaining_runs: number
+    event_end_at: number
+    occupied: { start_min: number; end_min: number; label: string }[]
   } | null
 }

@@ -2,7 +2,7 @@ import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinD
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
-import type { ExpeditionSchedule, DayTimeline } from './types'
+import type { ExpeditionSchedule, DayTimeline, DayRaidBooking, DayRaidPlanBlock } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -22,6 +22,9 @@ export const api = {
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
   dayTimeline: () => request<DayTimeline>('/api/day-timeline'),
+  saveDayRaidPlan: (blocks: DayRaidPlanBlock[]) => request<{ booking: DayRaidBooking }>('/api/day-timeline/raid-plan', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),
+  }),
   settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string }>('/api/saved-settings'),
   saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST',

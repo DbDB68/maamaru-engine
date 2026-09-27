@@ -16,7 +16,7 @@ from urllib.parse import quote
 # 确保能找到 touken 包（开发模式）
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -2046,8 +2046,13 @@ async def api_get_schedule():
 
 @app.get("/api/day-timeline")
 async def api_day_timeline():
-    """仪表盘 24 小时只读时间轴：远征班次 + 任务运行条 + 参考线 + 挂机建议。"""
+    """今日时间表与玩家选定的联队战安排。"""
+    return _day_timeline_payload()
+
+
+def _day_timeline_payload():
     from .day_timeline import build_day_timeline
+    from .day_plan import load_plan, review_plan
     runner = get_runner()
     active = None
     if runner.is_running and runner.current_script:
@@ -2061,11 +2066,37 @@ async def api_day_timeline():
         raid_team_no = config.get("raid", {}).get("team_no")
     except Exception:
         pass
-    return build_day_timeline(
+    timeline = build_day_timeline(
         script_labels={k: v["label"] for k, v in _SCRIPTS.items()},
         active=active,
         hanafuda_team_no=hanafuda_team_no,
         raid_team_no=raid_team_no)
+    plan = load_plan()
+    if plan and plan.get("day_start") == timeline["day_start"]:
+        timeline["booking"] = {**plan, "issues": review_plan(plan, timeline)}
+    else:
+        timeline["booking"] = None
+    return timeline
+
+
+@app.put("/api/day-timeline/raid-plan")
+async def api_save_day_raid_plan(request: Request):
+    from .day_plan import review_plan, save_plan
+
+    body = await request.json()
+    timeline = _day_timeline_payload()
+    activity = timeline.get("activity")
+    if not activity or activity.get("name") != "联队战":
+        raise HTTPException(409, "现在没有可安排的联队战，等任务收工并更新进度后再试")
+    blocks = body.get("blocks") if isinstance(body, dict) else None
+    plan = {"day_start": timeline["day_start"],
+            "event_end_at": activity["event_end_at"], "blocks": blocks}
+    issues = review_plan(plan, timeline)
+    if issues:
+        raise HTTPException(409, "；".join(issues))
+    saved = save_plan(plan["day_start"], plan["event_end_at"],
+                      [{"start_min": b["start_min"], "runs": b["runs"]} for b in blocks])
+    return {"booking": {**saved, "issues": []}}
 
 
 @app.post("/api/expedition-schedule")
