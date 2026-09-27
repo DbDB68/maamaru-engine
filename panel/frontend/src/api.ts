@@ -28,6 +28,9 @@ export const api = {
   saveDayRaidPlan: (blocks: DayRaidPlanBlock[]) => request<{ booking: DayRaidBooking }>('/api/day-timeline/raid-plan', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),
   }),
+  setDayConductor: (enabled: boolean, workflowId?: string) => request<{ conductor: DayTimeline['conductor'] }>('/api/day-conductor', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, workflow_id: workflowId }),
+  }),
   settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string }>('/api/saved-settings'),
   saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST',

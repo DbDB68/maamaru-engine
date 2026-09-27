@@ -675,3 +675,4 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False)
         ok, detail = yield from _run_node({"run": sleep_only}, agent, {}, config_path)
         report.append(("电脑休眠", detail or ("✓" if ok else "✗")))
         _flush_report(report, finished=True)
+    return completed

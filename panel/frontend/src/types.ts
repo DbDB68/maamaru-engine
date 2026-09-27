@@ -1008,6 +1008,19 @@ export interface DayRaidBooking {
   issues: string[]
 }
 
+export interface DayConductor {
+  enabled: boolean
+  available: boolean
+  workflow_id: string
+  workflow_name: string
+  blocks: Array<DayRaidPlanBlock & {
+    status: 'pending' | 'running' | 'ended' | 'interrupted' | 'missed' | 'blocked'
+    reason?: string
+  }>
+  issues: string[]
+  options: Array<{ id: string; name: string }>
+}
+
 export interface DayTimeline {
   now: number
   day_start: number
@@ -1019,6 +1032,7 @@ export interface DayTimeline {
   suggestions: DayTimelineSuggestion[] | null
   shortfall_seconds: number | null
   booking: DayRaidBooking | null
+  conductor: DayConductor
   activity?: {
     name: string
     target_runs: number

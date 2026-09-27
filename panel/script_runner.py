@@ -72,6 +72,8 @@ class ScriptRunner:
         self._on_message = None  # callback(message_dict)
         self._last_output: float = 0.0   # 最后一次收到子进程输出的时间
         self._stop_reason: str = ""      # "user" / "watchdog" / ""
+        self._last_run_id: str | None = None
+        self._last_run_status: str | None = None
 
     # noinspection PyAttributeOutsideInit
     def set_message_callback(self, cb):
@@ -84,6 +86,14 @@ class ScriptRunner:
     @property
     def current_script(self) -> str | None:
         return self._current_script
+
+    @property
+    def current_run_id(self) -> str | None:
+        return self._current_run_id
+
+    @property
+    def last_run_result(self) -> tuple[str | None, str | None]:
+        return self._last_run_id, self._last_run_status
 
     @property
     def current_started(self) -> float | None:
@@ -227,6 +237,8 @@ class ScriptRunner:
 
         with self._lock:
             if self._proc is proc:
+                self._last_run_id = run_id
+                self._last_run_status = status
                 self._proc = None
 
     @staticmethod

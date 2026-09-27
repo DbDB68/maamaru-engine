@@ -17,14 +17,39 @@ const saving = ref(false)
 const planMessage = ref('')
 const expeditionMessage = ref('')
 const togglingExpedition = ref('')
+const conductorChoice = ref('')
+const conductorBusy = ref(false)
+const conductorMessage = ref('')
 const draft = ref<{ time: string; runs: number }[]>([])
 let timer: number | undefined
 
 async function load() {
   try {
     data.value = await api.dayTimeline()
+    if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
+    else if (!data.value.conductor.options.some(option => option.id === conductorChoice.value)) {
+      conductorChoice.value = data.value.conductor.workflow_id
+    }
   } catch {
     /* 静默失败，下轮轮询再试 */
+  }
+}
+
+async function setConductor(enabled: boolean) {
+  if (conductorBusy.value) return
+  conductorBusy.value = true
+  conductorMessage.value = ''
+  try {
+    await api.setDayConductor(enabled, enabled ? conductorChoice.value : undefined)
+    await load()
+    conductorMessage.value = enabled
+      ? '大总管已接下今天的安排；到点前会重新核对远征和任务流。'
+      : '后续时段不会自动开工；已经开工的这一段仍需在执务台停止。'
+  } catch (error) {
+    conductorMessage.value = error instanceof Error ? error.message : '大总管没改成，请重试'
+    await load()
+  } finally {
+    conductorBusy.value = false
   }
 }
 
@@ -180,7 +205,7 @@ async function savePlan(blocks: DayRaidPlanBlock[]) {
     await api.saveDayRaidPlan(blocks)
     editing.value = false
     await load()
-    planMessage.value = '今日安排已记下；到点不会自动开工。'
+    planMessage.value = '今日安排已记下；要让大总管到点开工，请在下方明确开启。'
   } catch (error) {
     planMessage.value = error instanceof Error ? error.message : '保存失败，请重试'
     await load()
@@ -430,7 +455,7 @@ const caption = computed(() => {
           </div>
           <div v-if="bookingBlocks.length" class="tl-lane">
             <span class="tl-lane-tag">我的安排</span>
-            <div v-for="b in bookingBlocks" :key="b.key" class="tl-block is-booked" :class="{ 'is-stale': data.booking?.issues.length }" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
+            <div v-for="b in bookingBlocks" :key="b.key" class="tl-block is-booked" :class="{ 'is-stale': data.conductor.enabled ? data.conductor.issues.length : data.booking?.issues.length }" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
           </div>
         </div>
       </div>
@@ -461,27 +486,13 @@ const caption = computed(() => {
         </div>
         <p v-else class="empty">今天的时间表还空着</p>
       </div>
-      <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
-        <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
-        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
-        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；只改今天这一班。</p>
-        <div class="tl-expedition-list">
-          <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
-            <time>{{ fmtMin(slot.time_min) }}</time>
-            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
-            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.enabled }" :aria-pressed="slot.enabled" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.enabled ? '今天跑' : '今天跳过' }}</button>
-            <em v-else>{{ slot.enabled ? slot.planned_at > data.now ? '即将开班' : '已到点或已处理' : slot.skipped_today ? '今天跳过' : '未运行' }}</em>
-          </div>
-        </div>
-        <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
-      </details>
       <p v-if="data.hint" class="tl-hint">{{ data.hint }}</p>
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
       <section v-if="data.activity || data.booking" class="tl-booking" aria-label="今日联队战安排">
         <div class="tl-booking-head">
           <div>
             <strong>今日联队战</strong>
-            <small v-if="data.booking">你安排了 {{ data.booking.blocks.reduce((sum, block) => sum + block.runs, 0) }} 圈 · {{ data.booking.issues.length ? '需要重看' : '只记计划，尚未自动开工' }}</small>
+            <small v-if="data.booking">你安排了 {{ data.booking.blocks.reduce((sum, block) => sum + block.runs, 0) }} 圈 · {{ data.conductor.enabled ? '大总管已接班' : data.booking.issues.length ? '需要重看' : '只记计划，尚未自动开工' }}</small>
             <small v-else>推荐的空窗可以直接采用，也可以自己挑时间</small>
           </div>
           <div class="tl-booking-actions">
@@ -489,7 +500,7 @@ const caption = computed(() => {
             <button v-if="data.activity && !editing" type="button" :disabled="saving" @click="editPlan">{{ data.booking ? '改安排' : '自己定时间' }}</button>
           </div>
         </div>
-        <p v-if="data.booking?.issues.length" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
+        <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
           <span v-for="(block, index) in data.booking.blocks" :key="index">{{ fmtMin(block.start_min) }} 开始 · {{ block.runs }} 圈<template v-if="data.activity"> · 预计 {{ fmtMin(block.start_min + Math.ceil(block.runs * data.activity.seconds_per_loop / 60)) }} 收工</template></span>
         </div>
@@ -508,7 +519,42 @@ const caption = computed(() => {
           </div>
         </div>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
+        <div v-if="data.booking" class="tl-conductor">
+          <div class="tl-conductor-head">
+            <div><strong>大总管 · 自动开工</strong><small>{{ data.conductor.enabled ? `已交给「${data.conductor.workflow_name}」` : '今天的安排默认只记计划，开启后才会到点运行' }}</small></div>
+            <button v-if="data.conductor.enabled" type="button" :disabled="conductorBusy" @click="setConductor(false)">停止后续自动开工</button>
+          </div>
+          <template v-if="!data.conductor.enabled && data.conductor.available">
+            <label>联队战任务流
+              <select v-model="conductorChoice" :disabled="conductorBusy">
+                <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
+              </select>
+            </label>
+            <button type="button" :disabled="conductorBusy || !data.conductor.options.length || !!data.booking.issues.length" @click="setConductor(true)">{{ conductorBusy ? '正在核对…' : '按今天安排自动开工' }}</button>
+          </template>
+          <p v-else-if="!data.conductor.available">纯净账房只记安排；自动开工需在自动化面板开启。</p>
+          <p v-if="data.conductor.issues.length" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
+          <p v-if="data.conductor.enabled">仅接单个联队战步骤的任务流；每段圈数按今天的安排带入。错过开工时间不会补跑，远征占用时不会抢走运行位置。</p>
+          <div v-if="data.conductor.blocks.length" class="tl-conductor-blocks">
+            <span v-for="(block, index) in data.conductor.blocks" :key="index">{{ fmtMin(block.start_min) }} · {{ block.runs }} 圈 · {{ { pending: '待开工', running: '执行中', ended: '已结束，查看成绩单', interrupted: '中断，未重跑', missed: '错过，未补跑', blocked: '未开工' }[block.status] || block.status }}<small v-if="block.reason">{{ block.reason }}</small></span>
+          </div>
+          <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
+        </div>
       </section>
+      <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
+        <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
+        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
+        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；只改今天这一班。</p>
+        <div class="tl-expedition-list">
+          <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
+            <time>{{ fmtMin(slot.time_min) }}</time>
+            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
+            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.enabled }" :aria-pressed="slot.enabled" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.enabled ? '今天跑' : '今天跳过' }}</button>
+            <em v-else>{{ slot.enabled ? slot.planned_at > data.now ? '即将开班' : '已到点或已处理' : slot.skipped_today ? '今天跳过' : '未运行' }}</em>
+          </div>
+        </div>
+        <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
+      </details>
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
   </PaperCard>

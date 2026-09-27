@@ -1377,8 +1377,25 @@ install_daily_template(
 
 def _build_workflow(config_path, params):
     """自定义工作流入口：按 id 读预设，再交给 workflow 引擎编排。"""
+    from touken.flow_control import FlowAborted
     preset_id = str(params.get("workflow_id") or "")
-    preset = _workflow.find_preset(preset_id)
+    scheduled_runs = params.get("scheduled_raid_runs")
+    if scheduled_runs is not None:
+        from .day_conductor import workflow_spec
+        if type(scheduled_runs) is not int or not 1 <= scheduled_runs <= 99:
+            yield "[工作流] ✗ 今日安排的联队战圈数无效，停止"
+            raise FlowAborted("今日安排的联队战圈数无效")
+        try:
+            spec = workflow_spec(preset_id, (_load_panel_settings().get("params", {})
+                                             .get("raid", {}) or {}))
+            if spec["signature"] != params.get("scheduled_workflow_signature"):
+                raise ValueError("任务流或联队战设置已变化")
+            preset = {"nodes": spec["nodes"], "after": "none", "daily_mode": False}
+        except ValueError as exc:
+            yield f"[工作流] ✗ {exc}，本段不启动"
+            raise FlowAborted(str(exc)) from exc
+    else:
+        preset = _workflow.find_preset(preset_id)
     if preset is None:
         yield f"[工作流] 找不到预设 {preset_id!r}，可能已被删除"
         return
@@ -1387,9 +1404,14 @@ def _build_workflow(config_path, params):
     except _workflow.WorkflowError as exc:
         yield f"[工作流] 预设校验翻车: {exc}"
         return
-    yield from _workflow.run_workflow(config_path, plan, make_agent=_make_agent,
-                                      after=preset.get("after", "none"),
-                                      daily_mode=preset.get("daily_mode", False))
+    if scheduled_runs is not None:
+        plan[0]["params"] = {**plan[0]["params"], "runs": scheduled_runs}
+    completed = yield from _workflow.run_workflow(
+        config_path, plan, make_agent=_make_agent,
+        after=preset.get("after", "none"),
+        daily_mode=preset.get("daily_mode", False))
+    if scheduled_runs is not None and completed is False:
+        raise FlowAborted("今日安排的联队战步骤未完成")
 
 
 register_script("workflow", "自定义工作流",
@@ -1465,6 +1487,10 @@ async def _startup():
                             "message": message})
 
     start_scheduler(str(_CONFIG_PATH), _sched_emit)
+    from .day_conductor import start_conductor
+    start_conductor(str(_CONFIG_PATH), runner, _day_timeline_payload,
+                    lambda: (_load_panel_settings().get("params", {})
+                             .get("raid", {}) or {}), _sched_emit)
 
     # Bot 启动（配了 panel_config.json 才启；QQ/TG 各自独立开关）
     from .bot_qq import init_qq
@@ -2054,6 +2080,7 @@ async def api_day_timeline():
 def _day_timeline_payload():
     from .day_timeline import build_day_timeline
     from .day_plan import load_plan, review_plan
+    from .day_conductor import projection
     from .expedition_choices import load_choices
     runner = get_runner()
     active = None
@@ -2079,7 +2106,41 @@ def _day_timeline_payload():
         timeline["booking"] = {**plan, "issues": review_plan(plan, timeline)}
     else:
         timeline["booking"] = None
+    timeline["conductor"] = projection(
+        plan, timeline, (_load_panel_settings().get("params", {})
+                         .get("raid", {}) or {}))
+    timeline["conductor"]["available"] = not _ledger_mode()
     return timeline
+
+
+@app.put("/api/day-conductor")
+async def api_day_conductor(request: Request):
+    from .day_conductor import arm, disarm, projection
+    from .day_plan import load_plan
+
+    body = await request.json()
+    enabled = body.get("enabled") if isinstance(body, dict) else None
+    if type(enabled) is not bool:
+        raise HTTPException(400, "请选择是否让大总管自动开工")
+    if enabled and _ledger_mode():
+        raise HTTPException(403, "纯净账房模式不能自动开工")
+    if not enabled:
+        disarm()
+    else:
+        plan = load_plan()
+        if not plan:
+            raise HTTPException(409, "先记下今天的联队战时间和圈数")
+        workflow_id = body.get("workflow_id")
+        if not isinstance(workflow_id, str):
+            raise HTTPException(400, "请选择联队战任务流")
+        timeline = _day_timeline_payload()
+        try:
+            arm(plan, timeline, workflow_id,
+                (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    timeline = _day_timeline_payload()
+    return {"conductor": timeline["conductor"]}
 
 
 @app.put("/api/day-timeline/expedition-slot")
