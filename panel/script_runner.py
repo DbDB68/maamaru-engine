@@ -127,6 +127,10 @@ class ScriptRunner:
                     preset = find_preset(str((params or {}).get("workflow_id") or ""))
                     if preset:
                         self._current_workflow = {"id": preset["id"], "name": preset["name"]}
+                    elif ((params or {}).get("workflow_id") == "builtin-scheduled-raid"
+                          and "scheduled_raid_runs" in (params or {})):
+                        self._current_workflow = {
+                            "id": "builtin-scheduled-raid", "name": "今日联队战 · 自动开工"}
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
                 from touken.telemetry import get_telemetry_store
                 workflow_label = (self._current_workflow or {}).get("name") or None

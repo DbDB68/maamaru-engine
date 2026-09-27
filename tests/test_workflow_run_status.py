@@ -40,6 +40,18 @@ class WorkflowRunStatusTests(unittest.TestCase):
         identity["name"] = "调用者修改"
         self.assertEqual(self.runner.current_workflow["name"], "晚间日课")
 
+    def test_scheduled_raid_has_a_readable_workflow_name(self):
+        from panel.day_conductor import BUILTIN_ID
+        with patch.object(workflow, "find_preset", return_value=None):
+            self.assertIsNotNone(self.runner.start("workflow", "fake.json", {
+                "workflow_id": BUILTIN_ID, "scheduled_raid_runs": 18}))
+        self.assertEqual(self.runner.current_workflow,
+                         {"id": BUILTIN_ID, "name": "今日联队战 · 自动开工"})
+        from touken.telemetry import get_telemetry_store
+        get_telemetry_store().start_run.assert_called_once()
+        self.assertEqual(get_telemetry_store().start_run.call_args.kwargs["label"],
+                         "今日联队战 · 自动开工")
+
     def test_finished_and_next_regular_task_do_not_keep_workflow_identity(self):
         self.start()
         self.proc.poll.return_value = 0
