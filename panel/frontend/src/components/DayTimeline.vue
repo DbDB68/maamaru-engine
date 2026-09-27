@@ -521,7 +521,7 @@ const caption = computed(() => {
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <div v-if="data.booking" class="tl-conductor">
           <div class="tl-conductor-head">
-            <div><strong>大总管 · 自动开工</strong><small>{{ data.conductor.enabled ? `已交给「${data.conductor.workflow_name}」` : '今天的安排默认只记计划，开启后才会到点运行' }}</small></div>
+            <div><strong>大总管 · 自动开工</strong><small>{{ data.conductor.enabled ? `已交给「${data.conductor.workflow_name}」` : data.conductor.blocks.length ? '后续自动开工已停用' : '今天的安排默认只记计划，开启后才会到点运行' }}</small></div>
             <button v-if="data.conductor.enabled" type="button" :disabled="conductorBusy" @click="setConductor(false)">停止后续自动开工</button>
           </div>
           <template v-if="!data.conductor.enabled && data.conductor.available">
@@ -536,7 +536,7 @@ const caption = computed(() => {
           <p v-if="data.conductor.issues.length" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
           <p v-if="data.conductor.enabled">仅接单个联队战步骤的任务流；每段圈数按今天的安排带入。错过开工时间不会补跑，远征占用时不会抢走运行位置。</p>
           <div v-if="data.conductor.blocks.length" class="tl-conductor-blocks">
-            <span v-for="(block, index) in data.conductor.blocks" :key="index">{{ fmtMin(block.start_min) }} · {{ block.runs }} 圈 · {{ { pending: '待开工', running: '执行中', ended: '已结束，查看成绩单', interrupted: '中断，未重跑', missed: '错过，未补跑', blocked: '未开工' }[block.status] || block.status }}<small v-if="block.reason">{{ block.reason }}</small></span>
+            <span v-for="(block, index) in data.conductor.blocks" :key="index">{{ fmtMin(block.start_min) }} · {{ block.runs }} 圈 · {{ block.status === 'pending' && !data.conductor.enabled ? '已停用，未开工' : ({ pending: '待开工', running: '执行中', ended: '已结束，查看成绩单', interrupted: '中断，未重跑', missed: '错过，未补跑', blocked: '未开工' }[block.status] || block.status) }}<small v-if="block.reason">{{ block.reason }}</small></span>
           </div>
           <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
         </div>

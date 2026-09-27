@@ -91,10 +91,10 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     preset = _preset(workflow_id)
     if not _eligible(preset):
         raise ValueError("定时安排目前只支持单个联队战步骤、翻车即停的任务流")
-    node = workflow.normalize_nodes(preset["nodes"])[0]
+    source_node = workflow.normalize_nodes(preset["nodes"])[0]
     saved = raid_settings if isinstance(raid_settings, dict) else {}
-    effective = {**saved, **node["params"]}
-    node = {**node, "params": effective}
+    effective = {**saved, **source_node["params"]}
+    node = {**source_node, "params": effective}
     raw_team = effective.get("team_no", "3")
     if isinstance(raw_team, str) and raw_team.startswith("preset:"):
         from touken.custom_formations import load_formations
@@ -107,9 +107,12 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
         team_no = 0
     if team_no not in (1, 2, 3, 4, 5):
         raise ValueError("这份任务流的出阵部队还没认清，请先检查联队战设置")
+    signature_payload = {"raid_settings": saved, "team_no": team_no}
+    source_signature = _digest({**signature_payload, "nodes": [source_node]})
+    effective_signature = _digest({**signature_payload, "nodes": [node]})
     return {"name": preset["name"], "team_no": team_no, "nodes": [node],
-            "signature": _digest({"nodes": [node],
-                                  "raid_settings": saved, "team_no": team_no})}
+            "signature": source_signature,
+            "compatible_signatures": {source_signature, effective_signature}}
 
 
 def _for_team(timeline: dict, team_no: int) -> dict:
@@ -225,10 +228,13 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
             block["finished_at"] = now
             if block["status"] == "interrupted":
                 state["enabled"] = False
+                block["reason"] = ("任务流失败，后续已停用" if last_run_id == block.get("run_id")
+                                   and last_status in {"failed", "stopped", "watchdog"}
+                                   else "执行状态不明，后续已停用")
             changed = True
             emit_fn("conductor", "[大总管] 联队战时段已结束，请到成绩单看实际圈数"
                     if block["status"] == "ended" else
-                    "[大总管] 上段执行状态不明，后续自动开工已停用")
+                    f"[大总管] {block['reason']}")
         if not state.get("enabled"):
             if changed:
                 _save(state, path)

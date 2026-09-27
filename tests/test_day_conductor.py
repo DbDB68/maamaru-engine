@@ -140,6 +140,7 @@ class DayConductorTests(unittest.TestCase):
         state = dc.load_state(self.state_path)
         self.assertFalse(state["enabled"])
         self.assertEqual(state["blocks"][0]["status"], "interrupted")
+        self.assertEqual(state["blocks"][0]["reason"], "任务流失败，后续已停用")
 
     def test_disarm_preserves_current_run_but_prevents_next_block(self):
         self.arm()
@@ -176,7 +177,8 @@ class DayConductorTests(unittest.TestCase):
         signature = dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"]
         with patch.object(server, "_load_panel_settings", return_value={
             "params": {"raid": settings}}), \
-             patch.object(server._workflow, "run_workflow", return_value=iter(["ok"])) as run:
+             patch.object(server._workflow, "run_workflow",
+                          side_effect=lambda *args, **kwargs: iter(["ok"])) as run:
             messages = list(server._build_workflow("config.json", {
                 "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
                 "scheduled_workflow_signature": signature}))
@@ -191,6 +193,34 @@ class DayConductorTests(unittest.TestCase):
                     "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
                     "scheduled_workflow_signature": "old"}))
             run.assert_not_called()
+
+    def test_worker_accepts_signature_from_already_running_panel(self):
+        # 两版面板分别签预设原文/补入设置后的节点；两者都是同一份授权。
+        settings = {"team_no": "3", "rounds": 99, "auto_refill": True}
+        old_panel_signature = (
+            "19351240c87bc5765d39bc48aceec8bd35f2f00fc61bc9dbf57f005ba74fb315")
+        running_panel_signature = (
+            "30d8f7bae3f19f1c9ca0887a6bf1c1ae570f5e5246a156ec278fbd497c56f884")
+        self.assertEqual(dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"],
+                         old_panel_signature)
+        self.assertEqual(dc.workflow_spec(dc.BUILTIN_ID, settings)["compatible_signatures"],
+                         {old_panel_signature, running_panel_signature})
+        with patch.object(server, "_load_panel_settings", return_value={
+            "params": {"raid": settings}}), \
+             patch.object(server._workflow, "run_workflow",
+                          side_effect=lambda *args, **kwargs: iter(["ok"])) as run:
+            for signature in (old_panel_signature, running_panel_signature):
+                self.assertEqual(list(server._build_workflow("config.json", {
+                    "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
+                    "scheduled_workflow_signature": signature})), ["ok"])
+                self.assertEqual(run.call_args.args[1][0]["params"]["rounds"], 8)
+            changed_settings = {**settings, "team_no": "4"}
+            with patch.object(server, "_load_panel_settings", return_value={
+                "params": {"raid": changed_settings}}):
+                with self.assertRaises(FlowAborted):
+                    list(server._build_workflow("config.json", {
+                        "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
+                        "scheduled_workflow_signature": running_panel_signature}))
 
     def test_failed_workflow_step_exits_as_failed_worker(self):
         def failed_flow(*args, **kwargs):

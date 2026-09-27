@@ -1388,7 +1388,7 @@ def _build_workflow(config_path, params):
         try:
             spec = workflow_spec(preset_id, (_load_panel_settings().get("params", {})
                                              .get("raid", {}) or {}))
-            if spec["signature"] != params.get("scheduled_workflow_signature"):
+            if params.get("scheduled_workflow_signature") not in spec["compatible_signatures"]:
                 raise ValueError("任务流或联队战设置已变化")
             preset = {"nodes": spec["nodes"], "after": "none", "daily_mode": False}
         except ValueError as exc:
