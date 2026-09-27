@@ -381,7 +381,7 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline collapsible />
+    <DayTimeline collapsible @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" @open-expedition="emit('openExpedition')" />
     <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 

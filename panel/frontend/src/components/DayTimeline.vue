@@ -7,6 +7,7 @@ import PaperCard from './PaperCard.vue'
 const props = withDefaults(defineProps<{ collapsible?: boolean }>(), {
   collapsible: false,
 })
+const emit = defineEmits<{ openExpedition: [] }>()
 
 const DAY = 1440
 const data = ref<DayTimeline | null>(null)
@@ -380,7 +381,7 @@ const caption = computed(() => {
     .sort((a, b) => a.minute - b.minute)[0]
   if (nextEnabled) return `下一班 ${nextEnabled.time} · ${nextEnabled.rowTitle}`
   if (expeditionBlocks.value.length && !expeditionBlocks.value.some((block) => block.enabled)) {
-    return '远征排班未启用，今天只显示实际执务记录'
+    return data.value?.expedition_schedule_enabled ? '今天的远征班次都已跳过' : '自动排班未启用，原定班次显示为灰色'
   }
   return '远征班次和任务记录，都收在今天这一页'
 })
@@ -394,6 +395,7 @@ const caption = computed(() => {
         <p>{{ caption }}</p>
       </div>
       <div class="tl-card-actions">
+        <button type="button" class="tl-schedule-link" @click="emit('openExpedition')">{{ data?.expedition_schedule_enabled === false ? '开启自动排班' : '排班设置' }} →</button>
         <time v-if="data">{{ fmtMin(nowMin) }}</time>
         <button v-if="props.collapsible" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
           {{ expanded ? '收起' : '展开' }}
@@ -461,7 +463,7 @@ const caption = computed(() => {
       </div>
       <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
         <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
-        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班总开关未启用；这里先显示原定时间，需在「功能 → 远征排班」开启后才能逐班选择。</p>
+        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
         <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；只改今天这一班。</p>
         <div class="tl-expedition-list">
           <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
