@@ -45,7 +45,8 @@ def _minute_of(time_text: str) -> int:
         return 0
 
 
-def _expedition_items(cfg: dict, now: float, day_start: float) -> list[dict]:
+def _expedition_items(cfg: dict, now: float, day_start: float,
+                      choices: dict | None = None) -> list[dict]:
     auto = cfg.get("automation", {}) if isinstance(cfg, dict) else {}
     mode = auto.get("mode", "preset")
     auto_enabled = bool(auto.get("enabled", True))
@@ -58,38 +59,44 @@ def _expedition_items(cfg: dict, now: float, day_start: float) -> list[dict]:
     entries = cfg.get("entries", []) if isinstance(cfg, dict) else []
 
     items = []
-    try:
-        projection = scheduler.today_projection(cfg=cfg, now=now)
-    except Exception:
-        projection = {"preset": [], "custom": []}
-    for lane_name, lane_items in (("preset", projection.get("preset", [])),
-                                  ("custom", projection.get("custom", []))):
-        for it in lane_items:
-            if lane_name == "preset":
-                enabled = auto_enabled and mode == "preset"
-            else:
-                idx = it.get("index")
-                entry = entries[idx] if isinstance(idx, int) and 0 <= idx < len(entries) else {}
-                enabled = (auto_enabled and mode == "custom"
-                           and bool(entry.get("enabled", True)))
-            time_min = _minute_of(it.get("time", "00:00"))
-            duration = durations.get(it.get("map_code"), 0)
-            # 只保留与今天有重叠的班（preset 的循环日可能跨零点）
-            start_ts = day_start + time_min * 60
-            end_ts = start_ts + duration * 60
-            day_end = day_start + 86400
-            if end_ts <= day_start or start_ts >= day_end:
-                continue
-            items.append({
-                "time_min": time_min,
-                "duration_min": duration,
-                "team_no": it.get("team_no"),
-                "map_code": it.get("map_code", ""),
-                "state": it.get("state", "pending"),
-                "blocked_reason": it.get("blocked_reason") or "",
-                "late_min": int(it.get("late_min") or 0),
-                "enabled": enabled,
-            })
+    # 预设循环可能跨午夜；取今天开头和结尾所在的两个循环，按真实日期筛选。
+    projected = {}
+    for at in (day_start + 1, day_start + 86399, now):
+        try:
+            projection = scheduler.today_projection(cfg=cfg, now=at,
+                                                     choices=choices)
+        except Exception:
+            continue
+        for item in projection.get(mode, []):
+            projected[item["key"]] = item
+    for it in projected.values():
+        if mode == "preset":
+            base_enabled = auto_enabled
+        else:
+            idx = it.get("index")
+            entry = entries[idx] if isinstance(idx, int) and 0 <= idx < len(entries) else {}
+            base_enabled = auto_enabled and bool(entry.get("enabled", True))
+        planned_at = float(it.get("planned_at") or 0)
+        if not day_start <= planned_at < day_start + 86400:
+            continue
+        time_min = int((planned_at - day_start) // 60)
+        duration = durations.get(it.get("map_code"), 0)
+        skipped_today = bool(it.get("skipped_today"))
+        items.append({
+            "key": it["key"], "planned_at": planned_at,
+            "time_min": time_min,
+            "duration_min": duration,
+            "team_no": it.get("team_no"),
+            "map_code": it.get("map_code", ""),
+            "state": it.get("state", "pending"),
+            "blocked_reason": it.get("blocked_reason") or "",
+            "late_min": int(it.get("late_min") or 0),
+            "enabled": base_enabled and not skipped_today,
+            "base_enabled": base_enabled,
+            "skipped_today": skipped_today,
+            "toggleable": (base_enabled and planned_at > now + 60
+                           and it.get("state") in ("pending", "skipped")),
+        })
     items.sort(key=lambda x: (x["time_min"], x.get("team_no") or 0))
     return items
 
@@ -382,7 +389,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        store=None, script_labels: dict | None = None,
                        active: dict | None = None,
                        hanafuda_team_no: int | None = None,
-                       raid_team_no: int | None = None) -> dict:
+                       raid_team_no: int | None = None,
+                       expedition_choices: dict | None = None) -> dict:
     """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。"""
     now = time.time() if now is None else now
     if cfg is None:
@@ -394,7 +402,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         except Exception:
             store = None
     day_start, day_end = _day_window(now)
-    expeditions = _expedition_items(cfg, now, day_start)
+    expeditions = _expedition_items(cfg, now, day_start, expedition_choices)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None
@@ -444,6 +452,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         "day_start": day_start,
         "markers": [{"time_min": 240, "label": "日课刷新", "kind": "daily_reset"}],
         "expeditions": expeditions,
+        "expedition_schedule_enabled": bool(cfg.get("automation", {}).get("enabled")),
         "runs": _run_items(store, active, day_start, day_end, script_labels),
         "hint": hint,
         "activity": activity,

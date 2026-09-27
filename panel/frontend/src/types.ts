@@ -964,6 +964,8 @@ export interface DayTimelineMarker {
 }
 
 export interface DayTimelineExpedition {
+  key: string
+  planned_at: number
   time_min: number
   duration_min: number
   team_no: number
@@ -972,6 +974,9 @@ export interface DayTimelineExpedition {
   blocked_reason: string
   late_min: number
   enabled: boolean
+  base_enabled: boolean
+  skipped_today: boolean
+  toggleable: boolean
 }
 
 export interface DayTimelineRun {
@@ -1008,6 +1013,7 @@ export interface DayTimeline {
   day_start: number
   markers: DayTimelineMarker[]
   expeditions: DayTimelineExpedition[]
+  expedition_schedule_enabled: boolean
   runs: DayTimelineRun[]
   hint: string | null
   suggestions: DayTimelineSuggestion[] | null

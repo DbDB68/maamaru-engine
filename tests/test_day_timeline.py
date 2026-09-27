@@ -68,15 +68,24 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                                      script_labels={})
         self.assertFalse(out["expeditions"][0]["enabled"])
 
-    def test_mode_mismatch_grays_lane(self):
+    def test_other_schedule_mode_does_not_mix_into_today(self):
         now = _today_at(6, 0)
         cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
                      "enabled": True}], mode="preset")
         out = dtl.build_day_timeline(now, cfg=cfg, store=None,
                                      script_labels={})
         custom = [e for e in out["expeditions"] if e["map_code"] == "B3"]
-        self.assertTrue(custom)
-        self.assertFalse(custom[0]["enabled"])
+        self.assertFalse(custom)
+
+    def test_global_off_still_shows_configured_gray_shifts(self):
+        now = _today_at(6, 0)
+        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
+                     "enabled": True}], enabled=False)
+        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
+                                     script_labels={})
+        self.assertEqual(len(out["expeditions"]), 1)
+        self.assertFalse(out["expeditions"][0]["enabled"])
+        self.assertFalse(out["expeditions"][0]["toggleable"])
 
     def test_unknown_map_duration_zero_not_crash(self):
         now = _today_at(6, 0)

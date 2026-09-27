@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from touken.runtime_paths import SCHEDULE_PATH, STATE_DIR
+from .expedition_choices import is_skipped, load_choices
 
 _SCHED_PATH = SCHEDULE_PATH
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
@@ -216,7 +217,8 @@ def _emulator_ready(config_path: str) -> bool:
         return False
 
 
-def _preset_due(cfg: dict, now_min: int, today: str) -> list:
+def _preset_due(cfg: dict, now_min: int, today: str,
+                choices: dict | None = None) -> list:
     auto = cfg["automation"]
     preset = preset_payload().get(auto.get("preset"), {})
     lanes = preset.get("lanes", [])
@@ -229,6 +231,7 @@ def _preset_due(cfg: dict, now_min: int, today: str) -> list:
     cycle_label = cycle_day.isoformat()
     cycle_base = datetime.combine(cycle_day, datetime.min.time())
     grace = _grace_min(auto)
+    choices = choices or {}
     out = []
     for idx, lane in enumerate(lanes[:3]):
         if idx >= len(teams):
@@ -250,6 +253,9 @@ def _preset_due(cfg: dict, now_min: int, today: str) -> list:
         if auto.get("last_runs", {}).get(key):
             continue
         planned = cycle_base + timedelta(minutes=start + current["offset_min"] + shift)
+        if is_skipped(choices, key=key, team_no=int(teams[idx]),
+                      map_code=current["map_code"], planned_at=planned.timestamp()):
+            continue
         out.append({"key": key, "team_no": int(teams[idx]),
                     "map_code": current["map_code"], "late_min": late,
                     "shift_key": shift_key,
@@ -258,9 +264,11 @@ def _preset_due(cfg: dict, now_min: int, today: str) -> list:
     return out
 
 
-def _custom_due(cfg: dict, now_min: int, today: str) -> list:
+def _custom_due(cfg: dict, now_min: int, today: str,
+                choices: dict | None = None) -> list:
     auto = cfg["automation"]
     grace = _grace_min(auto)
+    choices = choices or {}
     out = []
     latest = {}
     for idx, e in enumerate(cfg.get("entries", [])):
@@ -279,6 +287,12 @@ def _custom_due(cfg: dict, now_min: int, today: str) -> list:
             continue
         key = f"{today}:custom:{idx}:{e.get('time')}"
         if auto.get("last_runs", {}).get(key):
+            continue
+        planned_at = (datetime.combine(datetime.fromisoformat(today).date(),
+                                       datetime.min.time())
+                      + timedelta(minutes=due)).timestamp()
+        if is_skipped(choices, key=key, team_no=int(e.get("team_no", 2)),
+                      map_code=e.get("map_code", ""), planned_at=planned_at):
             continue
         out.append({"key": key, "team_no": int(e.get("team_no", 2)),
                     "map_code": e.get("map_code", ""), "late_min": late,
@@ -587,7 +601,8 @@ def read_dispatch_result():
 
 # ==================== 时间表实况投影 ====================
 
-def today_projection(cfg: dict | None = None, now: float | None = None) -> dict:
+def today_projection(cfg: dict | None = None, now: float | None = None,
+                     choices: dict | None = None) -> dict:
     """今天各班的状态投影：preset lanes 全量 + custom entries 全量。
 
     state 除状态机六态外还有：pending（还没到点）、missed（计划时间已过但
@@ -599,6 +614,7 @@ def today_projection(cfg: dict | None = None, now: float | None = None) -> dict:
     auto = cfg.get("automation", {})
     slots = auto.get("slot_states", {})
     last_runs = auto.get("last_runs", {})
+    choices = choices or {}
     lt = time.localtime(now)
     now_min = lt.tm_hour * 60 + lt.tm_min
     today = time.strftime("%Y-%m-%d", lt)
@@ -606,7 +622,8 @@ def today_projection(cfg: dict | None = None, now: float | None = None) -> dict:
     def _status(key, planned_ts, team_no, map_code, extra):
         slot = slots.get(key)
         item = {"time": time.strftime("%H:%M", time.localtime(planned_ts)),
-                "team_no": team_no, "map_code": map_code, **extra}
+                "team_no": team_no, "map_code": map_code,
+                "key": key, "planned_at": planned_ts, **extra}
         if slot:
             item["state"] = slot.get("state", SLOT_WAITING_UNKNOWN)
             item["blocked_reason"] = slot.get("blocked_reason") or ""
@@ -628,6 +645,11 @@ def today_projection(cfg: dict | None = None, now: float | None = None) -> dict:
             item.update(state=("pending" if planned_ts > now else "missed"),
                         blocked_reason="", next_retry_in_min=None,
                         late_min=max(0, int((now - planned_ts) / 60)))
+        item["skipped_today"] = is_skipped(
+            choices, key=key, team_no=team_no,
+            map_code=map_code, planned_at=planned_ts)
+        if item["skipped_today"] and item["state"] not in TERMINAL_STATES:
+            item["state"] = "skipped"
         return item
 
     preset_items = []
@@ -695,8 +717,9 @@ def start_scheduler(config_path: str, emit_fn):
                     continue
                 now_min = int(time.strftime("%H")) * 60 + int(time.strftime("%M"))
                 today = time.strftime("%Y-%m-%d")
-                due = (_preset_due(cfg, now_min, today) if auto.get("mode") == "preset"
-                       else _custom_due(cfg, now_min, today))
+                choices = load_choices()
+                due = (_preset_due(cfg, now_min, today, choices) if auto.get("mode") == "preset"
+                       else _custom_due(cfg, now_min, today, choices))
                 # 自家派遣子进程在跑不算「忙」：别的班照常评估，只是起不来
                 busy = runner.is_running and runner.current_script != "dispatch"
                 outcome = tick(cfg, due, now,

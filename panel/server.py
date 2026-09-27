@@ -2039,9 +2039,10 @@ async def api_agent(request: Request):
 @app.get("/api/expedition-schedule")
 async def api_get_schedule():
     from .scheduler import load_config, map_options, preset_payload, today_projection
+    from .expedition_choices import load_choices
     cfg = load_config()
     return {**cfg, "maps": map_options(), "presets": preset_payload(),
-            "today": today_projection(cfg)}
+            "today": today_projection(cfg, choices=load_choices())}
 
 
 @app.get("/api/day-timeline")
@@ -2053,6 +2054,7 @@ async def api_day_timeline():
 def _day_timeline_payload():
     from .day_timeline import build_day_timeline
     from .day_plan import load_plan, review_plan
+    from .expedition_choices import load_choices
     runner = get_runner()
     active = None
     if runner.is_running and runner.current_script:
@@ -2070,13 +2072,34 @@ def _day_timeline_payload():
         script_labels={k: v["label"] for k, v in _SCRIPTS.items()},
         active=active,
         hanafuda_team_no=hanafuda_team_no,
-        raid_team_no=raid_team_no)
+        raid_team_no=raid_team_no,
+        expedition_choices=load_choices())
     plan = load_plan()
     if plan and plan.get("day_start") == timeline["day_start"]:
         timeline["booking"] = {**plan, "issues": review_plan(plan, timeline)}
     else:
         timeline["booking"] = None
     return timeline
+
+
+@app.put("/api/day-timeline/expedition-slot")
+async def api_set_day_expedition_slot(request: Request):
+    """仅改变今天这一班；排班总开关和每天循环规则不动。"""
+    from .expedition_choices import set_skipped
+
+    body = await request.json()
+    key = body.get("key") if isinstance(body, dict) else None
+    enabled = body.get("enabled") if isinstance(body, dict) else None
+    if not isinstance(key, str) or type(enabled) is not bool:
+        raise HTTPException(400, "请选择今天的一班远征")
+    timeline = _day_timeline_payload()
+    slot = next((item for item in timeline["expeditions"] if item["key"] == key), None)
+    if not slot or not slot["toggleable"]:
+        raise HTTPException(409, "这班已临近开班、已处理，或自动排班没有开启；请刷新时间表")
+    set_skipped(key=slot["key"], team_no=slot["team_no"],
+                map_code=slot["map_code"], planned_at=slot["planned_at"],
+                skipped=not enabled)
+    return {"ok": True}
 
 
 @app.put("/api/day-timeline/raid-plan")

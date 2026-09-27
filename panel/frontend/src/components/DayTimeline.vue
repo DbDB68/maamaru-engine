@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { DayRaidPlanBlock, DayTimeline } from '../types'
+import type { DayRaidPlanBlock, DayTimeline, DayTimelineExpedition } from '../types'
 import PaperCard from './PaperCard.vue'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean }>(), {
@@ -14,6 +14,8 @@ const expanded = ref(!props.collapsible)
 const editing = ref(false)
 const saving = ref(false)
 const planMessage = ref('')
+const expeditionMessage = ref('')
+const togglingExpedition = ref('')
 const draft = ref<{ time: string; runs: number }[]>([])
 let timer: number | undefined
 
@@ -22,6 +24,22 @@ async function load() {
     data.value = await api.dayTimeline()
   } catch {
     /* 静默失败，下轮轮询再试 */
+  }
+}
+
+async function toggleExpedition(slot: DayTimelineExpedition) {
+  if (!slot.toggleable || togglingExpedition.value) return
+  togglingExpedition.value = slot.key
+  expeditionMessage.value = ''
+  try {
+    await api.setDayExpeditionSlot(slot.key, !slot.enabled)
+    await load()
+    expeditionMessage.value = slot.enabled ? '这班今天跳过；明天仍按原排班。' : '这班今天照常派出。'
+  } catch (error) {
+    expeditionMessage.value = error instanceof Error ? error.message : '这班没改成，请重试'
+    await load()
+  } finally {
+    togglingExpedition.value = ''
   }
 }
 
@@ -41,6 +59,7 @@ const TEAM_NAMES: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '�
 
 const STATE_LABELS: Record<string, string> = {
   pending: '待派出',
+  skipped: '今天跳过',
   waiting_busy: '等空位',
   waiting_unknown: '等确认',
   ready: '可派出',
@@ -52,6 +71,7 @@ const STATE_LABELS: Record<string, string> = {
 
 const STATE_CLASSES: Record<string, string> = {
   pending: 'is-pending',
+  skipped: 'is-skipped',
   waiting_busy: 'is-waiting',
   waiting_unknown: 'is-waiting',
   ready: 'is-ready',
@@ -189,19 +209,20 @@ const expeditionBlocks = computed(() => {
     bits.push(stateLabel)
     if (e.late_min && e.state === 'dispatched') bits.push(`晚${e.late_min}分钟`)
     if (e.blocked_reason) bits.push(e.blocked_reason)
-    if (!e.enabled) bits.push('未启用')
+    if (!e.base_enabled) bits.push('排班未启用')
+    else if (e.skipped_today) bits.push('今天跳过')
     return {
-      key: `${e.time_min}-${e.team_no}-${e.map_code}`,
+      key: e.key,
+      slot: e,
       minute: e.time_min,
       left: pct(e.time_min),
       width: Math.max(pct(visibleDuration), 0.7),
-      cls: [STATE_CLASSES[e.state] ?? 'is-pending', e.enabled ? '' : 'is-disabled'],
+      cls: [STATE_CLASSES[e.state] ?? 'is-pending',
+        !e.enabled ? 'is-expedition-off' : e.state === 'pending' ? 'is-expedition-active' : ''],
       title: bits.join(' · '),
       text: e.map_code,
       rowTitle: `部队${team} · ${e.map_code}`,
-      rowDetail: e.enabled
-        ? `${durationText(e.duration_min)}远征 · ${stateLabel}`
-        : `${durationText(e.duration_min)}远征 · 排班未启用`,
+      rowDetail: `${durationText(e.duration_min)}远征 · ${!e.base_enabled ? '排班未启用' : stateLabel}`,
       time: fmtMin(e.time_min),
       tone: STATE_CLASSES[e.state] ?? 'is-pending',
       enabled: e.enabled,
@@ -209,13 +230,8 @@ const expeditionBlocks = computed(() => {
   })
 })
 
-// 排班总开关关闭时，时间轴不再把整天的假定班次当成待办铺出来。
-// 完整配置仍保留在自动排班页；这里仅展示真正会执行的班次。
-const displayedExpeditionBlocks = computed(() => {
-  return expeditionBlocks.value.some((block) => block.enabled)
-    ? expeditionBlocks.value
-    : []
-})
+// 总开关关闭时也保留灰色班次，让玩家先看清原排班。
+const displayedExpeditionBlocks = expeditionBlocks
 
 const runBlocks = computed(() => {
   if (!data.value) return []
@@ -397,8 +413,8 @@ const caption = computed(() => {
           <div class="tl-now" :style="{ left: pct(nowMin) + '%' }"></div>
           <div class="tl-lane">
             <span class="tl-lane-tag">远征</span>
-            <div v-for="b in displayedExpeditionBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
-            <span v-if="!displayedExpeditionBlocks.length" class="tl-lane-empty">远征排班未启用</span>
+            <button v-for="b in displayedExpeditionBlocks" :key="b.key" type="button" class="tl-block tl-expedition-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.enabled ? '今天照常跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.enabled" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
+            <span v-if="!displayedExpeditionBlocks.length" class="tl-lane-empty">今天没有远征班次</span>
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
@@ -443,6 +459,20 @@ const caption = computed(() => {
         </div>
         <p v-else class="empty">今天的时间表还空着</p>
       </div>
+      <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
+        <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
+        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班总开关未启用；这里先显示原定时间，需在「功能 → 远征排班」开启后才能逐班选择。</p>
+        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；只改今天这一班。</p>
+        <div class="tl-expedition-list">
+          <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
+            <time>{{ fmtMin(slot.time_min) }}</time>
+            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
+            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.enabled }" :aria-pressed="slot.enabled" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.enabled ? '今天跑' : '今天跳过' }}</button>
+            <em v-else>{{ slot.enabled ? slot.planned_at > data.now ? '即将开班' : '已到点或已处理' : slot.skipped_today ? '今天跳过' : '未运行' }}</em>
+          </div>
+        </div>
+        <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
+      </details>
       <p v-if="data.hint" class="tl-hint">{{ data.hint }}</p>
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
       <section v-if="data.activity || data.booking" class="tl-booking" aria-label="今日联队战安排">
