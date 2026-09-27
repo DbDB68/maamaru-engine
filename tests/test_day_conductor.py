@@ -172,7 +172,7 @@ class DayConductorTests(unittest.TestCase):
                 dc.workflow_spec("mixed", {})
 
     def test_worker_uses_booked_runs_without_changing_saved_settings(self):
-        settings = {"team_no": "3", "runs": 99}
+        settings = {"team_no": "3", "rounds": 99, "auto_refill": True}
         signature = dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"]
         with patch.object(server, "_load_panel_settings", return_value={
             "params": {"raid": settings}}), \
@@ -181,8 +181,10 @@ class DayConductorTests(unittest.TestCase):
                 "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
                 "scheduled_workflow_signature": signature}))
             self.assertEqual(messages, ["ok"])
-            self.assertEqual(run.call_args.args[1][0]["params"]["runs"], 8)
-            self.assertEqual(settings["runs"], 99)
+            self.assertEqual(run.call_args.args[1][0]["params"]["rounds"], 8)
+            self.assertEqual(run.call_args.args[1][0]["params"]["team_no"], "3")
+            self.assertTrue(run.call_args.args[1][0]["params"]["auto_refill"])
+            self.assertEqual(settings["rounds"], 99)
             run.reset_mock()
             with self.assertRaises(FlowAborted):
                 list(server._build_workflow("config.json", {

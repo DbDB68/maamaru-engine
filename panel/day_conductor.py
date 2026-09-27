@@ -94,6 +94,7 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     node = workflow.normalize_nodes(preset["nodes"])[0]
     saved = raid_settings if isinstance(raid_settings, dict) else {}
     effective = {**saved, **node["params"]}
+    node = {**node, "params": effective}
     raw_team = effective.get("team_no", "3")
     if isinstance(raw_team, str) and raw_team.startswith("preset:"):
         from touken.custom_formations import load_formations

@@ -1405,7 +1405,7 @@ def _build_workflow(config_path, params):
         yield f"[工作流] 预设校验翻车: {exc}"
         return
     if scheduled_runs is not None:
-        plan[0]["params"] = {**plan[0]["params"], "runs": scheduled_runs}
+        plan[0]["params"] = {**plan[0]["params"], "rounds": scheduled_runs}
     completed = yield from _workflow.run_workflow(
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
