@@ -389,8 +389,13 @@ def build_ledger(events: list[dict]) -> dict:
             observations.append({"ts": ts, "endpoint": ev["endpoint"],
                                  "reading": dict(last_known)})
         if delta:
+            # 归因降噪：pending 里只要有一个「已知动作」端点，就只报它们——
+            # 启动/翻页时的一串轮询请求（home/info、push、rolling 之类）
+            # 会把归因列表冲成流水账。全都认不出时才全列出来留证。
+            labeled = [r for r in pending_requests
+                       if r["endpoint"] in _ENDPOINT_LABEL]
             culprits = []
-            for req in pending_requests:
+            for req in (labeled or pending_requests):
                 label = _ENDPOINT_LABEL.get(req["endpoint"],
                                             req["endpoint"].lstrip("/"))
                 if label not in culprits:

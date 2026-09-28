@@ -176,6 +176,32 @@ def test_build_ledger(tmp_path):
     assert c1["ts"] == 1790545501
 
 
+def test_ledger_attribution_prefers_labeled_endpoints(tmp_path):
+    """轮询请求和动作请求夹在一起时，只归因给已知动作端点。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 13:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790542800}),
+        _c2s("2026-09-28 13:01:00", "GET",
+             "https://s39-ios-djlw.youzu.com/home/info?uid=1", ""),
+        _c2s("2026-09-28 13:01:01", "POST",
+             "https://s39-ios-djlw.youzu.com/mission/rewards?uid=1", "id=1"),
+        _s2c("2026-09-28 13:01:02",
+             "https://s39-ios-djlw.youzu.com/mission/rewards?uid=1",
+             {"resource": {"charcoal": 500, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790542862}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    assert ledger["changes"][0]["via"] == ["任务奖励"]
+    # via_endpoints 保留全部原始请求留证
+    assert ledger["changes"][0]["via_endpoints"] == ["/home/info",
+                                                     "/mission/rewards"]
+
+
 def test_format_ledger_runs(tmp_path):
     f = tmp_path / "log.txt"
     f.write_text(LEDGER_SAMPLE, encoding="utf-8")
