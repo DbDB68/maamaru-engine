@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
-import { categoryOf, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
+import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
 const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
@@ -18,7 +18,6 @@ const inventory = ref<any>(null)
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
 const situationError = ref('')
-const todayKobanSpending = ref<number | null>(null)
 const briefUpdatedAt = ref(0)
 const editingProfile = ref(false)
 const writing = ref(false)
@@ -70,6 +69,10 @@ const groups = computed(() => {
 })
 const resourceWatch = computed(() => planning.value?.resource_watch)
 const kobanWatch = computed(() => planning.value?.koban_watch)
+const recentKoban = computed<number | null>(() => {
+  const value = kobanWatch.value?.current ?? inventory.value?.resources?.['小判']
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+})
 const nearestEvent = computed<EventTimelineEntry | null>(() => timeline.value?.ongoing[0] || timeline.value?.upcoming[0] || null)
 const latestRun = computed(() => runs.value[0] || null)
 const briefTime = computed(() => briefUpdatedAt.value
@@ -96,22 +99,17 @@ const briefChanges = computed(() => {
     .slice(0, 6)
     .map(([name, value]) => ({ name, value: signed(Number(value)) }))
 })
-const resourceBrief = computed(() => {
-  const parts: string[] = []
-  const limiting = resourceWatch.value?.limiting || []
-  if (limiting.length) parts.push(`按普通锻刀的配比，${limiting.join('、')}会先卡住`)
-  if (todayKobanSpending.value === 0) parts.push('小判今日没有新的支出')
-  else if (todayKobanSpending.value != null) parts.push(`小判今日已记下 ${fmt(todayKobanSpending.value)} 支出`)
-  const event = nearestEvent.value
-  if (event?.budget?.sufficient === true) parts.push(`${event.name}预算已经备齐`)
-  else if (event?.budget?.shortfall != null) parts.push(`${event.name}预算还差 ${fmt(event.budget.shortfall)} 小判`)
-  return parts.length ? `${parts.join('；')}。` : '家底还在慢慢整理，有值得留意的变化再来告诉您。'
+const situationMoments = computed(() => {
+  const state = situation.value
+  if (!state) return []
+  const moments = [
+    ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队`, time: p.finished_at!, observedAt: state.parties_observed_at })),
+    ...state.kiwame_return.map((item, index) => ({ key: `return-${index}`, label: `${item.name || '刀剑'}修行归来`, time: item.finished_at, observedAt: state.kiwame_observed_at })),
+    ...state.forge_slots.map(slot => ({ key: `forge-${slot.slot_no}`, label: `第${slot.slot_no}炉锻刀`, time: slot.finished_at, observedAt: state.forge_observed_at })),
+  ]
+  return moments.sort((a, b) => a.time.localeCompare(b.time))
 })
-const forgeCapacityPercent = computed(() => {
-  const capacities = (resourceWatch.value?.resources || []).flatMap(item => item.forge_capacity == null ? [] : [item.forge_capacity])
-  const maximum = Math.max(...capacities, 0)
-  return maximum ? Math.max(5, Math.round(((resourceWatch.value?.forge_capacity || 0) / maximum) * 100)) : 0
-})
+const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
 function fmt(value: number | null | undefined) { return value == null ? '尚未记录' : Math.round(value).toLocaleString() }
 function resource(name: string) {
@@ -202,13 +200,6 @@ async function loadSummaries() {
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
     { label: '家底', run: async () => { inventory.value = (await api.dashboard()).inventory } },
     { label: '游戏近况', run: async () => { situation.value = (await api.honmaruSituation()).situation } },
-    { label: '今日账目', run: async () => {
-      const ledger = await api.resourceLedger(1)
-      todayKobanSpending.value = Math.abs(ledger.attributions
-        .filter(item => item.resource === '小判' && item.delta < 0 && shanghaiDate(item.ts) === today.value
-          && !['unknown', 'human'].includes(categoryOf(item.source)))
-        .reduce((sum, item) => sum + item.delta, 0))
-    } },
   ]
   const results = await Promise.allSettled(jobs.map(job => job.run()))
   return results.flatMap((result, index) => result.status === 'rejected' ? [jobs[index]!.label] : [])
@@ -329,51 +320,41 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
         <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
         <template v-else>
-          <p v-if="situation.secretary.name" class="situation-secretary">近侍 · <strong>{{ situation.secretary.name }}</strong><small>{{ situationTime(situation.secretary.observed_at) }}</small></p>
-          <div v-if="situation.parties.some(p => p.members.length)" class="situation-group"><p>部队 <small>{{ situationTime(situation.parties_observed_at) }}</small></p><div v-for="party in situation.parties.filter(p => p.members.length)" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong>{{ party.members.map(m => m.name).join('、') }}</strong><small v-if="party.finished_at">记录的完成时间 {{ gameTime(party.finished_at) }}</small></div></div>
-          <div v-if="situation.kiwame_return.length" class="situation-group"><p>修行归期 <small>{{ situationTime(situation.kiwame_observed_at) }}</small></p><div v-for="(item, index) in situation.kiwame_return" :key="index" class="situation-row"><strong>{{ item.name || '修行中的刀剑' }}</strong><small>{{ gameTime(item.finished_at) }}</small></div></div>
-          <div v-if="situation.forge_slots.length" class="situation-group"><p>锻刀完成时间 <small>{{ situationTime(situation.forge_observed_at) }}</small></p><div v-for="slot in situation.forge_slots" :key="slot.slot_no" class="situation-row"><strong>第{{ slot.slot_no }}炉</strong><small>{{ gameTime(slot.finished_at) }}</small></div></div>
-          <p v-if="!situation.secretary.name && !situation.parties.some(p => p.members.length) && !situation.kiwame_return.length && !situation.forge_slots.length" class="home-muted">这次记录还没有可展示的近况。</p>
+          <p v-if="situation.secretary.name" class="situation-secretary"><span>近侍</span><strong>{{ situation.secretary.name }}</strong><small>{{ situationTime(situation.secretary.observed_at) }}</small></p>
+          <div v-if="situationMoments.length" class="situation-moments">
+            <p class="situation-caption">记录中的时间 <small>按游戏记录</small></p>
+            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span>{{ gameTime(moment.time) }}</span><small>{{ situationTime(moment.observedAt) }}</small></div>
+            <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
+          </div>
+          <p v-else class="home-muted">暂时没有记录中的归期或锻刀完成时间。</p>
+          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong>{{ party.members.map(m => m.name).join('、') }}</strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
-      <PaperCard variant="dashboard" class="home-brief">
+      <PaperCard v-if="active || latestRun" variant="dashboard" class="home-brief">
         <header class="brief-meta"><span>狐之助小报 · {{ briefTime }}</span><span>{{ briefFreshness }}</span></header>
         <h2>{{ caretakerBrief.title }}</h2>
         <p class="brief-detail">{{ caretakerBrief.detail }}</p>
         <div v-if="briefChanges.length" class="brief-changes" aria-label="这一趟的家底变化"><span v-for="item in briefChanges" :key="item.name"><b>{{ item.name }}</b> {{ item.value }}</span></div>
-        <p class="brief-resource">{{ resourceBrief }}</p>
         <button type="button" class="home-text-button" @click="openBriefReport">{{ latestRun ? '看看这一趟的记录' : '去看看本丸记录' }} →</button>
       </PaperCard>
-      <section class="home-planning-card home-forge-card">
-        <p class="home-eyebrow">锻刀盘</p>
-        <h2><span aria-hidden="true">⚒</span> {{ resourceWatch?.forge_capacity == null ? '等待资源盘点' : `现在最缺${resourceWatch.limiting.join('、') || '的资源'}` }}</h2>
-        <p v-if="resourceWatch?.forge_capacity != null" class="planning-lead">还能锻 <b class="pencil-mark">{{ fmt(resourceWatch.forge_capacity) }}</b> 炉</p>
-        <div class="forge-meter" role="progressbar" aria-label="最短资源相对余量" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="forgeCapacityPercent"><i :style="{ width: `${forgeCapacityPercent}%` }" /></div>
-        <p class="planning-note">按四材料和委托符折算普通锻刀；十连限锻可去规划里看。</p>
-        <button type="button" class="home-text-button" @click="emit('planning')">去规划调整 →</button>
-      </section>
-      <section class="home-planning-card home-koban-card">
+      <section class="home-planning-card home-finances">
         <p class="home-eyebrow">博多账房</p>
-        <h2><span class="hakata-mark" aria-hidden="true">博</span> 小判消耗监督</h2>
-        <dl class="planning-rows">
-          <div><dt>现有家底</dt><dd><span class="pencil-mark">{{ fmt(kobanWatch?.current) }}</span></dd></div>
-          <div><dt>已经答应要花</dt><dd>{{ fmt(kobanWatch?.reserved) }}</dd></div>
-          <div><dt>近 {{ kobanWatch?.spending_days || 14 }} 天支出</dt><dd>{{ fmt(kobanWatch?.confirmed_spending) }}</dd></div>
-        </dl>
-        <p class="planning-note">{{ kobanWatch?.current == null ? '等盘点读到小判，再把能花的、留好的分开算清楚。' : `账上真正能动的是 ${fmt(kobanWatch.available)} 小判。` }}</p>
-        <button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button>
+        <h2><span class="hakata-mark" aria-hidden="true">博</span> 家底与安排</h2>
+        <p class="finance-lead">{{ kobanWatch?.available == null ? '最近的小判记录' : '可安排的小判' }} <strong>{{ fmt(kobanWatch?.available ?? recentKoban) }}</strong></p>
+        <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `现有 ${fmt(kobanWatch.current)}，已留 ${fmt(kobanWatch.reserved)}；近 ${kobanWatch.spending_days || 14} 天支出 ${fmt(kobanWatch.confirmed_spending)}。` }}</p>
+        <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
+        <details class="finance-details"><summary>查看最近一次家底</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
+        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去仓库 →</button></div>
       </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
           <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div></dl>
-          <p class="planning-note">{{ nearestEvent.budget?.message || nearestEvent.note || '活动安排已经收在日程里。' }}</p>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
       </section>
-      <section class="home-inventory"><header><h2>家底一角</h2><button type="button" class="home-text-button" @click="emit('report')">去仓库 ↗</button></header><p class="home-muted">最近一次记录</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></section>
     </aside>
 
     <dialog v-if="editingProfile || writing" ref="editor" class="home-dialog-shell" :aria-label="editingProfile ? '整理我的档案' : '写小记'" @cancel.prevent="!savingProfile && !savingNote && (editingProfile = writing = false)">
@@ -469,12 +450,21 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .home-situation header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
 .home-situation header h2 { margin: 2px 0 12px; }
 .home-situation .home-text-button { white-space: nowrap; }
-.situation-secretary, .situation-group { margin: 0; padding: 10px 0; border-top: 1px solid var(--paper-line); }
-.situation-secretary { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 13px; }
-.situation-secretary small, .situation-group small { color: var(--ink-dim); font-size: 11px; }
+.situation-secretary { display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: baseline; margin: 0; padding: 11px 0; border-top: 1px solid var(--paper-line); font-size: 12px; }
+.situation-secretary > span, .situation-secretary small, .situation-caption small, .situation-moment small { color: var(--ink-dim); font-size: 10px; }
 .situation-secretary small { margin-left: auto; }
-.situation-group > p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; margin: 0 0 8px; font-size: 12px; }
-.situation-row { display: grid; gap: 3px; margin-top: 8px; font-size: 12px; }
+.situation-moments { border-top: 1px solid var(--paper-line); padding-top: 10px; }
+.situation-caption { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 8px; font-size: 11px; color: var(--ink-dim); }
+.situation-moment { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 0; font-size: 12px; }
+.situation-moment strong { font-weight: 600; }
+.situation-moment span { text-align: right; font-variant-numeric: tabular-nums; }
+.situation-moment small { grid-column: 1 / -1; }
+.situation-more { margin: 7px 0 0; color: var(--ink-dim); font-size: 10px; }
+.situation-details, .finance-details { margin-top: 12px; border-top: 1px solid var(--paper-line); padding-top: 10px; }
+.situation-details summary, .finance-details summary { cursor: pointer; color: var(--home-green); font-size: 11px; }
+.situation-detail-group { margin-top: 12px; }
+.situation-detail-group > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
+.situation-row { display: grid; gap: 3px; margin-top: 8px; font-size: 11px; }
 .situation-row span, .situation-row small { color: var(--ink-dim); }
 .situation-row strong { font-weight: 500; overflow-wrap: anywhere; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
@@ -486,31 +476,28 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: linear-gradient(105deg, #edf0e7d9, #dce4dbb8 52%, #f4f3e9c7); border-block: 1px solid #ffffff75; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 10px; }
 .brief-changes span { white-space: nowrap; }
 .brief-changes b { font-weight: 500; }
-.honmaru-home .brief-resource { margin: 10px 0; padding: 10px; color: #173d6e; background: linear-gradient(105deg, #e9eee6d9, #dfe7ddb8 48%, #f2f2e9c7); border-block: 1px solid #ffffff70; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 11px; line-height: 1.65; }
 .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
 .home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }
-.honmaru-home .planning-lead { margin-bottom: 8px; color: #173d6e; font-size: 13px; }
 .pencil-mark { position: relative; z-index: 0; display: inline-block; padding-inline: 2px; font-weight: inherit; }
 .pencil-mark::after { content: ''; position: absolute; z-index: -1; left: -1px; right: 1px; bottom: 0; height: 3px; background: linear-gradient(177deg, transparent 18%, #756c6090 31% 55%, transparent 69%); transform: rotate(-1.2deg); }
-.forge-meter { height: 8px; margin: 10px 0; overflow: hidden; background: #dfddd2; }
-.forge-meter i { display: block; height: 100%; background: #668764; }
 .honmaru-home .planning-note { margin: 10px 0 8px; color: #796e5f; font-size: 11px; line-height: 1.7; }
 .hakata-mark { margin-right: 4px; color: #173d6e; font-size: 11px; }
+.finance-lead { display: grid; gap: 2px; margin: 3px 0 8px; color: var(--ink-dim); font-size: 11px; }
+.finance-lead strong { color: #173d6e; font: 24px/1.2 Georgia, serif; font-variant-numeric: tabular-nums; }
+.finance-forge { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--paper-line); color: #173d6e; font-size: 11px; line-height: 1.6; }
+.finance-details dl { display: grid; gap: 5px; margin: 11px 0 0; }
+.finance-details dl > div { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+.finance-details dt { color: var(--ink-dim); }
+.finance-details dd { margin: 0; font-variant-numeric: tabular-nums; }
+.finance-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 13px; }
 .planning-rows { margin: 0; border-top: 1px solid #ded6c7; }
 .planning-rows div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid #ded6c7; font-size: 12px; }
 .planning-rows dt { color: #173d6e; }
 .planning-rows dd { margin: 0; color: #173d6e; font-variant-numeric: tabular-nums; text-align: right; }
 .planning-rows dd.budget-ready { display: inline-flex; align-items: center; gap: 5px; color: #315f42; font-weight: 600; }
 .planning-rows dd.budget-ready::before { content: '备'; display: grid; width: 18px; height: 18px; place-items: center; color: #a34535; border: 1px solid #a34535; border-radius: 50%; box-shadow: inset 0 0 0 1px #a3453540; font: 9px/1 serif; transform: rotate(-8deg); }
-.home-inventory { padding: 0 5px; }
-.home-inventory header { display: flex; justify-content: space-between; align-items: baseline; }
-.home-inventory header h2 { margin: 0; }
-.home-inventory dl { display: grid; gap: 8px; margin: 0; }
-.home-inventory dl > div { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
-.home-inventory dt { color: var(--ink-dim); }
-.home-inventory dd { margin: 0; font-variant-numeric: tabular-nums; }
 .home-load-error, .home-notice { grid-column: 1 / -1; padding: 10px 14px; background: #f2e2cd; font-size: 12px; }
 .home-load-error button { background: transparent; border: 0; text-decoration: underline; margin-left: 12px; color: inherit; }
 .home-notice { background: #e8ecdf; }
@@ -533,7 +520,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .avatar-picker img { width: 54px; height: 54px; object-fit: cover; border: 3px solid #e5dac4; }
 .avatar-picker small { display: block; color: var(--ink-dim); font-size: 10px; }
 .avatar-picker input { font-size: 12px; width: 100%; }
-@media (max-width: 1100px) { .honmaru-home { grid-template-columns: 175px minmax(0, 1fr); gap: 25px; } .honmaru-keepsakes { grid-column: 2; grid-template-columns: 1fr 1fr; gap: 20px; } .home-inventory { grid-column: 1 / -1; } .home-inventory dl { grid-template-columns: 1fr 1fr; gap: 10px 25px; } }
-@media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 74px; padding: 4px 4px 11px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-inventory { grid-column: 1; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
+@media (max-width: 1100px) { .honmaru-home { grid-template-columns: 175px minmax(0, 1fr); gap: 25px; } .honmaru-keepsakes { grid-column: 2; grid-template-columns: 1fr 1fr; gap: 20px; } }
+@media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 74px; padding: 4px 4px 11px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) { .honmaru-home button { transition: none; } }
 </style>
