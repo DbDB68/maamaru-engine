@@ -114,6 +114,7 @@ const situationMoments = computed(() => {
   return moments.sort((a, b) => Number(b.done) - Number(a.done) || (a.done ? stamp(b.time) - stamp(a.time) : stamp(a.time) - stamp(b.time)))
 })
 const eventPointsText = computed(() => (situation.value?.event_points || []).map(p => p.points.toLocaleString()).join('、'))
+function situationResource(name: string) { return situationResources.value.find(r => r.name === name)?.value ?? '—' }
 const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
 const SITUATION_RESOURCE_ROWS: Array<[keyof NonNullable<HonmaruSituation['resources']>, string]> = [
   ['koban', '小判'], ['charcoal', '木炭'], ['steel', '玉钢'],
@@ -366,12 +367,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
             <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ moment.done ? '已完成待收' : gameTime(moment.time) }}</span><small>{{ moment.done ? gameTime(moment.time) + ' · ' : '' }}{{ situationTime(moment.observedAt) }}</small></div>
             <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
           </div>
-          <p v-else class="home-muted">暂时没有部队完成或修行归来的时间记录。</p>
-          <div v-if="situationResources.length" class="situation-resources">
-            <p class="situation-caption">资源 <small>{{ situationTime(situation.resources_observed_at ?? null) }}</small></p>
-            <dl class="situation-resource-grid"><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl>
-          </div>
-          <p v-if="eventPointsText" class="situation-event-points">活动点数 <strong>{{ eventPointsText }}</strong> <small>{{ situationTime(situation.event_points_observed_at ?? null) }}</small></p>
+          <p v-else class="home-muted">最近没有待收或要到点的时间记录。</p>
           <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}<i v-if="member.injury === '中伤' || member.injury === '重伤'" class="injury-badge" :class="{ severe: member.injury === '重伤' }">{{ member.injury }}</i></span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
@@ -388,14 +384,15 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p class="finance-lead">{{ kobanWatch?.available == null ? '最近的小判记录' : '可安排的小判' }} <strong>{{ fmt(kobanWatch?.available ?? recentKoban) }}</strong></p>
         <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `现有 ${fmt(kobanWatch.current)}，已留 ${fmt(kobanWatch.reserved)}；近 ${kobanWatch.spending_days || 14} 天支出 ${fmt(kobanWatch.confirmed_spending)}。` }}</p>
         <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
-        <details class="finance-details"><summary>查看最近一次家底</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
+        <p v-if="situationResources.length" class="finance-game-reading">游戏读数：小判 {{ situationResource('小判') }} · 委托符 {{ situationResource('委托符') }} <small>{{ situationTime(situation?.resources_observed_at ?? null) }}</small></p>
+        <details class="finance-details"><summary>查看家底明细</summary><template v-if="situationResources.length"><p class="finance-details-caption">游戏日志读数 · {{ situationTime(situation?.resources_observed_at ?? null) }}</p><dl><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl></template><p class="finance-details-caption">面板盘点读数{{ inventory?.captured_at ? ` · ${gameTime(inventory.captured_at)}` : '' }}</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
         <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去仓库 →</button></div>
       </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
-          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div></dl>
+          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div><div v-if="eventPointsText"><dt>当前点数</dt><dd>{{ eventPointsText }} <small class="event-points-time">{{ situationTime(situation?.event_points_observed_at ?? null) }}</small></dd></div></dl>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
@@ -512,19 +509,15 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .situation-row strong { font-weight: 500; overflow-wrap: anywhere; }
 .situation-injury { margin: 0 0 10px; padding: 7px 10px; border-left: 3px solid #c99430; background: #f6ecd8; color: #7a5a17; font-size: 11px; line-height: 1.6; }
 .situation-injury.severe { border-color: #a03f32; background: #f4e0da; color: #8c352a; }
-.situation-resources { margin-top: 12px; border-top: 1px solid var(--paper-line); padding-top: 10px; }
-.situation-resource-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 0; font-size: 11px; }
-.situation-resource-grid > div { display: flex; justify-content: space-between; gap: 6px; }
-.situation-resource-grid dt { color: var(--ink-dim); }
-.situation-resource-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
 .situation-members { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .situation-member small { color: var(--ink-dim); font-weight: 400; }
 .injury-badge { margin-left: 3px; padding: 0 4px; border-radius: 3px; background: #f3e3c2; color: #8a621b; font-size: 9px; font-style: normal; }
 .injury-badge.severe { background: #f2d7cf; color: #a03f32; }
 .situation-moment .moment-done { color: #315f42; font-weight: 600; }
-.situation-event-points { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--paper-line); font-size: 12px; }
-.situation-event-points strong { color: #173d6e; font-variant-numeric: tabular-nums; }
-.situation-event-points small { color: var(--ink-dim); font-size: 10px; margin-left: 6px; }
+.finance-game-reading { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--paper-line); color: #796e5f; font-size: 11px; line-height: 1.6; }
+.finance-game-reading small { color: var(--ink-dim); font-size: 10px; margin-left: 4px; }
+.finance-details-caption { margin: 10px 0 0; color: var(--ink-dim); font-size: 10px; }
+.event-points-time { color: var(--ink-dim); font-size: 10px; font-weight: 400; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
 .home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
