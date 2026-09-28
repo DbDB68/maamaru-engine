@@ -102,12 +102,18 @@ const briefChanges = computed(() => {
 const situationMoments = computed(() => {
   const state = situation.value
   if (!state) return []
+  const stamp = (value: string) => Date.parse(value.replace(' ', 'T') + '+08:00')
   const moments = [
     ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队完成时间`, time: p.finished_at!, observedAt: state.parties_observed_at })),
     ...state.kiwame_return.map((item, index) => ({ key: `return-${index}`, label: `${item.name || '刀剑'}修行归来`, time: item.finished_at, observedAt: state.kiwame_observed_at })),
-  ]
-  return moments.sort((a, b) => a.time.localeCompare(b.time))
+    ...(state.forge_slots || []).map(f => ({ key: `forge-${f.slot_no}`, label: `锻刀第${f.slot_no}槽出炉`, time: f.finished_at, observedAt: state.forge_observed_at })),
+    ...(state.repair || []).filter(r => r.finished_at).map(r => ({ key: `repair-${r.slot_no}`, label: r.name ? `${r.name}手入完成` : `手入第${r.slot_no}槽完成`, time: r.finished_at!, observedAt: state.repair_observed_at ?? null })),
+    ...(state.duty?.finished_at ? [{ key: 'duty', label: '内番完成', time: state.duty.finished_at, observedAt: state.duty_observed_at ?? null }] : []),
+  ].map(m => ({ ...m, done: stamp(m.time) <= now.value }))
+  // 已完成的（待收）排最前，按时间倒序；没完成的按时间正序（最近要来）
+  return moments.sort((a, b) => Number(b.done) - Number(a.done) || (a.done ? stamp(b.time) - stamp(a.time) : stamp(a.time) - stamp(b.time)))
 })
+const eventPointsText = computed(() => (situation.value?.event_points || []).map(p => p.points.toLocaleString()).join('、'))
 const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
 const SITUATION_RESOURCE_ROWS: Array<[keyof NonNullable<HonmaruSituation['resources']>, string]> = [
   ['koban', '小判'], ['charcoal', '木炭'], ['steel', '玉钢'],
@@ -356,8 +362,8 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <template v-else>
           <p v-for="row in injuredSummary" :key="`injury-${row.party_no}`" class="situation-injury" :class="{ severe: row.severe > 0 }">{{ injuredText(row) }}</p>
           <div v-if="situationMoments.length" class="situation-moments">
-            <p class="situation-caption">部队与修行时间 <small>按游戏记录</small></p>
-            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span>{{ gameTime(moment.time) }}</span><small>{{ situationTime(moment.observedAt) }}</small></div>
+            <p class="situation-caption">待收与归期 <small>按游戏记录</small></p>
+            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ moment.done ? '已完成待收' : gameTime(moment.time) }}</span><small>{{ moment.done ? gameTime(moment.time) + ' · ' : '' }}{{ situationTime(moment.observedAt) }}</small></div>
             <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
           </div>
           <p v-else class="home-muted">暂时没有部队完成或修行归来的时间记录。</p>
@@ -365,6 +371,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
             <p class="situation-caption">资源 <small>{{ situationTime(situation.resources_observed_at ?? null) }}</small></p>
             <dl class="situation-resource-grid"><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl>
           </div>
+          <p v-if="eventPointsText" class="situation-event-points">活动点数 <strong>{{ eventPointsText }}</strong> <small>{{ situationTime(situation.event_points_observed_at ?? null) }}</small></p>
           <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}<i v-if="member.injury === '中伤' || member.injury === '重伤'" class="injury-badge" :class="{ severe: member.injury === '重伤' }">{{ member.injury }}</i></span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
@@ -514,6 +521,10 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .situation-member small { color: var(--ink-dim); font-weight: 400; }
 .injury-badge { margin-left: 3px; padding: 0 4px; border-radius: 3px; background: #f3e3c2; color: #8a621b; font-size: 9px; font-style: normal; }
 .injury-badge.severe { background: #f2d7cf; color: #a03f32; }
+.situation-moment .moment-done { color: #315f42; font-weight: 600; }
+.situation-event-points { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--paper-line); font-size: 12px; }
+.situation-event-points strong { color: #173d6e; font-variant-numeric: tabular-nums; }
+.situation-event-points small { color: var(--ink-dim); font-size: 10px; margin-left: 6px; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
 .home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }

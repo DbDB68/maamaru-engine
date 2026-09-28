@@ -454,7 +454,7 @@ def build_home_situation(events: list[dict]) -> dict | None:
     login/party response, so pull time must never masquerade as observation time.
     """
     endpoints = ("/login/start", "/home", "/party/list",
-                 "/home/leave", "/home/situation")
+                 "/home/leave", "/home/situation", "/sally")
     found = {}
     accepted = []
     for ev in events:
@@ -486,6 +486,28 @@ def build_home_situation(events: list[dict]) -> dict | None:
     home = _latest_merged(accepted, "/home")
     resources = (snap["resources"] if isinstance(home.get("resource"), dict)
                  or isinstance(home.get("currency"), dict) else None)
+    # 手入槽：名字尽量用消歧标签，结构没实拍过，只透传认识的键
+    swords_by_serial = {s.get("serial_id"): s for s in (snap.get("swords") or [])}
+    repair = []
+    for slot in snap.get("repair") or []:
+        if not isinstance(slot, dict):
+            continue
+        entry = {"slot_no": _int(slot.get("slot_no")),
+                 "finished_at": slot.get("finished_at")}
+        sword = swords_by_serial.get(_int(slot.get("serial_id"), -1))
+        if sword:
+            entry["name"] = labels.get(sword["serial_id"], sword["name"])
+        repair.append(entry)
+    # 内番：同样没实拍样本，只有 finished_at 才值得上主页
+    duty_raw = home.get("duty") or {}
+    duty = ({"finished_at": duty_raw.get("finished_at")}
+            if isinstance(duty_raw, dict) and duty_raw.get("finished_at")
+            else None)
+    # 活动点数：/sally 的 point 块（{活动id: 点数}），id→活动名未校准，
+    # 主页只展示数字，名字交给面板自己的活动时间轴
+    event_points = [{"event_id": str(k), "points": _int(v)}
+                    for k, v in (snap.get("event_points") or {}).items()
+                    if _int(v) > 0]
     return {
         "schema": 1,
         "secretary": {"name": snap["profile"]["secretary"],
@@ -503,6 +525,12 @@ def build_home_situation(events: list[dict]) -> dict | None:
         "forge_observed_at": observed("/home/situation"),
         "resources": resources,
         "resources_observed_at": observed("/home") if resources else None,
+        "repair": repair,
+        "repair_observed_at": observed("/home/situation"),
+        "duty": duty,
+        "duty_observed_at": observed("/home") if duty else None,
+        "event_points": event_points,
+        "event_points_observed_at": observed("/sally"),
     }
 
 

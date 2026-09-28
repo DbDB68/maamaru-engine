@@ -34,6 +34,14 @@ export interface HonmaruSituation {
   /** /home 真实读数；日志没进过本丸时为 null，不冒充 */
   resources?: { charcoal: number; steel: number; coolant: number; whetstone: number; bill: number; koban: number } | null
   resources_observed_at?: string | null
+  /** 手入槽（结构按实拍透传，有 serial 能认出名字才带 name） */
+  repair?: Array<{ slot_no: number; finished_at: string | null; name?: string }>
+  repair_observed_at?: string | null
+  duty?: { finished_at: string | null } | null
+  duty_observed_at?: string | null
+  /** 活动点数（event_id→活动名未校准，只展示数字） */
+  event_points?: Array<{ event_id: string; points: number }>
+  event_points_observed_at?: string | null
 }
 
 export interface VisibilityRule {

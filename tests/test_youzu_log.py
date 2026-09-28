@@ -672,6 +672,50 @@ def test_home_situation_members_carry_label(tmp_path):
     # 这份日志没进过本丸（无 /home），资源宁可缺省不冒充
     assert situation["resources"] is None
     assert situation["resources_observed_at"] is None
+    # 无 /sally、无手入、无内番：一律空而不编
+    assert situation["event_points"] == []
+    assert situation["event_points_observed_at"] is None
+    assert situation["repair"] == []
+    assert situation["duty"] is None
+
+
+def test_home_situation_collects_repair_duty_and_event_points(tmp_path):
+    """手入/内番/活动点数进近况；手入名字走消歧标签。"""
+    lines = [
+        _s2c("2026-09-28 18:00:00", "https://x/login/start?uid=1",
+             {"level": "290", "secretary": "118", "status": 0}),
+        _s2c("2026-09-28 18:00:01", "https://x/home?uid=1",
+             {"resource": {"charcoal": 100}, "currency": {"money": "500"},
+              "duty": {"type": "3", "finished_at": "2026-09-28 21:00:00"},
+              "status": 0}),
+        _s2c("2026-09-28 18:00:02", "https://x/party/list?uid=1",
+             {"sword": {"111": {"serial_id": "111", "sword_id": "118",
+                                "level": "99", "hp": "30", "hp_max": "79"}},
+              "party": {"1": {"party_no": "1", "status": "1",
+                              "slot": {"1": {"serial_id": "111"}},
+                              "finished_at": None}},
+              "status": 0}),
+        _s2c("2026-09-28 18:00:03", "https://x/home/situation?uid=1",
+             {"party": {}, "forge": {},
+              "repair": [{"slot_no": "1", "serial_id": "111",
+                          "finished_at": "2026-09-28 20:30:00"}],
+              "status": 0}),
+        _s2c("2026-09-28 18:00:04", "https://x/sally?uid=1",
+             {"point": {"10031": 20496, "99999": 0}, "status": 0}),
+    ]
+    f = tmp_path / "home.log"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    situation = youzu_log.build_home_situation(youzu_log.parse_events(f))
+    assert situation["repair"] == [
+        {"slot_no": 1, "finished_at": "2026-09-28 20:30:00",
+         "name": "压切长谷部"}]
+    assert situation["repair_observed_at"] == "2026-09-28 18:00:03"
+    assert situation["duty"] == {"finished_at": "2026-09-28 21:00:00"}
+    assert situation["duty_observed_at"] == "2026-09-28 18:00:01"
+    # 0 点的活动不上主页
+    assert situation["event_points"] == [{"event_id": "10031",
+                                          "points": 20496}]
+    assert situation["event_points_observed_at"] == "2026-09-28 18:00:04"
 
 
 # ---------------------------------------------------------------- 出阵链日志验伤
