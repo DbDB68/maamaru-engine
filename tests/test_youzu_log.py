@@ -212,6 +212,37 @@ def test_format_ledger_runs(tmp_path):
     assert "2 笔收支" in text
 
 
+def test_conquest_complete_gets_detailed_label(tmp_path):
+    """远征完成的响应自带 party_no/field_id，归因要细分到队和图。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790546400}),
+        _c2s("2026-09-28 12:37:47", "POST",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             "party_no=4"),
+        _s2c("2026-09-28 12:37:48",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             {"success": True, "field_id": "21", "party_no": "4",
+              "resource": {"charcoal": 235, "steel": 0, "coolant": 135,
+                           "file": 135, "bill": 0},
+              "status": 0, "now_time": 1790548668}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    label = ledger["changes"][0]["via"][0]
+    assert label.startswith("远征完成·四队·B1"), label
+
+
+def test_expedition_map_label_fallback():
+    # 正常映射：21 → B1（二维度 1 小图）
+    assert youzu_log._expedition_map_label("21").startswith("B1")
+    # 妖魔鬼怪的 field_id 不硬猜，老实显示原值
+    assert youzu_log._expedition_map_label("99") == "field#99"
+
+
 def test_write_ledger_idempotent(tmp_path):
     from touken.telemetry import TelemetryStore
     f = tmp_path / "log.txt"

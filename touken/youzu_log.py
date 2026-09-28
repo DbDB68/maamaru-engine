@@ -308,6 +308,44 @@ _ENDPOINT_LABEL = {
     "/monthcard/salary": "月卡俸禄", "/sign/info": "签到",
 }
 
+_PARTY_NO_CN = {1: "一队", 2: "二队", 3: "三队", 4: "四队", 5: "五队"}
+
+
+def _expedition_map_label(field_id) -> str:
+    """conquest 的 field_id → 地图编号+名字（如 "B1 白河战线"）。
+
+    field_id 的编码规则是推的：21 = 二维度1小图（B1），即 十位=era 个位=slot。
+    还没拿真实结算响应校准过，对不上就老实显示 field_id 原值。
+    """
+    fid = _int(field_id, -1)
+    era, slot = fid // 10, fid % 10
+    if not (1 <= era <= 5 and 1 <= slot <= 4):
+        return f"field#{field_id}"
+    code = f"{'ABCDE'[era - 1]}{slot}"
+    try:
+        from .expedition_planner import load_maps
+        name = (load_maps().get(code) or {}).get("name") or ""
+    except Exception:
+        name = ""
+    return f"{code} {name}".strip()
+
+
+def _conquest_detail_label(endpoint: str, payload) -> str | None:
+    """远征相关响应 → 带部队和地图的细分标签（从响应原文取，不是猜）。"""
+    if not isinstance(payload, dict):
+        return None
+    party_no = _int(payload.get("party_no"), 0)
+    field_id = payload.get("field_id")
+    if not party_no or field_id in (None, ""):
+        return None
+    who = _PARTY_NO_CN.get(party_no, f"{party_no}队")
+    where = _expedition_map_label(field_id)
+    if endpoint == "/conquest/complete":
+        return f"远征完成·{who}·{where}"
+    if endpoint == "/conquest/start":
+        return f"远征派遣·{who}·{where}"
+    return None
+
 
 def _event_epoch(ev: dict) -> float | None:
     """事件时间戳：优先响应体里的服务器 now_time（时区安全），
@@ -394,12 +432,17 @@ def build_ledger(events: list[dict]) -> dict:
             # 会把归因列表冲成流水账。全都认不出时才全列出来留证。
             labeled = [r for r in pending_requests
                        if r["endpoint"] in _ENDPOINT_LABEL]
+            # 远征完成/派遣的响应原文自带 party_no+field_id，直接细分到
+            # 哪支队哪张图（这是视觉识别最难啃的点，现在白拿）
+            detail = _conquest_detail_label(ev["endpoint"], ev.get("payload"))
             culprits = []
             for req in (labeled or pending_requests):
                 label = _ENDPOINT_LABEL.get(req["endpoint"],
                                             req["endpoint"].lstrip("/"))
                 if label not in culprits:
                     culprits.append(label)
+            if detail:
+                culprits = [detail]
             changes.append({
                 "ts": ts,
                 "delta": delta,
@@ -520,8 +563,13 @@ def format_summary(snap: dict) -> str:
                         + (f"(伤{m['hp']}/{m['hp_max']})"
                            if m['hp'] < m['hp_max'] else "")
                         for m in party["members"]) or "（空）"
+        suffix = ""
+        if party["status"] == 2 and party.get("finished_at"):
+            done = (snap.get("server_time") or "") >= party["finished_at"]
+            suffix = ("，已到家待收" if done
+                      else f"，归队 {party['finished_at'][5:16]}")
         lines.append(f"  第{party['party_no']}部队 [{party['status_label']}] "
-                     f"{party['party_name']}：{mem}")
+                     f"{party['party_name']}{suffix}：{mem}")
     busy = [f"槽{f['slot_no']}→{f['finished_at']}" for f in snap["forge_slots"]
             if f.get("finished_at")]
     if busy:
