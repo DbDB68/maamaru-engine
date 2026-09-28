@@ -11,15 +11,29 @@ export interface HonmaruProfile {
 }
 export interface HonmaruNote { id: string; body: string; created_at: number; updated_at?: number }
 export interface HonmaruHomeData { schema_version: number; profile: Partial<HonmaruProfile>; notes: HonmaruNote[] }
+export interface HonmaruSituationMember {
+  name: string
+  level: number
+  /** 同名消歧标签（「·Lv99」「·2号机」），展示优先于 name */
+  label?: string
+  serial_tail?: string
+  hp?: number | null
+  hp_max?: number | null
+  fatigue?: number | null
+  injury?: '轻伤' | '中伤' | '重伤' | null
+}
 export interface HonmaruSituation {
   schema: number
   secretary: { name: string; observed_at: string | null }
-  parties: Array<{ party_no: number; party_name: string; members: Array<{ name: string; level: number }>; finished_at: string | null }>
+  parties: Array<{ party_no: number; party_name: string; members: HonmaruSituationMember[]; finished_at: string | null }>
   parties_observed_at: string | null
   kiwame_return: Array<{ name: string; finished_at: string }>
   kiwame_observed_at: string | null
   forge_slots: Array<{ slot_no: number; finished_at: string }>
   forge_observed_at: string | null
+  /** /home 真实读数；日志没进过本丸时为 null，不冒充 */
+  resources?: { charcoal: number; steel: number; coolant: number; whetstone: number; bill: number; koban: number } | null
+  resources_observed_at?: string | null
 }
 
 export interface VisibilityRule {

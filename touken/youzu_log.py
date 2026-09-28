@@ -453,7 +453,8 @@ def build_home_situation(events: list[dict]) -> dict | None:
     Keep the source time of each section. A recent pull can contain an old
     login/party response, so pull time must never masquerade as observation time.
     """
-    endpoints = ("/login/start", "/party/list", "/home/leave", "/home/situation")
+    endpoints = ("/login/start", "/home", "/party/list",
+                 "/home/leave", "/home/situation")
     found = {}
     accepted = []
     for ev in events:
@@ -473,10 +474,18 @@ def build_home_situation(events: list[dict]) -> dict | None:
         serial = m.get("serial_id")
         return {"name": m["name"], "level": m["level"],
                 "label": labels.get(serial, m["name"]),
-                "serial_tail": str(serial)[-4:] if serial else ""}
+                "serial_tail": str(serial)[-4:] if serial else "",
+                "hp": m.get("hp"), "hp_max": m.get("hp_max"),
+                "fatigue": m.get("fatigue"),
+                "injury": injury_tier(m.get("hp"), m.get("hp_max"))}
 
     def observed(endpoint):
         return (found.get(endpoint) or {}).get("ts")
+    # 资源读数只认 /home 里真实出现的 resource/currency 块；日志没进过
+    # 本丸（只有登录响应）时宁可缺省，也不拿 login 残块或全 0 冒充读数。
+    home = _latest_merged(accepted, "/home")
+    resources = (snap["resources"] if isinstance(home.get("resource"), dict)
+                 or isinstance(home.get("currency"), dict) else None)
     return {
         "schema": 1,
         "secretary": {"name": snap["profile"]["secretary"],
@@ -492,6 +501,8 @@ def build_home_situation(events: list[dict]) -> dict | None:
         "forge_slots": [{"slot_no": f["slot_no"], "finished_at": f["finished_at"]}
                         for f in snap["forge_slots"] if f["finished_at"]],
         "forge_observed_at": observed("/home/situation"),
+        "resources": resources,
+        "resources_observed_at": observed("/home") if resources else None,
     }
 
 

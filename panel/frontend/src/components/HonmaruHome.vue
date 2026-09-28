@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
+import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
 import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
@@ -109,6 +109,42 @@ const situationMoments = computed(() => {
   return moments.sort((a, b) => a.time.localeCompare(b.time))
 })
 const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
+const SITUATION_RESOURCE_ROWS: Array<[keyof NonNullable<HonmaruSituation['resources']>, string]> = [
+  ['koban', '小判'], ['charcoal', '木炭'], ['steel', '玉钢'],
+  ['coolant', '冷却材'], ['whetstone', '砥石'], ['bill', '委托符'],
+]
+const situationResources = computed(() => {
+  const resources = situation.value?.resources
+  if (!resources) return []
+  return SITUATION_RESOURCE_ROWS.map(([key, name]) => ({ name, value: resources[key].toLocaleString() }))
+})
+const injuredSummary = computed(() => {
+  const state = situation.value
+  if (!state) return []
+  const rows: Array<{ party_no: number; moderate: number; severe: number }> = []
+  for (const party of state.parties) {
+    let moderate = 0
+    let severe = 0
+    for (const member of party.members) {
+      if (member.injury === '中伤') moderate++
+      else if (member.injury === '重伤') severe++
+    }
+    if (moderate || severe) rows.push({ party_no: party.party_no, moderate, severe })
+  }
+  return rows
+})
+function injuredText(row: { party_no: number; moderate: number; severe: number }) {
+  const parts = []
+  if (row.severe) parts.push(`重伤 ${row.severe} 振`)
+  if (row.moderate) parts.push(`中伤 ${row.moderate} 振`)
+  return `第${row.party_no}部队 ${parts.join('、')}，出阵前记得手入。`
+}
+function memberTitle(member: HonmaruSituationMember) {
+  const facts = []
+  if (member.hp != null && member.hp_max) facts.push(`生存 ${member.hp}/${member.hp_max}`)
+  if (member.fatigue != null) facts.push(`疲劳 ${member.fatigue}`)
+  return facts.join(' · ')
+}
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
 function fmt(value: number | null | undefined) { return value == null ? '尚未记录' : Math.round(value).toLocaleString() }
 function resource(name: string) {
@@ -318,13 +354,18 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
         <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
         <template v-else>
+          <p v-for="row in injuredSummary" :key="`injury-${row.party_no}`" class="situation-injury" :class="{ severe: row.severe > 0 }">{{ injuredText(row) }}</p>
           <div v-if="situationMoments.length" class="situation-moments">
             <p class="situation-caption">部队与修行时间 <small>按游戏记录</small></p>
             <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span>{{ gameTime(moment.time) }}</span><small>{{ situationTime(moment.observedAt) }}</small></div>
             <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
           </div>
           <p v-else class="home-muted">暂时没有部队完成或修行归来的时间记录。</p>
-          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong>{{ party.members.map(m => m.name).join('、') }}</strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
+          <div v-if="situationResources.length" class="situation-resources">
+            <p class="situation-caption">资源 <small>{{ situationTime(situation.resources_observed_at ?? null) }}</small></p>
+            <dl class="situation-resource-grid"><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl>
+          </div>
+          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}<i v-if="member.injury === '中伤' || member.injury === '重伤'" class="injury-badge" :class="{ severe: member.injury === '重伤' }">{{ member.injury }}</i></span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
       <PaperCard v-if="active || latestRun" variant="dashboard" class="home-brief">
@@ -462,6 +503,17 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .situation-row { display: grid; gap: 3px; margin-top: 8px; font-size: 11px; }
 .situation-row span, .situation-row small { color: var(--ink-dim); }
 .situation-row strong { font-weight: 500; overflow-wrap: anywhere; }
+.situation-injury { margin: 0 0 10px; padding: 7px 10px; border-left: 3px solid #c99430; background: #f6ecd8; color: #7a5a17; font-size: 11px; line-height: 1.6; }
+.situation-injury.severe { border-color: #a03f32; background: #f4e0da; color: #8c352a; }
+.situation-resources { margin-top: 12px; border-top: 1px solid var(--paper-line); padding-top: 10px; }
+.situation-resource-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 0; font-size: 11px; }
+.situation-resource-grid > div { display: flex; justify-content: space-between; gap: 6px; }
+.situation-resource-grid dt { color: var(--ink-dim); }
+.situation-resource-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
+.situation-members { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.situation-member small { color: var(--ink-dim); font-weight: 400; }
+.injury-badge { margin-left: 3px; padding: 0 4px; border-radius: 3px; background: #f3e3c2; color: #8a621b; font-size: 9px; font-style: normal; }
+.injury-badge.severe { background: #f2d7cf; color: #a03f32; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
 .home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }

@@ -125,6 +125,15 @@ def test_home_situation_keeps_source_times_and_excludes_credentials(tmp_path):
     assert situation["parties_observed_at"] == "2026-09-28 11:34:40"
     assert situation["parties"][0]["members"][0]["name"] == "压切长谷部"
     assert situation["forge_slots"][0]["finished_at"] == "2026-09-28 12:00:00"
+    # /home 的资源读数进近况，时间取最新一条 /home（不许拿 pull 时间冒充）
+    assert situation["resources"]["charcoal"] == 50
+    assert situation["resources"]["koban"] == 1000
+    assert situation["resources"]["bill"] == 6
+    assert situation["resources_observed_at"] == "2026-09-28 11:35:00"
+    member = situation["parties"][0]["members"][0]
+    assert member["hp"] == 45 and member["hp_max"] == 45
+    assert member["fatigue"] == 100
+    assert member["injury"] is None  # 满血
     assert json.loads(saved) == situation
     for secret in ("测试婶", "user_id", "uid=1", '"t"', "serial_id"):
         assert secret not in saved
@@ -639,8 +648,8 @@ def test_home_situation_members_carry_label(tmp_path):
                                 "level": "99", "hp": "45", "hp_max": "45",
                                 "fatigue": "100", "protect": "1"},
                         "222": {"serial_id": "222", "sword_id": "118",
-                                "level": "99", "hp": "45", "hp_max": "45",
-                                "fatigue": "100", "protect": "1"}},
+                                "level": "99", "hp": "30", "hp_max": "79",
+                                "fatigue": "60", "protect": "1"}},
               "party": {"1": {"party_no": "1", "status": "1",
                               "party_name": "主力",
                               "slot": {"1": {"serial_id": "111"},
@@ -655,6 +664,14 @@ def test_home_situation_members_carry_label(tmp_path):
     assert members[0]["label"].endswith("号机")  # 同名同等级 → 号机
     assert members[0]["serial_tail"] == "111"
     assert members[0]["name"] and members[0]["level"] == 99
+    # 血量/疲劳/伤势档位随成员走，主页渲染直接可用
+    assert members[0]["hp"] == 45 and members[0]["injury"] is None
+    assert members[1]["hp"] == 30 and members[1]["hp_max"] == 79
+    assert members[1]["fatigue"] == 60
+    assert members[1]["injury"] == "中伤"
+    # 这份日志没进过本丸（无 /home），资源宁可缺省不冒充
+    assert situation["resources"] is None
+    assert situation["resources_observed_at"] is None
 
 
 # ---------------------------------------------------------------- 出阵链日志验伤
