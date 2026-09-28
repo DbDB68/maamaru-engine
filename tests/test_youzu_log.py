@@ -346,6 +346,123 @@ def test_mission_rewards_koban_from_item_list(tmp_path):
     assert len(res) == 1 and res[0]["delta"] == {"木炭": 400}
 
 
+def test_reading_event_points_and_consumables():
+    """活动点数（point 块）和道具库存（item 为 dict）都进读数。"""
+    reading = youzu_log._reading_from_payload({
+        "resource": {"charcoal": 100},
+        "point": {"10031": 20496},
+        "item": {"1_0": {"consumable_id": "1", "num": "32"},
+                 "8_0": {"consumable_id": "8", "num": "388"}},
+    })
+    assert reading["活动点数·10031"] == 20496
+    assert reading["道具#1"] == 32
+    assert reading["道具#8"] == 388
+
+
+def test_item_list_is_not_a_reading():
+    """mission/rewards 的 item 是 list（奖励清单），不是库存读数。"""
+    reading = youzu_log._reading_from_payload({
+        "item": [{"item_type": 4, "item_id": 0, "item_num": 250}],
+    })
+    assert reading is None or not any(k.startswith("道具#") for k in reading)
+
+
+def test_event_points_delta_attribution(tmp_path):
+    """活动点数差值走同一条归因链：归给夹在中间的出阵请求。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 20:00:00", "https://s39-ios-djlw.youzu.com/sally?uid=1",
+             {"point": {"10031": 20000}, "status": 0,
+              "now_time": 1790568000}),
+        _c2s("2026-09-28 20:10:00", "POST",
+             "https://s39-ios-djlw.youzu.com/sally/start?uid=1", "field_id=1"),
+        _s2c("2026-09-28 20:10:30", "https://s39-ios-djlw.youzu.com/sally?uid=1",
+             {"point": {"10031": 20496}, "status": 0,
+              "now_time": 1790568630}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    ch = [c for c in ledger["changes"] if "活动点数·10031" in c["delta"]]
+    assert len(ch) == 1
+    assert ch[0]["delta"] == {"活动点数·10031": 496}
+    assert ch[0]["via"] == ["sally/start"]  # 未收录端点，老实报原名
+
+
+def test_conquest_complete_exp_ledger(tmp_path):
+    """远征完成记两笔经验：审神者（before/after 可反推）+ 刀剑合计。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790546400}),
+        _c2s("2026-09-28 12:37:47", "POST",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             "party_no=4"),
+        _s2c("2026-09-28 12:37:48",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             {"success": 2, "field_id": "5", "party_no": "4",
+              "result": {"user_exp": 110, "exp": 41589884, "level": 290},
+              "sword": {"1": {"serial_id": "1", "get_exp": 285},
+                        "2": {"serial_id": "2", "get_exp": 285}},
+              "resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790548668}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    user = [c for c in ledger["changes"] if "审神者经验" in c["delta"]]
+    sword = [c for c in ledger["changes"] if "刀剑经验" in c["delta"]]
+    assert len(user) == 1 and user[0]["delta"] == {"审神者经验": 110}
+    assert user[0]["before"] == {"审神者经验": 41589774}
+    assert user[0]["after"] == {"审神者经验": 41589884}
+    assert user[0]["via"][0].startswith("远征完成·四队·B1")
+    assert len(sword) == 1 and sword[0]["delta"] == {"刀剑经验": 570}
+
+
+def test_snapshot_missions_kiwame_events(tmp_path):
+    """快照带任务进度、修行归来倒计时、活动日历。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 11:34:38", "https://s39-ios-djlw.youzu.com/login/start?uid=1",
+             {"user_id": 1, "level": "290", "status": 0}),
+        _s2c("2026-09-28 11:34:40", "https://s39-ios-djlw.youzu.com/party/list?uid=1",
+             {"sword": {"111": {"serial_id": "111", "sword_id": "118",
+                                "level": "99"}},
+              "party": {}, "status": 0}),
+        _s2c("2026-09-28 11:34:45", "https://s39-ios-djlw.youzu.com/home/leave?uid=1",
+             {"evolution": {"back": {"0": {"serial_id": 111,
+                                           "finished_at": "2026-10-02 11:34:55"}}},
+              "status": 0}),
+        _s2c("2026-09-28 11:34:46",
+             "https://s39-ios-djlw.youzu.com/home/get_all_activity?uid=1",
+             {"event": {"0": {"type": 4, "event_id": 14030,
+                              "start_at": "2026-09-24 10:00:00",
+                              "end_at": "2026-10-15 05:00:00"}},
+              "status": 0}),
+        _s2c("2026-09-28 13:03:04", "https://s39-ios-djlw.youzu.com/mission/index?uid=1",
+             {"mission": {"1": {"mission_id": "1", "value": "2", "status": "3"},
+                          "4375": {"mission_id": "4375", "value": "0",
+                                   "status": "1"}},
+              "status": 0}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    snap = youzu_log.build_snapshot(youzu_log.parse_events(f))
+    assert snap["missions"] == [
+        {"mission_id": 1, "value": 2, "status": 3},
+        {"mission_id": 4375, "value": 0, "status": 1}]
+    assert snap["kiwame_return"] == [
+        {"serial_id": 111, "name": "压切长谷部",
+         "finished_at": "2026-10-02 11:34:55"}]
+    assert snap["events_calendar"] == [
+        {"event_id": 14030, "type": 4,
+         "start_at": "2026-09-24 10:00:00", "end_at": "2026-10-15 05:00:00"}]
+    # 展示层：修行倒计时和活动日历进文本摘要
+    text = youzu_log.format_summary(snap)
+    assert "修行中：压切长谷部" in text
+    assert "活动 14030" in text
+
+
 def test_expedition_map_label_fallback():
     # sequential 连排口径（真实报文唯一在用的）：1=A1、5=B1、20=E4
     assert youzu_log._expedition_map_label("1").startswith("A1")

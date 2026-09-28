@@ -198,6 +198,9 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     sally = _latest(events, "/sally") or {}
     forge = _latest(events, "/forge") or {}
     conquest = _latest(events, "/conquest") or {}
+    mission_index = _latest(events, "/mission/index") or {}
+    leave = _latest_merged(events, "/home/leave")
+    activity = _latest(events, "/home/get_all_activity") or {}
 
     swords = party_list.get("sword") or sally.get("sword_all") or {}
     parties = party_list.get("party") or login.get("party") or {}
@@ -248,6 +251,36 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
         forge_rows.append({"slot_no": _int(slot_no),
                            "finished_at": slot.get("finished_at")})
 
+    missions = [
+        {"mission_id": _int(m.get("mission_id")),
+         "value": _int(m.get("value")),
+         "status": _int(m.get("status"), -1)}
+        for m in (mission_index.get("mission") or {}).values()
+        if isinstance(m, dict)
+    ]
+
+    kiwame_return = []
+    swords_by_serial = {str(s.get("serial_id")): s
+                        for s in swords.values() if isinstance(s, dict)}
+    for entry in ((leave.get("evolution") or {}).get("back") or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        sid = str(entry.get("serial_id"))
+        known = swords_by_serial.get(sid) or {}
+        kiwame_return.append({
+            "serial_id": _int(entry.get("serial_id")),
+            "name": (_sword_name(known.get("sword_id"), sword_db)
+                     if known else ""),
+            "finished_at": entry.get("finished_at"),
+        })
+
+    events_calendar = [
+        {"event_id": e.get("event_id"), "type": _int(e.get("type"), -1),
+         "start_at": e.get("start_at"), "end_at": e.get("end_at")}
+        for e in (activity.get("event") or {}).values()
+        if isinstance(e, dict)
+    ]
+
     snap = {
         "schema": 1,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -279,6 +312,9 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
         "event_points": sally.get("point") or {},
         "season": {"season_id": home.get("season_id"),
                    "end_at": home.get("season_end_at")},
+        "missions": missions,
+        "kiwame_return": kiwame_return,
+        "events_calendar": events_calendar,
         "server_time": home.get("now") or login.get("now"),
     }
     if with_swords:
@@ -380,7 +416,15 @@ def _event_epoch(ev: dict) -> float | None:
 
 
 def _reading_from_payload(payload) -> dict | None:
-    """从响应体提取余额读数 {资源名: 数量}；没带资源块返回 None。"""
+    """从响应体提取余额读数 {资源名: 数量}；没带任何读数返回 None。
+
+    除八资源外还收两类（2026-09-28 实测）：
+      - 活动点数：顶层 point 块 {活动id: 点数}（/sally 每次都带）；
+      - 道具库存：item 为 **dict** 时是 consumable 全量库存
+        （/home/leave、/conquest/complete 都带）；item 为 list 时是
+        奖励清单（mission/rewards），那是增量不是读数，跳过。
+        道具名还没逐个校准，先用「道具#N」占位，对上了再补名。
+    """
     if not isinstance(payload, dict):
         return None
     reading = {}
@@ -398,6 +442,19 @@ def _reading_from_payload(payload) -> dict | None:
     point_free = _int(currency.get("point_free"), None)
     if point is not None or point_free is not None:
         reading["甲州金"] = (point or 0) + (point_free or 0)
+    event_points = payload.get("point")
+    if isinstance(event_points, dict):
+        for event_id, pts in event_points.items():
+            value = _int(pts, None)
+            if value is not None:
+                reading[f"活动点数·{event_id}"] = value
+    items = payload.get("item")
+    if isinstance(items, dict):
+        for entry in items.values():
+            if isinstance(entry, dict) and "consumable_id" in entry:
+                num = _int(entry.get("num"), None)
+                if num is not None:
+                    reading[f"道具#{entry['consumable_id']}"] = num
     return reading or None
 
 
@@ -520,6 +577,39 @@ def build_ledger(events: list[dict]) -> dict:
             })
             if after_k is not None:
                 last_known["小判"] = after_k
+
+        # 远征经验账：result 块有审神者经验（exp 是发奖后的总值，
+        # before = exp - user_exp 反推）；sword 块每刀带 get_exp，
+        # 合计记一笔（逐刀太碎，要看刀的去快照）
+        if ev["endpoint"] == "/conquest/complete" \
+                and isinstance(ev.get("payload"), dict):
+            result = ev["payload"].get("result") or {}
+            user_exp = _int(result.get("user_exp"))
+            if user_exp:
+                exp_after = _int(result.get("exp"), None)
+                changes.append({
+                    "ts": ts,
+                    "delta": {"审神者经验": user_exp},
+                    "before": {"审神者经验": (exp_after - user_exp)
+                               if exp_after is not None else None},
+                    "after": {"审神者经验": exp_after},
+                    "via": [detail or "远征完成"],
+                    "via_endpoints": [r["endpoint"]
+                                      for r in pending_requests],
+                })
+            sword_exp = sum(_int(s.get("get_exp"))
+                            for s in (ev["payload"].get("sword")
+                                      or {}).values()
+                            if isinstance(s, dict))
+            if sword_exp:
+                changes.append({
+                    "ts": ts,
+                    "delta": {"刀剑经验": sword_exp},
+                    "before": {}, "after": {},
+                    "via": [detail or "远征完成"],
+                    "via_endpoints": [r["endpoint"]
+                                      for r in pending_requests],
+                })
         pending_requests = []
 
     return {"observations": observations, "changes": changes}
@@ -649,6 +739,14 @@ def format_summary(snap: dict) -> str:
     if snap.get("season", {}).get("end_at"):
         lines.append(f"  赛季 {snap['season']['season_id']}  "
                      f"截止 {snap['season']['end_at']}")
+    for k in snap.get("kiwame_return") or []:
+        if k.get("finished_at"):
+            lines.append(f"  修行中：{k.get('name') or '刀#' + str(k['serial_id'])}"
+                         f"  归来 {k['finished_at'][5:16]}")
+    for e in snap.get("events_calendar") or []:
+        if e.get("end_at"):
+            lines.append(f"  活动 {e['event_id']}：{e.get('start_at') or '?'} "
+                         f"~ {e['end_at']}")
     return "\n".join(lines)
 
 
