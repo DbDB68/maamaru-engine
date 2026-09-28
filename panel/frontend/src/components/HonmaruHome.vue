@@ -103,9 +103,8 @@ const situationMoments = computed(() => {
   const state = situation.value
   if (!state) return []
   const moments = [
-    ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队`, time: p.finished_at!, observedAt: state.parties_observed_at })),
+    ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队完成时间`, time: p.finished_at!, observedAt: state.parties_observed_at })),
     ...state.kiwame_return.map((item, index) => ({ key: `return-${index}`, label: `${item.name || '刀剑'}修行归来`, time: item.finished_at, observedAt: state.kiwame_observed_at })),
-    ...state.forge_slots.map(slot => ({ key: `forge-${slot.slot_no}`, label: `第${slot.slot_no}炉锻刀`, time: slot.finished_at, observedAt: state.forge_observed_at })),
   ]
   return moments.sort((a, b) => a.time.localeCompare(b.time))
 })
@@ -292,7 +291,6 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <div><dt>审神者</dt><dd>{{ profile.saniwa_name || '还没留名' }}</dd></div>
         <div><dt>属国</dt><dd>{{ profile.province || '待填写' }}</dd></div>
         <div><dt>就任日</dt><dd>{{ profile.joined_on?.replaceAll('-', '.') || '待填写' }}</dd></div>
-        <div><dt>近侍刀</dt><dd>{{ profile.attendant || '待填写' }}</dd></div>
       </dl>
       <button type="button" class="home-text-button profile-edit" :disabled="!homeReady" @click="editProfile">{{ profile.saniwa_name ? '整理我的档案' : '写下我的档案' }} <span aria-hidden="true">↗</span></button>
       <p class="profile-footnote">庭院里有熟悉的身影，<br>这里有慢慢积攒的日常。</p>
@@ -316,17 +314,16 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
       <section class="home-situation" aria-label="游戏里的本丸近况">
-        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>庭院近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
+        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>归期与部队</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
         <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
         <template v-else>
-          <p v-if="situation.secretary.name" class="situation-secretary"><span>近侍</span><strong>{{ situation.secretary.name }}</strong><small>{{ situationTime(situation.secretary.observed_at) }}</small></p>
           <div v-if="situationMoments.length" class="situation-moments">
-            <p class="situation-caption">记录中的时间 <small>按游戏记录</small></p>
+            <p class="situation-caption">部队与修行时间 <small>按游戏记录</small></p>
             <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span>{{ gameTime(moment.time) }}</span><small>{{ situationTime(moment.observedAt) }}</small></div>
             <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
           </div>
-          <p v-else class="home-muted">暂时没有记录中的归期或锻刀完成时间。</p>
+          <p v-else class="home-muted">暂时没有部队完成或修行归来的时间记录。</p>
           <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong>{{ party.members.map(m => m.name).join('、') }}</strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
@@ -360,7 +357,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     <dialog v-if="editingProfile || writing" ref="editor" class="home-dialog-shell" :aria-label="editingProfile ? '整理我的档案' : '写小记'" @cancel.prevent="!savingProfile && !savingNote && (editingProfile = writing = false)">
       <section class="home-dialog">
         <header><h2>{{ editingProfile ? '整理我的档案' : noteId ? '修改小记' : '写一则小记' }}</h2><button type="button" aria-label="关闭" :disabled="savingProfile || savingNote" @click="editingProfile = writing = false">×</button></header>
-        <form v-if="editingProfile" @submit.prevent="saveProfile"><fieldset :disabled="savingProfile"><label class="avatar-picker"><img v-if="draft.avatar" :src="draft.avatar" alt="头像预览"><span>选一张自己的头像<small>PNG / JPG / WebP，512 KB 以内</small></span><input type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar"></label><div class="profile-fields"><label>本丸名<input v-model="draft.honmaru_name" maxlength="40" placeholder="给这里起个名字"></label><label>审神者<input v-model="draft.saniwa_name" maxlength="40" placeholder="你的名字"></label><label>属国<input v-model="draft.province" maxlength="30" placeholder="例如：备前国"></label><label>就任日<input v-model="draft.joined_on" type="date" :max="today"></label><label class="field-wide">近侍刀<input v-model="draft.attendant" maxlength="40" placeholder="今天是谁陪在身边"></label><label class="field-wide">一言<textarea v-model="draft.motto" maxlength="120" rows="2" placeholder="写一句自己喜欢的话"></textarea></label></div></fieldset><p v-if="formError" role="alert" class="home-form-error">{{ formError }}</p><footer><button type="button" class="home-text-button" :disabled="savingProfile" @click="editingProfile = false">先不改了</button><button type="submit" class="home-primary" :disabled="savingProfile">{{ savingProfile ? '收好中…' : '收好档案' }}</button></footer></form>
+        <form v-if="editingProfile" @submit.prevent="saveProfile"><fieldset :disabled="savingProfile"><label class="avatar-picker"><img v-if="draft.avatar" :src="draft.avatar" alt="头像预览"><span>选一张自己的头像<small>PNG / JPG / WebP，512 KB 以内</small></span><input type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar"></label><div class="profile-fields"><label>本丸名<input v-model="draft.honmaru_name" maxlength="40" placeholder="给这里起个名字"></label><label>审神者<input v-model="draft.saniwa_name" maxlength="40" placeholder="你的名字"></label><label>属国<input v-model="draft.province" maxlength="30" placeholder="例如：备前国"></label><label>就任日<input v-model="draft.joined_on" type="date" :max="today"></label><label class="field-wide">一言<textarea v-model="draft.motto" maxlength="120" rows="2" placeholder="写一句自己喜欢的话"></textarea></label></div></fieldset><p v-if="formError" role="alert" class="home-form-error">{{ formError }}</p><footer><button type="button" class="home-text-button" :disabled="savingProfile" @click="editingProfile = false">先不改了</button><button type="submit" class="home-primary" :disabled="savingProfile">{{ savingProfile ? '收好中…' : '收好档案' }}</button></footer></form>
         <form v-else @submit.prevent="saveNote"><label class="note-label">今天想记住什么？<textarea v-model="noteBody" rows="7" maxlength="2000" required :disabled="savingNote" placeholder="一点碎念，一件小事，或者今天终于等到的那个人。"></textarea></label><small>{{ noteBody.length }} / 2000</small><p v-if="formError" role="alert" class="home-form-error">{{ formError }}</p><footer><button type="button" class="home-text-button" :disabled="savingNote" @click="writing = false">先不写了</button><button type="submit" class="home-primary" :disabled="savingNote || !noteBody.trim()">{{ savingNote ? '记录中…' : '记在本丸里' }}</button></footer></form>
       </section>
     </dialog>
@@ -450,9 +447,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .home-situation header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
 .home-situation header h2 { margin: 2px 0 12px; }
 .home-situation .home-text-button { white-space: nowrap; }
-.situation-secretary { display: flex; flex-wrap: wrap; gap: 4px 7px; align-items: baseline; margin: 0; padding: 11px 0; border-top: 1px solid var(--paper-line); font-size: 12px; }
-.situation-secretary > span, .situation-secretary small, .situation-caption small, .situation-moment small { color: var(--ink-dim); font-size: 10px; }
-.situation-secretary small { margin-left: auto; }
+.situation-caption small, .situation-moment small { color: var(--ink-dim); font-size: 10px; }
 .situation-moments { border-top: 1px solid var(--paper-line); padding-top: 10px; }
 .situation-caption { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 8px; font-size: 11px; color: var(--ink-dim); }
 .situation-moment { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 0; font-size: 12px; }
