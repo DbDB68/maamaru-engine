@@ -23,7 +23,7 @@ import json
 import re
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -286,6 +286,139 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     return snap
 
 
+# ---------------------------------------------------------------- ledger
+
+# 账房八资源 ← 日志字段映射（resource 块 + currency 块）。
+# bill 对应「委托符」是按锻刀扣 1 的语义推的，还没和游戏界面逐项对过账，
+# 对完之前标签带「?」，写进真账房前必须校准。
+LEDGER_RESOURCE_MAP = {
+    "charcoal": "木炭", "steel": "玉钢", "coolant": "冷却材",
+    "file": "砥石", "bill": "委托符?",
+}
+LEDGER_CURRENCY_MAP = {"money": "小判"}
+# 甲州金 = currency.point + point_free（付费+免费合并，和游戏界面显示一致）
+
+_ENDPOINT_LABEL = {
+    "/conquest/complete": "远征完成", "/conquest/start": "远征派遣",
+    "/forge/startmultiple": "锻刀开炉", "/forge/complete": "锻刀完成",
+    "/forge/completemultiple": "锻刀完成", "/forge/fastmultiple": "锻刀加速",
+    "/mission/rewards": "任务奖励", "/receive/get": "收信箱",
+    "/composition/compose": "合成", "/composition/union": "习合",
+    "/duty/complete": "内番完成", "/home/back": "修行归来",
+    "/monthcard/salary": "月卡俸禄", "/sign/info": "签到",
+}
+
+
+def _event_epoch(ev: dict) -> float | None:
+    """事件时间戳：优先响应体里的服务器 now_time（时区安全），
+    退而求其次用日志行时间（设备本地时间，按 +08:00 解释）。"""
+    payload = ev.get("payload")
+    if isinstance(payload, dict) and isinstance(payload.get("now_time"),
+                                                (int, float)):
+        return float(payload["now_time"])
+    ts = ev.get("ts")
+    if ts:
+        try:
+            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone(timedelta(hours=8))).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _reading_from_payload(payload) -> dict | None:
+    """从响应体提取余额读数 {资源名: 数量}；没带资源块返回 None。"""
+    if not isinstance(payload, dict):
+        return None
+    reading = {}
+    for field, name in LEDGER_RESOURCE_MAP.items():
+        value = (payload.get("resource") or {}).get(field)
+        if isinstance(value, (int, float)):
+            reading[name] = int(value)
+    currency = payload.get("currency") or {}
+    for field, name in LEDGER_CURRENCY_MAP.items():
+        value = currency.get(field)
+        if isinstance(value, (int, float)) or (isinstance(value, str)
+                                               and value.isdigit()):
+            reading[name] = int(value)
+    point = _int(currency.get("point"), None)
+    point_free = _int(currency.get("point_free"), None)
+    if point is not None or point_free is not None:
+        reading["甲州金"] = (point or 0) + (point_free or 0)
+    return reading or None
+
+
+def build_ledger(events: list[dict]) -> dict:
+    """从事件流提取账本：余额观察链 + 逐笔归因收支。
+
+    原理：每个带资源块的响应是一次精确读数；相邻读数间同一资源的差值，
+    归因给夹在中间的那些 C->S 请求的玩法。全部来自服务器响应原文，
+    confidence 天然是 confirmed（不是 OCR 猜的）。
+
+    注意响应是稀疏的（比如 /sally 的 currency 只带 money）：差值只在
+    「这次读到了、以前也读到过」的资源上计算，缺键不等于归零。
+    """
+    observations: list[dict] = []
+    changes: list[dict] = []
+    last_known: dict[str, int] = {}
+    pending_requests: list[dict] = []  # 两次读数之间发生的 C->S
+
+    for ev in events:
+        if ev["direction"] == "C->S":
+            if ev["endpoint"] and ev["endpoint"] not in ("/keepalive",):
+                pending_requests.append(ev)
+            continue
+        if ev["direction"] != "S->C":
+            continue
+        reading = _reading_from_payload(ev.get("payload"))
+        if not reading:
+            continue
+        ts = _event_epoch(ev)
+
+        delta, before, after = {}, {}, {}
+        for name, value in reading.items():
+            if name in last_known and last_known[name] != value:
+                delta[name] = value - last_known[name]
+                before[name] = last_known[name]
+                after[name] = value
+        changed = delta or not last_known
+        for name, value in reading.items():
+            last_known[name] = value
+
+        if changed:
+            observations.append({"ts": ts, "endpoint": ev["endpoint"],
+                                 "reading": dict(last_known)})
+        if delta:
+            culprits = []
+            for req in pending_requests:
+                label = _ENDPOINT_LABEL.get(req["endpoint"],
+                                            req["endpoint"].lstrip("/"))
+                if label not in culprits:
+                    culprits.append(label)
+            changes.append({
+                "ts": ts,
+                "delta": delta,
+                "before": before,
+                "after": after,
+                "via": culprits or ["(无请求，自然恢复?)"],
+                "via_endpoints": [r["endpoint"] for r in pending_requests],
+            })
+        pending_requests = []
+
+    return {"observations": observations, "changes": changes}
+
+
+def format_ledger(ledger: dict) -> str:
+    lines = [f"账本预览：{len(ledger['observations'])} 次读数，"
+             f"{len(ledger['changes'])} 笔收支"]
+    for ch in ledger["changes"]:
+        when = (datetime.fromtimestamp(ch["ts"]).strftime("%m-%d %H:%M:%S")
+                if ch["ts"] else "?")
+        parts = " ".join(f"{k}{v:+d}" for k, v in ch["delta"].items())
+        lines.append(f"  [{when}] {parts}  ← {'、'.join(ch['via'])}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- display
 
 def format_summary(snap: dict) -> str:
@@ -297,7 +430,7 @@ def format_summary(snap: dict) -> str:
         f"  审神者 Lv.{p['level']}  近侍：{p['secretary'] or '?'}",
         f"  资源：木炭 {r['charcoal']} / 玉钢 {r['steel']} / "
         f"冷却材 {r['coolant']} / 砥石 {r['whetstone']}",
-        f"        手伝い札 {r['bill']} / 小判 {r['koban']}",
+        f"        {LEDGER_RESOURCE_MAP['bill']} {r['bill']} / 小判 {r['koban']}",
         f"  刀剑：{snap['sword_count']} / {snap['sword_capacity'] or '?'} 振",
     ]
     for party in snap["parties"]:
@@ -330,6 +463,8 @@ def main(argv=None):
     ap.add_argument("--address", default=DEFAULT_ADDRESS)
     ap.add_argument("--out", help="快照 JSON 输出路径（默认 .tmp/youzu/snapshot.json）")
     ap.add_argument("--no-swords", action="store_true", help="快照不带全刀帐明细")
+    ap.add_argument("--ledger", action="store_true",
+                    help="打印账本预览（余额观察链 + 逐笔归因收支）")
     ap.add_argument("--keep-log", action="store_true",
                     help="保留 pull 下来的原始日志（默认解析完即焚："
                          "原档里有名字/user_code/session 凭证，不落盘为安）")
@@ -352,6 +487,9 @@ def main(argv=None):
         print(f"[焚毁] {src.name} 已删，原始日志不留本地")
     print()
     print(format_summary(snap))
+    if args.ledger:
+        print()
+        print(format_ledger(build_ledger(events)))
     return 0
 
 

@@ -120,3 +120,67 @@ def test_format_summary_runs(tmp_path):
     assert "测试婶" not in text
     assert "第1部队" in text
     assert "Lv.290" in text
+
+
+LEDGER_SAMPLE = "\n".join([
+    _s2c("2026-09-28 11:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+         {"resource": {"charcoal": 1000, "steel": 2000, "coolant": 3000,
+                       "file": 4000, "bill": 10},
+          "currency": {"money": "500", "point": "100", "point_free": "50"},
+          "status": 0, "now_time": 1790545200}),
+    # 远征完成：收入木炭
+    _c2s("2026-09-28 11:05:00", "POST",
+         "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1", "party_no=2"),
+    _s2c("2026-09-28 11:05:01",
+         "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+         {"resource": {"charcoal": 1250, "steel": 2000, "coolant": 3000,
+                       "file": 4000, "bill": 10},
+          "currency": {"money": "500"}, "status": 0,
+          "now_time": 1790545501}),
+    # 锻刀开炉：四项资源 + 委托符一起扣
+    _c2s("2026-09-28 11:06:00", "POST",
+         "https://s39-ios-djlw.youzu.com/forge/startmultiple?uid=1", "slot_no=1"),
+    _s2c("2026-09-28 11:06:01",
+         "https://s39-ios-djlw.youzu.com/forge/startmultiple?uid=1",
+         {"resource": {"charcoal": 550, "steel": 1300, "coolant": 2300,
+                       "file": 3300, "bill": 9},
+          "currency": {"money": "500"}, "status": 0,
+          "now_time": 1790545561}),
+    # keepalive 不带资源块，不该产生读数
+    _s2c("2026-09-28 11:06:30", "https://s39-ios-djlw.youzu.com/keepalive?uid=1",
+         {"status": 0, "now_time": 1790545590}),
+])
+
+
+def test_build_ledger(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text(LEDGER_SAMPLE, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+
+    # 三次带资源的响应 → 三条读数（keepalive 不算）
+    assert len(ledger["observations"]) == 3
+    # 首条读数含甲州金合并（100+50）与小判
+    first = ledger["observations"][0]["reading"]
+    assert first["甲州金"] == 150
+    assert first["小判"] == 500
+    assert first["委托符?"] == 10
+
+    assert len(ledger["changes"]) == 2
+    c1, c2 = ledger["changes"]
+    assert c1["delta"] == {"木炭": 250}
+    assert c1["via"] == ["远征完成"]
+    assert c2["delta"] == {"木炭": -700, "玉钢": -700, "冷却材": -700,
+                           "砥石": -700, "委托符?": -1}
+    assert c2["via"] == ["锻刀开炉"]
+    # 时间戳用的是响应体里的服务器 now_time
+    assert c1["ts"] == 1790545501
+
+
+def test_format_ledger_runs(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text(LEDGER_SAMPLE, encoding="utf-8")
+    text = youzu_log.format_ledger(
+        youzu_log.build_ledger(youzu_log.parse_events(f)))
+    assert "远征完成" in text
+    assert "木炭+250" in text
+    assert "2 笔收支" in text
