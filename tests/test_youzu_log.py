@@ -80,7 +80,10 @@ def test_snapshot_latest_wins(tmp_path):
     f.write_text(SAMPLE, encoding="utf-8")
     snap = youzu_log.build_snapshot(youzu_log.parse_events(f))
 
-    assert snap["profile"]["name"] == "测试婶"
+    # 敏感字段一律不进快照（盗号两件套防御）
+    assert "name" not in snap["profile"]
+    assert "server_name" not in snap["profile"]
+    assert "user_id" not in snap["profile"]
     assert snap["profile"]["level"] == 290
     # 后一条 /home 的资源覆盖前一条
     assert snap["resources"]["charcoal"] == 50
@@ -114,6 +117,6 @@ def test_format_summary_runs(tmp_path):
     f.write_text(SAMPLE, encoding="utf-8")
     snap = youzu_log.build_snapshot(youzu_log.parse_events(f))
     text = youzu_log.format_summary(snap)
-    assert "测试婶" in text
+    assert "测试婶" not in text
     assert "第1部队" in text
     assert "Lv.290" in text

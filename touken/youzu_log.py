@@ -252,11 +252,10 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
         "schema": 1,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "profile": {
-            "user_id": login.get("user_id"),
-            "name": login.get("name") or "",
+            # 不落盘：名字 / 服务器 / user_id / user_code —— 「名字+那串
+            # 1w-xxx」是流传已久的盗号两件套，状态面板用不着，一概不留。
             "level": _int(login.get("level")),
             "exp": _int(login.get("exp")),
-            "server_name": login.get("server_name") or "",
             "created_at": login.get("created_at") or "",
             "secretary": _sword_name(login.get("secretary"), sword_db)
             if login.get("secretary") else "",
@@ -295,8 +294,7 @@ def format_summary(snap: dict) -> str:
     lines = [
         f"本丸快照（数据时间 {snap.get('server_time') or '?'}，"
         f"生成于 {snap['generated_at']}）",
-        f"  审神者：{p['name'] or '?'}  Lv.{p['level']}  "
-        f"服务器：{p['server_name'] or '?'}  近侍：{p['secretary'] or '?'}",
+        f"  审神者 Lv.{p['level']}  近侍：{p['secretary'] or '?'}",
         f"  资源：木炭 {r['charcoal']} / 玉钢 {r['steel']} / "
         f"冷却材 {r['coolant']} / 砥石 {r['whetstone']}",
         f"        手伝い札 {r['bill']} / 小判 {r['koban']}",
