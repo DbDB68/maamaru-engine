@@ -330,8 +330,12 @@ def main(argv=None):
     ap.add_argument("--address", default=DEFAULT_ADDRESS)
     ap.add_argument("--out", help="快照 JSON 输出路径（默认 .tmp/youzu/snapshot.json）")
     ap.add_argument("--no-swords", action="store_true", help="快照不带全刀帐明细")
+    ap.add_argument("--keep-log", action="store_true",
+                    help="保留 pull 下来的原始日志（默认解析完即焚："
+                         "原档里有名字/user_code/session 凭证，不落盘为安）")
     args = ap.parse_args(argv)
 
+    pulled = args.file is None
     src = Path(args.file) if args.file else pull_log(args.adb, args.address)
     print(f"[日志] {src} ({src.stat().st_size:,} 字节)")
     events = parse_events(src)
@@ -343,6 +347,9 @@ def main(argv=None):
     out.write_text(json.dumps(snap, ensure_ascii=False, indent=2),
                    encoding="utf-8")
     print(f"[快照] {out}")
+    if pulled and not args.keep_log:
+        src.unlink()  # 阅后即焚（2026-09-28 老大亲批）；--file 传的别人的文件不碰
+        print(f"[焚毁] {src.name} 已删，原始日志不留本地")
     print()
     print(format_summary(snap))
     return 0
