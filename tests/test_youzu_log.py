@@ -352,11 +352,15 @@ def test_reading_event_points_and_consumables():
         "resource": {"charcoal": 100},
         "point": {"10031": 20496},
         "item": {"1_0": {"consumable_id": "1", "num": "32"},
-                 "8_0": {"consumable_id": "8", "num": "388"}},
+                 "8_0": {"consumable_id": "8", "num": "388"},
+                 "6103_0": {"consumable_id": "6103", "num": "2"}},
     })
     assert reading["活动点数·10031"] == 20496
-    assert reading["道具#1"] == 32
-    assert reading["道具#8"] == 388
+    # ITEM_NAMES 已校准的用真名（2026-09-28 CU 道具页逐页对上）
+    assert reading["御守"] == 32
+    assert reading["加速符·极"] == 388
+    # 没校准的平局组保持「道具#N」，不硬猜
+    assert reading["道具#6103"] == 2
 
 
 def test_item_list_is_not_a_reading():

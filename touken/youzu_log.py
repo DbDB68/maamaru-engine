@@ -334,6 +334,35 @@ LEDGER_RESOURCE_MAP = {
 LEDGER_CURRENCY_MAP = {"money": "小判"}
 # 甲州金 = currency.point + point_free（付费+免费合并，和游戏界面显示一致）
 
+# consumable_id → 道具名（2026-09-28 CU 逐页干净截图 + 日志库存数量
+# 双向对上锤死；长截图有拼接重影，全部以 CU 单帧为准）。
+# 注：日志里值为 6 的恰有三槽，UI 里值为 6 的也恰有三件
+# （菊碎片/经验符·中/内番符），排除法对上；其中 #10009=经验符·中
+# 是排除法推断（置信略低于数量唯一锤死的），将来有出入先查它。
+# 还没分出来的平局组（数量相同无法靠库存区分）保持「道具#N」：
+#   #6103/#6105/#6113（均 2）↔ 三所物·狮子/南蛮胴具足/狮子螺钿鞍 碎片
+#   #6003/#6109（均 1）↔ 锷·双鹤图碎片 / 碎片结合剂
+#   #6001（2）疑似异去探索道具，未锤死
+ITEM_NAMES = {
+    "1": "御守", "2": "御守·极",
+    "3": "仙人团子", "4": "御札·富士", "5": "御札·松",
+    "6": "御札·竹", "7": "御札·梅",
+    "8": "加速符·极", "9": "修行召回鸽",
+    "13": "小判箱·小", "14": "小判箱·中", "15": "小判箱·大",
+    "17": "幕内便当", "18": "一套纸笔", "19": "修行衣装",
+    "20": "修行道具", "21": "远征召回鸽", "22": "兵粮丸",
+    "24": "苏言机", "25": "笛", "26": "琴", "27": "三味线",
+    "28": "太鼓", "29": "铃", "37": "一口团子",
+    "60": "福豆", "68": "堆肥", "112": "制衣券", "117": "御祝重便当",
+    "1001": "根兵糖·中", "1002": "根兵糖·上",
+    "4205": "栗", "4206": "天竺牡丹",
+    "6005": "归城提灯五", "6107": "锷·月下梅树透图碎片",
+    "6111": "三所物·菊碎片",
+    "10001": "仙人团子·小", "10002": "幕内便当·小",
+    "10005": "内番符", "10009": "经验符·中", "10019": "远征筹备手册",
+    "20075": "暖心福袋",
+}
+
 _ENDPOINT_LABEL = {
     "/conquest/complete": "远征完成", "/conquest/start": "远征派遣",
     "/forge/startmultiple": "锻刀开炉", "/forge/complete": "锻刀完成",
@@ -423,7 +452,8 @@ def _reading_from_payload(payload) -> dict | None:
       - 道具库存：item 为 **dict** 时是 consumable 全量库存
         （/home/leave、/conquest/complete 都带）；item 为 list 时是
         奖励清单（mission/rewards），那是增量不是读数，跳过。
-        道具名还没逐个校准，先用「道具#N」占位，对上了再补名。
+        道具名走 ITEM_NAMES（2026-09-28 CU 逐页校准）；没对上号的
+        平局组保持「道具#N」原样，不硬猜。
     """
     if not isinstance(payload, dict):
         return None
@@ -454,7 +484,8 @@ def _reading_from_payload(payload) -> dict | None:
             if isinstance(entry, dict) and "consumable_id" in entry:
                 num = _int(entry.get("num"), None)
                 if num is not None:
-                    reading[f"道具#{entry['consumable_id']}"] = num
+                    cid = str(entry["consumable_id"])
+                    reading[ITEM_NAMES.get(cid, f"道具#{cid}")] = num
     return reading or None
 
 
