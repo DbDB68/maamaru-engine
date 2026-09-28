@@ -2,6 +2,9 @@
 """youzu_log：国服 HttpRequestCollect 日志解析测试（全部合成数据）"""
 
 import json
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
 
 from touken import youzu_log
 
@@ -110,6 +113,53 @@ def test_snapshot_without_swords(tmp_path):
                                     with_swords=False)
     assert "swords" not in snap
     assert snap["sword_count"] == 1
+
+
+def test_home_situation_keeps_source_times_and_excludes_credentials(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text(SAMPLE, encoding="utf-8")
+    path = tmp_path / "state" / "youzu_home_situation.json"
+    situation = youzu_log.save_home_situation(youzu_log.parse_events(f), path)
+    saved = path.read_text(encoding="utf-8")
+    assert situation["secretary"]["observed_at"] == "2026-09-28 11:34:38"
+    assert situation["parties_observed_at"] == "2026-09-28 11:34:40"
+    assert situation["parties"][0]["members"][0]["name"] == "压切长谷部"
+    assert situation["forge_slots"][0]["finished_at"] == "2026-09-28 12:00:00"
+    assert json.loads(saved) == situation
+    for secret in ("测试婶", "user_id", "uid=1", '"t"', "serial_id"):
+        assert secret not in saved
+
+
+def test_empty_home_situation_preserves_previous_record(tmp_path):
+    path = tmp_path / "youzu_home_situation.json"
+    path.write_text('{"schema":1}', encoding="utf-8")
+    assert youzu_log.save_home_situation([], path) is None
+    assert path.read_text(encoding="utf-8") == '{"schema":1}'
+
+
+def test_home_situation_api_refresh_uses_private_state_and_burns_log(tmp_path):
+    from panel import server
+    raw = tmp_path / "pulled.log"
+    raw.write_text(SAMPLE, encoding="utf-8")
+    config = tmp_path / "touken.json"
+    config.write_text('{"adb_path":"adb","adb_address":"127.0.0.1:16384"}',
+                      encoding="utf-8")
+    with patch.object(server, "STATUS_DIR", tmp_path / "state"), \
+         patch.object(server, "DEBUG_DIR", tmp_path / "debug"), \
+         patch.object(server, "_CONFIG_PATH", config), \
+         patch.object(youzu_log, "pull_log", return_value=raw) as pull:
+        client = TestClient(server.app)
+        assert client.get("/api/honmaru-home/situation").json() == {"situation": None}
+        response = client.post("/api/honmaru-home/situation/refresh")
+        assert response.status_code == 200
+        assert response.json()["situation"]["parties"][0]["members"][0]["name"]
+        assert not raw.exists()
+        assert pull.call_args.kwargs["dest_dir"] == tmp_path / "debug"
+        assert client.get("/api/honmaru-home/situation").json() == response.json()
+        saved = tmp_path / "state" / "youzu_home_situation.json"
+        saved.write_text('{"schema":2}', encoding="utf-8")
+        assert client.get("/api/honmaru-home/situation").status_code == 503
+        assert saved.read_text(encoding="utf-8") == '{"schema":2}'
 
 
 def test_format_summary_runs(tmp_path):

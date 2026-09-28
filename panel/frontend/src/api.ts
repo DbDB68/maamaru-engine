@@ -1,6 +1,6 @@
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 
-import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, WorkflowIdentity } from './types'
+import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
 import type { ExpeditionSchedule, DayTimeline, DayRaidBooking, DayRaidPlanBlock } from './types'
 
@@ -13,6 +13,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   honmaruHome: () => request<HonmaruHomeData>('/api/honmaru-home'),
+  honmaruSituation: () => request<{ situation: HonmaruSituation | null }>('/api/honmaru-home/situation'),
+  refreshHonmaruSituation: () => request<{ situation: HonmaruSituation }>('/api/honmaru-home/situation/refresh', { method: 'POST' }),
   saveHonmaruProfile: (profile: HonmaruProfile) => request<{ profile: HonmaruProfile }>('/api/honmaru-home/profile', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile),
   }),

@@ -134,12 +134,16 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
         try:
             from touken import youzu_log
             from touken.telemetry import TelemetryStore
+            from touken.runtime_paths import DEBUG_DIR, STATUS_DIR
             path = youzu_log.pull_log(agent.maa.adb_path,
-                                      agent.maa.adb_address)
+                                      agent.maa.adb_address,
+                                      dest_dir=DEBUG_DIR)
             try:
                 events = youzu_log.parse_events(path)
                 result = youzu_log.write_ledger(TelemetryStore(),
-                                                youzu_log.build_ledger(events))
+                                                 youzu_log.build_ledger(events))
+                youzu_log.save_home_situation(
+                    events, STATUS_DIR / "youzu_home_situation.json")
             finally:
                 path.unlink(missing_ok=True)  # 阅后即焚，原始日志不留本地
             yield (f"[日课] ✓ 账本已同步：观察 {result['observations_written']} 条，"

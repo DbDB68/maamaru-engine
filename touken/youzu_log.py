@@ -322,6 +322,58 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     return snap
 
 
+def build_home_situation(events: list[dict]) -> dict | None:
+    """Only the allowlisted game facts needed by the personal homepage.
+
+    Keep the source time of each section. A recent pull can contain an old
+    login/party response, so pull time must never masquerade as observation time.
+    """
+    endpoints = ("/login/start", "/party/list", "/home/leave", "/home/situation")
+    found = {}
+    accepted = []
+    for ev in events:
+        if (ev.get("direction") == "S->C" and ev.get("endpoint") in endpoints
+                and ev.get("status") == 200 and isinstance(ev.get("payload"), dict)
+                and str(ev["payload"].get("status", 0)) == "0"):
+            found[ev["endpoint"]] = ev
+            accepted.append(ev)
+    if not found:
+        return None
+    snap = build_snapshot(accepted, with_swords=False)
+    def observed(endpoint):
+        return (found.get(endpoint) or {}).get("ts")
+    return {
+        "schema": 1,
+        "secretary": {"name": snap["profile"]["secretary"],
+                      "observed_at": observed("/login/start")},
+        "parties": [{"party_no": p["party_no"], "party_name": p["party_name"],
+                     "members": [{"name": m["name"], "level": m["level"]}
+                                 for m in p["members"]],
+                     "finished_at": p["finished_at"]}
+                    for p in snap["parties"]] if "/party/list" in found else [],
+        "parties_observed_at": observed("/party/list"),
+        "kiwame_return": [{"name": k["name"], "finished_at": k["finished_at"]}
+                          for k in snap["kiwame_return"] if k["finished_at"]],
+        "kiwame_observed_at": observed("/home/leave"),
+        "forge_slots": [{"slot_no": f["slot_no"], "finished_at": f["finished_at"]}
+                        for f in snap["forge_slots"] if f["finished_at"]],
+        "forge_observed_at": observed("/home/situation"),
+    }
+
+
+def save_home_situation(events: list[dict], path: Path | str) -> dict | None:
+    """Atomically replace the small, credential-free homepage snapshot."""
+    situation = build_home_situation(events)
+    if situation is None:
+        return None
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(situation, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(path)
+    return situation
+
+
 # ---------------------------------------------------------------- ledger
 
 # 账房八资源 ← 日志字段映射（resource 块 + currency 块）。

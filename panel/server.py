@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -31,7 +32,7 @@ from touken.diagnostics import (
     build_diagnostic_bundle, create_diagnostic_bundle, reveal_file_in_explorer,
 )
 from touken.runtime_paths import (
-    BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
+    BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, DEBUG_DIR, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
     ensure_runtime_data,
 )
 
@@ -2670,6 +2671,48 @@ async def api_latest_sword_inventory():
     latest = (store.sword_snapshot_detail(owned["id"])
               if owned else None)
     return {"schema_version": TELEMETRY_SCHEMA_VERSION, "snapshot": latest}
+
+
+@app.get("/api/honmaru-home/situation")
+def api_home_situation():
+    path = STATUS_DIR / "youzu_home_situation.json"
+    if not path.exists():
+        return {"situation": None}
+    try:
+        situation = json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(situation, dict) or situation.get("schema") != 1
+                or not isinstance(situation.get("secretary"), dict)
+                or not isinstance(situation.get("parties"), list)
+                or not isinstance(situation.get("kiwame_return"), list)
+                or not isinstance(situation.get("forge_slots"), list)):
+            raise ValueError("unsupported homepage situation")
+        return {"situation": situation}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(503, "本丸近况暂时读不到，原记录已保留。") from exc
+
+
+@app.post("/api/honmaru-home/situation/refresh")
+def api_refresh_home_situation():
+    from touken import youzu_log
+    if get_runner().is_running:
+        raise HTTPException(409, "执务进行中，收工后再同步近况。")
+    try:
+        cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        path = youzu_log.pull_log(
+            cfg.get("adb_path") or _DEFAULT_ADB_PATH,
+            cfg.get("adb_address") or _DEFAULT_ADB_ADDR,
+            dest_dir=DEBUG_DIR)
+        try:
+            situation = youzu_log.save_home_situation(
+                youzu_log.parse_events(path),
+                STATUS_DIR / "youzu_home_situation.json")
+        finally:
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(503, "没能从游戏读取近况，请确认模拟器和游戏正在运行。") from exc
+    if situation is None:
+        raise HTTPException(503, "这次记录里还没有本丸近况，请进入本丸后再试。")
+    return {"situation": situation}
 
 
 @app.get("/api/data/honmaru-profile")

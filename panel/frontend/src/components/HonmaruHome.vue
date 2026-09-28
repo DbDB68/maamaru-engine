@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, PlanningReport } from '../types'
+import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
 import { categoryOf, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
@@ -15,6 +15,9 @@ const runs = ref<any[]>([])
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
+const situation = ref<HonmaruSituation | null>(null)
+const syncingSituation = ref(false)
+const situationError = ref('')
 const todayKobanSpending = ref<number | null>(null)
 const briefUpdatedAt = ref(0)
 const editingProfile = ref(false)
@@ -116,6 +119,21 @@ function resource(name: string) {
   return typeof value === 'number' ? value.toLocaleString() : '未记录'
 }
 function dateLabel(date: string) { return date === today.value ? '今天' : date.replaceAll('-', '.') }
+function gameTime(value: string) { return value.slice(0, 16).replaceAll('-', '.') }
+function situationTime(value: string | null) {
+  if (!value) return '读取时间不明'
+  const stamp = Date.parse(value.replace(' ', 'T') + '+08:00')
+  if (!Number.isFinite(stamp)) return '读取时间不明'
+  const minutes = Math.max(0, Math.floor((now.value - stamp) / 60000))
+  return minutes < 60 ? `${minutes} 分钟前读取` : `${value.slice(5, 16).replace('-', '.')} 读取`
+}
+async function syncSituation() {
+  syncingSituation.value = true
+  situationError.value = ''
+  try { situation.value = (await api.refreshHonmaruSituation()).situation }
+  catch (error) { situationError.value = errorMessage(error) }
+  finally { syncingSituation.value = false }
+}
 const runPostKinds: Record<string, { label: string; icon: string; scene: string }> = {
   sortie: { label: '出阵手记', icon: 'sortie.png', scene: 'honmaru_sortie_stage.png' },
   yosari: { label: '异去手记', icon: 'yosari.png', scene: 'honmaru_sortie_stage.png' },
@@ -183,6 +201,7 @@ async function loadSummaries() {
     { label: '规划', run: async () => { planning.value = await api.planning() } },
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
     { label: '家底', run: async () => { inventory.value = (await api.dashboard()).inventory } },
+    { label: '游戏近况', run: async () => { situation.value = (await api.honmaruSituation()).situation } },
     { label: '今日账目', run: async () => {
       const ledger = await api.resourceLedger(1)
       todayKobanSpending.value = Math.abs(ledger.attributions
@@ -305,6 +324,18 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
+      <section class="home-situation" aria-label="游戏里的本丸近况">
+        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>庭院近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
+        <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
+        <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
+        <template v-else>
+          <p v-if="situation.secretary.name" class="situation-secretary">近侍 · <strong>{{ situation.secretary.name }}</strong><small>{{ situationTime(situation.secretary.observed_at) }}</small></p>
+          <div v-if="situation.parties.some(p => p.members.length)" class="situation-group"><p>部队 <small>{{ situationTime(situation.parties_observed_at) }}</small></p><div v-for="party in situation.parties.filter(p => p.members.length)" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong>{{ party.members.map(m => m.name).join('、') }}</strong><small v-if="party.finished_at">记录的完成时间 {{ gameTime(party.finished_at) }}</small></div></div>
+          <div v-if="situation.kiwame_return.length" class="situation-group"><p>修行归期 <small>{{ situationTime(situation.kiwame_observed_at) }}</small></p><div v-for="(item, index) in situation.kiwame_return" :key="index" class="situation-row"><strong>{{ item.name || '修行中的刀剑' }}</strong><small>{{ gameTime(item.finished_at) }}</small></div></div>
+          <div v-if="situation.forge_slots.length" class="situation-group"><p>锻刀完成时间 <small>{{ situationTime(situation.forge_observed_at) }}</small></p><div v-for="slot in situation.forge_slots" :key="slot.slot_no" class="situation-row"><strong>第{{ slot.slot_no }}炉</strong><small>{{ gameTime(slot.finished_at) }}</small></div></div>
+          <p v-if="!situation.secretary.name && !situation.parties.some(p => p.members.length) && !situation.kiwame_return.length && !situation.forge_slots.length" class="home-muted">这次记录还没有可展示的近况。</p>
+        </template>
+      </section>
       <PaperCard variant="dashboard" class="home-brief">
         <header class="brief-meta"><span>狐之助小报 · {{ briefTime }}</span><span>{{ briefFreshness }}</span></header>
         <h2>{{ caretakerBrief.title }}</h2>
@@ -434,6 +465,18 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-empty h3 { margin: 14px 0 10px; font-size: 17px; font-weight: 500; }
 .journal-empty p { color: var(--ink-dim); line-height: 1.9; font-size: 12px; margin-bottom: 18px; }
 .honmaru-keepsakes { display: grid; gap: 25px; min-width: 0; }
+.home-situation { padding: 16px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: 12px; min-width: 0; }
+.home-situation header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
+.home-situation header h2 { margin: 2px 0 12px; }
+.home-situation .home-text-button { white-space: nowrap; }
+.situation-secretary, .situation-group { margin: 0; padding: 10px 0; border-top: 1px solid var(--paper-line); }
+.situation-secretary { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; font-size: 13px; }
+.situation-secretary small, .situation-group small { color: var(--ink-dim); font-size: 11px; }
+.situation-secretary small { margin-left: auto; }
+.situation-group > p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; margin: 0 0 8px; font-size: 12px; }
+.situation-row { display: grid; gap: 3px; margin-top: 8px; font-size: 12px; }
+.situation-row span, .situation-row small { color: var(--ink-dim); }
+.situation-row strong { font-weight: 500; overflow-wrap: anywhere; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
 .home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
