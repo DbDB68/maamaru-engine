@@ -311,14 +311,24 @@ _ENDPOINT_LABEL = {
 _PARTY_NO_CN = {1: "一队", 2: "二队", 3: "三队", 4: "四队", 5: "五队"}
 
 
-def _expedition_map_label(field_id) -> str:
-    """conquest 的 field_id → 地图编号+名字（如 "B1 白河战线"）。
+def _expedition_map_label(field_id, scheme: str = "sequential") -> str:
+    """field_id → 地图编号+名字（如 "B1 公武合体运动"）。
 
-    field_id 编码规则（2026-09-28 老大实测校准）：21 = 二维度1小图 = B1
-    公武合体运动，即 十位=era 个位=slot。对不上就老实显示 field_id 原值。
+    国服 field_id 口径（2026-09-28 拿真实报文锤死）：
+      - sequential（默认，唯一实测在用的）：/conquest 的 summary、
+        /conquest/start 请求、/conquest/complete 响应顶层全是它——
+        小图按章连排（A1-A4=1-4、B1=5……E4=20）。
+      - era_slot（十位=era 个位=slot）：响应里另有一个 conquest
+        子对象 field_id 恒为 "21"——B1 和 A1 的结算里它都是 21，
+        与远征目的地无关（疑似界面停留页之类的粘性状态），
+        不能拿来当地图。留这个 scheme 仅为解读该字段。
+    对不上就老实显示 field_id 原值。
     """
     fid = _int(field_id, -1)
-    era, slot = fid // 10, fid % 10
+    if scheme == "era_slot":
+        era, slot = fid // 10, fid % 10
+    else:
+        era, slot = (fid - 1) // 4 + 1, (fid - 1) % 4 + 1
     if not (1 <= era <= 5 and 1 <= slot <= 4):
         return f"field#{field_id}"
     code = f"{'ABCDE'[era - 1]}{slot}"
@@ -331,7 +341,12 @@ def _expedition_map_label(field_id) -> str:
 
 
 def _conquest_detail_label(endpoint: str, payload) -> str | None:
-    """远征相关响应 → 带部队和地图的细分标签（从响应原文取，不是猜）。"""
+    """远征相关报文 → 带部队和地图的细分标签（从报文原文取，不是猜）。
+
+    complete 响应顶层、start 请求的 field_id 都是 sequential 连排口径
+    （2026-09-28 实测：A1 start 请求 field_id=1，B1 complete 顶层
+    field_id=5）。
+    """
     if not isinstance(payload, dict):
         return None
     party_no = _int(payload.get("party_no"), 0)
@@ -386,6 +401,28 @@ def _reading_from_payload(payload) -> dict | None:
     return reading or None
 
 
+def _payload_koban_reward(payload) -> int:
+    """响应里直接列出的小判收入（item_type=4 的条目合计）。
+
+    不少动作响应没有 currency 块，小判只出现在奖励清单里——
+    /conquest/complete 叫 reward、/mission/rewards 叫 item，结构相同。
+    item_type=5 是资源/委托符（item_id：1=委托符 2=木炭 3=玉钢 4=冷却材
+    5=砥石，2026-09-28 实测），那部分响应自带的 resource 块差值已覆盖，
+    这里只取小判，不重复计。
+    """
+    if not isinstance(payload, dict):
+        return 0
+    total = 0
+    for key in ("reward", "item"):
+        entries = payload.get(key)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and str(entry.get("item_type")) == "4":
+                total += _int(entry.get("item_num"))
+    return total
+
+
 def build_ledger(events: list[dict]) -> dict:
     """从事件流提取账本：余额观察链 + 逐笔归因收支。
 
@@ -413,6 +450,17 @@ def build_ledger(events: list[dict]) -> dict:
             continue
         ts = _event_epoch(ev)
 
+        # 远征细分标签：complete 响应原文自带 party_no+field_id；start 的
+        # 响应没有，退而取它自己的 C->S 请求原文（两处都是连排口径）。
+        # 哪支队哪张图直接细分出来（视觉识别最难啃的点，这里白拿）
+        detail = _conquest_detail_label(ev["endpoint"], ev.get("payload"))
+        if detail is None and ev["endpoint"] == "/conquest/start":
+            req = next((r for r in reversed(pending_requests)
+                        if r["endpoint"] == "/conquest/start"), None)
+            if req:
+                detail = _conquest_detail_label(ev["endpoint"],
+                                                req.get("payload"))
+
         delta, before, after = {}, {}, {}
         for name, value in reading.items():
             if name in last_known and last_known[name] != value:
@@ -432,9 +480,6 @@ def build_ledger(events: list[dict]) -> dict:
             # 会把归因列表冲成流水账。全都认不出时才全列出来留证。
             labeled = [r for r in pending_requests
                        if r["endpoint"] in _ENDPOINT_LABEL]
-            # 远征完成/派遣的响应原文自带 party_no+field_id，直接细分到
-            # 哪支队哪张图（这是视觉识别最难啃的点，现在白拿）
-            detail = _conquest_detail_label(ev["endpoint"], ev.get("payload"))
             culprits = []
             for req in (labeled or pending_requests):
                 label = _ENDPOINT_LABEL.get(req["endpoint"],
@@ -451,6 +496,30 @@ def build_ledger(events: list[dict]) -> dict:
                 "via": culprits or ["(无请求，自然恢复?)"],
                 "via_endpoints": [r["endpoint"] for r in pending_requests],
             })
+
+        # 小判（currency.money）在不少动作响应里没有容器：complete 没有
+        # currency 块，mission/rewards 也没有——小判只列在奖励清单里
+        # （item_type=4，见 _payload_koban_reward）。按原文补记一笔并把
+        # 水位线同步推高，否则同一笔小判会拖到下一次带 currency 的轮询
+        # 才爆出来、归到不相干的端点头上（2026-09-28 实测：任务奖励的
+        # 小判+250 拖了两个钟头，差点赖给 party/list）。
+        # 响应自己已带小判读数时跳过（读数已是发奖后的值，不能再加）。
+        koban = _payload_koban_reward(ev.get("payload")) \
+            if "小判" not in reading else 0
+        if koban:
+            before_k = last_known.get("小判")
+            after_k = (before_k + koban) if before_k is not None else None
+            changes.append({
+                "ts": ts,
+                "delta": {"小判": koban},
+                "before": {"小判": before_k},
+                "after": {"小判": after_k},
+                "via": [detail or _ENDPOINT_LABEL.get(
+                    ev["endpoint"], (ev["endpoint"] or "?").lstrip("/"))],
+                "via_endpoints": [r["endpoint"] for r in pending_requests],
+            })
+            if after_k is not None:
+                last_known["小判"] = after_k
         pending_requests = []
 
     return {"observations": observations, "changes": changes}

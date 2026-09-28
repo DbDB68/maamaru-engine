@@ -213,7 +213,10 @@ def test_format_ledger_runs(tmp_path):
 
 
 def test_conquest_complete_gets_detailed_label(tmp_path):
-    """远征完成的响应自带 party_no/field_id，归因要细分到队和图。"""
+    """远征完成的响应自带 party_no/field_id，归因要细分到队和图。
+
+    complete 响应顶层的 field_id 是连排口径（B1=5，2026-09-28 实测）。
+    """
     sample = "\n".join([
         _s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
              {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
@@ -224,7 +227,8 @@ def test_conquest_complete_gets_detailed_label(tmp_path):
              "party_no=4"),
         _s2c("2026-09-28 12:37:48",
              "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
-             {"success": True, "field_id": "21", "party_no": "4",
+             {"success": 2, "field_id": "5", "party_no": "4",
+              "conquest": {"field_id": "21"},
               "resource": {"charcoal": 235, "steel": 0, "coolant": 135,
                            "file": 135, "bill": 0},
               "status": 0, "now_time": 1790548668}),
@@ -236,9 +240,122 @@ def test_conquest_complete_gets_detailed_label(tmp_path):
     assert label.startswith("远征完成·四队·B1"), label
 
 
+def test_conquest_start_label_from_request(tmp_path):
+    """start 的响应不带 party_no/field_id，细分标签要从请求原文拿。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790546400}),
+        _c2s("2026-09-28 12:10:00", "POST",
+             "https://s39-ios-djlw.youzu.com/conquest/start?uid=1",
+             "consumable_id=0&field_id=1&party_no=1"),
+        _s2c("2026-09-28 12:10:01",
+             "https://s39-ios-djlw.youzu.com/conquest/start?uid=1",
+             {"summary": {"1": {"party_no": "1", "field_id": "1"}},
+              "resource": {"charcoal": 50, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790547001}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    label = ledger["changes"][0]["via"][0]
+    assert label.startswith("远征派遣·一队·A1"), label
+
+
+def test_conquest_complete_koban_reward(tmp_path):
+    """complete 的小判走 reward 数组（响应没有 currency 块）：按原文记
+    一笔并推高水位线，后续轮询读到新余额时不许再报一次。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "currency": {"money": "570"},
+              "status": 0, "now_time": 1790546400}),
+        _c2s("2026-09-28 12:37:47", "POST",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             "party_no=4"),
+        _s2c("2026-09-28 12:37:48",
+             "https://s39-ios-djlw.youzu.com/conquest/complete?uid=1",
+             {"success": 2, "field_id": "5", "party_no": "4",
+              "resource": {"charcoal": 100, "steel": 0, "coolant": 135,
+                           "file": 135, "bill": 0},
+              "reward": [{"item_type": "4", "item_id": "0", "item_num": 200},
+                         {"item_type": "5", "item_id": "4", "item_num": 135},
+                         {"item_type": "5", "item_id": "5", "item_num": 135}],
+              "status": 0, "now_time": 1790548668}),
+        # 之后某个轮询端点带回新的小判余额 770：不许再报 +200
+        _s2c("2026-09-28 12:38:10", "https://s39-ios-djlw.youzu.com/party/list?uid=1",
+             {"resource": {"charcoal": 100, "steel": 0, "coolant": 135,
+                           "file": 135, "bill": 0},
+              "currency": {"money": "770"},
+              "status": 0, "now_time": 1790548690}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+
+    koban_changes = [c for c in ledger["changes"] if "小判" in c["delta"]]
+    assert len(koban_changes) == 1
+    ch = koban_changes[0]
+    assert ch["delta"] == {"小判": 200}
+    assert ch["before"] == {"小判": 570}
+    assert ch["after"] == {"小判": 770}
+    assert ch["via"][0].startswith("远征完成·四队·B1")
+    # 资源差值照常走 resource 块，不受影响
+    res = [c for c in ledger["changes"] if "冷却材" in c["delta"]]
+    assert res and res[0]["delta"] == {"冷却材": 135, "砥石": 135}
+
+
+def test_mission_rewards_koban_from_item_list(tmp_path):
+    """mission/rewards 的小判在 item 数组里（item_type=4），响应没有
+    currency 块——要按原文记账，不许拖到下一次轮询才爆出来。"""
+    sample = "\n".join([
+        _s2c("2026-09-28 13:00:00", "https://s39-ios-djlw.youzu.com/sign?uid=1",
+             {"resource": {"charcoal": 0, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "currency": {"money": "1000"}, "status": 0,
+              "now_time": 1790542800}),
+        _c2s("2026-09-28 13:03:04", "POST",
+             "https://s39-ios-djlw.youzu.com/mission/rewards?uid=1", "id=1"),
+        _s2c("2026-09-28 13:03:06",
+             "https://s39-ios-djlw.youzu.com/mission/rewards?uid=1",
+             {"item": [{"item_type": 5, "item_id": 2, "item_num": 400},
+                       {"item_type": 4, "item_id": 0, "item_num": 250}],
+              "resource": {"charcoal": 400, "steel": 0, "coolant": 0,
+                           "file": 0, "bill": 0},
+              "status": 0, "now_time": 1790542986}),
+        # 两个钟头后的轮询带回新余额：不许再报 +250
+        _s2c("2026-09-28 15:00:00", "https://s39-ios-djlw.youzu.com/home?uid=1",
+             {"currency": {"money": "1250"}, "status": 0,
+              "now_time": 1790550000}),
+    ])
+    f = tmp_path / "log.txt"
+    f.write_text(sample, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+
+    koban = [c for c in ledger["changes"] if "小判" in c["delta"]]
+    assert len(koban) == 1
+    assert koban[0]["delta"] == {"小判": 250}
+    assert koban[0]["before"] == {"小判": 1000}
+    assert koban[0]["after"] == {"小判": 1250}
+    assert koban[0]["via"] == ["任务奖励"]
+    # item 里的资源条目不重复计（resource 块差值已覆盖）
+    res = [c for c in ledger["changes"] if "木炭" in c["delta"]]
+    assert len(res) == 1 and res[0]["delta"] == {"木炭": 400}
+
+
 def test_expedition_map_label_fallback():
-    # 正常映射：21 → B1（二维度 1 小图）
-    assert youzu_log._expedition_map_label("21").startswith("B1")
+    # sequential 连排口径（真实报文唯一在用的）：1=A1、5=B1、20=E4
+    assert youzu_log._expedition_map_label("1").startswith("A1")
+    assert youzu_log._expedition_map_label("5").startswith("B1")
+    assert youzu_log._expedition_map_label("20").startswith("E4")
+    # 连排口径下 21 超出 E4=20，宁可显示原值也不硬猜
+    assert youzu_log._expedition_map_label("21") == "field#21"
+    # era_slot 口径仅用于解读那个恒为 21 的 conquest 粘性子对象
+    assert youzu_log._expedition_map_label("21", scheme="era_slot") \
+        .startswith("B1")
     # 妖魔鬼怪的 field_id 不硬猜，老实显示原值
     assert youzu_log._expedition_map_label("99") == "field#99"
 
