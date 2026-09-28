@@ -65,9 +65,11 @@ function workflowSaved(preset: WorkflowPreset) {
 }
 const loading = ref(true)
 const message = ref('')
-type AppTab = 'home' | 'planning' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
+type AppTab = 'home' | 'planning' | 'swords' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
 type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
+// 刀剑页内视图：刀账 / 部队预设（'archive' tab 保留为旧入口兼容别名）
+const swordView = ref<'archive' | 'formation'>('archive')
 const lastWorkshopTab = ref<WorkshopTab>('office')
 const workshopActive = computed(() => ['office', 'tasks', 'workflow', 'devtools'].includes(tab.value))
 function openWorkshop() {
@@ -458,7 +460,7 @@ async function pauseScheduler() { await api.pauseExpeditions(30); schedulerWarni
 // 通知中心事故单的「去看看」：按 entry 跳到对应页面/任务
 function openIncidentEntry(entry: { tab?: string; script?: string }) {
   const target = String(entry.tab || 'report')
-  if (['home', 'planning', 'tasks', 'workflow', 'report', 'archive', 'system'].includes(target)) tab.value = target as typeof tab.value
+  if (['home', 'planning', 'swords', 'tasks', 'workflow', 'report', 'archive', 'system'].includes(target)) tab.value = target as typeof tab.value
   if (entry.script && scripts.value[entry.script]) selected.value = entry.script
 }
 
@@ -568,8 +570,9 @@ watch(tab, value => {
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
+          <button class="nav-swords" :class="{ active: tab === 'swords' || tab === 'archive' }" @click="tab = 'swords'">刀剑</button>
           <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">功能</button>
-          <button class="nav-report" :class="{ active: tab === 'report' || tab === 'archive' }" @click="tab = 'report'">仓库</button>
+          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">系统</button>
         </template>
       </nav>
@@ -590,11 +593,11 @@ watch(tab, value => {
         <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
       </div>
     </nav>
-    <nav v-if="!ledgerMode && (tab === 'report' || tab === 'archive')" class="workshop-nav warehouse-nav" aria-label="仓库">
-      <div class="workshop-title"><strong>仓库</strong><small>先看资源，再翻刀账</small></div>
+    <nav v-if="!ledgerMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
+      <div class="workshop-title"><strong>刀剑</strong><small>看看刀账，调调部队</small></div>
       <div class="workshop-tabs">
-        <button type="button" :class="{ active: tab === 'report' }" @click="tab = 'report'">资源与账本</button>
-        <button type="button" :class="{ active: tab === 'archive' }" @click="tab = 'archive'">刀账</button>
+        <button type="button" :class="{ active: swordView === 'archive' }" @click="swordView = 'archive'">刀账</button>
+        <button type="button" :class="{ active: swordView === 'formation' }" @click="swordView = 'formation'">部队预设</button>
       </div>
     </nav>
     <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onStageScroll">
@@ -614,8 +617,8 @@ watch(tab, value => {
         <details class="task-nav-group" open>
           <summary>队伍</summary>
           <h3>队伍</h3>
-          <SideNavItem :active="selected === '$formation'" @click="selected = '$formation'">
-            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">部队预设</span>
+          <SideNavItem :active="false" @click="swordView = 'formation'; tab = 'swords'">
+            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">部队预设 <span class="task-menu-jump">→刀剑页</span></span>
           </SideNavItem>
         </details>
         <details class="task-nav-group" open>
@@ -665,7 +668,6 @@ watch(tab, value => {
         </TaskForm>
         <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课已放进工作流</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
         <SchedulePanel v-else-if="selected === '$schedule'" embedded />
-        <FormationPanel v-else-if="selected === '$formation'" :running="running" :current="current" :stopping="stopping" @stop="stop" @notify="message = $event" />
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
         <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />
@@ -750,7 +752,7 @@ watch(tab, value => {
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'archive'" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>

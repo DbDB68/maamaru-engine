@@ -129,6 +129,7 @@ button { cursor: pointer; }
 }
 .sidebar button > span, .home-functions button > span { display: inline-flex; min-width: 0; align-items: center; gap: 9px; }
 .task-menu-icon { width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; image-rendering: pixelated; }
+.task-menu-jump { color: #8a7d6a; font-size: 11px; }
 .sidebar button:hover { background: #ebe0cc; }
 .sidebar button.active { background: #fffaf0; border-color: #bd8b47; box-shadow: 3px 3px 0 #d6c7ad; }
 .sidebar small { color: #9d3028; }
