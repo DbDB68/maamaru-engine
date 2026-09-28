@@ -314,8 +314,8 @@ _PARTY_NO_CN = {1: "一队", 2: "二队", 3: "三队", 4: "四队", 5: "五队"}
 def _expedition_map_label(field_id) -> str:
     """conquest 的 field_id → 地图编号+名字（如 "B1 白河战线"）。
 
-    field_id 的编码规则是推的：21 = 二维度1小图（B1），即 十位=era 个位=slot。
-    还没拿真实结算响应校准过，对不上就老实显示 field_id 原值。
+    field_id 编码规则（2026-09-28 老大实测校准）：21 = 二维度1小图 = B1
+    公武合体运动，即 十位=era 个位=slot。对不上就老实显示 field_id 原值。
     """
     fid = _int(field_id, -1)
     era, slot = fid // 10, fid % 10
