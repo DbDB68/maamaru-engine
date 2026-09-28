@@ -105,6 +105,11 @@ class _LoopHost(SortieMixin):
     def _team_injury_status(self, cfg):
         return self._injuries.pop(0) if self._injuries else None
 
+    def _combined_injury_status(self, cfg, team_no, log_cache):
+        # 委托给视觉桩，保持本文件的遥测语义不变（日志通道由
+        # test_youzu_log.py 的 _log_injury_status 专项覆盖）
+        return self._team_injury_status(cfg), None
+
     def _injury_reaches_threshold(self, injury, threshold):
         return True
 

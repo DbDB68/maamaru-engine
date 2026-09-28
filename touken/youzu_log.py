@@ -322,6 +322,131 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     return snap
 
 
+# ---------------------------------------------------------------- injury
+
+# 伤势分档阈值（2026-09-28 CU 编队页实拍校准，样本：队3/队4）：
+#   34%/38%/45%/60%/61% 全部挂「中伤」章 → 中伤线 > 61%，取 2/3；
+#   94%/96% 在编队页不挂章（轻伤章编队页不显示，轻伤=掉血但 >2/3）；
+#   重伤线无样本（全 roster 最伤 34% 仍是中伤），取 1/3 保守线——
+#   若真线是 1/4，我们只是在 26~33% 提前停，安全方向。
+def injury_tier(hp, hp_max) -> str | None:
+    """hp 比例 → 轻伤/中伤/重伤；满血或数据非法返回 None。"""
+    hp, hp_max = _int(hp, -1), _int(hp_max, 0)
+    if hp_max <= 0 or hp < 0 or hp >= hp_max:
+        return None
+    if hp * 3 <= hp_max:
+        return "重伤"
+    if hp * 3 <= hp_max * 2:
+        return "中伤"
+    return "轻伤"
+
+
+# 携带全量刀数据的端点（2026-09-28 实测：/sally 进出阵菜单必刷新，
+# /party/list 进编队页刷新；/conquest/complete 等只带部分块，不算）。
+_SWORD_FULL_ENDPOINTS = ("/party/list", "/sally")
+
+
+def _latest_sword_pool(events: list[dict]):
+    """最新一次全量刀数据 (swords_dict, event)。没有返回 (None, None)。"""
+    for ev in reversed(events):
+        if ev.get("direction") != "S->C" or ev.get("endpoint") not in \
+                _SWORD_FULL_ENDPOINTS or not isinstance(ev.get("payload"), dict):
+            continue
+        pool = ev["payload"].get("sword") or ev["payload"].get("sword_all")
+        if isinstance(pool, dict) and pool:
+            return pool, ev
+    return None, None
+
+
+def party_injury_report(events: list[dict], party_no: int) -> dict | None:
+    """某部队的逐振验伤报告（serial 锚定，同名复制人精确区分）。
+
+    成员名单来自最新 /party/list，hp 来自最新全量刀数据响应；
+    两边各自带 observed_at（数据时间，不许拿 pull 时间冒充）。
+    任一成员在刀池里查不到 → 数据不全，整体返回 None（调用方回退
+    视觉链，绝不拿半残数据放行）。
+    """
+    party_ev = None
+    for ev in reversed(events):
+        if ev.get("direction") == "S->C" and ev.get("endpoint") == "/party/list" \
+                and isinstance(ev.get("payload"), dict) \
+                and isinstance(ev["payload"].get("party"), dict):
+            party_ev = ev
+            break
+    pool, pool_ev = _latest_sword_pool(events)
+    if party_ev is None or pool is None:
+        return None
+    party = party_ev["payload"]["party"].get(str(party_no))
+    if not isinstance(party, dict):
+        return None
+    from . import sword_db  # 与 build_snapshot 同款延迟 import
+    roster = [{"serial_id": _int(sid), "name": _sword_name(s.get("sword_id"),
+                                                            sword_db),
+               "level": _int(s.get("level"))}
+              for sid, s in pool.items() if isinstance(s, dict)]
+    labels = dup_labels(roster)
+    members = []
+    for slot_no in sorted((party.get("slot") or {}), key=lambda x: _int(x)):
+        serial = str((party["slot"][slot_no] or {}).get("serial_id") or "")
+        if not serial or serial == "0":
+            continue
+        s = pool.get(serial)
+        if not isinstance(s, dict):
+            return None  # 有成员查不到 = 数据不全，不猜
+        members.append({
+            "serial_id": _int(serial),
+            "sword_id": _int(s.get("sword_id")),
+            "name": _sword_name(s.get("sword_id"), sword_db),
+            "label": labels.get(_int(serial), ""),
+            "level": _int(s.get("level")),
+            "hp": _int(s.get("hp")), "hp_max": _int(s.get("hp_max")),
+            "fatigue": _int(s.get("fatigue")),
+            "protected": bool(_int(s.get("protect"))),
+            "omamori": _int(s.get("item_id"), 0) or None,  # 装备的御守道具 id
+            "injury": injury_tier(s.get("hp"), s.get("hp_max")),
+        })
+    if not members:
+        return None
+    rank = {None: 0, "轻伤": 1, "中伤": 2, "重伤": 3}
+    worst = max(members, key=lambda m: rank[m["injury"]])
+    return {
+        "party_no": party_no,
+        "members": members,
+        "max_injury": worst["injury"],
+        "observed_at": pool_ev.get("ts"),
+        "party_observed_at": party_ev.get("ts"),
+    }
+
+
+def dup_labels(swords) -> dict:
+    """同名刀消歧标签 {serial_id: 标签}。独占名字的给原名；撞名的
+    等级能区分用「·Lv99」，等级也撞按 serial 升序给「·2号机」
+    （serial 近似获得顺序，编号稳定不漂移）。"""
+    rows = []
+    for s in swords:
+        if isinstance(s, dict) and s.get("serial_id") is not None:
+            rows.append(s)
+    groups: dict[str, list] = {}
+    for s in rows:
+        groups.setdefault(str(s.get("name") or ""), []).append(s)
+    labels = {}
+    for name, members in groups.items():
+        members.sort(key=lambda m: _int(m.get("serial_id")))
+        if len(members) == 1:
+            labels[_int(members[0]["serial_id"])] = name
+            continue
+        lv_seen = {}
+        for m in members:
+            lv_seen.setdefault(_int(m.get("level")), []).append(m)
+        for idx, m in enumerate(members, 1):
+            lv = _int(m.get("level"))
+            if len(lv_seen[lv]) == 1:
+                labels[_int(m["serial_id"])] = f"{name}·Lv{lv}"
+            else:
+                labels[_int(m["serial_id"])] = f"{name}·{idx}号机"
+    return labels
+
+
 def build_home_situation(events: list[dict]) -> dict | None:
     """Only the allowlisted game facts needed by the personal homepage.
 
@@ -339,7 +464,17 @@ def build_home_situation(events: list[dict]) -> dict | None:
             accepted.append(ev)
     if not found:
         return None
-    snap = build_snapshot(accepted, with_swords=False)
+    snap = build_snapshot(accepted, with_swords=True)
+    # 同名刀消歧（label/serial_tail 是新增字段，name/level 原样不动，
+    # 旧前端无感；渲染侧认领后展示 label 即可）
+    labels = dup_labels(snap.get("swords") or [])
+
+    def _member(m):
+        serial = m.get("serial_id")
+        return {"name": m["name"], "level": m["level"],
+                "label": labels.get(serial, m["name"]),
+                "serial_tail": str(serial)[-4:] if serial else ""}
+
     def observed(endpoint):
         return (found.get(endpoint) or {}).get("ts")
     return {
@@ -347,8 +482,7 @@ def build_home_situation(events: list[dict]) -> dict | None:
         "secretary": {"name": snap["profile"]["secretary"],
                       "observed_at": observed("/login/start")},
         "parties": [{"party_no": p["party_no"], "party_name": p["party_name"],
-                     "members": [{"name": m["name"], "level": m["level"]}
-                                 for m in p["members"]],
+                     "members": [_member(m) for m in p["members"]],
                      "finished_at": p["finished_at"]}
                     for p in snap["parties"]] if "/party/list" in found else [],
         "parties_observed_at": observed("/party/list"),

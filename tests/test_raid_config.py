@@ -46,3 +46,22 @@ class RaidConfigMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InjuryCheckConfigMigrationTests(unittest.TestCase):
+    def test_old_config_gets_injury_check_key(self):
+        """老安装没有 injury_check：补键后默认开启日志验伤，且保留备份。"""
+        template = json.loads(EXAMPLE.read_text(encoding="utf-8-sig"))
+        old = json.loads(json.dumps(template))
+        old.pop("injury_check")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "touken_config.json"
+            backup_dir = Path(tmp) / "backups"
+            target.write_text(json.dumps(old, ensure_ascii=False),
+                              encoding="utf-8")
+            added = _fill_missing_config_keys(EXAMPLE, target, backup_dir)
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            self.assertIn("injury_check", added)
+            self.assertTrue(merged["injury_check"]["use_youzu_log"])
+            self.assertEqual(merged["injury_check"]["max_age_sec"], 600)
+            self.assertEqual(len(list(backup_dir.glob("*.json"))), 1)

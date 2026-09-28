@@ -332,7 +332,11 @@ class SortieMixin:
 
             # ========== 5. 【保命】重伤检查（先于一切出阵准备） ==========
             self.maa.screenshot(force=True)
-            injury = self._team_injury_status(cfg)
+            log_cache: dict = {}
+            injury, log_note = self._combined_injury_status(cfg, team_no,
+                                                            log_cache)
+            if log_note:
+                yield f"[出阵] 日志验伤：{log_note}"
             if injury:
                 threshold = str(repair_threshold or "light")
                 severity_rank = {"轻伤": 1, "中伤": 2, "重伤": 3}
@@ -412,7 +416,8 @@ class SortieMixin:
                         return
                     # 使用记录后重新做保命检查；异常时绝不再次点出阵。
                     self.maa.screenshot(force=True)
-                    restored_injury = self._team_injury_status(cfg)
+                    restored_injury, _ = self._combined_injury_status(
+                        cfg, team_no, log_cache)
                     if restored_injury and self._injury_reaches_threshold(
                             restored_injury, repair_threshold):
                         yield f"[出阵] 恢复刀装后检测到{restored_injury}，不再出阵"

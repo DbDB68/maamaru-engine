@@ -7,6 +7,7 @@
 import json
 import re
 import time
+from datetime import datetime
 
 from ..maa_adapter import roi_4to4, Point
 from ..runtime_paths import STATE_DIR
@@ -473,6 +474,62 @@ class BattleMixin:
         limits = {"light": 1, "medium": 2, "heavy": 3}
         return severity.get(injury, 3) >= limits.get(str(threshold or "light"), 1)
 
+    def _log_injury_status(self, team_no: int, cache: dict):
+        """国服日志验伤：HttpRequestCollect 里的精确 hp，serial 锚定，
+        同名复制人不会互相误判。返回 (伤势, 人话明细)；拉不到、数据过旧、
+        成员缺数据一律返回 (None, None)——「不知道」就回退视觉链，
+        绝不拿半残数据放行。
+
+        cache 在一次出阵链内复用：同圈复检不再 pull（一次 pull 含
+        adb root + 传输，秒级耗时，不能进热循环）。原始日志解析完即焚。
+        """
+        cfg = {}
+        if isinstance(getattr(self, "config", None), dict):
+            cfg = self.config.get("injury_check", {}) or {}
+        if not cfg.get("use_youzu_log", True):
+            return None, None
+        try:
+            if "events" not in cache:
+                from ..youzu_log import (DEFAULT_ADB, DEFAULT_ADDRESS,
+                                         party_injury_report, parse_events,
+                                         pull_log)
+                path = pull_log(
+                    getattr(self.maa, "adb_path", "") or DEFAULT_ADB,
+                    getattr(self.maa, "adb_address", "") or DEFAULT_ADDRESS)
+                try:
+                    cache["events"] = parse_events(path)
+                finally:
+                    path.unlink(missing_ok=True)  # 阅后即焚
+                cache["report_fn"] = party_injury_report
+            report = cache["report_fn"](cache["events"], team_no)
+        except Exception:
+            return None, None
+        if not report:
+            return None, None
+        max_age = float(cfg.get("max_age_sec", 600))
+        try:
+            age = (datetime.now() - datetime.strptime(
+                report["observed_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        except (TypeError, ValueError):
+            return None, None
+        if age > max_age:
+            return None, None
+        hurt = [m for m in report["members"] if m["injury"]]
+        detail = ("、".join(f"{m['label'] or m['name']}{m['injury']}"
+                            f"(hp{m['hp']}/{m['hp_max']})" for m in hurt)
+                  if hurt else "全员满血")
+        return report["max_injury"], detail
+
+    def _combined_injury_status(self, cfg: dict, team_no: int,
+                                log_cache: dict):
+        """视觉验伤 + 日志验伤取更保守结论（宁可错停，不放行）。
+        返回 (伤势, 日志明细)；日志通道缺席时明细为 None。"""
+        vision = self._team_injury_status(cfg)
+        log_injury, detail = self._log_injury_status(team_no, log_cache)
+        rank = {None: 0, "轻伤": 1, "中伤": 2, "重伤": 3}
+        injury = vision if rank[vision] >= rank[log_injury] else log_injury
+        return injury, detail
+
     def _team_injury_status(self, cfg):
         """在部队列表或战斗结果页识别当前最高伤势。"""
         # 只看左侧我方六人。大阪城结果页右侧敌军会出现红色“破坏”章，
@@ -565,7 +622,11 @@ class BattleMixin:
                 # 临时失手也不应把整次活动伪装成失败。
                 yield f"{tag} 自动换队长翻车（不影响出阵）: {exc}"
         self.maa.screenshot(force=True)
-        injury = self._team_injury_status(cfg)
+        log_cache: dict = {}
+        injury, log_note = self._combined_injury_status(cfg, team_no,
+                                                        log_cache)
+        if log_note:
+            yield f"{tag} 日志验伤：{log_note}"
         if injury and self._injury_reaches_threshold(
                 injury, repair_threshold):
             yield f"{tag} 出阵前检测到{injury}，已达到停止条件，本次不出阵"
@@ -690,7 +751,8 @@ class BattleMixin:
                     yield f"{tag} 恢复刀装后仍出现空缺警告，停止重试"
                     return False, team_record_saved
                 self.maa.screenshot(force=True)
-                restored_injury = self._team_injury_status(cfg)
+                restored_injury, _ = self._combined_injury_status(
+                    cfg, team_no, log_cache)
                 if restored_injury and self._injury_reaches_threshold(
                         restored_injury, repair_threshold):
                     yield f"{tag} 恢复刀装后检测到{restored_injury}，不再出阵"

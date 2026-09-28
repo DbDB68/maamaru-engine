@@ -558,3 +558,185 @@ def test_write_ledger_idempotent(tmp_path):
     assert any("远征完成" in x and "木炭" in x for x in labels)
     assert any("锻刀开炉" in x and "委托符" in x for x in labels)
     assert all(a["confidence"] == "confirmed" for a in agg["attributions"])
+
+
+# ---------------------------------------------------------------- 验伤/消歧
+
+def _injury_log(tmp_path, ts, members_hp, slots=("111", "222")):
+    """造一份带 party/list 的日志：members_hp = {serial: (hp, hp_max, sword_id)}"""
+    sword = {sid: {"serial_id": sid, "sword_id": sid_cfg[2],
+                   "level": "99", "hp": sid_cfg[0], "hp_max": sid_cfg[1],
+                   "fatigue": "100", "protect": "1", "item_id": "1"}
+             for sid, sid_cfg in members_hp.items()}
+    slot = {str(i + 1): {"serial_id": sid} for i, sid in enumerate(slots)}
+    lines = [
+        _s2c(ts, "https://x/party/list?uid=1",
+             {"sword": sword,
+              "party": {"1": {"party_no": "1", "status": "1",
+                              "party_name": "主力", "slot": slot,
+                              "finished_at": None}},
+              "status": 0}),
+    ]
+    f = tmp_path / "injury.log"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    return f
+
+
+def test_injury_tier_boundaries():
+    """分档阈值（2026-09-28 CU 编队页实拍校准：60%/61% 中伤，94%/96% 无章）。"""
+    t = youzu_log.injury_tier
+    assert t(79, 79) is None        # 满血
+    assert t(53, 79) == "轻伤"      # 67% > 2/3
+    assert t(52, 79) == "中伤"      # 66% ≤ 2/3
+    assert t(27, 79) == "中伤"      # 34%（实拍：莺丸 26/77=34% 挂中伤）
+    assert t(26, 79) == "重伤"      # ≤ 1/3 保守线
+    assert t(0, 79) == "重伤"
+    assert t(-1, 79) is None and t(10, 0) is None
+
+
+def test_party_injury_report(tmp_path):
+    f = _injury_log(tmp_path, "2026-09-28 18:00:00",
+                    {"111": ("45", "45", "118"), "222": ("30", "79", "118")})
+    report = youzu_log.party_injury_report(youzu_log.parse_events(f), 1)
+    assert report["max_injury"] == "中伤"
+    assert report["observed_at"] == "2026-09-28 18:00:00"
+    hurt = [m for m in report["members"] if m["injury"]]
+    assert len(hurt) == 1 and hurt[0]["serial_id"] == 222
+    assert hurt[0]["hp"] == 30 and hurt[0]["omamori"] == 1
+    assert hurt[0]["label"]  # 同名两振，必须给消歧标签
+    # 不存在的部队
+    assert youzu_log.party_injury_report(youzu_log.parse_events(f), 9) is None
+
+
+def test_party_injury_report_missing_member_is_unknown(tmp_path):
+    """成员在刀池里查不到 = 数据不全，返回 None 回退视觉链，不放行。"""
+    f = _injury_log(tmp_path, "2026-09-28 18:00:00",
+                    {"111": ("45", "45", "118")}, slots=("111", "999"))
+    assert youzu_log.party_injury_report(youzu_log.parse_events(f), 1) is None
+
+
+def test_dup_labels():
+    swords = [
+        {"serial_id": 20475841, "name": "压切长谷部", "level": 99},
+        {"serial_id": 31970026, "name": "压切长谷部", "level": 1},
+        {"serial_id": 31970076, "name": "压切长谷部", "level": 1},
+        {"serial_id": 31959534, "name": "蜂须贺虎彻", "level": 1},
+    ]
+    labels = youzu_log.dup_labels(swords)
+    assert labels[31959534] == "蜂须贺虎彻"          # 独占名字用原名
+    assert labels[20475841] == "压切长谷部·Lv99"     # 等级能区分
+    assert labels[31970026] == "压切长谷部·2号机"    # 等级也撞按 serial 排序
+    assert labels[31970076] == "压切长谷部·3号机"
+
+
+def test_home_situation_members_carry_label(tmp_path):
+    """主页快照的成员带消歧 label 和 serial_tail，name/level 原样不动。"""
+    lines = [
+        _s2c("2026-09-28 18:00:00", "https://x/login/start?uid=1",
+             {"level": "290", "secretary": "118", "status": 0}),
+        _s2c("2026-09-28 18:00:01", "https://x/party/list?uid=1",
+             {"sword": {"111": {"serial_id": "111", "sword_id": "118",
+                                "level": "99", "hp": "45", "hp_max": "45",
+                                "fatigue": "100", "protect": "1"},
+                        "222": {"serial_id": "222", "sword_id": "118",
+                                "level": "99", "hp": "45", "hp_max": "45",
+                                "fatigue": "100", "protect": "1"}},
+              "party": {"1": {"party_no": "1", "status": "1",
+                              "party_name": "主力",
+                              "slot": {"1": {"serial_id": "111"},
+                                       "2": {"serial_id": "222"}},
+                              "finished_at": None}},
+              "status": 0}),
+    ]
+    f = tmp_path / "home.log"
+    f.write_text("\n".join(lines), encoding="utf-8")
+    situation = youzu_log.build_home_situation(youzu_log.parse_events(f))
+    members = situation["parties"][0]["members"]
+    assert members[0]["label"].endswith("号机")  # 同名同等级 → 号机
+    assert members[0]["serial_tail"] == "111"
+    assert members[0]["name"] and members[0]["level"] == 99
+
+
+# ---------------------------------------------------------------- 出阵链日志验伤
+
+from datetime import datetime as _dt
+
+from touken.flows.battle import BattleMixin
+
+
+class _FakeMaa:
+    adb_path = "fake-adb"
+    adb_address = "127.0.0.1:0"
+
+
+class _Host(BattleMixin):
+    pass
+
+
+def _host(cfg=None):
+    h = _Host()
+    h.config = cfg if cfg is not None else {
+        "injury_check": {"use_youzu_log": True, "max_age_sec": 600}}
+    h.maa = _FakeMaa()
+    return h
+
+
+def _fake_pull(path):
+    def pull(*a, **kw):
+        pull.calls += 1
+        return path
+    pull.calls = 0
+    return pull
+
+
+def test_log_injury_status_fresh(tmp_path, monkeypatch):
+    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    f = _injury_log(tmp_path, ts,
+                    {"111": ("45", "45", "118"), "222": ("30", "79", "118")})
+    monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(f))
+    h = _host()
+    cache = {}
+    injury, detail = h._log_injury_status(1, cache)
+    assert injury == "中伤"
+    assert "hp30/79" in detail
+    # 同一条链内复检复用缓存，不重复 pull
+    h._log_injury_status(1, cache)
+    assert youzu_log.pull_log.calls == 1
+    # 原始日志阅后即焚
+    assert not f.exists()
+
+
+def test_log_injury_status_stale_falls_back(tmp_path, monkeypatch):
+    f = _injury_log(tmp_path, "2020-01-01 00:00:00",
+                    {"111": ("45", "45", "118"), "222": ("30", "79", "118")})
+    monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(f))
+    h = _host()
+    assert h._log_injury_status(1, {}) == (None, None)
+
+
+def test_log_injury_status_pull_failure_falls_back(monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError("adb 不在")
+    monkeypatch.setattr(youzu_log, "pull_log", boom)
+    h = _host()
+    assert h._log_injury_status(1, {}) == (None, None)
+
+
+def test_log_injury_status_disabled_by_config(monkeypatch):
+    monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(None))
+    h = _host({"injury_check": {"use_youzu_log": False}})
+    assert h._log_injury_status(1, {}) == (None, None)
+    assert youzu_log.pull_log.calls == 0
+
+
+def test_combined_injury_takes_conservative(tmp_path, monkeypatch):
+    """两通道取更保守结论：日志说满血、视觉说重伤 → 仍按重伤停。"""
+    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    f = _injury_log(tmp_path, ts,
+                    {"111": ("45", "45", "118"), "222": ("45", "45", "118")})
+    monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(f))
+    h = _host()
+    monkeypatch.setattr(h, "_team_injury_status", lambda cfg: "重伤")
+    injury, detail = h._combined_injury_status({}, 1, {})
+    assert injury == "重伤"
+    assert detail == "全员满血"

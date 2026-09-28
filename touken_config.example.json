@@ -10,6 +10,10 @@
     "max_restarts": 2,
     "boot_wait_s": 360
   },
+  "injury_check": {
+    "use_youzu_log": true,
+    "max_age_sec": 600
+  },
   "login": {
     "点击登录": {
       "template": "登录.png",

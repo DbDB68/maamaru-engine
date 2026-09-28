@@ -51,6 +51,11 @@ class _Host(SortieMixin):
     def _team_injury_status(self, cfg):
         return None
 
+    def _combined_injury_status(self, cfg, team_no, log_cache):
+        # 委托给视觉桩，保持本文件的守卫语义不变（日志通道由
+        # test_youzu_log.py 的 _log_injury_status 专项覆盖）
+        return self._team_injury_status(cfg), None
+
     def _save_team_record(self, cfg, record_no=1):
         return True
 

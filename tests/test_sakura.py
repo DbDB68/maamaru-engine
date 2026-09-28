@@ -190,6 +190,8 @@ class SortieRotateHookTests(unittest.TestCase):
         host._pick_team = lambda team_no: True
         host._expedition_takeover_requested = lambda now=None: False
         host._team_injury_status = lambda cfg: None
+        host._combined_injury_status = lambda cfg, team_no, log_cache: (
+            host._team_injury_status(cfg), None)
         host.saved_records = []
         host._save_team_record = lambda cfg, record_no=1: (
             host.saved_records.append(record_no) or True)
