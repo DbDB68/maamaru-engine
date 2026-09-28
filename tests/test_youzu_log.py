@@ -403,14 +403,17 @@ def test_reading_event_points_and_consumables():
         "point": {"10031": 20496},
         "item": {"1_0": {"consumable_id": "1", "num": "32"},
                  "8_0": {"consumable_id": "8", "num": "388"},
-                 "6103_0": {"consumable_id": "6103", "num": "2"}},
+                 "6103_0": {"consumable_id": "6103", "num": "2"},
+                 "99999_0": {"consumable_id": "99999", "num": "7"}},
     })
     assert reading["活动点数·10031"] == 20496
-    # ITEM_NAMES 已校准的用真名（2026-09-28 CU 道具页逐页对上）
+    # ITEM_NAMES 已校准的用真名（2026-09-28 CU 道具页逐页对上 +
+    # 三次 diff 实验，当日 117 种全部锤死）
     assert reading["御守"] == 32
     assert reading["加速符·极"] == 388
-    # 没校准的平局组保持「道具#N」，不硬猜
-    assert reading["道具#6103"] == 2
+    assert reading["狮子螺钿鞍碎片"] == 2
+    # 没校准的新道具保持「道具#N」，不硬猜
+    assert reading["道具#99999"] == 7
 
 
 def test_item_list_is_not_a_reading():
