@@ -1144,7 +1144,7 @@ onMounted(async () => {
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源、手账和记录' : '账目和接下来的打算'">
+    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '账房' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源、手账和记录' : '账目和接下来的打算'">
       <template #actions>
         <div v-if="!props.pageSection" class="report-toolbar-actions">
           <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />

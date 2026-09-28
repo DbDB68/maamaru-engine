@@ -194,8 +194,8 @@ function runPostText(run: any) {
   if (run.status === 'failed') return `这趟没能顺利收工。${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
   if (run.status === 'stopped') return `这趟按你的意思停下了。${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
   if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
-  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在仓库的记录里。`
-  return '这趟执务已经收工，完成了哪些事，可以翻开仓库记录看看。'
+  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在账房的记录里。`
+  return '这趟执务已经收工，完成了哪些事，可以翻开账房记录看看。'
 }
 function runPostFacts(run: any) {
   const facts: string[] = []
@@ -352,7 +352,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         </article>
       </section>
       <button v-if="entries.length > limit" class="journal-more home-text-button" type="button" @click="limit += 12">再翻一些记录 ↓</button>
-      <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('records')">去仓库翻更早的记录 →</button>
+      <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('records')">去账房翻更早的记录 →</button>
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
@@ -386,7 +386,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
         <p v-if="situationResources.length" class="finance-game-reading">游戏读数：小判 {{ situationResource('小判') }} · 委托符 {{ situationResource('委托符') }} <small>{{ situationTime(situation?.resources_observed_at ?? null) }}</small></p>
         <details class="finance-details"><summary>查看家底明细</summary><template v-if="situationResources.length"><p class="finance-details-caption">游戏日志读数 · {{ situationTime(situation?.resources_observed_at ?? null) }}</p><dl><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl></template><p class="finance-details-caption">面板盘点读数{{ inventory?.captured_at ? ` · ${gameTime(inventory.captured_at)}` : '' }}</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
-        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去仓库 →</button></div>
+        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
       </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
