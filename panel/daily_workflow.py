@@ -64,6 +64,11 @@ def make_template(settings, config, daily_steps):
             params.setdefault("sortie_mode", "none")
         nodes.append({"type": mapping[step], "params": params,
                       "on_error": "stop" if step == "登录" else "continue"})
+    # 账本同步永远殿后：把国服客户端的 HttpRequestCollect 流量日志
+    # 拉下来解析成真账房流水（只读、阅后即焚）。daily.ledger_sync=false 可关。
+    if daily.get("ledger_sync", True):
+        nodes.append({"type": "ledger_sync", "params": {},
+                      "on_error": "continue"})
     return {"id": "builtin-daily", "name": "一键日课", "nodes": nodes,
             "after": daily.get("after") or "none", "daily_mode": True}
 
@@ -120,6 +125,34 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
 
     def sortie_status(message, previous):
         return "⏭ 按安排不出阵" if message == "[日课] ⏭ 按安排不出阵" else previous
+
+    def daily_ledger_sync(agent, params, config_path):
+        """日课收尾记账：拉国服流量日志 → 解析 → 入库账房 → 焚毁原档。
+
+        失败只许播报不许炸——账本丢了不影响日课本体（telemetry 铁律同款）。
+        """
+        try:
+            from touken import youzu_log
+            from touken.telemetry import TelemetryStore
+            path = youzu_log.pull_log(agent.maa.adb_path,
+                                      agent.maa.adb_address)
+            try:
+                events = youzu_log.parse_events(path)
+                result = youzu_log.write_ledger(TelemetryStore(),
+                                                youzu_log.build_ledger(events))
+            finally:
+                path.unlink(missing_ok=True)  # 阅后即焚，原始日志不留本地
+            yield (f"[日课] ✓ 账本已同步：观察 {result['observations_written']} 条，"
+                   f"收支 {result['changes_written']} 条")
+        except Exception as exc:
+            yield f"[日课] ⚠ 账本同步失败（不影响日课本体）：{exc}"
+
+    workflow.register_node({
+        "type": "ledger_sync", "label": "账本同步",
+        "desc": "拉取国服客户端流量日志，解析成精确资源流水记入账房（只读、"
+                "原档阅后即焚）；目前只随一键日课殿后运行。",
+        "category": "finish", "params": [], "run": daily_ledger_sync,
+        "template_only": True})
 
     for name, callback in (("login", daily_login), ("practice", daily_practice),
                            ("expedition", daily_expedition), ("snapshot", daily_snapshot),

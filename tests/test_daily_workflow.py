@@ -39,7 +39,7 @@ class DailyWorkflowTests(unittest.TestCase):
         types = [n["type"] for n in default["nodes"]]
         self.assertEqual(types, ["login", "signin", "free_gift", "practice", "expedition",
                                  "naihanka", "forge", "dismantle", "synthesize", "daily_sortie",
-                                 "task_rewards", "snapshot"])
+                                 "task_rewards", "snapshot", "ledger_sync"])
         copy = workflow.create_preset({**default, "name": "我的日课"})
         self.assertNotEqual(copy["id"], default["id"])
         self.assertTrue(copy["daily_mode"])
@@ -53,11 +53,53 @@ class DailyWorkflowTests(unittest.TestCase):
         saved = {"params": {"daily": {"steps": ["演练", "锻刀", "出阵"], "after": "shutdown",
                     "sortie_mode": "yosari", "yosari_runs": 8, "team_no": "2"}}}
         template = make_template(saved, {"daily": {"forge_times": 5}}, server._DAILY_STEPS)
-        self.assertEqual([n["type"] for n in template["nodes"]], ["practice", "forge", "daily_sortie"])
+        self.assertEqual([n["type"] for n in template["nodes"]],
+                         ["practice", "forge", "daily_sortie", "ledger_sync"])
         self.assertEqual(template["nodes"][0]["params"], {})
         self.assertEqual(template["nodes"][1]["params"], {"times": 5})
         self.assertEqual(template["nodes"][2]["params"]["yosari_runs"], 8)
         self.assertEqual(template["after"], "shutdown")
+
+    def test_ledger_sync_appended_last_and_can_opt_out(self):
+        template = make_template({"params": {"daily": {"steps": ["登录"]}}},
+                                 {}, server._DAILY_STEPS)
+        self.assertEqual(template["nodes"][-1]["type"], "ledger_sync")
+        self.assertEqual(template["nodes"][-1]["on_error"], "continue")
+
+        off = make_template({"params": {"daily": {"steps": ["登录"],
+                                                  "ledger_sync": False}}},
+                            {}, server._DAILY_STEPS)
+        self.assertNotIn("ledger_sync",
+                         [n["type"] for n in off["nodes"]])
+
+    def test_ledger_sync_node_writes_then_burns(self):
+        from touken import youzu_log
+        run = server._workflow.NODE_REGISTRY["ledger_sync"]["run"]
+        log_file = self.root / "pulled.log"
+        log_file.write_text("x", encoding="utf-8")
+        agent = Mock()
+        agent.maa.adb_path = "adb"
+        agent.maa.adb_address = "127.0.0.1:16384"
+        with patch.object(youzu_log, "pull_log", return_value=log_file), \
+             patch.object(youzu_log, "write_ledger",
+                          return_value={"observations_written": 2,
+                                        "changes_written": 5}) as write:
+            messages = list(run(agent, {}, None))
+        write.assert_called_once()
+        self.assertFalse(log_file.exists())  # 原档阅后即焚
+        self.assertTrue(any("收支 5 条" in m for m in messages))
+
+    def test_ledger_sync_node_failure_never_breaks_daily(self):
+        from touken import youzu_log
+        run = server._workflow.NODE_REGISTRY["ledger_sync"]["run"]
+        agent = Mock()
+        agent.maa.adb_path = "adb"
+        agent.maa.adb_address = "127.0.0.1:16384"
+        with patch.object(youzu_log, "pull_log",
+                          side_effect=RuntimeError("adb 炸了")):
+            messages = list(run(agent, {}, None))
+        self.assertTrue(any("账本同步失败" in m and "adb 炸了" in m
+                            for m in messages))
 
     def test_template_uses_saved_forge_values_without_leaking_them_into_sortie(self):
         saved = {"params": {"daily": {
