@@ -289,11 +289,11 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
 # ---------------------------------------------------------------- ledger
 
 # 账房八资源 ← 日志字段映射（resource 块 + currency 块）。
-# bill 对应「委托符」是按锻刀扣 1 的语义推的，还没和游戏界面逐项对过账，
-# 对完之前标签带「?」，写进真账房前必须校准。
+# bill=委托符已于 2026-09-28 校准：日志链条 787+1(签到)+3(任务)=791，
+# 与游戏界面委托符数字分毫不差。
 LEDGER_RESOURCE_MAP = {
     "charcoal": "木炭", "steel": "玉钢", "coolant": "冷却材",
-    "file": "砥石", "bill": "委托符?",
+    "file": "砥石", "bill": "委托符",
 }
 LEDGER_CURRENCY_MAP = {"money": "小判"}
 # 甲州金 = currency.point + point_free（付费+免费合并，和游戏界面显示一致）
@@ -424,6 +424,83 @@ def format_ledger(ledger: dict) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- ledger write
+
+_LEDGER_SCRIPT = "youzu_log"
+
+
+def _ledger_state_path() -> Path:
+    from .runtime_paths import STATE_DIR
+    return STATE_DIR / "youzu_ledger_state.json"
+
+
+def write_ledger(store, ledger: dict,
+                 state_path: Path | str | None = None) -> dict:
+    """把账本写进 TelemetryStore（账房页面直接可见）。
+
+    - 余额观察 → inventory.captured（source=youzu_log，账房观察链，
+      不会混进手动家底列表——那边只认 manual_entry/manual_import）
+    - 收支 → 每资源一条 resource.change（before/after/delta/source/note
+      全是服务器原文，attribution=confirmed）
+    - 幂等：状态文件记 last_ts，已写过的部分重拉不重记
+      （日志每局重写，跨局的时间戳天然递增，不会撞车）
+    """
+    state_path = Path(state_path) if state_path else _ledger_state_path()
+    last_ts = 0.0
+    try:
+        last_ts = float(json.loads(state_path.read_text(
+            encoding="utf-8")).get("last_ts") or 0)
+    except (OSError, ValueError):
+        pass
+
+    conn = store._conn()
+    written_obs = written_changes = 0
+    max_ts = last_ts
+    for obs in ledger["observations"]:
+        ts = obs.get("ts")
+        if not ts or ts <= last_ts:
+            continue
+        payload = {
+            "captured_at": datetime.fromtimestamp(ts).strftime(
+                "%Y-%m-%d %H:%M:%S"),
+            "source": "youzu_log",
+            "resources": obs["reading"],
+        }
+        conn.execute(
+            "INSERT INTO events(ts, run_id, script, event_type, payload) "
+            "VALUES (?, NULL, ?, 'inventory.captured', ?)",
+            (ts, _LEDGER_SCRIPT, json.dumps(payload, ensure_ascii=False)))
+        written_obs += 1
+        max_ts = max(max_ts, ts)
+    for ch in ledger["changes"]:
+        ts = ch.get("ts")
+        if not ts or ts <= last_ts:
+            continue
+        via = "、".join(ch["via"])
+        for name, delta in ch["delta"].items():
+            payload = {
+                "resource": name, "delta": delta,
+                "before": ch["before"].get(name), "after": ch["after"].get(name),
+                "source": f"youzu_log.{(ch['via_endpoints'] or ['?'])[0].lstrip('/')}",
+                "note": f"{via} {name} {delta:+d}",
+                "attribution": "confirmed",
+            }
+            conn.execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, NULL, ?, 'resource.change', ?)",
+                (ts, _LEDGER_SCRIPT, json.dumps(payload, ensure_ascii=False)))
+            written_changes += 1
+        max_ts = max(max_ts, ts)
+    conn.commit()
+
+    if max_ts > last_ts:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({"last_ts": max_ts}),
+                              encoding="utf-8")
+    return {"observations_written": written_obs,
+            "changes_written": written_changes, "last_ts": max_ts}
+
+
 # ---------------------------------------------------------------- display
 
 def format_summary(snap: dict) -> str:
@@ -470,6 +547,9 @@ def main(argv=None):
     ap.add_argument("--no-swords", action="store_true", help="快照不带全刀帐明细")
     ap.add_argument("--ledger", action="store_true",
                     help="打印账本预览（余额观察链 + 逐笔归因收支）")
+    ap.add_argument("--write-ledger", action="store_true",
+                    help="把账本写进账房数据库（幂等，重复拉取不重记；"
+                         "注意开发环境写的是 Maamaru-Dev 数据目录）")
     ap.add_argument("--keep-log", action="store_true",
                     help="保留 pull 下来的原始日志（默认解析完即焚："
                          "原档里有名字/user_code/session 凭证，不落盘为安）")
@@ -495,6 +575,11 @@ def main(argv=None):
     if args.ledger:
         print()
         print(format_ledger(build_ledger(events)))
+    if args.write_ledger:
+        from .telemetry import TelemetryStore
+        result = write_ledger(TelemetryStore(), build_ledger(events))
+        print(f"\n[账房] 入库：观察 {result['observations_written']} 条，"
+              f"收支 {result['changes_written']} 条")
     return 0
 
 

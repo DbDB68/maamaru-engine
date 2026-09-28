@@ -163,14 +163,14 @@ def test_build_ledger(tmp_path):
     first = ledger["observations"][0]["reading"]
     assert first["甲州金"] == 150
     assert first["小判"] == 500
-    assert first["委托符?"] == 10
+    assert first["委托符"] == 10
 
     assert len(ledger["changes"]) == 2
     c1, c2 = ledger["changes"]
     assert c1["delta"] == {"木炭": 250}
     assert c1["via"] == ["远征完成"]
     assert c2["delta"] == {"木炭": -700, "玉钢": -700, "冷却材": -700,
-                           "砥石": -700, "委托符?": -1}
+                           "砥石": -700, "委托符": -1}
     assert c2["via"] == ["锻刀开炉"]
     # 时间戳用的是响应体里的服务器 now_time
     assert c1["ts"] == 1790545501
@@ -210,3 +210,29 @@ def test_format_ledger_runs(tmp_path):
     assert "远征完成" in text
     assert "木炭+250" in text
     assert "2 笔收支" in text
+
+
+def test_write_ledger_idempotent(tmp_path):
+    from touken.telemetry import TelemetryStore
+    f = tmp_path / "log.txt"
+    f.write_text(LEDGER_SAMPLE, encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    state = tmp_path / "state.json"
+    r1 = youzu_log.write_ledger(store, ledger, state_path=state)
+    assert r1["observations_written"] == 3
+    # 远征 +1 资源、锻刀 -5 资源 → 6 条 resource.change
+    assert r1["changes_written"] == 6
+
+    # 同一份账本再写一遍：全部跳过
+    r2 = youzu_log.write_ledger(store, ledger, state_path=state)
+    assert r2["observations_written"] == 0
+    assert r2["changes_written"] == 0
+
+    # 账房聚合视角：归因都在，且是 confirmed
+    agg = store.resource_ledger(0, 2_000_000_000)
+    labels = [a["label"] for a in agg["attributions"]]
+    assert any("远征完成" in x and "木炭" in x for x in labels)
+    assert any("锻刀开炉" in x and "委托符" in x for x in labels)
+    assert all(a["confidence"] == "confirmed" for a in agg["attributions"])
