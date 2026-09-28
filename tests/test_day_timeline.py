@@ -8,6 +8,7 @@
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +21,14 @@ def _today_at(hour, minute=0):
     return time.mktime(time.strptime(
         f"{time.strftime('%Y-%m-%d')} {hour:02d}:{minute:02d}:00",
         "%Y-%m-%d %H:%M:%S"))
+
+
+def _today_at_shanghai(hour, minute=0):
+    """按上海时间造时间戳：游戏换日逻辑（_raid_active_plan）走 SHANGHAI_TZ，
+    相关测试的时间戳必须同口径，否则 UTC 的 CI 上整天平移 8 小时变抽奖。"""
+    now = datetime.now(dtl.SHANGHAI_TZ)
+    return now.replace(hour=hour, minute=minute, second=0,
+                       microsecond=0).timestamp()
 
 
 _FAKE_MAPS = [
@@ -248,11 +257,11 @@ class DayTimelineMiscTests(unittest.TestCase):
         self.assertIsNone(plan)
 
     def test_raid_counts_only_this_game_day_rounds(self):
-        now = _today_at(12, 0)
+        now = _today_at_shanghai(12, 0)
         plan = {"runs_needed": 302, "seconds_per_loop": 420,
                 "seconds_to_end": 18 * 86400, "tama_remaining": 280000}
-        events = [(_today_at(3, 59), {}), (_today_at(4, 1), {}),
-                  (_today_at(9, 0), {})]
+        events = [(_today_at_shanghai(3, 59), {}), (_today_at_shanghai(4, 1), {}),
+                  (_today_at_shanghai(9, 0), {})]
         with patch("touken.advisor.load_event_cards",
                    return_value={"联队战": {"mechanics": "raid"}}), \
              patch("touken.advisor.currency_plan", return_value=plan), \
