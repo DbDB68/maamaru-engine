@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { ActivityPace, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
+import type { ActivityPace, DayTimeline, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
 import { dailyRunTarget, immediateBatchPlan } from './eventTimelineModel'
+import { raidDayRecommendation } from './planningLinkModel'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -13,6 +14,7 @@ const props = defineProps<{
   goalSaving?: string
   targetSaving?: string
   activityPaces?: Record<string, ActivityPace[]>
+  dayTimeline?: DayTimeline | null
 }>()
 
 const emit = defineEmits<{
@@ -21,6 +23,7 @@ const emit = defineEmits<{
   (event: 'add-stock-goal', abacus: EventAbacus, target: number): void
   (event: 'save-tama-target', name: string, target: number): void
   (event: 'open-activity', script: 'hanafuda' | 'raid', loops: number): void
+  (event: 'open-raid-recommendation'): void
 }>()
 
 const estimateInputs = ref<Record<string, string>>({})
@@ -118,6 +121,10 @@ function currencyOf(entry: EventTimelineEntry) {
 
 function currencyScript(mechanics: string | null | undefined): 'hanafuda' | 'raid' {
   return mechanics === 'raid' ? 'raid' : 'hanafuda'
+}
+
+function raidRecommendation(entry: EventTimelineEntry) {
+  return raidDayRecommendation(props.dayTimeline, entry.budget?.mechanics === 'raid')
 }
 
 function goalFor(entry: EventTimelineEntry) {
@@ -266,6 +273,9 @@ function tamaTimeText(entry: EventTimelineEntry) {
   const daysLeft = secondsToEnd / 86400
   const dailySeconds = daysLeft > 0 ? budget.estimated_seconds / daysLeft : budget.estimated_seconds
   const dailyRuns = dailyRunTarget(budget.runs_needed, secondsToEnd)
+  if (budget.mechanics === 'raid' && dailyRuns != null) {
+    return `按剩余活动时间折算，日均约 ${fmt(dailyRuns)} 圈；今日安排见上方时间表。`
+  }
   const action = dailyRuns == null
     ? `平均每天要留约 ${paceDuration(dailySeconds)}`
     : `平均每天挂约 ${fmt(dailyRuns)} 圈（约 ${paceDuration(dailySeconds)}）就来得及`
@@ -405,7 +415,11 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <p v-if="entry.budget.tama_remaining === 0">{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}已经拿到啦 🎉 剩下的手形想刷就刷。</p>
                 <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} {{ currencyOf(entry) }}。</p>
                 <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
-                <p v-if="entry.budget.mechanics === 'raid' && entry.budget.runs_needed" class="tama-action">{{ entry.budget.seconds_per_loop ? '今天具体挂几圈、几点开工，请看上方「今天的时间表」；它会避开已启用的远征班次。' : '本期实测圈速还不够；再完成几圈后，时间表才能安排联队战的挂机时段。' }}</p>
+                <div v-if="entry.budget.mechanics === 'raid' && entry.budget.runs_needed" class="tama-action raid-day-plan">
+                  <p v-if="raidRecommendation(entry)?.available">按目标进度，今天建议再跑 {{ fmt(raidRecommendation(entry)?.targetRuns) }} 圈；时间表当前能排 {{ fmt(raidRecommendation(entry)?.runs) }} 圈{{ raidRecommendation(entry)!.runs < raidRecommendation(entry)!.targetRuns ? '，剩下的时间不够排下' : '' }}。</p>
+                  <p v-else>{{ raidRecommendation(entry)?.reason }}</p>
+                  <button type="button" class="secondary" :disabled="!raidRecommendation(entry)?.available" @click="emit('open-raid-recommendation')">带入时间表</button>
+                </div>
                 <section v-if="entry.budget.mechanics !== 'raid' && tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
                   <span>
                     <small>现在这一锅</small>

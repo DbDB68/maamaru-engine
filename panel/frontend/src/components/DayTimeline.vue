@@ -1004,7 +1004,7 @@ const caption = computed(() => {
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
             <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并到点开工' }}</button>
-            <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1">取消</button>
+            <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
           </div>
         </div>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
-import type { ActivityPace, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
+import type { ActivityPace, DayTimeline as DayTimelineData, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
 import { resourceNames } from './reportModel'
 // 氪金货币不立目标，下拉选项里拿掉甲州金；账本展示那边 resourceNames 照旧
 const goalResources = resourceNames.filter(name => name !== '甲州金')
@@ -21,6 +21,8 @@ const emit = defineEmits<{
 }>()
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
+const dayTimeline = ref<DayTimelineData | null>(null)
+const dayTimelineRequest = ref(0)
 const loading = ref(false)
 const error = ref('')
 const timelineError = ref('')
@@ -331,6 +333,10 @@ async function scrollToElement(selector: string) {
   element?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
 }
 
+function openRaidRecommendation() {
+  dayTimelineRequest.value += 1
+}
+
 async function openCustomForm() {
   goalNotice.value = ''
   formOpen.value = true
@@ -381,7 +387,7 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline collapsible @open-expedition="emit('openExpedition')" />
+    <DayTimeline :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" @open-expedition="emit('openExpedition')" />
     <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 
@@ -481,11 +487,13 @@ onMounted(load)
       :goal-saving="abacusGoalSaving"
       :target-saving="tamaTargetSaving"
       :activity-paces="activityPaces"
+      :day-timeline="dayTimeline"
       @save-estimate="saveEstimate"
       @save-tama-target="saveTamaTarget"
       @add-goal="goalFromAbacus"
       @add-stock-goal="goalFromStockTarget"
       @open-activity="(script, loops) => emit('openActivity', script, loops)"
+      @open-raid-recommendation="openRaidRecommendation"
     />
 
   </section>
