@@ -5,7 +5,7 @@ import TaskForm from './components/TaskForm.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import LogPanel from './components/LogPanel.vue'
 import ListsPanel from './components/ListsPanel.vue'
-import SchedulePanel from './components/SchedulePanel.vue'
+
 import FormationPanel from './components/FormationPanel.vue'
 import WorkflowPanel from './components/WorkflowPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
@@ -32,7 +32,7 @@ const workflowDraft = ref<WorkflowPreset | null>(null)
 const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
 function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
-function openExpeditionPlanning() { selected.value = '$schedule'; tab.value = 'tasks' }
+function openExpeditionPlanning() { tab.value = 'planning' }
 function openActivityTask(script: 'hanafuda' | 'raid', loops: number) {
   if (!scripts.value[script]) {
     message.value = `当前模式不能直接打开${script === 'raid' ? '联队战' : '秘宝之里'}配置`
@@ -609,9 +609,6 @@ watch(tab, value => {
             <SideNavItem v-for="([key, info]) in group.entries" :key="key" :active="selected === key" :running="running && current === key" @click="key === 'daily' ? openDailyWorkflow() : selected = key">
               <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ info.label }}</span><small v-if="running && current === key">运行中</small>
             </SideNavItem>
-            <SideNavItem v-if="group.label === '后勤配置'" :active="selected === '$schedule'" @click="selected = '$schedule'">
-              <span><img class="task-menu-icon" :src="'/static/img/ui/expedition.png'" alt="">自动排班</span>
-            </SideNavItem>
           </details>
         </template>
         <details class="task-nav-group" open>
@@ -667,7 +664,7 @@ watch(tab, value => {
           </template>
         </TaskForm>
         <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课已放进工作流</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
-        <SchedulePanel v-else-if="selected === '$schedule'" embedded />
+        <!-- 自动排班已按老大意思藏起（温柔刀）：SchedulePanel 组件保留在仓库，UI 不再挂载。 -->
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
         <ListsPanel v-else-if="selected === '$wishlist'" key="wishlist" embedded initial="sword_wishlist" />

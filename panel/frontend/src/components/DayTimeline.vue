@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
+import { canAdoptRaidRecommendation } from './report/planningLinkModel'
 
-const props = withDefaults(defineProps<{ collapsible?: boolean }>(), {
+const props = withDefaults(defineProps<{ collapsible?: boolean; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
+  adoptRecommendationRequest: 0,
 })
-const emit = defineEmits<{ openExpedition: [] }>()
+const emit = defineEmits<{ openExpedition: []; timelineUpdated: [timeline: DayTimeline | null] }>()
 
 const DAY = 1440
 // workflow/daily 没有可靠时长，预计收工按 30 分钟估算（与后端口径一致）
@@ -39,6 +41,7 @@ let clockTimer: number | undefined
 async function load() {
   try {
     data.value = await api.dayTimeline()
+    emit('timelineUpdated', data.value)
     syncSmoothClock()
     if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
     else if (!data.value.conductor.options.some(option => option.id === conductorChoice.value)) {
@@ -297,6 +300,36 @@ function fillRecommended() {
   editing.value = true
 }
 
+/** Cross-card adoption only opens an untouched recommendation draft; it never saves or starts work. */
+async function openRaidRecommendation() {
+  const blocks = recommendedBlocks()
+  const canAdopt = canAdoptRaidRecommendation(
+    blocks.length > 0,
+    editing.value,
+    (data.value?.booking?.blocks.length || 0) > 0,
+  )
+  if (!blocks.length) return false
+  expanded.value = true
+  if (!canAdopt) {
+    planMessage.value = editing.value
+      ? '你正在修改时间表草稿，先保存或取消这份草稿，再带入联队战建议。'
+      : '时间表里已经有安排，先在这里处理现有安排，再带入联队战建议。'
+    await nextTick()
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    document.querySelector('.tl-booking')?.scrollIntoView({ behavior, block: 'start' })
+    return false
+  }
+  fillRecommended()
+  await nextTick()
+  const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  document.querySelector('.tl-booking-editor')?.scrollIntoView({ behavior, block: 'start' })
+  return true
+}
+
+watch(() => props.adoptRecommendationRequest, (request, previous) => {
+  if (request > previous) void openRaidRecommendation()
+})
+
 /** 运行图里点建议淡影 = 采纳这一段进草稿 */
 function adoptSuggestion(shadow: { minute: number; runs?: number }) {
   const base = data.value?.booking?.blocks || []
@@ -408,6 +441,7 @@ async function persistSchedule(blocks: DayScheduleBlock[], message: string) {
   if (data.value) {
     data.value.conductor = result.conductor
     data.value.booking = result.booking
+    emit('timelineUpdated', data.value)
   }
   planMessage.value = message
 }
@@ -732,7 +766,6 @@ const caption = computed(() => {
         <p>{{ caption }}</p>
       </div>
       <div class="tl-card-actions">
-        <button type="button" class="tl-schedule-link" @click="emit('openExpedition')">{{ data?.expedition_schedule_enabled === false ? '开启自动排班' : '排班设置' }} →</button>
         <time v-if="data">{{ fmtMin(nowMin) }}</time>
         <button v-if="props.collapsible" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
           {{ expanded ? '收起' : '展开' }}
@@ -885,7 +918,7 @@ const caption = computed(() => {
       </section>
       <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
         <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
-        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看；点时间轴上的灰虚块也能让单独一班今天跑。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
+        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">原定班次仅供查看；点时间轴上的灰虚块，就能让单独一班今天跑。</p>
         <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；点时间轴上的块直接切换。</p>
         <div class="tl-expedition-list">
           <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
