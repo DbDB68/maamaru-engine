@@ -578,9 +578,30 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                  if item["kind"] == "running"
                  or (item["will_run"]
                      and item["state"] not in scheduler.TERMINAL_STATES)}
+    # 一张图同时只能一队在跑：未完结班（running/待收/已点且时段没过完）
+    # 占住的图不再给新建议；expired/failed 的班 will_run=False，不占图
+    occupied_maps = set()
+    for item in expeditions:
+        code = str(item.get("map_code") or "")
+        if not code:
+            continue
+        if item["kind"] == "running":  # 远征中/待收都算没完结
+            occupied_maps.add(code)
+        elif item.get("will_run") and now_min < item["time_min"] + int(
+                item.get("duration_min") or 0):
+            occupied_maps.add(code)
+    # 今天同图同队 failed 过的组合拉黑到今天结束（防失败循环；
+    # 图本身不拉黑，换队仍可荐）
+    failed_combos = {(str(item.get("map_code") or ""),
+                      int(item.get("team_no") or 0))
+                     for item in expeditions
+                     if item["kind"] == "forced"
+                     and item.get("state") == scheduler.SLOT_FAILED
+                     and item.get("map_code")}
     advice = expedition_advisor.build_expedition_suggestions(
         expedition_help, planning=planning, situation_path=situation_path,
-        now_min=now_min, committed_teams=committed)
+        now_min=now_min, committed_teams=committed,
+        occupied_maps=occupied_maps, failed_combos=failed_combos)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None

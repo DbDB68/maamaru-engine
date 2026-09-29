@@ -75,6 +75,7 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                      "enabled": True}])
         out = dtl.build_day_timeline(now, cfg=cfg, store=None,
                                      script_labels={},
+                                     expedition_forced={},
                                      expedition_records={},
                                      expedition_help={"teams_out": 0,
                                                       "available_teams": []})
@@ -154,6 +155,7 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                              time.localtime(_today_at(11, 0)))}}
         out = dtl.build_day_timeline(now, cfg=_cfg([]), store=None,
                                      script_labels={},
+                                     expedition_forced={},
                                      expedition_records=records)
         self.assertEqual(len(out["expeditions"]), 1)
         item = out["expeditions"][0]
@@ -313,6 +315,7 @@ class DayTimelineMiscTests(unittest.TestCase):
         with patch.object(scheduler, "map_options", lambda: []):
             out = dtl.build_day_timeline(
                 _today_at(9, 0), cfg={}, store=self.store, script_labels={},
+                expedition_forced={},
                 expedition_records={},
                 expedition_help={"teams_out": 0, "available_teams": []})
         self.assertEqual(out["expeditions"], [])

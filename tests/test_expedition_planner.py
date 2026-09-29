@@ -560,11 +560,12 @@ class RuleHonestyTests(unittest.TestCase):
                 self.assertEqual(rules["min_members"], 3)
                 self.assertEqual(rules["required_types"], {"枪": 1})
             else:
-                # 没有依据的图必须标 partial，null=不知道而不是没有要求
+                # min_members 依旧无依据保持 unknown；required_types 已按
+                # 4399 攻略+游戏内截图核对填实（{}=确认无刀种要求）
                 self.assertEqual(rules["completeness"], "partial")
                 self.assertIsNone(rules["min_members"])
-                self.assertIsNone(rules["required_types"])
-                self.assertTrue(rules["unknown_aspects"])
+                self.assertIsInstance(rules["required_types"], dict)
+                self.assertEqual(rules["unknown_aspects"], ["min_members"])
 
 
 class DegradationTests(unittest.TestCase):

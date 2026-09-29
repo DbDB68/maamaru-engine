@@ -207,6 +207,44 @@ class SuggestionBuildTests(unittest.TestCase):
         self.assertEqual(len(out["suggestions"]), 1)
         self.assertIn("想丢 2 队，只排得出 1 班", out["note"])
 
+    def test_occupied_map_falls_back_to_second_best(self):
+        """小判榜首 D4 今天已有班在跑 → 建议顺移次优的 B1。"""
+        planning = _planning(limiting=(), koban_available=-50)
+        out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                          planning=planning, occupied_maps={"D4"})
+        suggestion = out["suggestions"][0]
+        self.assertEqual(suggestion["map_code"], "B1")
+        self.assertEqual(suggestion["resource"], "小判")
+
+    def test_all_producing_maps_occupied_gives_honest_note(self):
+        """对口图全被占 → 不硬塞，note 说明白。"""
+        planning = _planning(limiting=(), koban_available=-50)
+        out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                          planning=planning, occupied_maps={"D4", "B1"})
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("都有班在跑或已点上", out["note"])
+
+    def test_two_suggestions_never_share_one_map(self):
+        """两资源时薪榜首同图时，第二条建议回退次优图（一图一班）。"""
+        maps = {
+            "M1": {"era": 1, "slot": 1, "name": "双产", "duration_min": 60,
+                   "木炭": 120, "玉钢": 120, "冷却材": 0, "砥石": 0, "小判": 0,
+                   "rules": {}},
+            "M2": {"era": 1, "slot": 2, "name": "单产", "duration_min": 60,
+                   "木炭": 0, "玉钢": 60, "冷却材": 0, "砥石": 0, "小判": 0,
+                   "rules": {}},
+        }
+        planning = _planning(limiting=("木炭", "玉钢"))
+        out = self._build(_prefs(teams_out=2, available_teams=(1, 4)),
+                          planning=planning, maps=maps)
+        self.assertEqual(len(out["suggestions"]), 2)
+        first, second = out["suggestions"]
+        self.assertEqual((first["resource"], first["map_code"],
+                          first["team_no"]), ("木炭", "M1", 1))
+        # 玉钢榜首也是 M1，但已被本批建议占住 → 回退 M2
+        self.assertEqual((second["resource"], second["map_code"],
+                          second["team_no"]), ("玉钢", "M2", 4))
+
     def test_resource_without_producing_map_gets_note(self):
         out = self._build(_prefs(teams_out=1, available_teams=(1,)),
                           planning=_planning(limiting=("冷却材",)))
@@ -238,6 +276,147 @@ class SuggestionBuildTests(unittest.TestCase):
         out = self._build(_prefs(teams_out=0))
         self.assertEqual(out["suggestions"], [])
         self.assertIn("不丢队", out["note"])
+
+
+# 刀种门槛测试用图：B2 要队里有打刀（老大部队四翻车现场），B1 无要求兜底，
+# E4 要凑 4 种刀。收益只为排队次服务
+_TYPE_MAPS = {
+    "B2": {"era": 2, "slot": 2, "name": "加役方人足寄场", "duration_min": 180,
+           "木炭": 0, "玉钢": 0, "冷却材": 0, "砥石": 0, "小判": 300,
+           "rules": {"total_level": 60, "required_types": {"打刀": 1}}},
+    "B1": {"era": 2, "slot": 1, "name": "湖底", "duration_min": 90,
+           "木炭": 0, "玉钢": 0, "冷却材": 0, "砥石": 180, "小判": 90,
+           "rules": {"total_level": 20, "required_types": {}}},
+}
+_E4_MAPS = {
+    "E4": {"era": 5, "slot": 4, "name": "天下布武", "duration_min": 360,
+           "木炭": 0, "玉钢": 0, "冷却材": 0, "砥石": 0, "小判": 600,
+           "rules": {"total_level": 300, "required_types": {},
+                     "min_distinct_types": 4}},
+}
+
+
+def _members(*names, level=99):
+    return [{"level": level, "name": name} for name in names]
+
+
+class TypeGateTests(unittest.TestCase):
+    """刀种资格门：「含有」语义——至少一把该刀种在队；极化刀种不变。
+    成员名单走真实名册（swords.json）解析。"""
+
+    def _build(self, prefs, parties, maps=_TYPE_MAPS):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = _write_situation(folder.name, parties)
+        planning = _planning(limiting=(), koban_available=-50)
+        return ea.build_expedition_suggestions(
+            prefs, planning=planning, maps=maps, situation_path=path,
+            now_min=600)
+
+    def test_all_tachi_team_skips_b2_to_second_map(self):
+        """全太刀队（老大部队四翻车同款）不给 B2，顺移无门槛的 B1。"""
+        out = self._build(
+            _prefs(teams_out=1, available_teams=(4,)),
+            [{"party_no": 4, "members": _members(
+                "三日月宗近", "小狐丸", "一期一振")}])
+        suggestion = out["suggestions"][0]
+        self.assertEqual(suggestion["map_code"], "B1")
+        self.assertEqual(suggestion["team_no"], 4)
+
+    def test_qualified_team_gets_b2_over_unqualified(self):
+        """两队可丢时，B2 顺移给队里有打刀的部队一，不给全太刀的部队四。"""
+        out = self._build(
+            _prefs(teams_out=1, available_teams=(1, 4)),
+            [{"party_no": 4, "members": _members(
+                "三日月宗近", "小狐丸", "一期一振")},
+             {"party_no": 1, "members": _members(
+                 "加州清光", "山姥切国广", "三日月宗近")}])
+        suggestion = out["suggestions"][0]
+        self.assertEqual((suggestion["map_code"], suggestion["team_no"]),
+                         ("B2", 1))
+        self.assertIn("刀种也够格", suggestion["reason"])
+
+    def test_contains_semantics_one_uchigatana_is_enough(self):
+        """「含有」不是「全是」：五把太刀里掺一把打刀就合格。"""
+        out = self._build(
+            _prefs(teams_out=1, available_teams=(4,)),
+            [{"party_no": 4, "members": _members(
+                "三日月宗近", "小狐丸", "一期一振", "江雪左文字",
+                "加州清光")}])
+        suggestion = out["suggestions"][0]
+        self.assertEqual(suggestion["map_code"], "B2")
+
+    def test_kiwame_suffix_keeps_base_type(self):
+        """极化刀种不变：「加州清光·极」仍算打刀。"""
+        out = self._build(
+            _prefs(teams_out=1, available_teams=(4,)),
+            [{"party_no": 4, "members": _members(
+                "三日月宗近", "小狐丸", "一期一振", "加州清光·极")}])
+        self.assertEqual(out["suggestions"][0]["map_code"], "B2")
+
+    def test_all_teams_type_blocked_gives_human_note(self):
+        """唯一可丢队全是太刀且次优图也占 → note 写人话说明卡在哪。"""
+        out = self._build(
+            _prefs(teams_out=1, available_teams=(4,)),
+            [{"party_no": 4, "members": _members(
+                "三日月宗近", "小狐丸", "一期一振")}],
+            maps={"B2": _TYPE_MAPS["B2"]})
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("刀种门槛", out["note"])
+        self.assertIn("部队四全是太刀，没有打刀", out["note"])
+
+    def test_e4_min_distinct_types_gate(self):
+        """E4 要凑 4 种刀：3 种不够，补一把大太刀凑够 4 种放行。"""
+        three_kinds = [{"party_no": 4, "members": _members(
+            "三日月宗近", "小狐丸", "加州清光", "山姥切国广",
+            "今剑", "今剑")}]  # 太刀/打刀/短刀 = 3 种
+        out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                          three_kinds, maps=_E4_MAPS)
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("凑4种刀", out["note"])
+        self.assertIn("只凑出3种刀", out["note"])
+
+        four_kinds = [{"party_no": 4, "members": _members(
+            "三日月宗近", "小狐丸", "加州清光", "今剑", "石切丸",
+            "石切丸")}]  # 太刀/打刀/短刀/大太刀 = 4 种
+        out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                          four_kinds, maps=_E4_MAPS)
+        self.assertEqual(out["suggestions"][0]["map_code"], "E4")
+        self.assertIn("凑4种刀", out["suggestions"][0]["reason"])
+
+    def test_failed_combo_blacklisted_but_map_open_to_other_team(self):
+        """同图同队今天 failed 过 → 拉黑该组合，同图换队仍可荐。"""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = _write_situation(folder.name, [
+            {"party_no": 1, "members": _members("加州清光", "今剑")},
+            {"party_no": 4, "members": _members("加州清光", "今剑")},
+        ])
+        out = ea.build_expedition_suggestions(
+            _prefs(teams_out=1, available_teams=(1, 4)),
+            planning=_planning(limiting=(), koban_available=-50),
+            maps=_TYPE_MAPS, situation_path=path, now_min=600,
+            failed_combos={("B2", 4)})
+        # (B2,部队四) 拉黑，B2 改荐部队一
+        suggestion = out["suggestions"][0]
+        self.assertEqual((suggestion["map_code"], suggestion["team_no"]),
+                         ("B2", 1))
+
+    def test_failed_combo_without_fallback_gives_note(self):
+        """同组合 failed 且无队无图可换 → note 写「这班今天没派成」。"""
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = _write_situation(folder.name, [
+            {"party_no": 4, "members": _members("加州清光", "今剑")},
+        ])
+        out = ea.build_expedition_suggestions(
+            _prefs(teams_out=1, available_teams=(4,)),
+            planning=_planning(limiting=(), koban_available=-50),
+            maps={"B2": _TYPE_MAPS["B2"]}, situation_path=path, now_min=600,
+            failed_combos={("B2", 4)})
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("这班今天没派成", out["note"])
+        self.assertIn("换队/换图试试", out["note"])
 
 
 class PrefsStorageTests(unittest.TestCase):
@@ -386,6 +565,122 @@ class TimelineIntegrationTests(unittest.TestCase):
         self.assertEqual(out["expeditions"][0]["kind"], "running")
         self.assertEqual(out["expedition_suggestions"], [])
 
+    def test_forced_shift_occupies_its_map(self):
+        """已点的班（时段没过完）占住图：D4 已点 → 小判建议回退 B1。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+                                             "mode": "custom"}}
+        forced = {"k": {"team_no": 4, "map_code": "D4",
+                        "planned_at": self._today_at(10, 0),
+                        "start_min": 600, "duration_min": 240}}
+        out = self._build(now, cfg, expedition_forced=forced,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4, 5)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        suggestions = out["expedition_suggestions"]
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["map_code"], "B1")
+        self.assertEqual(suggestions[0]["team_no"], 5)
+
+    def test_running_expedition_occupies_its_map(self):
+        """还在跑的班占住图：D4 在跑 → 小判建议回退 B1。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+                                             "mode": "custom"}}
+        records = {"5": {"map_code": "D4", "duration_min": 240,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(self._today_at(5, 0)))}}
+        out = self._build(now, cfg, expedition_records=records,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4, 5)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        self.assertEqual(out["expeditions"][0]["state"], "running")
+        suggestions = out["expedition_suggestions"]
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["map_code"], "B1")
+        self.assertEqual(suggestions[0]["team_no"], 4)
+
+    def test_awaiting_collect_expedition_occupies_its_map(self):
+        """跑完待收也算没完结：图仍被占，建议不往 D4 塞。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+                                             "mode": "custom"}}
+        records = {"5": {"map_code": "D4", "duration_min": 240,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(self._today_at(1, 0)))}}
+        out = self._build(now, cfg, expedition_records=records,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4, 5)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        self.assertEqual(out["expeditions"][0]["state"], "awaiting_collect")
+        suggestions = out["expedition_suggestions"]
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["map_code"], "B1")
+
+    def test_expired_shift_frees_its_map(self):
+        """过点作废的班不占图：D4 的班 expired → 建议照常给 D4。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [],
+               "automation": {"enabled": False, "mode": "custom",
+                              "slot_states": {"k": {"state": "expired",
+                                                    "blocked_reason": ""}}}}
+        forced = {"k": {"team_no": 4, "map_code": "D4",
+                        "planned_at": self._today_at(10, 0),
+                        "start_min": 600, "duration_min": 240}}
+        out = self._build(now, cfg, expedition_forced=forced,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4, 5)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        suggestions = out["expedition_suggestions"]
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["map_code"], "D4")
+
+    def test_failed_shift_frees_its_map(self):
+        """确认失败的班不占图，但同图同队拉黑：D4 换部队五荐。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [],
+               "automation": {"enabled": False, "mode": "custom",
+                              "slot_states": {"k": {"state": "failed_unknown",
+                                                    "blocked_reason": ""}}}}
+        forced = {"k": {"team_no": 4, "map_code": "D4",
+                        "planned_at": self._today_at(10, 0),
+                        "start_min": 600, "duration_min": 240}}
+        out = self._build(now, cfg, expedition_forced=forced,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4, 5)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        suggestions = out["expedition_suggestions"]
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0]["map_code"], "D4")
+        # 同图可以荐，但不再荐给今天没派成的部队四
+        self.assertEqual(suggestions[0]["team_no"], 5)
+
+    def test_failed_combo_without_other_team_gives_honest_note(self):
+        """没派成的组合拉黑后没别的队/图可给 → 不给建议，note 说明。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [],
+               "automation": {"enabled": False, "mode": "custom",
+                              "slot_states": {
+                                  "k": {"state": "failed_unknown",
+                                        "blocked_reason": ""},
+                                  "k2": {"state": "failed_unknown",
+                                         "blocked_reason": ""}}}}
+        forced = {"k": {"team_no": 4, "map_code": "D4",
+                        "planned_at": self._today_at(10, 0),
+                        "start_min": 600, "duration_min": 240},
+                  "k2": {"team_no": 4, "map_code": "B1",
+                         "planned_at": self._today_at(15, 0),
+                         "start_min": 900, "duration_min": 90}}
+        out = self._build(now, cfg, expedition_forced=forced,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4,)),
+                          planning=_planning(limiting=(), koban_available=-50))
+        self.assertEqual(out["expedition_suggestions"], [])
+        self.assertIn("没派成", out["expedition_advice_note"])
+        self.assertIn("换队/换图试试", out["expedition_advice_note"])
+
     def test_timeline_note_when_no_planning(self):
         now = self._today_at(6, 0)
         cfg = {"entries": [], "automation": {"enabled": False,
@@ -513,6 +808,60 @@ class HelpPrefsEndpointTests(unittest.TestCase):
         response = self._put({"teams_out": 1, "available_teams": "14"})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(self.path.exists())
+
+
+class ExpeditionMapsDataTests(unittest.TestCase):
+    """touken/data/expedition_maps.json 刀种要求校验。
+
+    刀种数据来源：4399 远征攻略（2026-09-30 转录），B2~B4 与游戏内截图
+    核对一致；等级合计沿用 TapTap 白月魔女统计表（2026-07-26 转录）。
+    """
+
+    KNOWN_LEVELS = {"A1": 5, "A2": 10, "A3": 20, "A4": 30,
+                    "B1": 50, "B2": 60, "B3": 80, "B4": 100,
+                    "C1": 110, "C2": 120, "C3": 130, "C4": 140,
+                    "D1": 150, "D2": 180, "D3": 200, "D4": 220,
+                    "E1": 240, "E2": 260, "E3": 280, "E4": 300}
+    KNOWN_TYPES = {"A2": {"短刀": 1}, "A3": {"胁差": 1},
+                   "A4": {"短刀": 1, "胁差": 1},
+                   "B2": {"打刀": 1}, "B3": {"太刀": 1},
+                   "B4": {"打刀": 1, "太刀": 1},
+                   "C2": {"大太刀": 1}, "E2": {"枪": 1}, "E3": {"薙刀": 1}}
+    FREE_MAPS = {"A1", "B1", "C1", "C3", "C4",
+                 "D1", "D2", "D3", "D4", "E1", "E4"}
+
+    def setUp(self):
+        self.maps = ea.load_maps()
+
+    def test_all_20_maps_have_known_type_rules(self):
+        """每张图 required_types 必须查实（含「确认自由」={}），不许 null。"""
+        self.assertEqual(len(self.maps), 20)
+        for code, meta in self.maps.items():
+            rules = meta.get("rules") or {}
+            with self.subTest(map=code):
+                self.assertIsInstance(rules.get("required_types"), dict)
+                self.assertNotIn("required_types",
+                                 rules.get("unknown_aspects") or [])
+                self.assertIn("min_distinct_types", rules)
+
+    def test_levels_match_known_table(self):
+        for code, total in self.KNOWN_LEVELS.items():
+            with self.subTest(map=code):
+                self.assertEqual(self.maps[code]["rules"]["total_level"],
+                                 total)
+                self.assertEqual(self.maps[code]["level_req"], total)
+
+    def test_type_requirements_match_known_table(self):
+        for code in self.maps:
+            with self.subTest(map=code):
+                self.assertEqual(self.maps[code]["rules"]["required_types"],
+                                 self.KNOWN_TYPES.get(code, {}))
+                expected_distinct = 4 if code == "E4" else None
+                self.assertEqual(
+                    self.maps[code]["rules"]["min_distinct_types"],
+                    expected_distinct)
+        self.assertEqual(self.FREE_MAPS,
+                         {c for c in self.maps if c not in self.KNOWN_TYPES})
 
 
 if __name__ == "__main__":

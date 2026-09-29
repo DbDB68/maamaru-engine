@@ -21,15 +21,15 @@
    "rules": {
     "total_level": 5,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "A2": {
@@ -50,15 +50,17 @@
    "rules": {
     "total_level": 10,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "短刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "A3": {
@@ -79,15 +81,17 @@
    "rules": {
     "total_level": 20,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "胁差": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "A4": {
@@ -108,15 +112,18 @@
    "rules": {
     "total_level": 30,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "短刀": 1,
+     "胁差": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "B1": {
@@ -137,15 +144,15 @@
    "rules": {
     "total_level": 50,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "B2": {
@@ -166,15 +173,17 @@
    "rules": {
     "total_level": 60,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "打刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "B3": {
@@ -195,15 +204,17 @@
    "rules": {
     "total_level": 80,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "太刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "B4": {
@@ -224,15 +235,18 @@
    "rules": {
     "total_level": 100,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "打刀": 1,
+     "太刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "C1": {
@@ -253,15 +267,15 @@
    "rules": {
     "total_level": 110,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "C2": {
@@ -282,15 +296,17 @@
    "rules": {
     "total_level": 120,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "大太刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "C3": {
@@ -311,15 +327,15 @@
    "rules": {
     "total_level": 130,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "C4": {
@@ -340,15 +356,15 @@
    "rules": {
     "total_level": 140,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "D1": {
@@ -369,15 +385,15 @@
    "rules": {
     "total_level": 150,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "D2": {
@@ -398,15 +414,15 @@
    "rules": {
     "total_level": 180,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "D3": {
@@ -427,15 +443,15 @@
    "rules": {
     "total_level": 200,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "D4": {
@@ -456,15 +472,15 @@
    "rules": {
     "total_level": 220,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "E1": {
@@ -485,15 +501,15 @@
    "rules": {
     "total_level": 240,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "E2": {
@@ -517,6 +533,7 @@
     "required_types": {
      "枪": 1
     },
+    "min_distinct_types": null,
     "completeness": "complete",
     "unknown_aspects": [],
     "server": "cn",
@@ -542,15 +559,17 @@
    "rules": {
     "total_level": 280,
     "min_members": null,
-    "required_types": null,
+    "required_types": {
+     "薙刀": 1
+    },
+    "min_distinct_types": null,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   },
   "E4": {
@@ -571,17 +590,17 @@
    "rules": {
     "total_level": 300,
     "min_members": null,
-    "required_types": null,
+    "required_types": {},
+    "min_distinct_types": 4,
     "completeness": "partial",
     "unknown_aspects": [
-     "min_members",
-     "required_types"
+     "min_members"
     ],
     "server": "cn",
-    "source": "总等级沿用表头 TapTap 白月魔女统计表（2026-07-26 转录）；该图是否有最低人数/指定刀种要求无可靠依据，保持 unknown",
-    "verified_at": "2026-07-26"
+    "source": "总等级沿用 TapTap 白月魔女统计表（2026-07-26 转录）；刀种要求来源 4399 远征攻略（2026-09-30 转录），B2/B3/B4 与老大游戏内截图核对一致",
+    "verified_at": "2026-09-30"
    }
   }
  },
- "_rules字段": "每张图的远征成功硬条件。total_level=全队等级合计要求（与既有 level_req 同义）；min_members/required_types 为 null 表示「不知道」，不是「没有要求」；required_types 语义为至少包含（{刀种: 最少振数}）；completeness=complete 表示条件已确认完整，partial 表示还有未知面，规划器对 partial 图只能给 rule_incomplete，不得输出伪确定方案；server/source/verified_at 标明规则适用的服与证据来源，国服没确认的绝不拿日服数据顶替。"
+ "_rules字段": "每张图的远征成功硬条件。total_level=全队等级合计要求（与既有 level_req 同义）；min_members 为 null 表示「不知道」，不是「没有要求」；required_types 语义为至少包含（{刀种: 最少振数}），{}=确认无刀种要求，null=不知道；min_distinct_types=编队至少凑几种不同刀种（仅 E4 有据为 4），null=无此要求；completeness=complete 表示条件已确认完整，partial 表示还有未知面，规划器对 partial 图只能给 rule_incomplete，不得输出伪确定方案；server/source/verified_at 标明规则适用的服与证据来源，国服没确认的绝不拿日服数据顶替。"
 }

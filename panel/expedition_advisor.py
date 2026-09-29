@@ -132,10 +132,11 @@ def load_maps(path: Path = _MAPS_PATH) -> dict:
 
 
 def party_levels_from_situation(path: Path) -> dict | None:
-    """本丸近况 → {队号: {sum, max, count}}；读不到（没同步过）返回 None。
+    """本丸近况 → {队号: {sum, max, count, names}}；读不到（没同步过）返回 None。
 
-    有了它才能核远征图的 total_level/level_req；没有就只做收益匹配，
-    建议里注明等级没核。
+    有了它才能核远征图的 total_level/level_req 和刀种要求；没有就只做
+    收益匹配，建议里注明等级没核。names 是成员名册名（简体中文，极化带
+    「·极」后缀），刀种资格门用。
     """
     try:
         situation = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -152,15 +153,124 @@ def party_levels_from_situation(path: Path) -> dict | None:
             team = int(party.get("party_no"))
         except (TypeError, ValueError):
             continue
-        members = [m.get("level") for m in party.get("members") or []
-                   if isinstance(m, dict)]
-        members = [int(level) for level in members
-                   if isinstance(level, (int, float))]
+        rows = [m for m in party.get("members") or [] if isinstance(m, dict)]
+        members = [int(m["level"]) for m in rows
+                   if isinstance(m.get("level"), (int, float))]
         if not members:
             continue
         levels[team] = {"sum": sum(members), "max": max(members),
-                        "count": len(members)}
+                        "count": len(members),
+                        "names": [str(m.get("name") or "") for m in rows]}
     return levels or None
+
+
+# 名册（swords.json）刀种是日文旧字体（脇差/槍/剣），远征规则和面板用简体；
+# 映射与 touken/flows/team_roster._TYPE_NORMALIZE 保持一致
+_TYPE_NORMALIZE = {"脇差": "胁差", "槍": "枪", "剣": "剑"}
+_SWORD_TYPE_TABLE: dict | None = None
+
+
+def _sword_type_table() -> dict:
+    """刀名（日/中）→ 规范刀种（简体）。精确匹配不模糊——资格门认错比
+    认不到更糟（错拦只是少条建议，错放就是 failed_unknown）。"""
+    global _SWORD_TYPE_TABLE
+    if _SWORD_TYPE_TABLE is None:
+        from touken import sword_db
+        table = {}
+        for info in sword_db.all_swords().values():
+            raw = info.get("type") or ""
+            sword_type = _TYPE_NORMALIZE.get(raw, raw)
+            if not sword_type:
+                continue
+            for name in (info.get("name"), info.get("name_zh")):
+                if name:
+                    table.setdefault(name, sword_type)
+        _SWORD_TYPE_TABLE = table
+    return _SWORD_TYPE_TABLE
+
+
+def party_sword_types(party: dict) -> list:
+    """近况队伍 → 每人规范刀种（认不出为 None）。极化刀种不变，去「·极」后缀。"""
+    table = _sword_type_table()
+    types = []
+    for name in party.get("names") or []:
+        base = str(name).removesuffix("·极").strip()
+        types.append(table.get(base))
+    return types
+
+
+def _type_shortfall(meta, party) -> dict | None:
+    """刀种门槛（「含有」语义：至少一把该刀种在队）。
+
+    返回 None = 合格/无从核（图没要求、没近况、名册全认不出都不拦，
+    和等级门一个口径）；否则 {"missing": [缺的刀种], "distinct": (现有种数,
+    要求种数) | None}。
+    """
+    if not party:
+        return None
+    rules = meta.get("rules") if isinstance(meta, dict) else None
+    if not isinstance(rules, dict):
+        return None
+    required = rules.get("required_types")
+    distinct_need = rules.get("min_distinct_types")
+    has_distinct_rule = isinstance(distinct_need, int) \
+        and not isinstance(distinct_need, bool) and distinct_need > 0
+    if required is None and not has_distinct_rule:
+        return None
+    known = [t for t in party_sword_types(party) if t]
+    if not known:
+        return None
+    missing = []
+    if isinstance(required, dict):
+        for type_name, need in sorted(required.items()):
+            if not isinstance(need, int) or isinstance(need, bool) \
+                    or need <= 0:
+                continue
+            if known.count(type_name) < need:
+                missing.append(type_name)
+    distinct = None
+    if has_distinct_rule:
+        have = len(set(known))
+        if have < distinct_need:
+            distinct = (have, distinct_need)
+    if missing or distinct:
+        return {"missing": missing, "distinct": distinct}
+    return None
+
+
+def _type_block_detail(team_no: int, party: dict, shortfall: dict) -> str:
+    """人话描述哪队卡在哪：「部队四全是太刀，没有打刀」。"""
+    team = f"部队{TEAM_NAMES.get(team_no, team_no)}"
+    known = sorted({t for t in party_sword_types(party) if t})
+    if len(known) == 1:
+        comp = f"全是{known[0]}"
+    elif known:
+        comp = f"只有{'、'.join(known)}"
+    else:
+        comp = "刀种没核到"
+    parts = []
+    if shortfall["missing"]:
+        parts.append("没有" + "和".join(shortfall["missing"]))
+    if shortfall["distinct"]:
+        have, need = shortfall["distinct"]
+        parts.append(f"只凑出{have}种刀，要{need}种")
+    return f"{team}{comp}，{'，'.join(parts)}"
+
+
+def _type_req_text(meta) -> str:
+    """图的刀种要求人话：「队里有打刀和太刀」「凑4种刀」。"""
+    rules = meta.get("rules") if isinstance(meta, dict) else None
+    if not isinstance(rules, dict):
+        return ""
+    parts = []
+    required = rules.get("required_types")
+    if isinstance(required, dict) and required:
+        parts.append("队里有" + "和".join(sorted(required)))
+    distinct_need = rules.get("min_distinct_types")
+    if isinstance(distinct_need, int) and not isinstance(distinct_need, bool) \
+            and distinct_need > 0:
+        parts.append(f"凑{distinct_need}种刀")
+    return "，".join(parts)
 
 
 def _per_hour(meta, resource: str) -> float:
@@ -288,7 +398,7 @@ DAY_END_MIN = 23 * 60 + 59    # 当天 23:59 前排得下才给这班建议
 
 
 def _reason(resource, tag, team_no, map_code, map_name, rank,
-            capacity, party) -> str:
+            capacity, party, type_note="") -> str:
     """v2 口吻：缺什么 → 派哪队去哪张图，为什么这队够格。"""
     team = f"部队{TEAM_NAMES.get(team_no, team_no)}"
     if tag == "limiting":
@@ -308,7 +418,10 @@ def _reason(resource, tag, team_no, map_code, map_name, rank,
     else:
         tail = f"→ 派{team}去{where}"
     reason = f"{head}{tail}"
-    reason += ("（等级合计够格）" if party else "（队伍等级没核到）")
+    suffix = "等级合计够格" if party else "队伍等级没核到"
+    if type_note:
+        suffix += f"，{type_note}"
+    reason += f"（{suffix}）"
     return reason
 
 
@@ -316,14 +429,21 @@ def build_expedition_suggestions(prefs: dict, *,
                                  planning=None, maps: dict | None = None,
                                  situation_path: Path | None = None,
                                  now_min: float = 0.0,
-                                 committed_teams=()) -> dict:
+                                 committed_teams=(),
+                                 occupied_maps=(),
+                                 failed_combos=()) -> dict:
     """玩家驱动的建议：丢 N 队 → 缺口前 N 种资源 → 每种资源配对口图和队。
 
     - 图：按该资源时薪从高到低试，23:59 前排不下就换次优图，全排不下
       今天不给这班建议（note 说明）。
+    - 图排除：occupied_maps 里「今天已有未完结班」的图不入选（游戏机制
+      一张图同时只能一队在跑）；本批建议内部也互相去重，两张建议不落同图。
     - 队：在「可丢且还没被派建议、没在外面跑、没已点的班」的队伍里，
-      滤图的等级条件（total_level/level_req，有近况才核），
+      滤图的等级条件（total_level/level_req）和刀种条件
+      （required_types「含有」语义 / min_distinct_types，有近况才核），
       都满足时优先番号小的；每队最多一条建议。
+    - 黑名单：failed_combos 里「今天同图同队没派成」的组合不再荐
+      （failed 会释放图，但同组合拉黑到今天结束），note 如实说明。
     - 多队建议同一起排时刻（now+5min）——不同队伍同时远征是游戏常态。
     返回 {"suggestions": [...], "note": 玩家可看的原因/None}。
     """
@@ -353,6 +473,16 @@ def build_expedition_suggestions(prefs: dict, *,
     free_teams = [t for t in sorted(prefs["available_teams"])
                   if t not in committed]
 
+    occupied = {str(code) for code in occupied_maps or () if code}
+
+    failed = set()
+    for combo in failed_combos or ():
+        try:
+            code, team = combo
+            failed.add((str(code), int(team)))
+        except (TypeError, ValueError):
+            continue
+
     order = shortage_order(planning, teams_out)
     suggestions = []
     misses = []
@@ -364,17 +494,39 @@ def build_expedition_suggestions(prefs: dict, *,
              and int(item[1].get("duration_min") or 0) > 0),
             key=lambda item: -_per_hour(item[1], resource))
         placed = False
-        saw_fit_block = saw_level_block = False
+        miss = {"resource": resource, "fit": False, "level": False,
+                "occupied": False, "type": False, "retry": False,
+                "detail": ""}
         for map_code, meta in ranked:
+            if map_code in occupied:
+                miss["occupied"] = True
+                continue
             duration = int(meta.get("duration_min") or 0)
             if start_min + duration > DAY_END_MIN:
-                saw_fit_block = True
+                miss["fit"] = True
                 continue
-            eligible = [t for t in free_teams if t not in used
-                        and _level_ok(meta, (party_levels or {}).get(t))]
+            candidates = [t for t in free_teams if t not in used]
+            # 今天同图同队 failed 过的组合拉黑到今天结束（图本身不拉黑）
+            blocked = [t for t in candidates if (map_code, t) in failed]
+            if blocked:
+                miss["retry"] = True
+                candidates = [t for t in candidates if t not in blocked]
+            eligible = []
+            for team in candidates:
+                party = (party_levels or {}).get(team)
+                if not _level_ok(meta, party):
+                    miss["level"] = True
+                    continue
+                shortfall = _type_shortfall(meta, party)
+                if shortfall is not None:
+                    miss["type"] = True
+                    if not miss["detail"]:
+                        miss["detail"] = (
+                            f"{map_code}要{_type_req_text(meta)}，"
+                            + _type_block_detail(team, party, shortfall))
+                    continue
+                eligible.append(team)
             if not eligible:
-                saw_level_block = saw_level_block or bool(
-                    [t for t in free_teams if t not in used])
                 continue
             team_no = min(eligible)
             used.add(team_no)
@@ -382,6 +534,13 @@ def build_expedition_suggestions(prefs: dict, *,
             rank = _resource_rank(maps, resource, map_code)
             capacity = _forge_capacity(planning, resource)
             party = party_levels.get(team_no) if party_levels else None
+            req_text = _type_req_text(meta)
+            type_note = ""
+            if req_text:
+                known = [t for t in party_sword_types(party) if t] \
+                    if party else []
+                type_note = f"刀种也够格（{req_text}）" if known \
+                    else "刀种没核到"
             suggestions.append({
                 "kind": "expedition",
                 "key": f"suggest:{team_no}:{map_code}",
@@ -394,22 +553,32 @@ def build_expedition_suggestions(prefs: dict, *,
                 "reason": _reason(resource, tag, team_no, map_code,
                                   str(meta.get("name") or map_code),
                                   rank if per_hour > 0 else None,
-                                  capacity, party),
+                                  capacity, party, type_note),
             })
             placed = True
+            occupied.add(map_code)  # 本批建议内部也去重：一张图一班
             break
         if not placed:
-            misses.append((resource, saw_fit_block, saw_level_block))
+            misses.append(miss)
 
     notes = []
     if not free_teams and not suggestions:
         notes.append("能丢的队伍今天都已经有安排或还在外面，没队可丢。")
-    for resource, fit_block, level_block in misses:
-        if fit_block and not level_block:
-            notes.append(f"{resource}的对口图今天 23:59 前排不下，"
-                         "明天早点丢。")
-        elif level_block:
-            notes.append(f"能丢的队伍等级都不够{resource}的对口图。")
+    for miss in misses:
+        resource = miss["resource"]
+        frags = []
+        if miss["occupied"]:
+            frags.append("对口图今天都有班在跑或已点上，明天再丢")
+        if miss["retry"]:
+            frags.append("这班今天没派成，同图同队先拉黑，换队/换图试试")
+        if miss["type"]:
+            frags.append(f"刀种门槛卡住：{miss['detail']}")
+        if miss["fit"]:
+            frags.append("对口图 23:59 前排不下，明天早点丢")
+        if miss["level"]:
+            frags.append("能丢的队伍等级都不够对口图")
+        if frags:
+            notes.append(f"{resource}：" + "；".join(frags) + "。")
         else:
             notes.append(f"{resource}今天排不出班（图太晚或没队够格）。")
     if suggestions and len(suggestions) < teams_out:
