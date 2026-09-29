@@ -357,23 +357,7 @@ button.tl-block:disabled { cursor: default; }
 .tlx-chip:hover:not(:disabled) { border-color: var(--fox-gold); color: var(--ink); }
 .tlx-chip.is-on { color: #315f42; background: rgba(49, 95, 66, 0.12); border-color: #6f9b6d; font-weight: 700; }
 .tlx-chip:disabled { cursor: default; opacity: .6; }
-.tl-expedition-choices { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
-.tl-expedition-choices summary { color: var(--ink); font-size: 12px; font-weight: 700; cursor: pointer; }
-.tl-expedition-choices summary small { margin-left: 6px; color: var(--ink-soft); font-size: 10px; font-weight: 400; }
-.tl-expedition-note, .tl-expedition-message { margin: 6px 0; color: var(--ink-soft); font-size: 11px; }
-.tl-expedition-note button { padding: 0; color: #79500e; background: none; border: 0; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
-.tl-expedition-note button:hover { color: #543706; }
-.tl-expedition-message { color: #6d4f18; }
-.tl-expedition-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 12px; margin-top: 8px; }
-.tl-expedition-row { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #b5d0ac; border-radius: 6px; background: #edf5e9; }
-.tl-expedition-row.is-off { color: #77736e; background: #efede9; border-color: #d8d3ca; }
-.tl-expedition-row time { flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.tl-expedition-row > span { flex: 1; min-width: 0; font-size: 11px; }
-.tl-expedition-row small { display: block; color: var(--ink-soft); font-size: 9px; }
-.tl-expedition-row button { flex: none; padding: 5px 7px; color: #746c62; background: #e4e0d8; border: 1px solid #c6bfb3; border-radius: 5px; font: inherit; font-size: 10px; cursor: pointer; }
-.tl-expedition-row button.is-on { color: #315f32; background: #d6ead1; border-color: #77ad73; }
-.tl-expedition-row button:disabled { cursor: default; opacity: .6; }
-.tl-expedition-row em { color: var(--ink-soft); font-size: 10px; font-style: normal; }
+.tl-expedition-message { margin: 6px 0; color: #6d4f18; font-size: 11px; }
 .tl-mini-block.tlx-off { background: #bbb5aa; opacity: .5; }
 .tl-hint { margin: 8px 0 0; font-size: 12px; color: #8a5a12; }
 .tl-booking { margin-top: 12px; padding: 13px 14px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }

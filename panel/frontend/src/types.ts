@@ -997,6 +997,8 @@ export interface DayTimelineMarker {
 
 export interface DayTimelineExpedition {
   key: string
+  /** forced = 玩家点的班（含建议采纳的自描述班）；running = 远征中/待收 */
+  kind: 'forced' | 'running'
   planned_at: number
   time_min: number
   duration_min: number
@@ -1038,7 +1040,7 @@ export interface DayExpeditionHelpPrefs {
   available_teams: number[]
 }
 
-/** 一条远征建议：只投排班投影里已有的班；点采纳 = 那班记 forced */
+/** 一条远征建议：引擎按缺口现算的班（队伍/图/时刻自描述）；点采纳 = 记 forced */
 export interface DayExpeditionSuggestion {
   kind: 'expedition'
   key: string
@@ -1106,7 +1108,7 @@ export interface DayTimeline {
   expedition_schedule_enabled: boolean
   expedition_help: DayExpeditionHelpPrefs
   expedition_suggestions: DayExpeditionSuggestion[]
-  /** 建议为空时给玩家看的原因（没盘点/没有能点的班） */
+  /** 建议为空时给玩家看的原因（没盘点/今天不丢队/排不下） */
   expedition_advice_note: string | null
   runs: DayTimelineRun[]
   hint: string | null

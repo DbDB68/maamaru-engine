@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import scheduler
-from .expedition_choices import is_forced, load_choice_sets
+from .expedition_choices import is_adhoc_record, load_choice_sets
 from . import expedition_advisor
 
 DAY_MINUTES = 24 * 60
@@ -79,70 +79,153 @@ def _minute_of(time_text: str) -> int:
         return 0
 
 
-def _expedition_items(cfg: dict, now: float, day_start: float,
-                      choices: dict | None = None,
-                      forced: dict | None = None) -> list[dict]:
+def _planned_ts_of(record) -> float | None:
+    """forced 记录的 planned_at 兼容 ISO 字符串和时间戳。"""
+    if not isinstance(record, dict):
+        return None
+    raw = record.get("planned_at")
+    try:
+        if isinstance(raw, str):
+            return datetime.fromisoformat(raw).timestamp()
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            return float(raw)
+    except (ValueError, OverflowError, OSError):
+        return None
+    return None
+
+
+def _forced_expedition_items(cfg: dict, now: float, day_start: float,
+                             forced: dict, durations: dict) -> list[dict]:
+    """forced 班（preset/custom 抬上来的 + 建议引擎采纳的自描述班）。
+
+    v2 起时间轴不再渲染 preset 投影：没点名的班不上轴。
+    """
     auto = cfg.get("automation", {}) if isinstance(cfg, dict) else {}
-    mode = auto.get("mode", "preset")
-    auto_enabled = bool(auto.get("enabled", True))
+    slots = auto.get("slot_states", {})
+    last_runs = auto.get("last_runs", {})
+    items = []
+    for key, record in (forced or {}).items():
+        if not isinstance(record, dict):
+            continue
+        try:
+            team_no = int(record.get("team_no"))
+        except (TypeError, ValueError):
+            continue
+        map_code = str(record.get("map_code") or "")
+        planned_ts = _planned_ts_of(record)
+        if planned_ts is None or map_code == "":
+            continue
+        if not day_start <= planned_ts < day_start + 86400:
+            continue
+        slot = slots.get(key)
+        if slot:
+            state = slot.get("state", scheduler.SLOT_WAITING_UNKNOWN)
+            blocked_reason = slot.get("blocked_reason") or ""
+            ended = slot.get("dispatched_at")
+            try:
+                done_ts = time.mktime(time.strptime(ended, "%Y-%m-%d %H:%M:%S"))
+            except (TypeError, ValueError):
+                done_ts = now
+            late_min = max(0, int((done_ts - planned_ts) / 60))
+        elif last_runs.get(key):
+            state, blocked_reason = scheduler.SLOT_DISPATCHED, ""
+            late_min = max(0, int((now - planned_ts) / 60))
+        else:
+            state = "pending" if planned_ts > now else "missed"
+            blocked_reason = ""
+            late_min = max(0, int((now - planned_ts) / 60))
+        # 自描述班时长以记录为准；排班引用班查收益表
+        duration = (int(record["duration_min"])
+                    if is_adhoc_record(record)
+                    else durations.get(map_code, 0))
+        will_run = state not in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED)
+        items.append({
+            "key": key, "kind": "forced", "planned_at": planned_ts,
+            "time_min": int((planned_ts - day_start) // 60),
+            "duration_min": duration,
+            "team_no": team_no,
+            "map_code": map_code,
+            "state": state,
+            "blocked_reason": blocked_reason,
+            "late_min": late_min,
+            "enabled": will_run,
+            "base_enabled": False,
+            "entry_enabled": True,
+            "skipped_today": False,
+            "forced_today": True,
+            "will_run": will_run,
+            # 还没进状态机终态、又没临近开班的班可以点掉（取消 forced）
+            "toggleable": (state not in scheduler.TERMINAL_STATES
+                           and planned_ts > now + 60),
+        })
+    return items
+
+
+def _running_expedition_items(records: dict, now: float, day_start: float,
+                              durations: dict) -> list[dict]:
+    """远征中/待收：来自 expeditions.json 派遣记录（收菜后销账）。"""
+    items = []
+    day_end = day_start + 86400
+    for team_str, record in (records or {}).items():
+        if not isinstance(record, dict):
+            continue
+        try:
+            team_no = int(team_str)
+            started = time.mktime(time.strptime(
+                str(record["dispatched_at"]), "%Y-%m-%d %H:%M:%S"))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        map_code = str(record.get("map_code") or "")
+        duration = int(record.get("duration_min")
+                       or durations.get(map_code, 0) or 0)
+        end_ts = started + duration * 60
+        if started >= day_end or end_ts < day_start - 6 * 3600:
+            continue  # 明天的班/太久远的残账都不上今天的轴
+        time_min = int((started - day_start) // 60)
+        if time_min < 0:  # 跨午夜：截到今天 0 点起画
+            duration += time_min
+            time_min = 0
+        state = "running" if now < end_ts else "awaiting_collect"
+        items.append({
+            "key": f"running:{team_no}:{map_code}",
+            "kind": "running", "planned_at": started,
+            "time_min": time_min,
+            "duration_min": max(0, duration),
+            "team_no": team_no,
+            "map_code": map_code,
+            "state": state,
+            "blocked_reason": "",
+            "late_min": 0,
+            "enabled": True,
+            "base_enabled": True,
+            "entry_enabled": True,
+            "skipped_today": False,
+            "forced_today": False,
+            "will_run": True,
+            "toggleable": False,
+        })
+    return items
+
+
+def _expedition_items(cfg: dict, now: float, day_start: float,
+                      forced: dict | None = None,
+                      records: dict | None = None) -> list[dict]:
+    """v2 泳道内容 = 已 forced 的班 + 远征中/待收；preset 死班表不上轴。"""
     durations = {}
     try:
         durations = {m["code"]: int(m.get("duration_min", 0))
                      for m in scheduler.map_options()}
     except Exception:
         pass
-    entries = cfg.get("entries", []) if isinstance(cfg, dict) else []
-    forced = forced or {}
-
-    items = []
-    # 预设循环可能跨午夜；取今天开头和结尾所在的两个循环，按真实日期筛选。
-    projected = {}
-    for at in (day_start + 1, day_start + 86399, now):
-        try:
-            projection = scheduler.today_projection(cfg=cfg, now=at,
-                                                    choices=choices, forced=forced)
-        except Exception:
-            continue
-        for item in projection.get(mode, []):
-            projected[item["key"]] = item
-    for it in projected.values():
-        team_no = int(it.get("team_no") or 0)
-        map_code = it.get("map_code", "")
-        forced_today = is_forced(forced, key=it["key"], team_no=team_no,
-                                 map_code=map_code)
-        if mode == "preset":
-            entry_enabled = True
-        else:
-            idx = it.get("index")
-            entry = entries[idx] if isinstance(idx, int) and 0 <= idx < len(entries) else {}
-            entry_enabled = bool(entry.get("enabled", True))
-        base_enabled = auto_enabled and entry_enabled
-        skipped_today = bool(it.get("skipped_today")) and not forced_today
-        # 会跑 = 排班开着且没跳过，或被单班强制启用（自定义排班条目被关掉的除外）
-        will_run = (base_enabled and not skipped_today) or (forced_today and entry_enabled)
-        planned_at = float(it.get("planned_at") or 0)
-        if not day_start <= planned_at < day_start + 86400:
-            continue
-        time_min = int((planned_at - day_start) // 60)
-        duration = durations.get(map_code, 0)
-        items.append({
-            "key": it["key"], "planned_at": planned_at,
-            "time_min": time_min,
-            "duration_min": duration,
-            "team_no": it.get("team_no"),
-            "map_code": map_code,
-            "state": it.get("state", "pending"),
-            "blocked_reason": it.get("blocked_reason") or "",
-            "late_min": int(it.get("late_min") or 0),
-            "enabled": base_enabled and not skipped_today,
-            "base_enabled": base_enabled,
-            "entry_enabled": entry_enabled,
-            "skipped_today": skipped_today,
-            "forced_today": forced_today,
-            "will_run": will_run,
-            "toggleable": (entry_enabled and planned_at > now + 60
-                           and it.get("state") in ("pending", "skipped")),
-        })
+    running = _running_expedition_items(records, now, day_start, durations)
+    forced_items = _forced_expedition_items(cfg, now, day_start,
+                                            forced or {}, durations)
+    # 已确认派出且队伍在外的 forced 班由「远征中」块代言，不画两遍
+    running_teams = {item["team_no"] for item in running}
+    forced_items = [item for item in forced_items
+                    if not (item["team_no"] in running_teams
+                            and item["state"] == scheduler.SLOT_DISPATCHED)]
+    items = running + forced_items
     items.sort(key=lambda x: (x["time_min"], x.get("team_no") or 0))
     return items
 
@@ -395,31 +478,43 @@ def suggest_round_windows(now_min: float, occupied: list[dict],
 
 def _occupied_segments(expedition_items: list[dict], cfg: dict,
                        activity_team_no: int | None) -> list[dict]:
-    """避开刷新、派遣动作和活动队外出；队伍未知时保守避开全部远征。"""
+    """避开刷新、派遣动作和活动队外出；队伍未知时保守避开全部远征。
+
+    v2：上轴的只有 forced 班和远征中/待收——待收的队已到家门口不占窗。
+    """
     occupied = [{
         "start_min": DAILY_RESET_WINDOW[0],
         "end_min": DAILY_RESET_WINDOW[1],
         "label": "日课刷新",
     }]
-    try:
-        managed = scheduler.managed_teams(cfg)
-    except Exception:
-        managed = {int(e.get("team_no") or 0) for e in expedition_items
-                   if e.get("enabled")}
+    active_items = [e for e in expedition_items
+                    if e.get("will_run") and e.get("state") != "awaiting_collect"]
+    managed = {int(e.get("team_no") or 0) for e in active_items}
     away_whole_shift = bool(activity_team_no and activity_team_no in managed)
-    for e in expedition_items:
-        if not e.get("enabled"):
-            continue
+    for e in active_items:
         team = scheduler.TEAM_NAMES.get(int(e.get("team_no") or 0),
                                         f"部队{e.get('team_no')}")
         start = e["time_min"]
         when = f"{start // 60:02d}:{start % 60:02d}"
+        if e.get("state") == "running":
+            # 队在外面：活动队是这支（或不知道活动队）时整段避让
+            if activity_team_no is None \
+                    or int(e.get("team_no") or 0) == activity_team_no:
+                occupied.append({
+                    "start_min": start,
+                    "end_min": start + int(e.get("duration_min") or 0)
+                    if e.get("duration_min") else DAY_MINUTES,
+                    "label": f"{when} {team}远征",
+                })
+            continue
+        if e.get("state") in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED):
+            continue
         occupied.append({
             "start_min": start - ACTION_WINDOW_BEFORE_MIN,
             "end_min": start + ACTION_WINDOW_AFTER_MIN,
             "label": f"{when} {team}派遣",
         })
-        # 活动队被远征排班管着时，整段远征队伍都不在家，出不了阵
+        # 活动队今天有班要跑时，整段远征队伍都不在家，出不了阵
         if activity_team_no is None or (away_whole_shift
                                         and int(e.get("team_no") or 0) == activity_team_no):
             occupied.append({
@@ -439,12 +534,15 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        expedition_choices: dict | None = None,
                        expedition_forced: dict | None = None,
                        expedition_help: dict | None = None,
+                       expedition_records: dict | None = None,
                        planning: dict | None = None,
                        situation_path=None) -> dict:
-    """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。
+    """组装 24 小时只读时间轴：远征块 + 任务运行条 + 参考线 + 挂机建议。
 
-    expedition_help / planning 都可注入（测试）；缺省分别从偏好文件和
-    账本报告取，取不到就给空建议 + 原因。
+    远征泳道 v2：只有已 forced 的班和远征中/待收上轴（preset 死班表
+    不再投影）；建议淡影由引擎按缺口现算，点了才跑。
+    expedition_help / planning / expedition_records 都可注入（测试）；
+    缺省分别从偏好文件、账本报告和 expeditions.json 取。
     """
     now = time.time() if now is None else now
     if cfg is None:
@@ -462,22 +560,33 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             expedition_choices = loaded_choices
         if expedition_forced is None:
             expedition_forced = loaded_forced
+    if expedition_records is None:
+        try:
+            expedition_records = scheduler.expedition_records()
+        except Exception:
+            expedition_records = {}
     expeditions = _expedition_items(cfg, now, day_start,
-                                    expedition_choices, expedition_forced)
+                                    forced=expedition_forced,
+                                    records=expedition_records)
     if expedition_help is None:
         expedition_help = expedition_advisor.load_prefs()
     if planning is None and int(expedition_help.get("teams_out") or 0) > 0:
         planning = _load_planning_snapshot(store)
+    now_min = (now - day_start) / 60
+    # 已有安排（在外面跑/待收/已点的班）的队伍不再给新建议
+    committed = {item["team_no"] for item in expeditions
+                 if item["kind"] == "running"
+                 or (item["will_run"]
+                     and item["state"] not in scheduler.TERMINAL_STATES)}
     advice = expedition_advisor.build_expedition_suggestions(
-        {"expeditions": expeditions}, expedition_help, planning=planning,
-        situation_path=situation_path)
+        expedition_help, planning=planning, situation_path=situation_path,
+        now_min=now_min, committed_teams=committed)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None
     shortfall_seconds = None
     activity = None
     hint = None
-    now_min = (now - day_start) / 60
     if hanafuda_plan and raid_plan:
         hint = "秘宝之里和联队战都在进行，今天先不替你选活动；时间表仍显示远征班次。"
     elif raid_plan:

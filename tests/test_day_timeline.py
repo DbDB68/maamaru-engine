@@ -48,99 +48,163 @@ def _cfg(entries, *, mode="custom", enabled=True):
     }
 
 
+def _forced_record(team, map_code, planned_ts, *, start_min=None,
+                   duration_min=None):
+    record = {"team_no": team, "map_code": map_code,
+              "planned_at": planned_ts}
+    if start_min is not None:
+        record["start_min"] = start_min
+    if duration_min is not None:
+        record["duration_min"] = duration_min
+    return record
+
+
 class DayTimelineExpeditionTests(unittest.TestCase):
+    """v2：上轴的只有 forced 班（含自描述班）和远征中/待收；
+    preset/custom 死班表不再投影。"""
+
     def setUp(self):
         patcher = patch.object(scheduler, "map_options", lambda: _FAKE_MAPS)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_custom_entry_lands_on_axis(self):
+    def test_unforced_entry_is_not_projected(self):
+        """没点名的排班条目不上轴（preset/custom 投影已撤）。"""
         now = _today_at(6, 0)
         cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
                      "enabled": True}])
         out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
+                                     script_labels={},
+                                     expedition_records={},
+                                     expedition_help={"teams_out": 0,
+                                                      "available_teams": []})
+        self.assertEqual(out["expeditions"], [])
+
+    def test_forced_entry_lands_on_axis(self):
+        now = _today_at(6, 0)
+        day_start = _today_at(0, 0)
+        key = f"{time.strftime('%Y-%m-%d')}:custom:0:08:30"
+        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
+                     "enabled": True}], enabled=False)
+        forced = {key: _forced_record(2, "B3", _today_at(8, 30))}
+        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
+                                     script_labels={},
+                                     expedition_forced=forced,
+                                     expedition_records={},
+                                     expedition_help={"teams_out": 0,
+                                                      "available_teams": []})
         self.assertEqual(len(out["expeditions"]), 1)
         item = out["expeditions"][0]
+        self.assertEqual(item["kind"], "forced")
         self.assertEqual(item["time_min"], 8 * 60 + 30)
         self.assertEqual(item["duration_min"], 90)
         self.assertEqual(item["team_no"], 2)
         self.assertEqual(item["map_code"], "B3")
         self.assertEqual(item["state"], "pending")
-        self.assertTrue(item["enabled"])
+        self.assertTrue(item["will_run"])
+        self.assertTrue(item["forced_today"])
+        self.assertTrue(item["toggleable"])
 
-    def test_disabled_entry_grayed_out(self):
-        now = _today_at(6, 0)
-        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                     "enabled": False}])
-        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
-        self.assertFalse(out["expeditions"][0]["enabled"])
-
-    def test_expedition_will_run_states(self):
-        """will_run 三态：总开关关→不跑（但可点 force）；forced→跑；
-        自定义条目被关掉→forced 也不 lifted，且不可点。"""
+    def test_adhoc_forced_uses_its_own_duration(self):
+        """自描述班时长以记录为准，不查收益表。"""
         now = _today_at(6, 0)
         day_start = _today_at(0, 0)
-        key = f"{time.strftime('%Y-%m-%d')}:custom:0:08:30"
-        cfg_off = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                         "enabled": True}], enabled=False)
-        items = dtl._expedition_items(cfg_off, now, day_start, {}, {})
-        self.assertFalse(items[0]["will_run"])
-        self.assertTrue(items[0]["toggleable"])  # 总开关关着也能点（force）
-        forced = {key: {"team_no": 2, "map_code": "B3", "planned_at": 1}}
-        items = dtl._expedition_items(cfg_off, now, day_start, {}, forced)
-        self.assertTrue(items[0]["will_run"])
-        self.assertTrue(items[0]["forced_today"])
-        cfg_entry_off = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                               "enabled": False}], enabled=False)
-        items = dtl._expedition_items(cfg_entry_off, now, day_start, {}, forced)
-        self.assertFalse(items[0]["will_run"])
+        key = f"{time.strftime('%Y-%m-%d')}:adhoc:1:700"
+        forced = {key: _forced_record(1, "ZZ9", _today_at(11, 40),
+                                      start_min=700, duration_min=45)}
+        items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["duration_min"], 45)
+        self.assertEqual(items[0]["map_code"], "ZZ9")  # 图查不到也照画
+
+    def test_legacy_forced_unknown_map_duration_zero(self):
+        now = _today_at(6, 0)
+        day_start = _today_at(0, 0)
+        forced = {"k": _forced_record(2, "ZZ9", _today_at(8, 30))}
+        items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
+        self.assertEqual(items[0]["duration_min"], 0)
+
+    def test_garbage_forced_records_not_crash(self):
+        now = _today_at(6, 0)
+        day_start = _today_at(0, 0)
+        forced = {"a": None, "b": {"team_no": "x"},
+                  "c": _forced_record(2, "B3", "垃圾")}
+        items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
+        self.assertEqual(items, [])
+
+    def test_yesterday_forced_not_shown(self):
+        now = _today_at(6, 0)
+        day_start = _today_at(0, 0)
+        forced = {"old": _forced_record(2, "B3", day_start - 3600)}
+        items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
+        self.assertEqual(items, [])
+
+    def test_near_start_forced_not_toggleable(self):
+        now = _today_at(8, 0)
+        day_start = _today_at(0, 0)
+        forced = {"k": _forced_record(2, "B3", now + 30)}
+        items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
         self.assertFalse(items[0]["toggleable"])
-        cfg_on = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                        "enabled": True}])
-        skipped = {key: {"team_no": 2, "map_code": "B3", "planned_at": 1}}
-        items = dtl._expedition_items(cfg_on, now, day_start, skipped, {})
-        self.assertFalse(items[0]["will_run"])
-        self.assertTrue(items[0]["skipped_today"])
-        items = dtl._expedition_items(cfg_on, now, day_start, skipped, forced)
-        self.assertTrue(items[0]["will_run"])  # forced 优先于 skipped
 
-    def test_other_schedule_mode_does_not_mix_into_today(self):
-        now = _today_at(6, 0)
-        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                     "enabled": True}], mode="preset")
-        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
-        custom = [e for e in out["expeditions"] if e["map_code"] == "B3"]
-        self.assertFalse(custom)
-
-    def test_global_off_still_shows_configured_gray_shifts(self):
-        now = _today_at(6, 0)
-        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
-                     "enabled": True}], enabled=False)
-        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
+    def test_running_record_shows_as_running_block(self):
+        now = _today_at(12, 0)
+        records = {"4": {"map_code": "B3", "duration_min": 90,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(_today_at(11, 0)))}}
+        out = dtl.build_day_timeline(now, cfg=_cfg([]), store=None,
+                                     script_labels={},
+                                     expedition_records=records)
         self.assertEqual(len(out["expeditions"]), 1)
-        self.assertFalse(out["expeditions"][0]["enabled"])
-        self.assertFalse(out["expeditions"][0]["will_run"])
-        # 新语义：总开关关着，未来的班也能点（点 = 记 forced 单独跑这班）
-        self.assertTrue(out["expeditions"][0]["toggleable"])
+        item = out["expeditions"][0]
+        self.assertEqual(item["kind"], "running")
+        self.assertEqual(item["state"], "running")
+        self.assertEqual(item["time_min"], 660)
+        self.assertEqual(item["duration_min"], 90)
+        self.assertFalse(item["toggleable"])
 
-    def test_unknown_map_duration_zero_not_crash(self):
-        now = _today_at(6, 0)
-        cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "ZZ9",
-                     "enabled": True}])
-        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
-        self.assertEqual(out["expeditions"][0]["duration_min"], 0)
+    def test_overdue_record_shows_awaiting_collect(self):
+        now = _today_at(12, 0)
+        records = {"4": {"map_code": "B3", "duration_min": 90,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(_today_at(9, 0)))}}
+        items = dtl._expedition_items(_cfg([]), now, _today_at(0, 0),
+                                      records=records)
+        self.assertEqual(items[0]["state"], "awaiting_collect")
 
-    def test_garbage_entry_not_crash(self):
-        now = _today_at(6, 0)
-        cfg = _cfg([{"time": "咕咕", "team_no": 2, "map_code": "B3"}])
-        out = dtl.build_day_timeline(now, cfg=cfg, store=None,
-                                     script_labels={})
-        self.assertEqual(len(out["expeditions"]), 1)
+    def test_dispatched_forced_hidden_behind_running(self):
+        """已确认派出且队伍在外的 forced 班由「远征中」块代言，不画两遍。"""
+        now = _today_at(12, 0)
+        day_start = _today_at(0, 0)
+        key = f"{time.strftime('%Y-%m-%d')}:adhoc:4:660"
+        cfg = _cfg([])
+        cfg["automation"].setdefault("slot_states", {})[key] = {
+            "state": "dispatched", "blocked_reason": "",
+            "dispatched_at": time.strftime("%Y-%m-%d %H:%M:%S",
+                                           time.localtime(_today_at(11, 0)))}
+        forced = {key: _forced_record(4, "B3", _today_at(11, 0),
+                                      start_min=660, duration_min=90)}
+        records = {"4": {"map_code": "B3", "duration_min": 90,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(_today_at(11, 0)))}}
+        items = dtl._expedition_items(cfg, now, day_start, forced=forced,
+                                      records=records)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["kind"], "running")
+
+    def test_cross_midnight_running_clamped_to_day_start(self):
+        now = _today_at(0, 30)
+        records = {"2": {"map_code": "B3", "duration_min": 90,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(_today_at(0, 0) - 1800))}}
+        items = dtl._expedition_items(_cfg([]), now, _today_at(0, 0),
+                                      records=records)
+        self.assertEqual(items[0]["time_min"], 0)
+        self.assertEqual(items[0]["duration_min"], 60)
+        self.assertEqual(items[0]["state"], "running")
 
 
 class DayTimelineRunTests(unittest.TestCase):
@@ -248,7 +312,9 @@ class DayTimelineMiscTests(unittest.TestCase):
     def test_empty_inputs_not_crash(self):
         with patch.object(scheduler, "map_options", lambda: []):
             out = dtl.build_day_timeline(
-                _today_at(9, 0), cfg={}, store=self.store, script_labels={})
+                _today_at(9, 0), cfg={}, store=self.store, script_labels={},
+                expedition_records={},
+                expedition_help={"teams_out": 0, "available_teams": []})
         self.assertEqual(out["expeditions"], [])
         self.assertEqual(out["runs"], [])
         self.assertIsNone(out["hint"])
@@ -390,11 +456,16 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
                 "seconds_to_end": seconds_to_end,
                 "tama_remaining": 300}
 
-    def _build(self, now, cfg, plan, team_no=None):
+    def _build(self, now, cfg, plan, team_no=None, forced=None):
         with patch.object(dtl, "_hanafuda_active_plan", return_value=plan):
             return dtl.build_day_timeline(now, cfg=cfg, store=self.store,
                                           script_labels={},
-                                          hanafuda_team_no=team_no)
+                                          hanafuda_team_no=team_no,
+                                          expedition_forced=forced or {},
+                                          expedition_records={},
+                                          expedition_help={
+                                              "teams_out": 0,
+                                              "available_teams": []})
 
     def test_daily_quota_spread_over_days_left(self):
         """口径：estimated_seconds 按剩余天数平摊（和活动卡前端一致）。"""
@@ -421,11 +492,11 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         self.assertEqual(out["suggestions"][0]["start_min"], 250)
 
     def test_managed_hanafuda_team_blocks_whole_shift(self):
-        """活动队在排班管理内：它的远征时段整段避让，不只是动作窗口。"""
-        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
-                     "enabled": True}])  # B3 = 90 分钟
+        """活动队有 forced 班要跑：它的远征时段整段避让，不只是动作窗口。"""
+        forced = {"k": _forced_record(3, "B3", _today_at(10, 0))}  # B3 = 90 分钟
         plan = self._plan(4 * 3600, 86400)
-        out = self._build(_today_at(8, 0), cfg, plan, team_no=3)
+        out = self._build(_today_at(8, 0), _cfg([]), plan, team_no=3,
+                          forced=forced)
         blocks = out["suggestions"]
         self.assertEqual(out["shortfall_seconds"], 0)
         self.assertEqual(len(blocks), 2)
@@ -435,32 +506,46 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         self.assertEqual(blocks[1]["start_min"], 690)
 
     def test_unmanaged_hanafuda_team_only_action_window(self):
-        """活动队不在排班管理内：只占动作窗口。"""
-        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
-                     "enabled": True}])
+        """forced 班不是活动队的：只占动作窗口。"""
+        forced = {"k": _forced_record(3, "B3", _today_at(10, 0))}
         plan = self._plan(4 * 3600, 86400)
-        out = self._build(_today_at(8, 0), cfg, plan, team_no=4)
+        out = self._build(_today_at(8, 0), _cfg([]), plan, team_no=4,
+                          forced=forced)
         blocks = out["suggestions"]
         self.assertEqual(blocks[1]["start_min"], 605)  # 10:05 就能续
 
-    def test_disabled_shift_not_avoided(self):
-        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
-                     "enabled": False}])
+    def test_expired_shift_not_avoided(self):
+        """过点废弃的 forced 班（终态 expired）不再占窗。"""
+        today = time.strftime("%Y-%m-%d")
+        key = f"{today}:adhoc:3:600"
+        cfg = _cfg([])
+        cfg["automation"].setdefault("slot_states", {})[key] = {
+            "state": scheduler.SLOT_EXPIRED, "blocked_reason": ""}
+        forced = {key: _forced_record(3, "B3", _today_at(10, 0))}
         plan = self._plan(2 * 3600, 86400)
-        out = self._build(_today_at(8, 0), cfg, plan, team_no=3)
+        out = self._build(_today_at(8, 0), cfg, plan, team_no=3,
+                          forced=forced)
         self.assertEqual(out["suggestions"],
                          [{"start_min": 480, "duration_min": 120, "note": ""}])
 
-    def test_raid_daily_rounds_split_around_same_team_expedition(self):
-        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
-                     "enabled": True}])
-        plan = {"runs_needed": 36, "seconds_per_loop": 420,
-                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+    def _raid_build(self, now, plan, *, raid_team_no=None, forced=None,
+                    active=None):
         with patch.object(dtl, "_raid_active_plan", return_value=plan), \
              patch.object(dtl, "_hanafuda_active_plan", return_value=None):
-            out = dtl.build_day_timeline(
-                _today_at(8, 0), cfg=cfg, store=self.store,
-                script_labels={}, raid_team_no=3)
+            return dtl.build_day_timeline(
+                now, cfg=_cfg([]), store=self.store,
+                script_labels={}, raid_team_no=raid_team_no,
+                expedition_forced=forced or {},
+                expedition_records={},
+                expedition_help={"teams_out": 0, "available_teams": []},
+                active=active)
+
+    def test_raid_daily_rounds_split_around_same_team_expedition(self):
+        forced = {"k": _forced_record(3, "B3", _today_at(10, 0))}
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        out = self._raid_build(_today_at(8, 0), plan, raid_team_no=3,
+                               forced=forced)
         self.assertEqual(out["activity"]["target_runs"], 18)
         self.assertEqual(out["activity"]["planned_runs"], 18)
         self.assertEqual([(b["start_min"], b["runs"]) for b in out["suggestions"]],
@@ -468,34 +553,22 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         self.assertEqual(out["shortfall_seconds"], 0)
 
     def test_unknown_raid_team_avoids_every_expedition_shift(self):
-        cfg = _cfg([{"time": "10:00", "team_no": 3, "map_code": "B3",
-                     "enabled": True}])
+        forced = {"k": _forced_record(3, "B3", _today_at(10, 0))}
         plan = {"runs_needed": 36, "seconds_per_loop": 420,
                 "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
-        with patch.object(dtl, "_raid_active_plan", return_value=plan), \
-             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
-            out = dtl.build_day_timeline(
-                _today_at(9, 55), cfg=cfg, store=self.store,
-                script_labels={}, raid_team_no=None)
+        out = self._raid_build(_today_at(9, 55), plan, forced=forced)
         self.assertEqual(out["suggestions"][0]["start_min"], 690)
 
     def test_raid_without_measured_pace_makes_no_schedule(self):
-        with patch.object(dtl, "_raid_active_plan", return_value=None), \
-             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
-            out = dtl.build_day_timeline(
-                _today_at(8, 0), cfg=_cfg([]), store=self.store,
-                script_labels={})
+        out = self._raid_build(_today_at(8, 0), None)
         self.assertIsNone(out["activity"])
         self.assertIsNone(out["suggestions"])
 
     def test_running_task_waits_for_fresh_raid_progress(self):
         plan = {"runs_needed": 36, "seconds_per_loop": 420,
                 "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
-        with patch.object(dtl, "_raid_active_plan", return_value=plan), \
-             patch.object(dtl, "_hanafuda_active_plan", return_value=None):
-            out = dtl.build_day_timeline(
-                _today_at(8, 0), cfg=_cfg([]), store=self.store,
-                script_labels={}, active={"script": "raid"})
+        out = self._raid_build(_today_at(8, 0), plan,
+                               active={"script": "raid"})
         self.assertIsNone(out["suggestions"])
         self.assertIn("收工", out["hint"])
 

@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from touken.runtime_paths import SCHEDULE_PATH, STATE_DIR
-from .expedition_choices import is_forced, is_skipped, load_choice_sets
+from .expedition_choices import (adhoc_planned_date, is_adhoc_record,
+                                 is_forced, is_skipped, load_choice_sets)
 
 _SCHED_PATH = SCHEDULE_PATH
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
@@ -313,6 +314,44 @@ def forced_only(due: list, forced: dict) -> list:
     return [job for job in due
             if is_forced(forced or {}, key=job["key"],
                          team_no=int(job["team_no"]), map_code=job["map_code"])]
+
+
+def adhoc_due(cfg: dict, forced: dict, now: float, today: str) -> list:
+    """自描述 forced 班（建议引擎采纳的班）的到期产出。
+
+    不引用任何 preset/custom 条目：队伍/图/计划时刻全在 forced 记录里。
+    键里编了日期，昨天的残留自动不参与；宽限口径与排班一致
+    （max_delay_min，资本家 4 倍）。
+    """
+    auto = cfg["automation"]
+    grace = _grace_min(auto)
+    last_runs = auto.get("last_runs", {})
+    out = []
+    for key, record in (forced or {}).items():
+        if not is_adhoc_record(record):
+            continue
+        if adhoc_planned_date(record) != today:
+            continue
+        raw_planned = record.get("planned_at")
+        try:
+            planned_ts = (datetime.fromisoformat(raw_planned).timestamp()
+                          if isinstance(raw_planned, str)
+                          else float(raw_planned))
+            team_no = int(record.get("team_no"))
+            map_code = str(record.get("map_code") or "")
+        except (TypeError, ValueError):
+            continue
+        if not map_code:
+            continue
+        late = (now - planned_ts) / 60
+        if late < 0 or late > grace:
+            continue
+        if last_runs.get(key):
+            continue
+        out.append({"key": key, "team_no": team_no, "map_code": map_code,
+                    "late_min": int(late),
+                    "planned_at": str(record["planned_at"])})
+    return out
 
 
 def managed_teams(cfg=None):
@@ -730,6 +769,9 @@ def start_scheduler(config_path: str, emit_fn):
                 due = (_preset_due(cfg, now_min, today, choices, forced)
                        if auto.get("mode") == "preset"
                        else _custom_due(cfg, now_min, today, choices, forced))
+                # 自描述 forced 班（建议引擎采纳的班）不走 preset/custom 投影，
+                # 两种模式下都照常到点进状态机
+                due += adhoc_due(cfg, forced, now, today)
                 if not auto.get("enabled"):
                     # 总开关关着：只有今日强制启用的班照常走状态机，其余照旧不跑
                     due = forced_only(due, forced)

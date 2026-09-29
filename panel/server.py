@@ -2145,11 +2145,11 @@ async def api_day_conductor(request: Request):
 
 @app.put("/api/day-timeline/expedition-slot")
 async def api_set_day_expedition_slot(request: Request):
-    """只改今天这一班跑不跑：会跑 ↔ 跳过/强制，排班循环规则不动。
-
-    排班总开关关着时也能把未来的班点上（记 forced 单独跑）。
+    """点按今天的一班远征：自描述班（建议采纳的）直接改 forced 记录；
+    排班投影里的班走旧契约（会跑 ↔ 跳过/强制）。
     """
-    from .expedition_choices import set_slot_intention
+    from .expedition_choices import (ADHOC_KEY_MARK, set_forced_adhoc,
+                                     set_slot_intention)
 
     body = await request.json()
     key = body.get("key") if isinstance(body, dict) else None
@@ -2160,6 +2160,16 @@ async def api_set_day_expedition_slot(request: Request):
     slot = next((item for item in timeline["expeditions"] if item["key"] == key), None)
     if not slot or not slot["toggleable"]:
         raise HTTPException(409, "这班已临近开班、已处理，或排班里被关掉了；请刷新时间表")
+    if ADHOC_KEY_MARK in key:
+        # 自描述班：点掉 = 删 forced 记录；点回 = 按块上的自描述信息重写
+        set_forced_adhoc(
+            key=key, team_no=int(slot["team_no"]), map_code=slot["map_code"],
+            start_min=int(slot["time_min"]),
+            duration_min=int(slot.get("duration_min") or 0),
+            planned_at=time.strftime("%Y-%m-%dT%H:%M:%S",
+                                     time.localtime(float(slot["planned_at"]))),
+            forced=will_run)
+        return {"ok": True}
     if will_run and not slot["base_enabled"] and not slot.get("entry_enabled", True):
         raise HTTPException(409, "这班在排班设置里被关掉了，先去排班里打开再来点")
     set_slot_intention(key=slot["key"], team_no=slot["team_no"],
@@ -2170,12 +2180,14 @@ async def api_set_day_expedition_slot(request: Request):
 
 @app.put("/api/day-timeline/expedition-adopt")
 async def api_adopt_day_expedition_suggestion(request: Request):
-    """采纳一条远征建议 = 给那班记 forced（排班关着也单独走状态机）。
+    """采纳一条远征建议 = 写一班自描述 forced（排班关着也到点单独派出）。
 
-    建议只投排班投影里已有的班；采纳前对照最新建议列表，过期的点不动。
+    v2：建议由引擎按缺口现算，不引用排班条目；forced 记录自带
+    队伍/图/时刻/时长。重复采纳 409；建议过期（队伍已有安排等）409。
     """
     from . import expedition_advisor
-    from .expedition_choices import set_slot_intention
+    from .expedition_choices import (adhoc_key, load_choice_sets,
+                                     set_forced_adhoc)
 
     body = await request.json()
     if not isinstance(body, dict):
@@ -2197,15 +2209,17 @@ async def api_adopt_day_expedition_suggestion(request: Request):
          and int(item.get("start_min") or -1) == start_min), None)
     if not suggestion:
         raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
-    slot = next((item for item in timeline.get("expeditions") or []
-                 if item.get("key") == suggestion.get("key")), None)
-    if not slot or not slot.get("toggleable"):
-        raise HTTPException(409, "这班已临近开班、已处理，或排班里被关掉了；请刷新时间表")
-    if not slot.get("entry_enabled", True):
-        raise HTTPException(409, "这班在排班设置里被关掉了，先去排班里打开再来点")
-    set_slot_intention(key=slot["key"], team_no=slot["team_no"],
-                       map_code=slot["map_code"], planned_at=slot["planned_at"],
-                       will_run=True, base_enabled=bool(slot["base_enabled"]))
+    today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"]))
+    key = adhoc_key(today, team_no, start_min)
+    _, forced = load_choice_sets()
+    if key in forced:
+        raise HTTPException(409, "这班已经点上了，到点会单独派出")
+    set_forced_adhoc(
+        key=key, team_no=team_no, map_code=map_code, start_min=start_min,
+        duration_min=int(suggestion.get("duration_min") or 0),
+        planned_at=time.strftime(
+            "%Y-%m-%dT%H:%M:%S",
+            time.localtime(timeline["day_start"] + start_min * 60)))
     fresh = _day_timeline_payload()
     return {"ok": True,
             "expeditions": fresh.get("expeditions") or [],

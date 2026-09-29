@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from panel import scheduler as s
+from panel import expedition_choices as ec
 from touken.flows.battle import BattleMixin
 from touken.flows.raid import RaidMixin
 from touken.flows.report_judge import _is_fail
@@ -486,6 +487,108 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(by_index[1]["state"], "pending")  # 还没到点
         self.assertEqual(by_index[2]["state"], "missed")   # 过去但面板没见过
         self.assertIn("preset", proj)
+
+
+class AdhocDispatchTests(unittest.TestCase):
+    """自描述 forced 班（建议引擎采纳的班）：到点走同一条状态机路，
+    排班总开关关着也照常（forced_only 天然放行）。"""
+
+    def _cfg(self, **auto_over):
+        cfg = s._defaults()
+        cfg["automation"]["enabled"] = True
+        cfg["automation"]["mode"] = "custom"
+        cfg["automation"].update(auto_over)
+        cfg["entries"] = []
+        return cfg
+
+    def _record(self, team=4, map_code="B3", planned_ts=None,
+                start_min=600, duration_min=90):
+        planned_ts = _today_at(10, 0) if planned_ts is None else planned_ts
+        return {"team_no": team, "map_code": map_code,
+                "planned_at": time.strftime("%Y-%m-%dT%H:%M:%S",
+                                            time.localtime(planned_ts)),
+                "start_min": start_min, "duration_min": duration_min}
+
+    def test_due_at_planned_time_within_grace(self):
+        today = time.strftime("%Y-%m-%d")
+        key = ec.adhoc_key(today, 4, 600)
+        forced = {key: self._record()}
+        due = s.adhoc_due(self._cfg(), forced, _today_at(10, 5), today)
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0]["key"], key)
+        self.assertEqual((due[0]["team_no"], due[0]["map_code"]), (4, "B3"))
+        self.assertEqual(due[0]["late_min"], 5)
+        # 提前不产班
+        self.assertEqual(s.adhoc_due(self._cfg(), forced,
+                                     _today_at(9, 59), today), [])
+
+    def test_grace_cutoff(self):
+        today = time.strftime("%Y-%m-%d")
+        forced = {ec.adhoc_key(today, 4, 600): self._record()}
+        self.assertEqual(
+            s.adhoc_due(self._cfg(), forced, _today_at(10, 31), today), [])
+        cfg = self._cfg(capitalist=True)  # 资本家 4 倍宽限一样罩 adhoc
+        self.assertEqual(
+            len(s.adhoc_due(cfg, forced, _today_at(11, 59), today)), 1)
+
+    def test_done_or_stale_records_not_due(self):
+        today = time.strftime("%Y-%m-%d")
+        key = ec.adhoc_key(today, 4, 600)
+        cfg = self._cfg()
+        # 已派过（last_runs 有账）不重复产班
+        cfg["automation"]["last_runs"][key] = _ts_text(_today_at(10, 5))
+        self.assertEqual(s.adhoc_due(cfg, {key: self._record()},
+                                     _today_at(10, 5), today), [])
+        # 昨天的残留、引用排班条目的 legacy forced 都不参与
+        yesterday = _today_at(10, 0) - 86400
+        mixed = {
+            "old": self._record(planned_ts=yesterday),
+            "legacy": {"team_no": 4, "map_code": "B3",
+                       "planned_at": _today_at(10, 0)},
+        }
+        self.assertEqual(s.adhoc_due(self._cfg(), mixed,
+                                     _today_at(10, 5), today), [])
+
+    def test_forced_only_passes_adhoc_when_switch_off(self):
+        today = time.strftime("%Y-%m-%d")
+        key = ec.adhoc_key(today, 4, 600)
+        forced = {key: self._record()}
+        due = s.adhoc_due(self._cfg(enabled=False), forced,
+                          _today_at(10, 5), today)
+        self.assertEqual(s.forced_only(due, forced), due)
+
+    def test_tick_to_confirmed_dispatch_round_trip(self):
+        """到点 → ready → 起派遣（队/图正确）→ expeditions.json 确认 → 终态+last_runs。"""
+        today = time.strftime("%Y-%m-%d")
+        key = ec.adhoc_key(today, 4, 600)
+        forced = {key: self._record()}
+        cfg = self._cfg()
+        now = _today_at(10, 5)
+        due = s.adhoc_due(cfg, forced, now, today)
+        out = s.tick(cfg, due, now, runner_busy=False, emulator_ok=True,
+                     records={})
+        slot = cfg["automation"]["slot_states"][key]
+        self.assertEqual(slot["state"], "ready")
+        self.assertIsNone(out["start"])
+        out = s.tick(cfg, due, now + 16, runner_busy=False, emulator_ok=True,
+                     records={})
+        self.assertIsNotNone(out["start"])
+        # runner.start("dispatch", ...) 的班：队和图就是 forced 记录里那套
+        self.assertEqual(out["start"]["team_no"], 4)
+        self.assertEqual(out["start"]["map_code"], "B3")
+        records = {"4": {"map_code": "B3",
+                         "dispatched_at": _ts_text(now + 16),
+                         "duration_min": 90}}
+        events, changed = s.resolve_inflight(
+            cfg, key, None, now + 20, records,
+            {"key": key, "outcome": "done"})
+        self.assertTrue(changed)
+        self.assertEqual(slot["state"], "dispatched")
+        self.assertIn(key, cfg["automation"]["last_runs"])
+        for _, msg in out["events"] + events:
+            self.assertFalse(_is_fail(msg), msg)
+        # 落了 last_runs 的班不再产班：重启不重复派
+        self.assertEqual(s.adhoc_due(cfg, forced, now + 20, today), [])
 
 
 if __name__ == "__main__":

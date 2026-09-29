@@ -57,18 +57,6 @@ def _planning(*, limiting=("砥石",), capacity=3, koban_available=1000,
     }
 
 
-def _slot(key, team, map_code, time_min, *, toggleable=True, will_run=False,
-          duration=90):
-    return {"key": key, "team_no": team, "map_code": map_code,
-            "time_min": time_min, "duration_min": duration,
-            "toggleable": toggleable, "will_run": will_run,
-            "planned_at": float(time_min)}
-
-
-def _timeline(*slots):
-    return {"expeditions": list(slots)}
-
-
 def _prefs(teams_out=2, available_teams=(1, 4)):
     return {"version": 1, "teams_out": teams_out,
             "available_teams": list(available_teams)}
@@ -114,135 +102,142 @@ class ShortageOrderTests(unittest.TestCase):
 
 
 class SuggestionBuildTests(unittest.TestCase):
-    def test_n_teams_get_n_suggestions_in_team_order(self):
-        timeline = _timeline(
-            _slot("k1", 4, "B1", 600),
-            _slot("k2", 1, "A1", 700, duration=30),
-        )
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=2, available_teams=(4, 1)),
-            planning=_planning(limiting=("砥石", "玉钢")), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+    """v2：引擎按缺口现算班（图/队/时刻自描述），不再投排班投影。"""
+
+    def _build(self, prefs, **kwargs):
+        kwargs.setdefault("planning", _planning())
+        kwargs.setdefault("maps", _MAPS)
+        kwargs.setdefault("situation_path", Path("/nonexistent"))
+        kwargs.setdefault("now_min", 600)
+        return ea.build_expedition_suggestions(prefs, **kwargs)
+
+    def test_n_teams_get_n_suggestions_by_shortage_order(self):
+        out = self._build(_prefs(teams_out=2, available_teams=(1, 4)),
+                          planning=_planning(limiting=("砥石", "玉钢")))
         self.assertEqual(len(out["suggestions"]), 2)
         first, second = out["suggestions"]
-        # 队号序：部队一先挑缺口第一（砥石），部队四拿缺口第二（玉钢）
-        self.assertEqual((first["team_no"], first["resource"]), (1, "砥石"))
-        self.assertEqual((second["team_no"], second["resource"]), (4, "玉钢"))
-        self.assertEqual(first["map_code"], "A1")
-        self.assertEqual(first["start_min"], 700)
-        self.assertEqual(first["duration_min"], 30)
+        # 缺口第一（砥石）配唯一产砥石的 B1，番号最小的部队一去
+        self.assertEqual((first["team_no"], first["resource"],
+                          first["map_code"]), (1, "砥石", "B1"))
+        # 缺口第二（玉钢）配 A2，部队四接上（每队至多一条）
+        self.assertEqual((second["team_no"], second["resource"],
+                          second["map_code"]), (4, "玉钢", "A2"))
+        # now+5 分钟起排；不同队伍同时出发是游戏常态
+        self.assertEqual(first["start_min"], 605)
+        self.assertEqual(second["start_min"], 605)
+        self.assertEqual(first["duration_min"], 90)
+        self.assertEqual(first["key"], "suggest:1:B1")
         self.assertIsNone(out["note"])
 
-    def test_best_map_for_shortage_picked_among_team_slots(self):
-        """同一队有多班时挑最对口资源的，不是最早那班。"""
-        timeline = _timeline(
-            _slot("k1", 4, "A1", 600),   # 木炭 120/h
-            _slot("k2", 4, "B1", 900),   # 砥石 120/h ← 缺口对口
-        )
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
-        self.assertEqual(out["suggestions"][0]["map_code"], "B1")
-        self.assertEqual(out["suggestions"][0]["start_min"], 900)
-        self.assertIn("时薪第一", out["suggestions"][0]["reason"])
+    def test_smallest_team_number_wins(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(4, 1)))
+        self.assertEqual(out["suggestions"][0]["team_no"], 1)
 
-    def test_rank_one_reason_when_globally_best(self):
-        timeline = _timeline(_slot("k1", 4, "B1", 600))
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
-        self.assertIn("砥石", out["suggestions"][0]["reason"])
-        self.assertIn("时薪第一", out["suggestions"][0]["reason"])
+    def test_reason_names_shortage_map_and_rank(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(4,)))
+        reason = out["suggestions"][0]["reason"]
+        self.assertIn("砥石最缺（就剩3炉）", reason)
+        self.assertIn("B1「湖底」", reason)
+        self.assertIn("时薪正是第一", reason)
+        self.assertIn("等级没核", reason)  # 没近况文件，如实标注
 
-    def test_zero_yield_slot_still_suggested_with_honest_reason(self):
-        timeline = _timeline(_slot("k1", 1, "A2", 600))  # A2 只产玉钢
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+    def test_second_best_map_when_best_cannot_fit_today(self):
+        """晚段最优图（4 小时的 D4）排不下时回退次优图 B1。"""
+        planning = _planning(limiting=(), koban_available=-50)
+        out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                          planning=planning, now_min=1200)  # 20:05 起排
         suggestion = out["suggestions"][0]
-        self.assertEqual(suggestion["map_code"], "A2")
-        self.assertIn("不产砥石", suggestion["reason"])
+        self.assertEqual(suggestion["map_code"], "B1")
+        self.assertIn("时薪第2", suggestion["reason"])
 
-    def test_running_or_untoggleable_slots_not_suggested(self):
-        timeline = _timeline(
-            _slot("k1", 4, "B1", 600, will_run=True),
-            _slot("k2", 4, "B1", 900, toggleable=False),
-        )
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+    def test_past_day_end_gives_no_suggestion_with_honest_note(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                          now_min=23 * 60)  # 23:05 起排，90 分钟的 B1 装不下
         self.assertEqual(out["suggestions"], [])
-        self.assertIn("没有能点的班", out["note"])
+        self.assertIn("23:59 前排不下", out["note"])
 
-    def test_available_team_without_slots_counts_against_quota(self):
-        timeline = _timeline(_slot("k1", 1, "A1", 600))
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=2, available_teams=(1, 4)),
-            planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
-        self.assertEqual(len(out["suggestions"]), 1)
-        self.assertIn("想丢 2 队", out["note"])
-
-    def test_level_gate_filters_high_maps(self):
-        """队伍等级和不够 total_level 的图被滤掉，挑剩下的。"""
+    def test_level_gate_falls_back_to_lower_map(self):
+        """D4 要等级合计 100，队伍只有 50 → 回退到门槛 20 的 B1。"""
         with tempfile.TemporaryDirectory() as folder:
             path = _write_situation(folder, [
-                {"party_no": 1, "members": [{"level": 6}, {"level": 4}]},
+                {"party_no": 1, "members": [{"level": 50}]},
             ])
-            timeline = _timeline(
-                _slot("k1", 1, "A2", 600),  # total_level 200，滤掉
-                _slot("k2", 1, "A1", 700),  # total_level 10，过
-            )
-            out = ea.build_expedition_suggestions(
-                timeline, _prefs(teams_out=1), planning=_planning(),
-                maps=_MAPS, situation_path=path)
-            self.assertEqual(out["suggestions"][0]["map_code"], "A1")
-            self.assertNotIn("等级没核", out["suggestions"][0]["reason"])
+            planning = _planning(limiting=(), koban_available=-50)
+            out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                              planning=planning, situation_path=path)
+            suggestion = out["suggestions"][0]
+            self.assertEqual(suggestion["map_code"], "B1")
+            self.assertIn("等级合计够格", suggestion["reason"])
 
-    def test_all_slots_level_blocked_gives_no_suggestion(self):
+    def test_all_teams_level_blocked_gives_no_suggestion(self):
         with tempfile.TemporaryDirectory() as folder:
             path = _write_situation(folder, [
                 {"party_no": 4, "members": [{"level": 1}]},
             ])
-            timeline = _timeline(_slot("k1", 4, "B1", 600))
-            out = ea.build_expedition_suggestions(
-                timeline, _prefs(teams_out=1), planning=_planning(),
-                maps=_MAPS, situation_path=path)
+            out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                              situation_path=path)
             self.assertEqual(out["suggestions"], [])
-            self.assertIn("没有能点的班", out["note"])
+            self.assertIn("等级都不够", out["note"])
 
-    def test_no_situation_annotates_reason(self):
-        timeline = _timeline(_slot("k1", 4, "B1", 600))
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
-        self.assertIn("等级没核", out["suggestions"][0]["reason"])
+    def test_team_missing_from_situation_passes_gate_but_is_marked(self):
+        """近况里没这队 = 等级核不了，不拦但注明。"""
+        with tempfile.TemporaryDirectory() as folder:
+            path = _write_situation(folder, [
+                {"party_no": 2, "members": [{"level": 99}]},
+            ])
+            out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                              situation_path=path)
+            self.assertEqual(len(out["suggestions"]), 1)
+            self.assertIn("等级没核", out["suggestions"][0]["reason"])
+
+    def test_committed_teams_get_no_new_suggestion(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(1, 4)),
+                          committed_teams=(1,))
+        self.assertEqual(out["suggestions"][0]["team_no"], 4)
+
+    def test_all_teams_committed_gives_honest_note(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                          committed_teams=(4,))
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("没队可丢", out["note"])
+
+    def test_one_team_takes_at_most_one_shift(self):
+        out = self._build(_prefs(teams_out=2, available_teams=(1,)),
+                          planning=_planning(limiting=("砥石", "玉钢")))
+        self.assertEqual(len(out["suggestions"]), 1)
+        self.assertIn("想丢 2 队，只排得出 1 班", out["note"])
+
+    def test_resource_without_producing_map_gets_note(self):
+        out = self._build(_prefs(teams_out=1, available_teams=(1,)),
+                          planning=_planning(limiting=("冷却材",)))
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("冷却材", out["note"])
+
+    def test_fill_tone_when_nothing_is_urgent(self):
+        """四资源齐平不算「最缺」，reason 走顺手攒的 fill 口吻。"""
+        planning = _planning(limiting=("木炭", "玉钢", "冷却材", "砥石"),
+                             capacity=400)
+        out = self._build(_prefs(teams_out=1, available_teams=(4,)),
+                          planning=planning)
+        self.assertEqual(out["suggestions"][0]["resource"], "砥石")
+        self.assertIn("顺手攒砥石", out["suggestions"][0]["reason"])
 
     def test_no_planning_gives_empty_advice_with_note(self):
-        timeline = _timeline(_slot("k1", 4, "B1", 600))
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=None, maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+        out = self._build(_prefs(teams_out=1), planning=None)
         self.assertEqual(out["suggestions"], [])
         self.assertIn("盘点", out["note"])
 
     def test_empty_resource_watch_is_no_data(self):
-        timeline = _timeline(_slot("k1", 4, "B1", 600))
         planning = {"resource_watch": {"forge_capacity": None,
                                        "limiting": []}}
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=1), planning=planning, maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+        out = self._build(_prefs(teams_out=1), planning=planning)
         self.assertEqual(out["suggestions"], [])
-        self.assertIsNotNone(out["note"])
+        self.assertIn("盘点", out["note"])
 
     def test_teams_out_zero_means_no_advice(self):
-        timeline = _timeline(_slot("k1", 4, "B1", 600))
-        out = ea.build_expedition_suggestions(
-            timeline, _prefs(teams_out=0), planning=_planning(), maps=_MAPS,
-            situation_path=Path("/nonexistent"))
+        out = self._build(_prefs(teams_out=0))
         self.assertEqual(out["suggestions"], [])
-        self.assertIsNone(out["note"])
+        self.assertIn("不丢队", out["note"])
 
 
 class PrefsStorageTests(unittest.TestCase):
@@ -306,7 +301,7 @@ class PrefsStorageTests(unittest.TestCase):
 
 
 class TimelineIntegrationTests(unittest.TestCase):
-    """build_day_timeline 注入偏好/账本/近况，吐出建议淡影字段。"""
+    """build_day_timeline 注入偏好/账本/近况，吐出建议淡影字段（v2 现算班）。"""
 
     def setUp(self):
         day_timeline._planning_cache.clear()  # 别家的测试可能预填了真账本缓存
@@ -317,15 +312,26 @@ class TimelineIntegrationTests(unittest.TestCase):
         ])
         patcher.start()
         self.addCleanup(patcher.stop)
+        # build_day_timeline 不传 maps，建议引擎走自己的 load_maps
+        maps_patcher = patch.object(ea, "load_maps", lambda: _MAPS)
+        maps_patcher.start()
+        self.addCleanup(maps_patcher.stop)
+
+    def _today_at(self, hour, minute=0):
+        return time.mktime(time.strptime(
+            f"{time.strftime('%Y-%m-%d')} {hour:02d}:{minute:02d}:00",
+            "%Y-%m-%d %H:%M:%S"))
 
     def _build(self, now, cfg, **kwargs):
         kwargs.setdefault("store", object())
         kwargs.setdefault("script_labels", {})
+        kwargs.setdefault("expedition_forced", {})
+        kwargs.setdefault("expedition_records", {})
+        kwargs.setdefault("situation_path", Path("/nonexistent"))
         return day_timeline.build_day_timeline(now, cfg=cfg, **kwargs)
 
     def test_timeline_carries_help_and_suggestions(self):
-        now = time.mktime(time.strptime(
-            f"{time.strftime('%Y-%m-%d')} 06:00:00", "%Y-%m-%d %H:%M:%S"))
+        now = self._today_at(6, 0)
         cfg = {"entries": [{"time": "10:00", "team_no": 4, "map_code": "B1",
                             "enabled": True}],
                "automation": {"enabled": False, "mode": "custom",
@@ -334,73 +340,131 @@ class TimelineIntegrationTests(unittest.TestCase):
         out = self._build(now, cfg,
                           expedition_help=_prefs(teams_out=1,
                                                  available_teams=(4,)),
-                          planning=_planning(),
-                          situation_path=Path("/nonexistent"))
+                          planning=_planning())
         self.assertEqual(out["expedition_help"]["teams_out"], 1)
         self.assertEqual(out["expedition_help"]["available_teams"], [4])
+        # v2：排班条目不再上轴，也不影响建议——引擎按缺口现算
+        self.assertEqual(out["expeditions"], [])
         self.assertEqual(len(out["expedition_suggestions"]), 1)
         suggestion = out["expedition_suggestions"][0]
         self.assertEqual(suggestion["kind"], "expedition")
         self.assertEqual(suggestion["team_no"], 4)
         self.assertEqual(suggestion["map_code"], "B1")
-        self.assertEqual(suggestion["start_min"], 600)
+        self.assertEqual(suggestion["start_min"], 365)  # 06:00 + 5 分钟
+        self.assertEqual(suggestion["duration_min"], 90)
         self.assertEqual(suggestion["resource"], "砥石")
         self.assertTrue(suggestion["reason"])
 
+    def test_forced_teams_get_no_new_suggestion(self):
+        """已点上班的队（forced 落账）不再给新建议。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+                                             "mode": "custom"}}
+        forced = {"k": {"team_no": 4, "map_code": "B1",
+                        "planned_at": self._today_at(10, 0)}}
+        out = self._build(now, cfg, expedition_forced=forced,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4,)),
+                          planning=_planning())
+        self.assertEqual(len(out["expeditions"]), 1)
+        self.assertEqual(out["expedition_suggestions"], [])
+        self.assertIn("没队可丢", out["expedition_advice_note"])
+
+    def test_running_team_gets_no_new_suggestion(self):
+        """队伍还在外面远征（expeditions.json）时不再给新建议。"""
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+                                             "mode": "custom"}}
+        records = {"4": {"map_code": "B1", "duration_min": 90,
+                         "dispatched_at": time.strftime(
+                             "%Y-%m-%d %H:%M:%S",
+                             time.localtime(self._today_at(5, 0)))}}
+        out = self._build(now, cfg, expedition_records=records,
+                          expedition_help=_prefs(teams_out=1,
+                                                 available_teams=(4,)),
+                          planning=_planning())
+        self.assertEqual(out["expeditions"][0]["kind"], "running")
+        self.assertEqual(out["expedition_suggestions"], [])
+
     def test_timeline_note_when_no_planning(self):
-        now = time.mktime(time.strptime(
-            f"{time.strftime('%Y-%m-%d')} 06:00:00", "%Y-%m-%d %H:%M:%S"))
+        now = self._today_at(6, 0)
         cfg = {"entries": [], "automation": {"enabled": False,
                                              "mode": "custom"}}
         out = self._build(now, cfg, expedition_help=_prefs(teams_out=1),
-                          planning=None, situation_path=Path("/nonexistent"))
+                          planning=None)
         self.assertEqual(out["expedition_suggestions"], [])
         self.assertIn("盘点", out["expedition_advice_note"])
 
 
 class AdoptEndpointTests(unittest.TestCase):
-    """PUT /api/day-timeline/expedition-adopt：采纳 = forced 落账。"""
+    """PUT /api/day-timeline/expedition-adopt：采纳 = 自描述 forced 落账。"""
 
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.path = Path(self.folder.name) / "choices.json"
-        self.slot = {"key": "today:custom:0:10:00", "team_no": 4,
-                     "map_code": "B1", "planned_at": 1759094400.0,
-                     "time_min": 600, "duration_min": 90,
-                     "toggleable": True, "base_enabled": False,
-                     "entry_enabled": True}
-        self.suggestion = {"kind": "expedition", "key": self.slot["key"],
-                           "team_no": 4, "map_code": "B1", "resource": "砥石",
-                           "duration_min": 90, "start_min": 600,
-                           "reason": "砥石最缺"}
-        self.timeline = {"expeditions": [self.slot],
+        self.day_start = time.mktime(time.strptime(
+            f"{time.strftime('%Y-%m-%d')} 00:00:00", "%Y-%m-%d %H:%M:%S"))
+        self.suggestion = {"kind": "expedition", "key": "suggest:4:B1",
+                           "team_no": 4, "map_code": "B1", "map_name": "湖底",
+                           "resource": "砥石", "duration_min": 90,
+                           "start_min": 600, "reason": "砥石最缺"}
+        self.timeline = {"day_start": self.day_start,
+                         "expeditions": [],
                          "expedition_suggestions": [self.suggestion],
                          "expedition_help": {"teams_out": 1,
-                                             "available_teams": [4]}}
+                                             "available_teams": [4]},
+                         "expedition_advice_note": None}
 
     def _put(self, payload):
-        real = ec.set_slot_intention
+        real_load = ec.load_choice_sets
+        real_set = ec.set_forced_adhoc
 
-        def to_temp(**kwargs):
+        def load_temp(*_args, **_kwargs):
+            return real_load(self.path)
+
+        def set_temp(**kwargs):
             kwargs["path"] = self.path
-            return real(**kwargs)
+            return real_set(**kwargs)
 
         with patch.object(server, "_day_timeline_payload",
                           return_value=self.timeline), \
-             patch.object(ec, "set_slot_intention", side_effect=to_temp):
+             patch.object(ec, "load_choice_sets", side_effect=load_temp), \
+             patch.object(ec, "set_forced_adhoc", side_effect=set_temp):
             return TestClient(server.app).put(
                 "/api/day-timeline/expedition-adopt", json=payload)
 
-    def test_adopt_records_forced_when_schedule_off(self):
+    def _today(self):
+        return time.strftime("%Y-%m-%d", time.localtime(self.day_start))
+
+    def test_adopt_writes_self_describing_forced(self):
         response = self._put({"team_no": 4, "map_code": "B1",
                               "start_min": 600})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
         skipped, forced = ec.load_choice_sets(self.path)
         self.assertEqual(skipped, {})
-        self.assertIn(self.slot["key"], forced)
-        self.assertEqual(forced[self.slot["key"]]["map_code"], "B1")
+        key = ec.adhoc_key(self._today(), 4, 600)
+        self.assertIn(key, forced)
+        record = forced[key]
+        # 自描述：队伍/图/时刻/时长全在记录里，不引用排班条目
+        self.assertEqual(record["team_no"], 4)
+        self.assertEqual(record["map_code"], "B1")
+        self.assertEqual(record["start_min"], 600)
+        self.assertEqual(record["duration_min"], 90)
+        self.assertEqual(record["planned_at"], time.strftime(
+            "%Y-%m-%dT%H:%M:%S", time.localtime(self.day_start + 600 * 60)))
+        self.assertTrue(ec.is_adhoc_record(record))
+        # 响应带新鲜的泳道/建议，前端不用再多拉一次
+        self.assertIn("expeditions", response.json())
+        self.assertIn("expedition_suggestions", response.json())
+
+    def test_duplicate_adopt_rejected(self):
+        first = self._put({"team_no": 4, "map_code": "B1", "start_min": 600})
+        self.assertEqual(first.status_code, 200)
+        again = self._put({"team_no": 4, "map_code": "B1", "start_min": 600})
+        self.assertEqual(again.status_code, 409)
+        self.assertIn("已经点上", again.json()["detail"])
 
     def test_stale_suggestion_rejected(self):
         response = self._put({"team_no": 4, "map_code": "B1",
@@ -412,13 +476,6 @@ class AdoptEndpointTests(unittest.TestCase):
         response = self._put({"team_no": 9, "map_code": "B1",
                               "start_min": 600})
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(self.path.exists())
-
-    def test_untoggleable_slot_rejected(self):
-        self.slot["toggleable"] = False
-        response = self._put({"team_no": 4, "map_code": "B1",
-                              "start_min": 600})
-        self.assertEqual(response.status_code, 409)
         self.assertFalse(self.path.exists())
 
 

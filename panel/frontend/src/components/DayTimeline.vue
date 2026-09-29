@@ -91,8 +91,8 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
     await api.setDayExpeditionSlot(slot.key, !slot.will_run)
     await load()
     expeditionMessage.value = !slot.will_run
-      ? (slot.base_enabled ? '这班今天照常派出。' : '排班没开，这班今天单独跑。')
-      : (slot.base_enabled ? '这班今天跳过；明天仍按原排班。' : '这班今天不跑。')
+      ? '这班已点上，到点单独派出。'
+      : '这班今天不跑了；想跑再点建议淡影。'
   } catch (error) {
     expeditionMessage.value = error instanceof Error ? error.message : '这班没改成，请重试'
     await load()
@@ -206,6 +206,8 @@ const STATE_LABELS: Record<string, string> = {
   expired: '已跳过',
   missed: '已错过',
   failed_unknown: '待确认',
+  running: '远征中',
+  awaiting_collect: '待收菜',
 }
 
 const STATE_CLASSES: Record<string, string> = {
@@ -218,6 +220,8 @@ const STATE_CLASSES: Record<string, string> = {
   expired: 'is-expired',
   missed: 'is-missed',
   failed_unknown: 'is-failed',
+  running: 'is-running',
+  awaiting_collect: 'is-waiting',
 }
 
 const TONE_LABELS: Record<string, string> = {
@@ -576,9 +580,7 @@ const expeditionBlocks = computed(() => {
     bits.push(stateLabel)
     if (e.late_min && e.state === 'dispatched') bits.push(`晚${e.late_min}分钟`)
     if (e.blocked_reason) bits.push(e.blocked_reason)
-    if (e.forced_today && !e.base_enabled) bits.push('单独跑这班')
-    else if (!e.base_enabled) bits.push('排班未启用')
-    else if (e.skipped_today) bits.push('今天跳过')
+    if (e.kind === 'forced' && e.will_run) bits.push('点的班，到点单独派出')
     return {
       key: e.key,
       slot: e,
@@ -586,10 +588,10 @@ const expeditionBlocks = computed(() => {
       left: pct(e.time_min),
       width: Math.max(pct(visibleDuration), 0.7),
       cls: e.will_run ? 'tlx-on' : 'tlx-off',
-      title: `${bits.join(' · ')} · ${e.will_run ? '今天会跑' : '今天不跑'}${e.toggleable ? ' · 点我切换' : ''}`,
+      title: `${bits.join(' · ')}${e.toggleable ? ' · 点我取消这班' : ''}`,
       text: e.map_code,
       rowTitle: `部队${team} · ${e.map_code}`,
-      rowDetail: `${durationText(e.duration_min)}远征 · ${!e.base_enabled && !e.forced_today ? '排班未启用' : stateLabel}`,
+      rowDetail: `${durationText(e.duration_min)}远征 · ${stateLabel}`,
       time: fmtMin(e.time_min),
       tone: STATE_CLASSES[e.state] ?? 'is-pending',
       enabled: e.enabled,
@@ -597,7 +599,7 @@ const expeditionBlocks = computed(() => {
   })
 })
 
-// 总开关关闭时也保留灰色班次，让玩家先看清原排班。
+// v2：上轴的只有点的班（forced）和远征中/待收；preset 死班表不再画出来。
 const displayedExpeditionBlocks = expeditionBlocks
 
 /** 远征建议淡影：投进对应队伍的子泳道，点采纳 = 那班记 forced */
@@ -619,10 +621,13 @@ const expeditionSuggestionBlocks = computed(() => {
   })
 })
 
-/** 远征按队伍分跑道，密班不再糊成一条 */
+/** 远征按队伍分跑道：可丢队伍 ∪ 有班的队 ∪ 有建议的队；其余整泳道隐藏 */
 const expeditionLanes = computed(() => {
-  const teams = [...new Set(displayedExpeditionBlocks.value.map(b => b.slot.team_no))].sort((a, b) => a - b)
-  return teams.map(team => ({
+  if (!data.value) return []
+  const teams = new Set<number>(data.value.expedition_help?.available_teams ?? [])
+  displayedExpeditionBlocks.value.forEach(b => teams.add(b.slot.team_no))
+  expeditionSuggestionBlocks.value.forEach(s => teams.add(s.teamNo))
+  return [...teams].sort((a, b) => a - b).map(team => ({
     team,
     label: `远征·${TEAM_NAMES[team] ?? team}`,
     blocks: displayedExpeditionBlocks.value.filter(b => b.slot.team_no === team),
@@ -834,9 +839,9 @@ const caption = computed(() => {
     .sort((a, b) => a.minute - b.minute)[0]
   if (nextEnabled) return `下一班 ${nextEnabled.time} · ${nextEnabled.rowTitle}`
   if (expeditionBlocks.value.length && !expeditionBlocks.value.some((block) => block.enabled)) {
-    return data.value?.expedition_schedule_enabled ? '今天的远征班次都已跳过' : '自动排班未启用，原定班次显示为灰色'
+    return '今天点上的远征班都已过点或取消'
   }
-  return '远征班次和任务记录，都收在今天这一页'
+  return '点绿色的建议淡影，就能丢队出门'
 })
 </script>
 
@@ -868,13 +873,13 @@ const caption = computed(() => {
           <template v-if="expeditionLanes.length">
             <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
               <span class="tl-lane-tag">{{ lane.label }}</span>
-              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.will_run ? '今天会跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
+              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击取消这班' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
               <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion" @click="adoptExpeditionSuggestion(s.suggestion)">{{ s.text }}</button>
             </div>
           </template>
           <div v-else class="tl-lane">
             <span class="tl-lane-tag">远征</span>
-            <span class="tl-lane-empty">今天没有远征班次</span>
+            <span class="tl-lane-empty">今天没有远征安排</span>
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
@@ -918,6 +923,7 @@ const caption = computed(() => {
         </span>
         <small v-if="data.expedition_advice_note" class="tl-expedition-help-note">{{ data.expedition_advice_note }}</small>
       </div>
+      <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
         <div class="tl-mini-meta">
           <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务<template v-if="suggestionBlocks.length"> <i class="is-suggest"></i>建议</template></span>
@@ -1011,20 +1017,6 @@ const caption = computed(() => {
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
-      <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
-        <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
-        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">原定班次仅供查看；点时间轴上的灰虚块，就能让单独一班今天跑。</p>
-        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；点时间轴上的块直接切换。</p>
-        <div class="tl-expedition-list">
-          <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
-            <time>{{ fmtMin(slot.time_min) }}</time>
-            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled && !slot.forced_today ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
-            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.will_run }" :aria-pressed="slot.will_run" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.will_run ? '今天跑' : '今天跳过' }}</button>
-            <em v-else>{{ slot.enabled ? slot.planned_at > data.now ? '即将开班' : '已到点或已处理' : slot.skipped_today ? '今天跳过' : '未运行' }}</em>
-          </div>
-        </div>
-        <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
-      </details>
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
   </PaperCard>
