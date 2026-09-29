@@ -77,6 +77,35 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                                      script_labels={})
         self.assertFalse(out["expeditions"][0]["enabled"])
 
+    def test_expedition_will_run_states(self):
+        """will_run 三态：总开关关→不跑（但可点 force）；forced→跑；
+        自定义条目被关掉→forced 也不 lifted，且不可点。"""
+        now = _today_at(6, 0)
+        day_start = _today_at(0, 0)
+        key = f"{time.strftime('%Y-%m-%d')}:custom:0:08:30"
+        cfg_off = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
+                         "enabled": True}], enabled=False)
+        items = dtl._expedition_items(cfg_off, now, day_start, {}, {})
+        self.assertFalse(items[0]["will_run"])
+        self.assertTrue(items[0]["toggleable"])  # 总开关关着也能点（force）
+        forced = {key: {"team_no": 2, "map_code": "B3", "planned_at": 1}}
+        items = dtl._expedition_items(cfg_off, now, day_start, {}, forced)
+        self.assertTrue(items[0]["will_run"])
+        self.assertTrue(items[0]["forced_today"])
+        cfg_entry_off = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
+                               "enabled": False}], enabled=False)
+        items = dtl._expedition_items(cfg_entry_off, now, day_start, {}, forced)
+        self.assertFalse(items[0]["will_run"])
+        self.assertFalse(items[0]["toggleable"])
+        cfg_on = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
+                        "enabled": True}])
+        skipped = {key: {"team_no": 2, "map_code": "B3", "planned_at": 1}}
+        items = dtl._expedition_items(cfg_on, now, day_start, skipped, {})
+        self.assertFalse(items[0]["will_run"])
+        self.assertTrue(items[0]["skipped_today"])
+        items = dtl._expedition_items(cfg_on, now, day_start, skipped, forced)
+        self.assertTrue(items[0]["will_run"])  # forced 优先于 skipped
+
     def test_other_schedule_mode_does_not_mix_into_today(self):
         now = _today_at(6, 0)
         cfg = _cfg([{"time": "08:30", "team_no": 2, "map_code": "B3",
@@ -94,7 +123,9 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                                      script_labels={})
         self.assertEqual(len(out["expeditions"]), 1)
         self.assertFalse(out["expeditions"][0]["enabled"])
-        self.assertFalse(out["expeditions"][0]["toggleable"])
+        self.assertFalse(out["expeditions"][0]["will_run"])
+        # 新语义：总开关关着，未来的班也能点（点 = 记 forced 单独跑这班）
+        self.assertTrue(out["expeditions"][0]["toggleable"])
 
     def test_unknown_map_duration_zero_not_crash(self):
         now = _today_at(6, 0)

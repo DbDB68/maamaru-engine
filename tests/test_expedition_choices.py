@@ -1,4 +1,10 @@
-"""今天单班选择真正影响派遣，并能随时还原当天未来班次。"""
+# -*- coding: utf-8 -*-
+"""今天单班选择真正影响派遣，并能随时还原当天未来班次。
+
+skipped：今天这班别跑。forced：今天这班一定要跑——排班总开关关着也单独
+走状态机派出（排班开着时等价于「不跳过」）。两者互斥，后写的赢；
+forced 不 lifted 自定义排班里被关掉的条目。
+"""
 
 import json
 import tempfile
@@ -10,6 +16,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from panel import day_timeline, scheduler
+from panel import expedition_choices as ec
+from panel import server
 from panel.expedition_choices import is_skipped, load_choices, set_skipped
 
 
@@ -17,6 +25,10 @@ def _today_at(hour, minute=0):
     return time.mktime(time.strptime(
         f"{time.strftime('%Y-%m-%d')} {hour:02d}:{minute:02d}:00",
         "%Y-%m-%d %H:%M:%S"))
+
+
+def _key():
+    return "2026-09-29:custom:0:08:00"
 
 
 class ExpeditionChoiceTests(unittest.TestCase):
@@ -121,26 +133,146 @@ class ExpeditionChoiceTests(unittest.TestCase):
         self.assertFalse(after["expeditions"][0]["enabled"])
 
     def test_api_checks_live_slot_before_changing_it(self):
-        from panel import server
-
+        """端点先核对实时班次再落盘；body 用目标态 will_run（新契约：
+        排班开着点「不跑」记 skipped，关着点「跑」记 forced）。"""
         slot = {"key": "today:custom:0:10:00", "team_no": 2,
                 "map_code": "B3", "planned_at": _today_at(10),
-                "toggleable": True}
+                "toggleable": True, "base_enabled": True,
+                "entry_enabled": True}
         timeline = {"expeditions": [slot]}
         client = TestClient(server.app)
         with patch.object(server, "_day_timeline_payload", return_value=timeline), \
-             patch("panel.expedition_choices.set_skipped") as writer:
+             patch.object(ec, "set_slot_intention") as writer:
             response = client.put("/api/day-timeline/expedition-slot",
-                                  json={"key": slot["key"], "enabled": False})
+                                  json={"key": slot["key"], "will_run": False})
             self.assertEqual(response.status_code, 200)
             writer.assert_called_once_with(
                 key=slot["key"], team_no=2, map_code="B3",
-                planned_at=slot["planned_at"], skipped=True)
+                planned_at=slot["planned_at"], will_run=False,
+                base_enabled=True)
             slot["toggleable"] = False
             blocked = client.put("/api/day-timeline/expedition-slot",
-                                 json={"key": slot["key"], "enabled": True})
+                                 json={"key": slot["key"], "will_run": True})
             self.assertEqual(blocked.status_code, 409)
             self.assertEqual(writer.call_count, 1)
+
+
+class ChoiceSetTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.path = Path(self.folder.name) / "choices.json"
+
+    def test_forced_roundtrip(self):
+        ec.set_forced(key=_key(), team_no=2, map_code="B1", planned_at=1,
+                      forced=True, path=self.path)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertEqual(skipped, {})
+        self.assertTrue(ec.is_forced(forced, key=_key(), team_no=2, map_code="B1"))
+        self.assertFalse(ec.is_forced(forced, key=_key(), team_no=3, map_code="B1"))
+
+    def test_skipped_and_forced_are_mutually_exclusive(self):
+        ec.set_skipped(key=_key(), team_no=2, map_code="B1", planned_at=1,
+                       skipped=True, path=self.path)
+        ec.set_forced(key=_key(), team_no=2, map_code="B1", planned_at=1,
+                      forced=True, path=self.path)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertEqual(skipped, {})
+        self.assertIn(_key(), forced)
+        # 反过来再记跳过，强制被清掉
+        ec.set_skipped(key=_key(), team_no=2, map_code="B1", planned_at=1,
+                       skipped=True, path=self.path)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertIn(_key(), skipped)
+        self.assertEqual(forced, {})
+
+    def test_legacy_file_without_forced_key(self):
+        self.path.write_text(
+            '{"version":1,"skipped":{"k":{"team_no":2,"map_code":"B1",'
+            '"planned_at":1}}}', encoding="utf-8")
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertIn("k", skipped)
+        self.assertEqual(forced, {})
+        self.assertEqual(ec.load_choices(self.path), skipped)
+
+    def test_set_slot_intention_by_base_state(self):
+        # 排班开着点「会跑」：只清选择，不记 forced
+        out = ec.set_slot_intention(key=_key(), team_no=2, map_code="B1",
+                                    planned_at=1, will_run=True,
+                                    base_enabled=True, path=self.path)
+        self.assertEqual(out["skipped"], {})
+        self.assertEqual(out["forced"], {})
+        # 排班关着点「会跑」：记 forced
+        out = ec.set_slot_intention(key=_key(), team_no=2, map_code="B1",
+                                    planned_at=1, will_run=True,
+                                    base_enabled=False, path=self.path)
+        self.assertIn(_key(), out["forced"])
+        # 点「不跑」：清 forced 记 skipped
+        out = ec.set_slot_intention(key=_key(), team_no=2, map_code="B1",
+                                    planned_at=1, will_run=False,
+                                    base_enabled=False, path=self.path)
+        self.assertIn(_key(), out["skipped"])
+        self.assertEqual(out["forced"], {})
+
+
+class ExpeditionSlotEndpointTests(unittest.TestCase):
+    """PUT /api/day-timeline/expedition-slot：will_run 目标态三态落盘。"""
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.path = Path(self.folder.name) / "choices.json"
+        self.slot = {"key": _key(), "team_no": 2, "map_code": "B1",
+                     "planned_at": 1759094400.0, "toggleable": True,
+                     "base_enabled": True, "entry_enabled": True}
+
+    def _put(self, payload):
+        real = ec.set_slot_intention
+
+        def to_temp(**kwargs):
+            kwargs["path"] = self.path
+            return real(**kwargs)
+
+        with patch.object(server, "_day_timeline_payload",
+                          return_value={"expeditions": [self.slot]}), \
+             patch.object(ec, "set_slot_intention", side_effect=to_temp):
+            return TestClient(server.app).put("/api/day-timeline/expedition-slot",
+                                              json=payload)
+
+    def test_will_run_false_records_skip(self):
+        response = self._put({"key": _key(), "will_run": False})
+        self.assertEqual(response.status_code, 200)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertIn(_key(), skipped)
+        self.assertEqual(forced, {})
+
+    def test_will_run_true_with_automation_off_records_force(self):
+        self.slot["base_enabled"] = False
+        response = self._put({"key": _key(), "will_run": True})
+        self.assertEqual(response.status_code, 200)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertEqual(skipped, {})
+        self.assertIn(_key(), forced)
+
+    def test_will_run_true_with_automation_on_clears_both(self):
+        response = self._put({"key": _key(), "will_run": True})
+        self.assertEqual(response.status_code, 200)
+        skipped, forced = ec.load_choice_sets(self.path)
+        self.assertEqual(skipped, {})
+        self.assertEqual(forced, {})
+
+    def test_untoggleable_slot_rejected(self):
+        self.slot["toggleable"] = False
+        response = self._put({"key": _key(), "will_run": False})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(self.path.exists())
+
+    def test_entry_disabled_cannot_be_forced(self):
+        self.slot["base_enabled"] = False
+        self.slot["entry_enabled"] = False
+        response = self._put({"key": _key(), "will_run": True})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(self.path.exists())
 
 
 if __name__ == "__main__":

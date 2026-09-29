@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from touken.runtime_paths import SCHEDULE_PATH, STATE_DIR
-from .expedition_choices import is_skipped, load_choices
+from .expedition_choices import is_forced, is_skipped, load_choice_sets
 
 _SCHED_PATH = SCHEDULE_PATH
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
@@ -218,7 +218,7 @@ def _emulator_ready(config_path: str) -> bool:
 
 
 def _preset_due(cfg: dict, now_min: int, today: str,
-                choices: dict | None = None) -> list:
+                choices: dict | None = None, forced: dict | None = None) -> list:
     auto = cfg["automation"]
     preset = preset_payload().get(auto.get("preset"), {})
     lanes = preset.get("lanes", [])
@@ -253,8 +253,13 @@ def _preset_due(cfg: dict, now_min: int, today: str,
         if auto.get("last_runs", {}).get(key):
             continue
         planned = cycle_base + timedelta(minutes=start + current["offset_min"] + shift)
-        if is_skipped(choices, key=key, team_no=int(teams[idx]),
-                      map_code=current["map_code"], planned_at=planned.timestamp()):
+        skipped_today = is_skipped(
+            choices, key=key, team_no=int(teams[idx]),
+            map_code=current["map_code"], planned_at=planned.timestamp())
+        forced_today = is_forced(
+            forced or {}, key=key, team_no=int(teams[idx]),
+            map_code=current["map_code"])
+        if skipped_today and not forced_today:
             continue
         out.append({"key": key, "team_no": int(teams[idx]),
                     "map_code": current["map_code"], "late_min": late,
@@ -265,7 +270,7 @@ def _preset_due(cfg: dict, now_min: int, today: str,
 
 
 def _custom_due(cfg: dict, now_min: int, today: str,
-                choices: dict | None = None) -> list:
+                choices: dict | None = None, forced: dict | None = None) -> list:
     auto = cfg["automation"]
     grace = _grace_min(auto)
     choices = choices or {}
@@ -291,13 +296,23 @@ def _custom_due(cfg: dict, now_min: int, today: str,
         planned_at = (datetime.combine(datetime.fromisoformat(today).date(),
                                        datetime.min.time())
                       + timedelta(minutes=due)).timestamp()
-        if is_skipped(choices, key=key, team_no=int(e.get("team_no", 2)),
-                      map_code=e.get("map_code", ""), planned_at=planned_at):
+        team_no = int(e.get("team_no", 2))
+        if is_skipped(choices, key=key, team_no=team_no,
+                      map_code=e.get("map_code", ""), planned_at=planned_at) \
+                and not is_forced(forced or {}, key=key, team_no=team_no,
+                                  map_code=e.get("map_code", "")):
             continue
         out.append({"key": key, "team_no": int(e.get("team_no", 2)),
                     "map_code": e.get("map_code", ""), "late_min": late,
                     "planned_at": f"{today}T{e.get('time', '08:00')}:00"})
     return out
+
+
+def forced_only(due: list, forced: dict) -> list:
+    """排班总开关关着时，只有今日强制启用的班还照常到期。"""
+    return [job for job in due
+            if is_forced(forced or {}, key=job["key"],
+                         team_no=int(job["team_no"]), map_code=job["map_code"])]
 
 
 def managed_teams(cfg=None):
@@ -602,7 +617,7 @@ def read_dispatch_result():
 # ==================== 时间表实况投影 ====================
 
 def today_projection(cfg: dict | None = None, now: float | None = None,
-                     choices: dict | None = None) -> dict:
+                     choices: dict | None = None, forced: dict | None = None) -> dict:
     """今天各班的状态投影：preset lanes 全量 + custom entries 全量。
 
     state 除状态机六态外还有：pending（还没到点）、missed（计划时间已过但
@@ -647,7 +662,8 @@ def today_projection(cfg: dict | None = None, now: float | None = None,
                         late_min=max(0, int((now - planned_ts) / 60)))
         item["skipped_today"] = is_skipped(
             choices, key=key, team_no=team_no,
-            map_code=map_code, planned_at=planned_ts)
+            map_code=map_code, planned_at=planned_ts) and not is_forced(
+            forced or {}, key=key, team_no=team_no, map_code=map_code)
         if item["skipped_today"] and item["state"] not in TERMINAL_STATES:
             item["state"] = "skipped"
         return item
@@ -707,19 +723,24 @@ def start_scheduler(config_path: str, emit_fn):
                     for _, msg in events:
                         emit_fn("scheduler", msg)
                 paused = auto.get("paused_until", "")
-                if not auto.get("enabled") or (paused and paused > time.strftime("%Y-%m-%d %H:%M:%S")):
-                    # 暂停/停用 = 不接管：接管旗标必须清掉，不然玩法循环会
+                pause_active = bool(paused and paused > time.strftime("%Y-%m-%d %H:%M:%S"))
+                now_min = int(time.strftime("%H")) * 60 + int(time.strftime("%M"))
+                today = time.strftime("%Y-%m-%d")
+                choices, forced = load_choice_sets()
+                due = (_preset_due(cfg, now_min, today, choices, forced)
+                       if auto.get("mode") == "preset"
+                       else _custom_due(cfg, now_min, today, choices, forced))
+                if not auto.get("enabled"):
+                    # 总开关关着：只有今日强制启用的班照常走状态机，其余照旧不跑
+                    due = forced_only(due, forced)
+                if pause_active or (not auto.get("enabled") and not due):
+                    # 暂停/停用且无强制班 = 不接管：接管旗标必须清掉，不然玩法循环会
                     # 为一个不会来的排班白白提前收工
                     clear_takeover_flag()
                     if changed:
                         save_config(cfg)
                     time.sleep(5)
                     continue
-                now_min = int(time.strftime("%H")) * 60 + int(time.strftime("%M"))
-                today = time.strftime("%Y-%m-%d")
-                choices = load_choices()
-                due = (_preset_due(cfg, now_min, today, choices) if auto.get("mode") == "preset"
-                       else _custom_due(cfg, now_min, today, choices))
                 # 自家派遣子进程在跑不算「忙」：别的班照常评估，只是起不来
                 busy = runner.is_running and runner.current_script != "dispatch"
                 outcome = tick(cfg, due, now,

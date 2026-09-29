@@ -17,6 +17,7 @@ const data = ref<DayTimeline | null>(null)
 const expanded = ref(!props.collapsible)
 const editing = ref(false)
 const saving = ref(false)
+const removing = ref(false)
 const planMessage = ref('')
 const expeditionMessage = ref('')
 const togglingExpedition = ref('')
@@ -26,11 +27,19 @@ const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
 interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string }
 const draft = ref<DraftRow[]>([])
+/** 运行图气泡点开「改参数」时要高亮的草稿行；-1 = 不高亮 */
+const highlightIndex = ref(-1)
+/** 运行图块气泡：块在 booking.blocks 里的下标 + 所在泳道 + 块左缘（%） */
+const popover = ref<{ index: number; lane: 'task' | 'daily'; left: number } | null>(null)
+// 现在线走浏览器本地时钟平滑推进；30s 轮询只负责校准和数据
+const smoothNowMin = ref(0)
 let timer: number | undefined
+let clockTimer: number | undefined
 
 async function load() {
   try {
     data.value = await api.dayTimeline()
+    syncSmoothClock()
     if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
     else if (!data.value.conductor.options.some(option => option.id === conductorChoice.value)) {
       conductorChoice.value = data.value.conductor.workflow_id
@@ -38,6 +47,11 @@ async function load() {
   } catch {
     /* 静默失败，下轮轮询再试 */
   }
+}
+
+function syncSmoothClock() {
+  if (!data.value) return
+  smoothNowMin.value = Math.min(DAY, Math.max(0, (Date.now() / 1000 - data.value.day_start) / 60))
 }
 
 async function loadWorkflowPresets() {
@@ -69,9 +83,11 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
   togglingExpedition.value = slot.key
   expeditionMessage.value = ''
   try {
-    await api.setDayExpeditionSlot(slot.key, !slot.enabled)
+    await api.setDayExpeditionSlot(slot.key, !slot.will_run)
     await load()
-    expeditionMessage.value = slot.enabled ? '这班今天跳过；明天仍按原排班。' : '这班今天照常派出。'
+    expeditionMessage.value = !slot.will_run
+      ? (slot.base_enabled ? '这班今天照常派出。' : '排班没开，这班今天单独跑。')
+      : (slot.base_enabled ? '这班今天跳过；明天仍按原排班。' : '这班今天不跑。')
   } catch (error) {
     expeditionMessage.value = error instanceof Error ? error.message : '这班没改成，请重试'
     await load()
@@ -80,13 +96,33 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
   }
 }
 
+function closePopoverOnOutside(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (!target) return
+  if (target.closest('.tl-popover') || target.closest('.tl-block')) return
+  popover.value = null
+}
+
+function closePopoverOnEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape') popover.value = null
+}
+
 onMounted(() => {
   load()
+  syncSmoothClock()
   void loadWorkflowPresets()
   timer = window.setInterval(load, 30000)
+  clockTimer = window.setInterval(() => {
+    smoothNowMin.value = Math.min(DAY, smoothNowMin.value + 1 / 60)
+  }, 1000)
+  document.addEventListener('click', closePopoverOnOutside)
+  document.addEventListener('keydown', closePopoverOnEscape)
 })
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer)
+  if (clockTimer) window.clearInterval(clockTimer)
+  document.removeEventListener('click', closePopoverOnOutside)
+  document.removeEventListener('keydown', closePopoverOnEscape)
 })
 
 const TICKS = [0, 240, 480, 720, 960, 1200, 1440]
@@ -202,7 +238,7 @@ const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, stri
 function blockStatusText(block: DayConductorBlock): string {
   if (block.status === 'pending') {
     // 过点不是错误：runner 忙完手头的活就排队开工
-    return block.start_min <= nowMin.value ? '排队中，手头收工就上' : '到点开工'
+    return block.start_min <= smoothNowMin.value ? '排队中，手头收工就上' : '到点开工'
   }
   if (block.status === 'blocked') return `没开工：${block.reason || '核对没过'}`
   if (block.status === 'interrupted') return block.reason || '中断'
@@ -219,7 +255,7 @@ const STATUS_CLASSES: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, s
 
 function blockStatusClass(block: DayConductorBlock): string {
   if (block.status === 'pending') {
-    return block.start_min <= nowMin.value ? 'is-waiting' : 'is-pending'
+    return block.start_min <= smoothNowMin.value ? 'is-waiting' : 'is-pending'
   }
   return STATUS_CLASSES[block.status] || 'is-pending'
 }
@@ -253,7 +289,22 @@ function editPlan() {
 
 /** 按推荐安排 = 把建议块填进草稿等确认，不直接保存 */
 function fillRecommended() {
-  draft.value = recommendedBlocks().map(toDraftRow)
+  highlightIndex.value = -1
+  const blocks = recommendedBlocks()
+  draft.value = blocks.length ? blocks.map(toDraftRow) : [defaultDraftRow()]
+  planMessage.value = ''
+  void loadWorkflowPresets()
+  editing.value = true
+}
+
+/** 运行图里点建议淡影 = 采纳这一段进草稿 */
+function adoptSuggestion(shadow: { minute: number; runs?: number }) {
+  const base = data.value?.booking?.blocks || []
+  const block: DayScheduleBlock = { start_min: shadow.minute, kind: 'raid', runs: shadow.runs ?? 1 }
+  const exists = base.some(item => item.kind === 'raid'
+    && item.start_min === block.start_min && item.runs === block.runs)
+  highlightIndex.value = -1
+  draft.value = [...base.map(toDraftRow), ...(exists ? [] : [toDraftRow(block)])]
   planMessage.value = ''
   void loadWorkflowPresets()
   editing.value = true
@@ -351,24 +402,70 @@ function rowEndText(row: DraftRow): string {
   return fmtMin(start + GENERIC_BLOCK_MIN)
 }
 
+async function persistSchedule(blocks: DayScheduleBlock[], message: string) {
+  const result = await api.saveDaySchedule(
+    blocks, blocks.some(block => block.kind === 'raid') ? conductorChoice.value : undefined)
+  if (data.value) {
+    data.value.conductor = result.conductor
+    data.value.booking = result.booking
+  }
+  planMessage.value = message
+}
+
 async function saveSchedule() {
   const blocks = [...preview.value.blocks].sort((a, b) => a.start_min - b.start_min)
   saving.value = true
   planMessage.value = ''
   try {
-    const result = await api.saveDaySchedule(
-      blocks, blocks.some(block => block.kind === 'raid') ? conductorChoice.value : undefined)
-    if (data.value) {
-      data.value.conductor = result.conductor
-      data.value.booking = result.booking
-    }
+    await persistSchedule(blocks, '已记下并交给大总管；到点自动开工，手头有活跑完就接上。')
     editing.value = false
-    planMessage.value = '已记下并交给大总管；到点自动开工，手头有活跑完就接上。'
+    highlightIndex.value = -1
   } catch (error) {
     planMessage.value = error instanceof Error ? error.message : '保存失败，请重试'
     await load()
   } finally {
     saving.value = false
+  }
+}
+
+const popoverBlock = computed(() => {
+  if (popover.value == null) return undefined
+  return data.value?.booking?.blocks[popover.value.index]
+})
+
+function openBlockPopover(entry: { index: number; lane: 'task' | 'daily'; left: number }) {
+  popover.value = { index: entry.index, lane: entry.lane, left: entry.left }
+}
+
+function popoverLeft(left: number): string {
+  return `${Math.min(left, 60)}%`
+}
+
+/** 气泡「改参数」：打开编辑器载入当前 booking 草稿，并高亮被点的那块 */
+function editFromPopover() {
+  if (popover.value == null) return
+  highlightIndex.value = popover.value.index
+  editPlan()
+  popover.value = null
+}
+
+/** 气泡「移出安排」：删掉这块走同一个保存即开工端点重存（保持 armed） */
+async function removeFromSchedule() {
+  const booking = data.value?.booking
+  if (!booking || popover.value == null || removing.value) return
+  const remaining = booking.blocks.filter((_, index) => index !== popover.value!.index)
+  if (!remaining.length) return
+  removing.value = true
+  planMessage.value = ''
+  try {
+    await persistSchedule([...remaining].sort((a, b) => a.start_min - b.start_min),
+      '这一段已移出，剩下的照常到点开工。')
+  } catch (error) {
+    planMessage.value = error instanceof Error ? error.message : '移出失败，请重试'
+    await load()
+  } finally {
+    removing.value = false
+    popover.value = null
   }
 }
 
@@ -383,7 +480,8 @@ const expeditionBlocks = computed(() => {
     bits.push(stateLabel)
     if (e.late_min && e.state === 'dispatched') bits.push(`晚${e.late_min}分钟`)
     if (e.blocked_reason) bits.push(e.blocked_reason)
-    if (!e.base_enabled) bits.push('排班未启用')
+    if (e.forced_today && !e.base_enabled) bits.push('单独跑这班')
+    else if (!e.base_enabled) bits.push('排班未启用')
     else if (e.skipped_today) bits.push('今天跳过')
     return {
       key: e.key,
@@ -391,12 +489,11 @@ const expeditionBlocks = computed(() => {
       minute: e.time_min,
       left: pct(e.time_min),
       width: Math.max(pct(visibleDuration), 0.7),
-      cls: [STATE_CLASSES[e.state] ?? 'is-pending',
-        !e.enabled ? 'is-expedition-off' : e.state === 'pending' ? 'is-expedition-active' : ''],
-      title: bits.join(' · '),
+      cls: e.will_run ? 'tlx-on' : 'tlx-off',
+      title: `${bits.join(' · ')} · ${e.will_run ? '今天会跑' : '今天不跑'}${e.toggleable ? ' · 点我切换' : ''}`,
       text: e.map_code,
       rowTitle: `部队${team} · ${e.map_code}`,
-      rowDetail: `${durationText(e.duration_min)}远征 · ${!e.base_enabled ? '排班未启用' : stateLabel}`,
+      rowDetail: `${durationText(e.duration_min)}远征 · ${!e.base_enabled && !e.forced_today ? '排班未启用' : stateLabel}`,
       time: fmtMin(e.time_min),
       tone: STATE_CLASSES[e.state] ?? 'is-pending',
       enabled: e.enabled,
@@ -447,11 +544,12 @@ const suggestionBlocks = computed(() => {
     return {
       key: `suggest-${i}`,
       minute: s.start_min,
+      runs: s.runs ?? undefined,
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
-      cls: 'is-suggest',
-      title: `${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`,
-      text: s.runs != null ? `${s.runs} 圈` : '建议',
+      cls: 'tlx-suggest',
+      title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点我采纳`,
+      text: s.runs != null ? `建议 ${s.runs} 圈` : '建议',
       rowTitle: activityLabel,
       rowDetail: `${range} ${detail}`,
       time: fmtMin(s.start_min),
@@ -462,23 +560,53 @@ const suggestionBlocks = computed(() => {
   })
 })
 
-const bookingBlocks = computed(() => {
+/** 编辑中的草稿已采纳的建议不再显示淡影 */
+const suggestionShadows = computed(() => {
+  const shadows = suggestionBlocks.value
+  if (!editing.value) return shadows
+  const taken = new Set(draft.value
+    .filter(row => row.kind === 'raid')
+    .map(row => parseTime(row.time))
+    .filter((value): value is number => value != null))
+  return shadows.filter(shadow => !taken.has(shadow.minute))
+})
+
+interface ScheduleLaneBlock {
+  key: string
+  index: number
+  block: DayScheduleBlock
+  lane: 'task' | 'daily'
+  left: number
+  width: number
+  cls: string
+  title: string
+  text: string
+}
+
+const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
   const booking = data.value?.booking
   if (!booking) return []
   const stale = !data.value?.conductor.enabled && booking.issues.length > 0
   return booking.blocks.map((block, index) => {
     const end = blockEndMin(block) ?? block.start_min + GENERIC_BLOCK_MIN
     const cblock = conductorBlockFor(block)
+    const lane: 'task' | 'daily' = block.kind === 'daily' ? 'daily' : 'task'
     return {
       key: `booked-${index}`,
+      index,
+      block,
+      lane,
       left: pct(block.start_min),
       width: Math.max(pct(Math.max(end - block.start_min, 4)), 0.7),
-      cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : 'is-booked',
-      title: `${fmtMin(block.start_min)} ${blockLabel(block)}${cblock ? ` · ${blockStatusText(cblock)}` : '（已排，保存后到点开工）'}`,
+      cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : lane === 'daily' ? 'tlx-daily' : 'tlx-task',
+      title: `${fmtMin(block.start_min)} ${blockLabel(block)}${cblock ? ` · ${blockStatusText(cblock)}` : ' · 点我改参数/移出'}`,
       text: block.kind === 'raid' ? `${block.runs} 圈` : block.kind === 'daily' ? '日课' : '任务流',
     }
   })
 })
+
+const taskBlocks = computed(() => scheduleBlocks.value.filter(block => block.lane === 'task'))
+const dailyBlocks = computed(() => scheduleBlocks.value.filter(block => block.lane === 'daily'))
 
 const bookedRows = computed(() => (data.value?.booking?.blocks || []).map((block, index) => ({
   key: index,
@@ -611,25 +739,40 @@ const caption = computed(() => {
           <div v-for="m in data.markers" :key="m.kind" class="tl-marker" :style="{ left: pct(m.time_min) + '%' }">
             <i>{{ m.label }}</i>
           </div>
-          <div class="tl-now" :style="{ left: pct(nowMin) + '%' }"></div>
+          <div class="tl-now" :style="{ left: pct(smoothNowMin) + '%' }"></div>
           <div class="tl-lane">
             <span class="tl-lane-tag">远征</span>
-            <button v-for="b in displayedExpeditionBlocks" :key="b.key" type="button" class="tl-block tl-expedition-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.enabled ? '今天照常跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.enabled" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
+            <button v-for="b in displayedExpeditionBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.will_run ? '今天会跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
             <span v-if="!displayedExpeditionBlocks.length" class="tl-lane-empty">今天没有远征班次</span>
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
-            <div v-for="b in runBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
-            <span v-if="!runBlocks.length" class="tl-lane-empty">今天还没有任务记录</span>
+            <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="openBlockPopover(b)">{{ b.text }}</button>
+            <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="adoptSuggestion(b)">{{ b.text }}</button>
+            <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活</span>
+            <div v-if="popover && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
+              <strong>{{ blockLabel(popoverBlock) }}</strong>
+              <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
+              <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
+              <div class="tl-popover-actions">
+                <button type="button" @click="editFromPopover">改参数</button>
+                <button type="button" :disabled="removing || (data.booking?.blocks.length ?? 0) <= 1" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
+              </div>
+            </div>
           </div>
-          <div v-if="data.suggestions" class="tl-lane">
-            <span class="tl-lane-tag">建议</span>
-            <div v-for="b in suggestionBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
-            <span v-if="!suggestionBlocks.length" class="tl-lane-empty">今天排不出合适的挂机空窗</span>
-          </div>
-          <div v-if="bookingBlocks.length" class="tl-lane">
-            <span class="tl-lane-tag">我的安排</span>
-            <div v-for="b in bookingBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
+          <div class="tl-lane">
+            <span class="tl-lane-tag">日课</span>
+            <button v-for="b in dailyBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="openBlockPopover(b)">{{ b.text }}</button>
+            <span v-if="!dailyBlocks.length" class="tl-lane-empty">可排 03:30 一键日课</span>
+            <div v-if="popover && popover.lane === 'daily' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
+              <strong>{{ blockLabel(popoverBlock) }}</strong>
+              <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
+              <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
+              <div class="tl-popover-actions">
+                <button type="button" @click="editFromPopover">改参数</button>
+                <button type="button" :disabled="removing || (data.booking?.blocks.length ?? 0) <= 1" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -641,10 +784,10 @@ const caption = computed(() => {
         <div class="tl-mini-axis" aria-label="今天二十四小时概览">
           <span v-for="t in MINI_TICKS.slice(1, -1)" :key="`mini-grid-${t}`" class="tl-mini-grid" :style="{ left: pct(t) + '%' }"></span>
           <span class="tl-mini-reset" :style="{ left: pct(240) + '%' }" title="04:00 日课刷新"></span>
-          <span class="tl-mini-now" :style="{ left: pct(nowMin) + '%' }" title="现在"></span>
+          <span class="tl-mini-now" :style="{ left: pct(smoothNowMin) + '%' }" title="现在"></span>
           <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
-          <span v-for="b in suggestionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in suggestionShadows" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
         </div>
         <div class="tl-mini-ticks">
           <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`">{{ t === DAY ? '24' : t / 60 }}</span>
@@ -672,7 +815,7 @@ const caption = computed(() => {
           </div>
           <div class="tl-booking-actions">
             <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="fillRecommended">按推荐安排</button>
-            <button v-if="!editing" type="button" :disabled="saving" @click="editPlan">{{ data.booking ? '改安排' : '自己定时间' }}</button>
+            <button v-if="!editing" type="button" :disabled="saving" @click="highlightIndex = -1; editPlan()">{{ data.booking ? '改安排' : '自己定时间' }}</button>
             <button v-if="data.conductor.enabled && !editing" type="button" :disabled="conductorBusy" @click="stopConductor">{{ conductorBusy ? '正在停用…' : '停用自动开工' }}</button>
           </div>
         </div>
@@ -686,7 +829,7 @@ const caption = computed(() => {
           </span>
         </div>
         <div v-if="editing" class="tl-booking-editor">
-          <div v-for="(row, index) in draft" :key="index" class="tl-booking-row">
+          <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
             <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
             <label>类型
               <select v-model="row.kind" @change="normalizeRow(row)">
@@ -718,7 +861,7 @@ const caption = computed(() => {
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
             <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并到点开工' }}</button>
-            <button type="button" :disabled="saving" @click="editing = false">取消</button>
+            <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1">取消</button>
           </div>
         </div>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
@@ -727,13 +870,13 @@ const caption = computed(() => {
       </section>
       <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
         <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>
-        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
-        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；只改今天这一班。</p>
+        <p v-if="!data.expedition_schedule_enabled" class="tl-expedition-note">自动排班未启用，原定班次仅供查看；点时间轴上的灰虚块也能让单独一班今天跑。<button type="button" @click="emit('openExpedition')">去开启 →</button></p>
+        <p v-else class="tl-expedition-note">亮色今天照常跑，灰色今天跳过；点时间轴上的块直接切换。</p>
         <div class="tl-expedition-list">
           <div v-for="slot in data.expeditions" :key="slot.key" class="tl-expedition-row" :class="{ 'is-off': !slot.enabled }">
             <time>{{ fmtMin(slot.time_min) }}</time>
-            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
-            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.enabled }" :aria-pressed="slot.enabled" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.enabled ? '今天跑' : '今天跳过' }}</button>
+            <span>部队{{ TEAM_NAMES[slot.team_no] ?? slot.team_no }} · {{ slot.map_code }} <small>{{ !slot.base_enabled && !slot.forced_today ? '排班未启用' : STATE_LABELS[slot.state] ?? slot.state }}</small></span>
+            <button v-if="slot.toggleable" type="button" :class="{ 'is-on': slot.will_run }" :aria-pressed="slot.will_run" :disabled="!!togglingExpedition" @click="toggleExpedition(slot)">{{ togglingExpedition === slot.key ? '更改中…' : slot.will_run ? '今天跑' : '今天跳过' }}</button>
             <em v-else>{{ slot.enabled ? slot.planned_at > data.now ? '即将开班' : '已到点或已处理' : slot.skipped_today ? '今天跳过' : '未运行' }}</em>
           </div>
         </div>

@@ -96,3 +96,54 @@ class CoordinationTests(unittest.TestCase):
         self.assertTrue(s.record_completed_dispatch(cfg, job, "old", records, 700))
         self.assertEqual(cfg["automation"]["lane_shifts"]["lane"], 15)
         self.assertEqual(cfg["automation"]["last_runs"]["first"], "new")
+
+    def test_forced_bypasses_skip_in_custom_due(self):
+        cfg = self.config()
+        cfg["automation"].update(mode="custom")
+        cfg["entries"] = [dict(time="08:00", team_no=2, map_code="B1")]
+        key = "2026-09-05:custom:0:08:00"
+        skipped = {key: {"team_no": 2, "map_code": "B1", "planned_at": 1}}
+        self.assertEqual(s._custom_due(cfg, 490, "2026-09-05",
+                                       choices=skipped), [])
+        forced = {key: {"team_no": 2, "map_code": "B1", "planned_at": 1}}
+        due = s._custom_due(cfg, 490, "2026-09-05",
+                            choices=skipped, forced=forced)
+        self.assertEqual([j["key"] for j in due], [key])
+
+    def test_forced_only_filters_due_when_automation_off(self):
+        """总开关关着：forced_only 只留下被强制启用的班，其余照旧不跑。"""
+        cfg = self.config()
+        cfg["automation"].update(mode="custom", enabled=False)
+        cfg["entries"] = [dict(time="07:00", team_no=2, map_code="B1"),
+                          dict(time="07:20", team_no=3, map_code="B2")]
+        due = s._custom_due(cfg, 450, "2026-09-05")
+        self.assertEqual(len(due), 2)
+        forced = {due[0]["key"]: {"team_no": 2, "map_code": "B1",
+                                  "planned_at": 1}}
+        kept = s.forced_only(due, forced)
+        self.assertEqual([j["key"] for j in kept], [due[0]["key"]])
+        # 强制班照常走状态机到 ready → start
+        cfg2 = self.config()
+        cfg2["automation"].update(mode="custom", enabled=False)
+        cfg2["entries"] = [dict(time="07:00", team_no=2, map_code="B1")]
+        kept = s.forced_only(
+            s._custom_due(cfg2, 450, "2026-09-05"), forced)
+        base = s._planned_ts(kept[0])
+        out = s.tick(cfg2, kept, base + 10, runner_busy=False,
+                     emulator_ok=True, records={})
+        out = s.tick(cfg2, kept, base + 26, runner_busy=False,
+                     emulator_ok=True, records={})
+        self.assertIsNotNone(out["start"])
+
+    def test_forced_unskips_in_today_projection(self):
+        cfg = self.config()
+        cfg["automation"].update(mode="custom")
+        cfg["entries"] = [dict(time="08:00", team_no=2, map_code="B1")]
+        key = "2026-09-05:custom:0:08:00"
+        choices = {key: {"team_no": 2, "map_code": "B1", "planned_at": 1}}
+        forced = {key: {"team_no": 2, "map_code": "B1", "planned_at": 1}}
+        now = 1757133600 + 4 * 3600  # 2026-09-05 中午
+        proj = s.today_projection(cfg, now=now, choices=choices, forced=forced)
+        item = proj["custom"][0]
+        self.assertFalse(item["skipped_today"])
+        self.assertNotEqual(item["state"], "skipped")

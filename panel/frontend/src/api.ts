@@ -24,8 +24,9 @@ export const api = {
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
   scripts: () => request<ScriptsResponse>('/api/scripts'),
   dayTimeline: () => request<DayTimeline>('/api/day-timeline'),
-  setDayExpeditionSlot: (key: string, enabled: boolean) => request<{ ok: boolean }>('/api/day-timeline/expedition-slot', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, enabled }),
+  /** 切今天这一班跑不跑：willRun=true 时排班关着会记 forced 单独跑 */
+  setDayExpeditionSlot: (key: string, willRun: boolean) => request<{ ok: boolean }>('/api/day-timeline/expedition-slot', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, will_run: willRun }),
   }),
   saveDayRaidPlan: (blocks: DayScheduleBlock[]) => request<{ booking: DayBooking }>('/api/day-timeline/raid-plan', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),

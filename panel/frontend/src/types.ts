@@ -1007,7 +1007,12 @@ export interface DayTimelineExpedition {
   late_min: number
   enabled: boolean
   base_enabled: boolean
+  /** 自定义排班里该条目自身的开关（preset 模式恒 true） */
+  entry_enabled: boolean
   skipped_today: boolean
+  forced_today: boolean
+  /** 今天到底跑不跑：排班开着且未跳过，或被单班强制启用 */
+  will_run: boolean
   toggleable: boolean
 }
 

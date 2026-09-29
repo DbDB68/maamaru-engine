@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import scheduler
+from .expedition_choices import is_forced, load_choice_sets
 
 DAY_MINUTES = 24 * 60
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -46,7 +47,8 @@ def _minute_of(time_text: str) -> int:
 
 
 def _expedition_items(cfg: dict, now: float, day_start: float,
-                      choices: dict | None = None) -> list[dict]:
+                      choices: dict | None = None,
+                      forced: dict | None = None) -> list[dict]:
     auto = cfg.get("automation", {}) if isinstance(cfg, dict) else {}
     mode = auto.get("mode", "preset")
     auto_enabled = bool(auto.get("enabled", True))
@@ -57,6 +59,7 @@ def _expedition_items(cfg: dict, now: float, day_start: float,
     except Exception:
         pass
     entries = cfg.get("entries", []) if isinstance(cfg, dict) else []
+    forced = forced or {}
 
     items = []
     # 预设循环可能跨午夜；取今天开头和结尾所在的两个循环，按真实日期筛选。
@@ -64,37 +67,47 @@ def _expedition_items(cfg: dict, now: float, day_start: float,
     for at in (day_start + 1, day_start + 86399, now):
         try:
             projection = scheduler.today_projection(cfg=cfg, now=at,
-                                                     choices=choices)
+                                                    choices=choices, forced=forced)
         except Exception:
             continue
         for item in projection.get(mode, []):
             projected[item["key"]] = item
     for it in projected.values():
+        team_no = int(it.get("team_no") or 0)
+        map_code = it.get("map_code", "")
+        forced_today = is_forced(forced, key=it["key"], team_no=team_no,
+                                 map_code=map_code)
         if mode == "preset":
-            base_enabled = auto_enabled
+            entry_enabled = True
         else:
             idx = it.get("index")
             entry = entries[idx] if isinstance(idx, int) and 0 <= idx < len(entries) else {}
-            base_enabled = auto_enabled and bool(entry.get("enabled", True))
+            entry_enabled = bool(entry.get("enabled", True))
+        base_enabled = auto_enabled and entry_enabled
+        skipped_today = bool(it.get("skipped_today")) and not forced_today
+        # 会跑 = 排班开着且没跳过，或被单班强制启用（自定义排班条目被关掉的除外）
+        will_run = (base_enabled and not skipped_today) or (forced_today and entry_enabled)
         planned_at = float(it.get("planned_at") or 0)
         if not day_start <= planned_at < day_start + 86400:
             continue
         time_min = int((planned_at - day_start) // 60)
-        duration = durations.get(it.get("map_code"), 0)
-        skipped_today = bool(it.get("skipped_today"))
+        duration = durations.get(map_code, 0)
         items.append({
             "key": it["key"], "planned_at": planned_at,
             "time_min": time_min,
             "duration_min": duration,
             "team_no": it.get("team_no"),
-            "map_code": it.get("map_code", ""),
+            "map_code": map_code,
             "state": it.get("state", "pending"),
             "blocked_reason": it.get("blocked_reason") or "",
             "late_min": int(it.get("late_min") or 0),
             "enabled": base_enabled and not skipped_today,
             "base_enabled": base_enabled,
+            "entry_enabled": entry_enabled,
             "skipped_today": skipped_today,
-            "toggleable": (base_enabled and planned_at > now + 60
+            "forced_today": forced_today,
+            "will_run": will_run,
+            "toggleable": (entry_enabled and planned_at > now + 60
                            and it.get("state") in ("pending", "skipped")),
         })
     items.sort(key=lambda x: (x["time_min"], x.get("team_no") or 0))
@@ -390,7 +403,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        active: dict | None = None,
                        hanafuda_team_no: int | None = None,
                        raid_team_no: int | None = None,
-                       expedition_choices: dict | None = None) -> dict:
+                       expedition_choices: dict | None = None,
+                       expedition_forced: dict | None = None) -> dict:
     """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。"""
     now = time.time() if now is None else now
     if cfg is None:
@@ -402,7 +416,14 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         except Exception:
             store = None
     day_start, day_end = _day_window(now)
-    expeditions = _expedition_items(cfg, now, day_start, expedition_choices)
+    if expedition_choices is None or expedition_forced is None:
+        loaded_choices, loaded_forced = load_choice_sets()
+        if expedition_choices is None:
+            expedition_choices = loaded_choices
+        if expedition_forced is None:
+            expedition_forced = loaded_forced
+    expeditions = _expedition_items(cfg, now, day_start,
+                                    expedition_choices, expedition_forced)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None
