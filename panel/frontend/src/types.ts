@@ -1032,6 +1032,25 @@ export interface DayTimelineSuggestion {
   note: string
 }
 
+/** 远征建议引擎的长期偏好：今天丢几队 + 哪些队可以丢（换日不重置） */
+export interface DayExpeditionHelpPrefs {
+  teams_out: number
+  available_teams: number[]
+}
+
+/** 一条远征建议：只投排班投影里已有的班；点采纳 = 那班记 forced */
+export interface DayExpeditionSuggestion {
+  kind: 'expedition'
+  key: string
+  team_no: number
+  map_code: string
+  map_name: string
+  resource: string
+  duration_min: number
+  start_min: number
+  reason: string
+}
+
 export type ScheduleBlockKind = 'raid' | 'workflow' | 'daily'
 
 /** 计划块 v2：raid 带 runs（1–99），workflow 带 workflow_id，daily 无参数 */
@@ -1085,6 +1104,10 @@ export interface DayTimeline {
   markers: DayTimelineMarker[]
   expeditions: DayTimelineExpedition[]
   expedition_schedule_enabled: boolean
+  expedition_help: DayExpeditionHelpPrefs
+  expedition_suggestions: DayExpeditionSuggestion[]
+  /** 建议为空时给玩家看的原因（没盘点/没有能点的班） */
+  expedition_advice_note: string | null
   runs: DayTimelineRun[]
   hint: string | null
   suggestions: DayTimelineSuggestion[] | null

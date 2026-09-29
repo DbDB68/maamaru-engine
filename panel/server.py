@@ -2168,6 +2168,69 @@ async def api_set_day_expedition_slot(request: Request):
     return {"ok": True}
 
 
+@app.put("/api/day-timeline/expedition-adopt")
+async def api_adopt_day_expedition_suggestion(request: Request):
+    """采纳一条远征建议 = 给那班记 forced（排班关着也单独走状态机）。
+
+    建议只投排班投影里已有的班；采纳前对照最新建议列表，过期的点不动。
+    """
+    from . import expedition_advisor
+    from .expedition_choices import set_slot_intention
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "请选一条远征建议")
+    try:
+        team_no = int(body.get("team_no"))
+        start_min = int(body.get("start_min"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "请选一条远征建议") from None
+    map_code = body.get("map_code")
+    if team_no not in expedition_advisor.VALID_TEAMS \
+            or not isinstance(map_code, str) or not map_code:
+        raise HTTPException(400, "请选一条远征建议")
+    timeline = _day_timeline_payload()
+    suggestion = next(
+        (item for item in timeline.get("expedition_suggestions") or []
+         if item.get("team_no") == team_no
+         and item.get("map_code") == map_code
+         and int(item.get("start_min") or -1) == start_min), None)
+    if not suggestion:
+        raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
+    slot = next((item for item in timeline.get("expeditions") or []
+                 if item.get("key") == suggestion.get("key")), None)
+    if not slot or not slot.get("toggleable"):
+        raise HTTPException(409, "这班已临近开班、已处理，或排班里被关掉了；请刷新时间表")
+    if not slot.get("entry_enabled", True):
+        raise HTTPException(409, "这班在排班设置里被关掉了，先去排班里打开再来点")
+    set_slot_intention(key=slot["key"], team_no=slot["team_no"],
+                       map_code=slot["map_code"], planned_at=slot["planned_at"],
+                       will_run=True, base_enabled=bool(slot["base_enabled"]))
+    fresh = _day_timeline_payload()
+    return {"ok": True,
+            "expeditions": fresh.get("expeditions") or [],
+            "expedition_suggestions": fresh.get("expedition_suggestions") or [],
+            "expedition_help": fresh.get("expedition_help"),
+            "expedition_advice_note": fresh.get("expedition_advice_note")}
+
+
+@app.put("/api/expedition-help-prefs")
+async def api_save_expedition_help_prefs(request: Request):
+    """记住长期偏好：今天丢几队 + 哪些队可以丢；换日不重置，想改再改。"""
+    from . import expedition_advisor
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "偏好格式不对")
+    try:
+        prefs = expedition_advisor.save_prefs(
+            teams_out=body.get("teams_out"),
+            available_teams=body.get("available_teams"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "expedition_help": prefs}
+
+
 @app.put("/api/day-timeline/raid-plan")
 async def api_save_day_raid_plan(request: Request):
     from .day_plan import review_plan, save_plan

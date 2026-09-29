@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from datetime import datetime, timedelta, timezone
 
 from . import scheduler
 from .expedition_choices import is_forced, load_choice_sets
+from . import expedition_advisor
 
 DAY_MINUTES = 24 * 60
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -36,6 +38,37 @@ def _day_window(now: float) -> tuple[float, float]:
     day_start = datetime.fromtimestamp(now).replace(
         hour=0, minute=0, second=0, microsecond=0).timestamp()
     return day_start, day_start + 86400
+
+
+# 建议引擎的家底报告（resource_watch / koban_watch）：30 秒轮询的时间表
+# 不值得每次都重算一遍账本，成功结果缓存两分钟；失败不缓存，下次再试。
+_PLANNING_TTL_SEC = 120.0
+_planning_cache: dict[float, dict] = {}
+
+
+def _load_planning_snapshot(store):
+    if store is None:
+        return None
+    now = time.time()
+    for cached_at, data in list(_planning_cache.items()):
+        if now - cached_at < _PLANNING_TTL_SEC and data is not None:
+            return data
+    try:
+        from touken import advisor
+        from touken.runtime_paths import CONFIG_PATH, STATE_DIR
+        recipe = None
+        try:
+            config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            recipe = (config.get("forge") or {}).get("recipe")
+        except Exception:
+            pass
+        data = advisor.get_planning(store, STATE_DIR / advisor.GOALS_FILENAME,
+                                    forge_recipe=recipe)
+    except Exception:
+        return None
+    _planning_cache.clear()
+    _planning_cache[now] = data if isinstance(data, dict) else None
+    return data
 
 
 def _minute_of(time_text: str) -> int:
@@ -404,8 +437,15 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        hanafuda_team_no: int | None = None,
                        raid_team_no: int | None = None,
                        expedition_choices: dict | None = None,
-                       expedition_forced: dict | None = None) -> dict:
-    """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。"""
+                       expedition_forced: dict | None = None,
+                       expedition_help: dict | None = None,
+                       planning: dict | None = None,
+                       situation_path=None) -> dict:
+    """组装 24 小时只读时间轴：远征班次块 + 任务运行条 + 参考线 + 挂机建议。
+
+    expedition_help / planning 都可注入（测试）；缺省分别从偏好文件和
+    账本报告取，取不到就给空建议 + 原因。
+    """
     now = time.time() if now is None else now
     if cfg is None:
         cfg = scheduler.load_config()
@@ -424,6 +464,13 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             expedition_forced = loaded_forced
     expeditions = _expedition_items(cfg, now, day_start,
                                     expedition_choices, expedition_forced)
+    if expedition_help is None:
+        expedition_help = expedition_advisor.load_prefs()
+    if planning is None and int(expedition_help.get("teams_out") or 0) > 0:
+        planning = _load_planning_snapshot(store)
+    advice = expedition_advisor.build_expedition_suggestions(
+        {"expeditions": expeditions}, expedition_help, planning=planning,
+        situation_path=situation_path)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None
@@ -474,6 +521,12 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         "markers": [{"time_min": 240, "label": "日课刷新", "kind": "daily_reset"}],
         "expeditions": expeditions,
         "expedition_schedule_enabled": bool(cfg.get("automation", {}).get("enabled")),
+        "expedition_help": {
+            "teams_out": int(expedition_help.get("teams_out") or 0),
+            "available_teams": list(expedition_help.get("available_teams") or []),
+        },
+        "expedition_suggestions": advice["suggestions"],
+        "expedition_advice_note": advice["note"],
         "runs": _run_items(store, active, day_start, day_end, script_labels),
         "hint": hint,
         "activity": activity,

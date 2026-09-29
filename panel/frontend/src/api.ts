@@ -28,6 +28,14 @@ export const api = {
   setDayExpeditionSlot: (key: string, willRun: boolean) => request<{ ok: boolean }>('/api/day-timeline/expedition-slot', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, will_run: willRun }),
   }),
+  /** 采纳一条远征建议：那班记 forced（排班关着也单独跑），绝不自动执行 */
+  adoptDayExpeditionSuggestion: (teamNo: number, mapCode: string, startMin: number) => request<{ ok: boolean; expeditions: DayTimeline['expeditions']; expedition_suggestions: DayTimeline['expedition_suggestions']; expedition_help: DayTimeline['expedition_help']; expedition_advice_note: string | null }>('/api/day-timeline/expedition-adopt', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team_no: teamNo, map_code: mapCode, start_min: startMin }),
+  }),
+  /** 记住远征建议偏好：今天丢几队 + 哪些队可以丢（长期，换日不重置） */
+  setExpeditionHelpPrefs: (teamsOut: number, availableTeams: number[]) => request<{ ok: boolean; expedition_help: DayTimeline['expedition_help'] }>('/api/expedition-help-prefs', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ teams_out: teamsOut, available_teams: availableTeams }),
+  }),
   saveDayRaidPlan: (blocks: DayScheduleBlock[]) => request<{ booking: DayBooking }>('/api/day-timeline/raid-plan', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),
   }),

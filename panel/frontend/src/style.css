@@ -348,6 +348,15 @@ button.tl-block:disabled { cursor: default; }
 .tl-block.tlx-daily { color: #f8f3e6; background: #a87416; border-color: #8a5f12; }
 .tl-block.tlx-suggest { color: #315f42; background: rgba(49, 95, 66, 0.12); border: 1.5px dashed #6f9b6d; }
 .tl-block.tlx-suggest:hover { background: rgba(49, 95, 66, 0.22); }
+.tl-expedition-help { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; padding: 5px 8px; border: 1px dashed #ddd2b8; border-radius: 6px; background: rgba(255, 250, 241, 0.4); color: var(--ink-soft); font-size: 11px; }
+.tl-expedition-help-count { display: inline-flex; align-items: center; gap: 4px; }
+.tl-expedition-help select { padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: inherit; font-size: 11px; }
+.tl-expedition-help-teams { display: inline-flex; align-items: center; gap: 4px; }
+.tl-expedition-help-note { flex-basis: 100%; color: #8a5a12; }
+.tlx-chip { padding: 0 7px; border: 1px solid #cbbf9f; border-radius: 999px; background: transparent; color: var(--ink-soft); font: inherit; font-size: 11px; line-height: 18px; cursor: pointer; }
+.tlx-chip:hover:not(:disabled) { border-color: var(--fox-gold); color: var(--ink); }
+.tlx-chip.is-on { color: #315f42; background: rgba(49, 95, 66, 0.12); border-color: #6f9b6d; font-weight: 700; }
+.tlx-chip:disabled { cursor: default; opacity: .6; }
 .tl-expedition-choices { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
 .tl-expedition-choices summary { color: var(--ink); font-size: 12px; font-weight: 700; cursor: pointer; }
 .tl-expedition-choices summary small { margin-left: 6px; color: var(--ink-soft); font-size: 10px; font-weight: 400; }

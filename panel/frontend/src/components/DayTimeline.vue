@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { ConductorBlockStatus, DayConductorBlock, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
+import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 import { canAdoptRaidRecommendation } from './report/planningLinkModel'
 
@@ -23,6 +23,8 @@ const removing = ref(false)
 const planMessage = ref('')
 const expeditionMessage = ref('')
 const togglingExpedition = ref('')
+const adoptingSuggestion = ref('')
+const prefsBusy = ref(false)
 const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
@@ -96,6 +98,66 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
     await load()
   } finally {
     togglingExpedition.value = ''
+  }
+}
+
+/* ── 远征建议：偏好即存即生效；点淡影 = 采纳（那班记 forced，不会自动跑） ── */
+
+async function updateTeamsOut(event: Event) {
+  const value = Number((event.target as HTMLSelectElement).value)
+  if (!data.value || prefsBusy.value) return
+  const previous = data.value.expedition_help.teams_out
+  data.value.expedition_help.teams_out = value
+  prefsBusy.value = true
+  expeditionMessage.value = ''
+  try {
+    await api.setExpeditionHelpPrefs(value, data.value.expedition_help.available_teams)
+    await load()
+  } catch (error) {
+    expeditionMessage.value = error instanceof Error ? error.message : '偏好没存上，请重试'
+    if (data.value) data.value.expedition_help.teams_out = previous
+    await load()
+  } finally {
+    prefsBusy.value = false
+  }
+}
+
+async function toggleAvailableTeam(team: number) {
+  if (!data.value || prefsBusy.value) return
+  const current = data.value.expedition_help.available_teams
+  const next = current.includes(team)
+    ? current.filter(item => item !== team)
+    : [...current, team].sort((a, b) => a - b)
+  const previous = current
+  data.value.expedition_help.available_teams = next
+  prefsBusy.value = true
+  expeditionMessage.value = ''
+  try {
+    await api.setExpeditionHelpPrefs(data.value.expedition_help.teams_out, next)
+    await load()
+  } catch (error) {
+    expeditionMessage.value = error instanceof Error ? error.message : '偏好没存上，请重试'
+    if (data.value) data.value.expedition_help.available_teams = previous
+    await load()
+  } finally {
+    prefsBusy.value = false
+  }
+}
+
+async function adoptExpeditionSuggestion(suggestion: DayExpeditionSuggestion) {
+  if (adoptingSuggestion.value) return
+  adoptingSuggestion.value = suggestion.key
+  expeditionMessage.value = ''
+  try {
+    await api.adoptDayExpeditionSuggestion(
+      suggestion.team_no, suggestion.map_code, suggestion.start_min)
+    await load()
+    expeditionMessage.value = `部队${TEAM_NAMES[suggestion.team_no] ?? suggestion.team_no} ${fmtMin(suggestion.start_min)} 这班已点上，到点单独派出。`
+  } catch (error) {
+    expeditionMessage.value = error instanceof Error ? error.message : '这班没点上，请重试'
+    await load()
+  } finally {
+    adoptingSuggestion.value = ''
   }
 }
 
@@ -538,6 +600,25 @@ const expeditionBlocks = computed(() => {
 // 总开关关闭时也保留灰色班次，让玩家先看清原排班。
 const displayedExpeditionBlocks = expeditionBlocks
 
+/** 远征建议淡影：投进对应队伍的子泳道，点采纳 = 那班记 forced */
+const expeditionSuggestionBlocks = computed(() => {
+  if (!data.value) return []
+  return (data.value.expedition_suggestions || []).map((s) => {
+    const team = TEAM_NAMES[s.team_no] ?? String(s.team_no)
+    const visibleDuration = Math.min(Math.max(s.duration_min, 10), DAY - s.start_min)
+    const range = `${fmtMin(s.start_min)}–${fmtMin(Math.min(DAY, s.start_min + s.duration_min))}`
+    return {
+      key: s.key,
+      suggestion: s,
+      teamNo: s.team_no,
+      left: pct(s.start_min),
+      width: Math.max(pct(visibleDuration), 0.7),
+      title: `建议：部队${team} ${s.map_code}（${range}）· ${s.reason} · 点我采纳`,
+      text: s.map_code,
+    }
+  })
+})
+
 /** 远征按队伍分跑道，密班不再糊成一条 */
 const expeditionLanes = computed(() => {
   const teams = [...new Set(displayedExpeditionBlocks.value.map(b => b.slot.team_no))].sort((a, b) => a - b)
@@ -545,6 +626,7 @@ const expeditionLanes = computed(() => {
     team,
     label: `远征·${TEAM_NAMES[team] ?? team}`,
     blocks: displayedExpeditionBlocks.value.filter(b => b.slot.team_no === team),
+    suggestions: expeditionSuggestionBlocks.value.filter(s => s.teamNo === team),
   }))
 })
 
@@ -787,6 +869,7 @@ const caption = computed(() => {
             <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
               <span class="tl-lane-tag">{{ lane.label }}</span>
               <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.will_run ? '今天会跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
+              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion" @click="adoptExpeditionSuggestion(s.suggestion)">{{ s.text }}</button>
             </div>
           </template>
           <div v-else class="tl-lane">
@@ -824,6 +907,17 @@ const caption = computed(() => {
           </div>
         </div>
       </div>
+      <div v-if="data.expedition_help" class="tl-expedition-help">
+        <label class="tl-expedition-help-count">今天丢
+          <select :value="data.expedition_help.teams_out" :disabled="prefsBusy" @change="updateTeamsOut">
+            <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
+          </select>
+        队出门</label>
+        <span class="tl-expedition-help-teams">可丢的队伍
+          <button v-for="t in [1, 2, 3, 4, 5]" :key="t" type="button" class="tlx-chip" :class="{ 'is-on': data.expedition_help.available_teams.includes(t) }" :aria-pressed="data.expedition_help.available_teams.includes(t)" :disabled="prefsBusy" @click="toggleAvailableTeam(t)">{{ TEAM_NAMES[t] }}</button>
+        </span>
+        <small v-if="data.expedition_advice_note" class="tl-expedition-help-note">{{ data.expedition_advice_note }}</small>
+      </div>
       <div class="tl-compact">
         <div class="tl-mini-meta">
           <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务<template v-if="suggestionBlocks.length"> <i class="is-suggest"></i>建议</template></span>
@@ -836,6 +930,7 @@ const caption = computed(() => {
           <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in suggestionShadows" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="s in expeditionSuggestionBlocks" :key="`mini-suggest-${s.key}`" class="tl-mini-block is-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title"></span>
         </div>
         <div class="tl-mini-ticks">
           <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`">{{ t === DAY ? '24' : t / 60 }}</span>
