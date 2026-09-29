@@ -325,6 +325,9 @@ button { cursor: pointer; }
 .tl-now::before { position: absolute; top: -6px; left: -6px; width: 10px; height: 10px; content: ''; background: #a83226; border-radius: 50%; }
 .tl-lane { position: relative; height: 40px; margin-bottom: 7px; background: rgba(255, 250, 241, 0.6); border: 1px solid var(--line); border-radius: 4px; }
 .tl-lane-tag { position: absolute; left: -46px; top: 50%; transform: translateY(-50%); width: 40px; text-align: right; font-size: 11px; color: var(--ink-soft); }
+.tl-sub-lane { height: 22px; margin-bottom: 4px; background: transparent; border-color: #e3d9c2; }
+.tl-sub-lane .tl-lane-tag { width: 44px; font-size: 9px; }
+.tl-sub-lane .tl-block { top: 2px; bottom: 2px; padding: 0 3px; border-radius: 3px; font-size: 9px; line-height: 16px; box-shadow: 0 0 0 1px #f4eedd; }
 .tl-lane-empty { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--ink-soft); }
 .tl-block { position: absolute; top: 7px; bottom: 7px; overflow: hidden; padding: 0 4px; border: 1px solid transparent; border-radius: 4px; font-size: 11px; line-height: 24px; white-space: nowrap; text-overflow: ellipsis; cursor: default; }
 .tl-block.is-pending { color: var(--ink-soft); background: #eee7d8; border-color: var(--line); }

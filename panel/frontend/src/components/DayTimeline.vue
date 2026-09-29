@@ -504,6 +504,16 @@ const expeditionBlocks = computed(() => {
 // 总开关关闭时也保留灰色班次，让玩家先看清原排班。
 const displayedExpeditionBlocks = expeditionBlocks
 
+/** 远征按队伍分跑道，密班不再糊成一条 */
+const expeditionLanes = computed(() => {
+  const teams = [...new Set(displayedExpeditionBlocks.value.map(b => b.slot.team_no))].sort((a, b) => a - b)
+  return teams.map(team => ({
+    team,
+    label: `远征·${TEAM_NAMES[team] ?? team}`,
+    blocks: displayedExpeditionBlocks.value.filter(b => b.slot.team_no === team),
+  }))
+})
+
 const runBlocks = computed(() => {
   if (!data.value) return []
   const dayStart = data.value.day_start
@@ -740,10 +750,15 @@ const caption = computed(() => {
             <i>{{ m.label }}</i>
           </div>
           <div class="tl-now" :style="{ left: pct(smoothNowMin) + '%' }"></div>
-          <div class="tl-lane">
+          <template v-if="expeditionLanes.length">
+            <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
+              <span class="tl-lane-tag">{{ lane.label }}</span>
+              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.will_run ? '今天会跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
+            </div>
+          </template>
+          <div v-else class="tl-lane">
             <span class="tl-lane-tag">远征</span>
-            <button v-for="b in displayedExpeditionBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${b.slot.will_run ? '今天会跑' : '今天不跑'}${b.slot.toggleable ? '，点击切换' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
-            <span v-if="!displayedExpeditionBlocks.length" class="tl-lane-empty">今天没有远征班次</span>
+            <span class="tl-lane-empty">今天没有远征班次</span>
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
