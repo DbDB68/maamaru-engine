@@ -2,7 +2,7 @@ import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinD
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
-import type { ExpeditionSchedule, DayTimeline, DayRaidBooking, DayRaidPlanBlock } from './types'
+import type { ExpeditionSchedule, DayTimeline, DayBooking, DayScheduleBlock } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -27,8 +27,13 @@ export const api = {
   setDayExpeditionSlot: (key: string, enabled: boolean) => request<{ ok: boolean }>('/api/day-timeline/expedition-slot', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, enabled }),
   }),
-  saveDayRaidPlan: (blocks: DayRaidPlanBlock[]) => request<{ booking: DayRaidBooking }>('/api/day-timeline/raid-plan', {
+  saveDayRaidPlan: (blocks: DayScheduleBlock[]) => request<{ booking: DayBooking }>('/api/day-timeline/raid-plan', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),
+  }),
+  /** 保存今日时段表并当场开启大总管：保存即 armed */
+  saveDaySchedule: (blocks: DayScheduleBlock[], raidWorkflowId?: string) => request<{ conductor: DayTimeline['conductor']; booking: DayTimeline['booking'] }>('/api/day-timeline/schedule', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blocks, raid_workflow_id: raidWorkflowId }),
   }),
   setDayConductor: (enabled: boolean, workflowId?: string) => request<{ conductor: DayTimeline['conductor'] }>('/api/day-conductor', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, workflow_id: workflowId }),

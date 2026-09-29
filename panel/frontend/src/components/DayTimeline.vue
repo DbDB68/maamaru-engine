@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../api'
-import type { DayRaidPlanBlock, DayTimeline, DayTimelineExpedition } from '../types'
+import type { ConductorBlockStatus, DayConductorBlock, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean }>(), {
@@ -10,6 +10,9 @@ const props = withDefaults(defineProps<{ collapsible?: boolean }>(), {
 const emit = defineEmits<{ openExpedition: [] }>()
 
 const DAY = 1440
+// workflow/daily 没有可靠时长，预计收工按 30 分钟估算（与后端口径一致）
+const GENERIC_BLOCK_MIN = 30
+const MAX_BLOCKS = 6
 const data = ref<DayTimeline | null>(null)
 const expanded = ref(!props.collapsible)
 const editing = ref(false)
@@ -20,7 +23,9 @@ const togglingExpedition = ref('')
 const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
-const draft = ref<{ time: string; runs: number }[]>([])
+const workflowPresets = ref<WorkflowPreset[]>([])
+interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string }
+const draft = ref<DraftRow[]>([])
 let timer: number | undefined
 
 async function load() {
@@ -35,16 +40,22 @@ async function load() {
   }
 }
 
-async function setConductor(enabled: boolean) {
+async function loadWorkflowPresets() {
+  try {
+    workflowPresets.value = (await api.workflows()).presets
+  } catch {
+    /* 下拉暂时为空，保存时后端还会再核 */
+  }
+}
+
+async function stopConductor() {
   if (conductorBusy.value) return
   conductorBusy.value = true
   conductorMessage.value = ''
   try {
-    await api.setDayConductor(enabled, enabled ? conductorChoice.value : undefined)
+    await api.setDayConductor(false)
     await load()
-    conductorMessage.value = enabled
-      ? '大总管已接下今天的安排；到点前会重新核对远征和任务流。'
-      : '后续时段不会自动开工；已经开工的这一段仍需在执务台停止。'
+    conductorMessage.value = '后续时段不会自动开工；已经开工的这一段仍需在执务台停止。'
   } catch (error) {
     conductorMessage.value = error instanceof Error ? error.message : '大总管没改成，请重试'
     await load()
@@ -71,6 +82,7 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
 
 onMounted(() => {
   load()
+  void loadWorkflowPresets()
   timer = window.setInterval(load, 30000)
 })
 onBeforeUnmount(() => {
@@ -147,65 +159,211 @@ function parseTime(value: string): number | null {
   return hour < 24 && minute < 60 ? hour * 60 + minute : null
 }
 
-function recommendedBlocks(): DayRaidPlanBlock[] {
+const raidKindAvailable = computed(() => data.value?.activity?.name === '联队战')
+
+const nowMin = computed(() => {
+  if (!data.value) return 0
+  return Math.min(DAY, Math.max(0, (data.value.now - data.value.day_start) / 60))
+})
+
+function presetName(id?: string): string {
+  if (!id) return ''
+  return workflowPresets.value.find(preset => preset.id === id)?.name || `任务流 ${id}`
+}
+
+function blockLabel(block: DayScheduleBlock): string {
+  if (block.kind === 'raid') return `联队战 ${block.runs ?? '?'} 圈`
+  if (block.kind === 'workflow') return presetName(block.workflow_id) || '任务流'
+  return '一键日课'
+}
+
+/** 预计收工时刻；raid 没有活动卡片时算不出来，返回 null */
+function blockEndMin(block: DayScheduleBlock): number | null {
+  const activity = data.value?.activity
+  if (block.kind === 'raid') {
+    if (!activity || activity.name !== '联队战') return null
+    return block.start_min + Math.ceil((block.runs ?? 1) * activity.seconds_per_loop / 60)
+  }
+  return block.start_min + GENERIC_BLOCK_MIN
+}
+
+function conductorBlockFor(block: DayScheduleBlock): DayConductorBlock | undefined {
+  if (!data.value?.conductor.enabled) return undefined
+  return data.value.conductor.blocks.find(
+    candidate => candidate.start_min === block.start_min && candidate.kind === block.kind)
+}
+
+const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, string>> = {
+  running: '正在跑',
+  ended: '已收工',
+  missed: '换日未跑',
+}
+
+function blockStatusText(block: DayConductorBlock): string {
+  if (block.status === 'pending') {
+    // 过点不是错误：runner 忙完手头的活就排队开工
+    return block.start_min <= nowMin.value ? '排队中，手头收工就上' : '到点开工'
+  }
+  if (block.status === 'blocked') return `没开工：${block.reason || '核对没过'}`
+  if (block.status === 'interrupted') return block.reason || '中断'
+  return STATUS_TEXT[block.status] || block.status
+}
+
+const STATUS_CLASSES: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, string>> = {
+  running: 'is-running',
+  ended: 'is-done',
+  blocked: 'is-failed',
+  interrupted: 'is-failed',
+  missed: 'is-expired',
+}
+
+function blockStatusClass(block: DayConductorBlock): string {
+  if (block.status === 'pending') {
+    return block.start_min <= nowMin.value ? 'is-waiting' : 'is-pending'
+  }
+  return STATUS_CLASSES[block.status] || 'is-pending'
+}
+
+function toDraftRow(block: DayScheduleBlock): DraftRow {
+  return { time: fmtMin(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '' }
+}
+
+function recommendedBlocks(): DayScheduleBlock[] {
   return (data.value?.suggestions || [])
     .filter(block => block.runs != null)
-    .map(block => ({ start_min: block.start_min, runs: block.runs! }))
+    .map(block => ({ start_min: block.start_min, kind: 'raid' as const, runs: block.runs! }))
+}
+
+function defaultDraftRow(): DraftRow {
+  return {
+    time: fmtMin(Math.min(DAY - 1, Math.ceil(nowMin.value))),
+    kind: raidKindAvailable.value ? 'raid' : 'daily',
+    runs: 1,
+    workflow_id: '',
+  }
 }
 
 function editPlan() {
   const blocks = data.value?.booking?.blocks || recommendedBlocks()
-  draft.value = (blocks.length ? blocks : [{ start_min: Math.ceil(nowMin.value), runs: 1 }])
-    .map(block => ({ time: fmtMin(block.start_min), runs: block.runs }))
+  draft.value = blocks.length ? blocks.map(toDraftRow) : [defaultDraftRow()]
   planMessage.value = ''
+  void loadWorkflowPresets()
   editing.value = true
 }
 
+/** 按推荐安排 = 把建议块填进草稿等确认，不直接保存 */
+function fillRecommended() {
+  draft.value = recommendedBlocks().map(toDraftRow)
+  planMessage.value = ''
+  void loadWorkflowPresets()
+  editing.value = true
+}
+
+function normalizeRow(row: DraftRow) {
+  if (row.kind === 'raid' && (!Number.isInteger(row.runs) || row.runs < 1)) row.runs = 1
+  if (row.kind === 'workflow' && !row.workflow_id) row.workflow_id = workflowPresets.value[0]?.id || ''
+}
+
 function addBlock() {
-  if (draft.value.length >= 2) return
+  if (draft.value.length >= MAX_BLOCKS) return
   const last = draft.value[draft.value.length - 1]
   const start = parseTime(last?.time || '') ?? Math.ceil(nowMin.value)
   const pace = data.value?.activity?.seconds_per_loop || 0
-  draft.value.push({ time: fmtMin(Math.min(1439, start + Math.ceil((last?.runs || 1) * pace / 60))), runs: 1 })
+  const lastDuration = last?.kind === 'raid' && pace
+    ? Math.ceil((last?.runs || 1) * pace / 60)
+    : GENERIC_BLOCK_MIN
+  const kind: ScheduleBlockKind = last?.kind === 'workflow' ? 'workflow'
+    : raidKindAvailable.value ? 'raid' : 'daily'
+  draft.value.push({ time: fmtMin(Math.min(DAY - 1, start + lastDuration)), kind, runs: 1, workflow_id: '' })
 }
+
+const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
 
 const preview = computed(() => {
   const activity = data.value?.activity
-  if (!activity) return { blocks: [] as DayRaidPlanBlock[], issues: ['当前没有可安排的联队战'] }
   const issues: string[] = []
-  const blocks: DayRaidPlanBlock[] = []
-  const deadline = Math.min(DAY, Math.floor((activity.event_end_at - (data.value?.day_start || 0)) / 60) - 5)
+  const blocks: DayScheduleBlock[] = []
+  const hasRaid = draftHasRaid.value
+  if (hasRaid && !raidKindAvailable.value) {
+    issues.push('当前没有可安排的联队战，联队战段请移除或换成别的活')
+  }
+  const pace = activity?.name === '联队战' ? activity.seconds_per_loop : 0
+  if (hasRaid && pace <= 0) issues.push('还没有可靠的本期圈速')
+  const deadline = activity
+    ? Math.min(DAY, Math.floor((activity.event_end_at - (data.value?.day_start || 0)) / 60) - 5)
+    : 0
+  const loopMin = pace > 0 ? pace : 420
+  let totalRuns = 0
+  const spans: Array<[number, number]> = []
   for (const [index, row] of draft.value.entries()) {
     const start = parseTime(row.time)
-    const runs = Number(row.runs)
-    if (start == null || !Number.isInteger(runs) || runs < 1 || runs > 99) {
-      issues.push(`第${index + 1}段请填写时间和 1–99 圈`)
+    if (start == null) {
+      issues.push(`第${index + 1}段请填写今天的时间`)
       continue
     }
-    blocks.push({ start_min: start, runs })
-    const end = start + Math.ceil(runs * activity.seconds_per_loop / 60)
-    if (start < Math.ceil(nowMin.value)) issues.push(`第${index + 1}段的开工时间已经过去`)
-    if (end > deadline) issues.push(`第${index + 1}段赶不上今天收摊`)
-    const collision = activity.occupied.find(item => start < item.end_min && end > item.start_min)
-    if (collision) issues.push(`第${index + 1}段会撞上${collision.label}`)
+    if (row.kind === 'raid') {
+      const runs = Number(row.runs)
+      if (!Number.isInteger(runs) || runs < 1 || runs > 99) {
+        issues.push(`第${index + 1}段圈数要填 1–99`)
+        continue
+      }
+      if (!raidKindAvailable.value) continue
+      blocks.push({ start_min: start, kind: 'raid', runs })
+      totalRuns += runs
+      const end = start + Math.ceil(runs * loopMin / 60)
+      spans.push([start, end])
+      if (end > deadline) issues.push(`第${index + 1}段赶不上今天收摊`)
+      const collision = activity?.occupied.find(item => start < item.end_min && end > item.start_min)
+      if (collision) issues.push(`第${index + 1}段会撞上${collision.label}`)
+    } else if (row.kind === 'workflow') {
+      if (!row.workflow_id) {
+        issues.push(`第${index + 1}段选一个任务流`)
+        continue
+      }
+      blocks.push({ start_min: start, kind: 'workflow', workflow_id: row.workflow_id })
+      spans.push([start, start + GENERIC_BLOCK_MIN])
+    } else {
+      blocks.push({ start_min: start, kind: 'daily' })
+      spans.push([start, start + GENERIC_BLOCK_MIN])
+    }
   }
-  if (blocks.reduce((sum, block) => sum + block.runs, 0) > activity.remaining_runs) issues.push('圈数超过本期剩余圈数')
-  if (blocks.length === 2) {
-    const firstEnd = blocks[0].start_min + Math.ceil(blocks[0].runs * activity.seconds_per_loop / 60)
-    if (blocks[0].start_min > blocks[1].start_min) issues.push('请按开工时间排列')
-    if (firstEnd > blocks[1].start_min) issues.push('两个时段重叠')
+  if (hasRaid && raidKindAvailable.value && totalRuns > (activity?.remaining_runs ?? 0)) {
+    issues.push('圈数超过本期剩余圈数')
   }
-  return { blocks, issues }
+  for (let i = 1; i < spans.length; i++) {
+    if (spans[i][0] < spans[i - 1][0]) issues.push('请按开工时间排列时段')
+    if (spans[i - 1][1] > spans[i][0]) {
+      issues.push('时段互相重叠')
+      break
+    }
+  }
+  return { blocks, issues: [...new Set(issues)] }
 })
 
-async function savePlan(blocks: DayRaidPlanBlock[]) {
+function rowEndText(row: DraftRow): string {
+  const start = parseTime(row.time)
+  if (start == null) return ''
+  if (row.kind === 'raid') {
+    const activity = data.value?.activity
+    if (!activity || activity.name !== '联队战') return ''
+    return fmtMin(start + Math.ceil(Number(row.runs || 0) * activity.seconds_per_loop / 60))
+  }
+  return fmtMin(start + GENERIC_BLOCK_MIN)
+}
+
+async function saveSchedule() {
+  const blocks = [...preview.value.blocks].sort((a, b) => a.start_min - b.start_min)
   saving.value = true
   planMessage.value = ''
   try {
-    await api.saveDayRaidPlan(blocks)
+    const result = await api.saveDaySchedule(
+      blocks, blocks.some(block => block.kind === 'raid') ? conductorChoice.value : undefined)
+    if (data.value) {
+      data.value.conductor = result.conductor
+      data.value.booking = result.booking
+    }
     editing.value = false
-    await load()
-    planMessage.value = '今日安排已记下；要让大总管到点开工，请在下方明确开启。'
+    planMessage.value = '已记下并交给大总管；到点自动开工，手头有活跑完就接上。'
   } catch (error) {
     planMessage.value = error instanceof Error ? error.message : '保存失败，请重试'
     await load()
@@ -213,16 +371,6 @@ async function savePlan(blocks: DayRaidPlanBlock[]) {
     saving.value = false
   }
 }
-
-function saveRecommended() {
-  const blocks = recommendedBlocks()
-  if (blocks.length) void savePlan(blocks)
-}
-
-const nowMin = computed(() => {
-  if (!data.value) return 0
-  return Math.min(DAY, Math.max(0, (data.value.now - data.value.day_start) / 60))
-})
 
 const expeditionBlocks = computed(() => {
   if (!data.value) return []
@@ -315,15 +463,41 @@ const suggestionBlocks = computed(() => {
 })
 
 const bookingBlocks = computed(() => {
-  const activity = data.value?.activity
-  if (!activity) return []
-  return (data.value?.booking?.blocks || []).map((block, index) => ({
-    key: `booked-${index}`,
-    left: pct(block.start_min),
-    width: Math.max(pct(Math.ceil(block.runs * activity.seconds_per_loop / 60)), 0.7),
-    title: `${fmtMin(block.start_min)} 联队战 ${block.runs} 圈（玩家安排，尚未接自动开工）`,
-    text: `${block.runs} 圈`,
-  }))
+  const booking = data.value?.booking
+  if (!booking) return []
+  const stale = !data.value?.conductor.enabled && booking.issues.length > 0
+  return booking.blocks.map((block, index) => {
+    const end = blockEndMin(block) ?? block.start_min + GENERIC_BLOCK_MIN
+    const cblock = conductorBlockFor(block)
+    return {
+      key: `booked-${index}`,
+      left: pct(block.start_min),
+      width: Math.max(pct(Math.max(end - block.start_min, 4)), 0.7),
+      cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : 'is-booked',
+      title: `${fmtMin(block.start_min)} ${blockLabel(block)}${cblock ? ` · ${blockStatusText(cblock)}` : '（已排，保存后到点开工）'}`,
+      text: block.kind === 'raid' ? `${block.runs} 圈` : block.kind === 'daily' ? '日课' : '任务流',
+    }
+  })
+})
+
+const bookedRows = computed(() => (data.value?.booking?.blocks || []).map((block, index) => ({
+  key: index,
+  block,
+  cblock: conductorBlockFor(block),
+})))
+
+const bookingSummary = computed(() => {
+  const booking = data.value?.booking
+  if (!booking) return ''
+  const raidRuns = booking.blocks
+    .filter(block => block.kind === 'raid')
+    .reduce((sum, block) => sum + (block.runs || 0), 0)
+  const bits = [`安排了 ${booking.blocks.length} 段`]
+  if (raidRuns) bits.push(`共 ${raidRuns} 圈`)
+  if (data.value?.conductor.enabled) bits.push('大总管已接班，到点自动开工')
+  else if (booking.issues.length) bits.push('需要重看')
+  else bits.push('只记计划，尚未开启自动开工')
+  return bits.join(' · ')
 })
 
 const shortfallText = computed(() => {
@@ -455,7 +629,7 @@ const caption = computed(() => {
           </div>
           <div v-if="bookingBlocks.length" class="tl-lane">
             <span class="tl-lane-tag">我的安排</span>
-            <div v-for="b in bookingBlocks" :key="b.key" class="tl-block is-booked" :class="{ 'is-stale': data.conductor.enabled ? data.conductor.issues.length : data.booking?.issues.length }" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
+            <div v-for="b in bookingBlocks" :key="b.key" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title">{{ b.text }}</div>
           </div>
         </div>
       </div>
@@ -488,58 +662,68 @@ const caption = computed(() => {
       </div>
       <p v-if="data.hint" class="tl-hint">{{ data.hint }}</p>
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
-      <section v-if="data.activity || data.booking" class="tl-booking" aria-label="今日联队战安排">
+      <section class="tl-booking" aria-label="今日安排">
         <div class="tl-booking-head">
           <div>
-            <strong>今日联队战</strong>
-            <small v-if="data.booking">你安排了 {{ data.booking.blocks.reduce((sum, block) => sum + block.runs, 0) }} 圈 · {{ data.conductor.enabled ? '大总管已接班' : data.booking.issues.length ? '需要重看' : '只记计划，尚未自动开工' }}</small>
-            <small v-else>推荐的空窗可以直接采用，也可以自己挑时间</small>
+            <strong>今日安排</strong>
+            <small v-if="data.booking">{{ bookingSummary }}</small>
+            <small v-else-if="data.activity">推荐的空窗可以直接采用，也可以自己挑时间和活</small>
+            <small v-else>排了就跑：联队战、任务流、一键日课，到点自动开工</small>
           </div>
           <div class="tl-booking-actions">
-            <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="saveRecommended">按推荐安排</button>
-            <button v-if="data.activity && !editing" type="button" :disabled="saving" @click="editPlan">{{ data.booking ? '改安排' : '自己定时间' }}</button>
+            <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="fillRecommended">按推荐安排</button>
+            <button v-if="!editing" type="button" :disabled="saving" @click="editPlan">{{ data.booking ? '改安排' : '自己定时间' }}</button>
+            <button v-if="data.conductor.enabled && !editing" type="button" :disabled="conductorBusy" @click="stopConductor">{{ conductorBusy ? '正在停用…' : '停用自动开工' }}</button>
           </div>
         </div>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
+        <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
-          <span v-for="(block, index) in data.booking.blocks" :key="index">{{ fmtMin(block.start_min) }} 开始 · {{ block.runs }} 圈<template v-if="data.activity"> · 预计 {{ fmtMin(block.start_min + Math.ceil(block.runs * data.activity.seconds_per_loop / 60)) }} 收工</template></span>
+          <span v-for="row in bookedRows" :key="row.key">
+            {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
+            <template v-if="row.cblock"> · <small class="tl-status" :class="blockStatusClass(row.cblock)">{{ blockStatusText(row.cblock) }}</small></template>
+            <template v-else-if="row.block.kind === 'raid' && blockEndMin(row.block) != null"> · 预计 {{ fmtMin(blockEndMin(row.block)!) }} 收工</template>
+          </span>
         </div>
         <div v-if="editing" class="tl-booking-editor">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row">
-            <label>第{{ index + 1 }}段开始 <input v-model="row.time" type="time" step="60" /></label>
-            <label>圈数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
-            <span v-if="parseTime(row.time) != null && data.activity">预计 {{ fmtMin(parseTime(row.time)! + Math.ceil(Number(row.runs || 0) * data.activity.seconds_per_loop / 60)) }} 收工</span>
+            <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
+            <label>类型
+              <select v-model="row.kind" @change="normalizeRow(row)">
+                <option v-if="raidKindAvailable" value="raid">联队战圈数</option>
+                <option value="workflow">任务流</option>
+                <option value="daily">一键日课</option>
+              </select>
+            </label>
+            <label v-if="row.kind === 'raid'">圈数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
+            <label v-if="row.kind === 'workflow'">任务流
+              <select v-model="row.workflow_id">
+                <option value="" disabled>选一份任务流</option>
+                <option v-for="preset in workflowPresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
+              </select>
+            </label>
+            <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
+            <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button v-if="draft.length > 1" type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
-          <button v-if="draft.length < 2" type="button" class="tl-booking-link" @click="addBlock">＋ 再安排一段</button>
+          <button v-if="draft.length < MAX_BLOCKS" type="button" class="tl-booking-link" @click="addBlock">＋ 再加一段</button>
+          <div v-if="draftHasRaid" class="tl-booking-raidwf">
+            <label>联队战任务流
+              <select v-model="conductorChoice">
+                <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
+              </select>
+            </label>
+            <small>联队战段都用这份任务流开工，只接单个联队战步骤的任务流。</small>
+          </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
-            <button type="button" :disabled="saving || preview.issues.length > 0" @click="savePlan(preview.blocks)">{{ saving ? '保存中…' : '记下今天的安排' }}</button>
+            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并到点开工' }}</button>
             <button type="button" :disabled="saving" @click="editing = false">取消</button>
           </div>
         </div>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
-        <div v-if="data.booking" class="tl-conductor">
-          <div class="tl-conductor-head">
-            <div><strong>大总管 · 自动开工</strong><small>{{ data.conductor.enabled ? `已交给「${data.conductor.workflow_name}」` : data.conductor.blocks.length ? '后续自动开工已停用' : '今天的安排默认只记计划，开启后才会到点运行' }}</small></div>
-            <button v-if="data.conductor.enabled" type="button" :disabled="conductorBusy" @click="setConductor(false)">停止后续自动开工</button>
-          </div>
-          <template v-if="!data.conductor.enabled && data.conductor.available">
-            <label>联队战任务流
-              <select v-model="conductorChoice" :disabled="conductorBusy">
-                <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
-              </select>
-            </label>
-            <button type="button" :disabled="conductorBusy || !data.conductor.options.length || !!data.booking.issues.length" @click="setConductor(true)">{{ conductorBusy ? '正在核对…' : '按今天安排自动开工' }}</button>
-          </template>
-          <p v-else-if="!data.conductor.available">纯净账房只记安排；自动开工需在自动化面板开启。</p>
-          <p v-if="data.conductor.issues.length" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
-          <p v-if="data.conductor.enabled">仅接单个联队战步骤的任务流；每段圈数按今天的安排带入。错过开工时间不会补跑，远征占用时不会抢走运行位置。</p>
-          <div v-if="data.conductor.blocks.length" class="tl-conductor-blocks">
-            <span v-for="(block, index) in data.conductor.blocks" :key="index">{{ fmtMin(block.start_min) }} · {{ block.runs }} 圈 · {{ block.status === 'pending' && !data.conductor.enabled ? '已停用，未开工' : ({ pending: '待开工', running: '执行中', ended: '已结束，查看成绩单', interrupted: '中断，未重跑', missed: '错过，未补跑', blocked: '未开工' }[block.status] || block.status) }}<small v-if="block.reason">{{ block.reason }}</small></span>
-          </div>
-          <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
-        </div>
+        <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
+        <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
       <details v-if="data.expeditions.length" class="tl-expedition-choices" open>
         <summary>今天的远征排班 <small>{{ data.expeditions.filter(item => item.enabled).length }} / {{ data.expeditions.length }} 班照常跑</small></summary>

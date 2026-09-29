@@ -375,6 +375,19 @@ button { cursor: pointer; }
 .tl-booking-row input { width: 90px; padding: 5px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 12px; }
 .tl-booking-row input[type='number'] { width: 54px; }
 .tl-booking .tl-booking-link { padding-inline: 0; color: var(--fox-gold-deep); background: transparent; border: 0; }
+.tl-booking-row select { max-width: 100%; padding: 5px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 12px; }
+.tl-booking-warning-inline { color: #a23e32; font-size: 11px; }
+.tl-booking-raidwf { display: grid; gap: 4px; max-width: 340px; }
+.tl-booking-raidwf label { display: grid; gap: 4px; color: var(--ink-soft); font-size: 11px; }
+.tl-booking-raidwf select { min-height: 29px; padding: 4px 7px; color: var(--ink); background: var(--paper-card); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.tl-booking-raidwf small { color: var(--ink-soft); font-size: 10px; }
+.tl-status { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 9px; line-height: 14px; }
+.tl-status.is-pending { color: var(--ink-soft); background: #eee7d8; }
+.tl-status.is-waiting { color: #8a5a12; background: #f7e8c4; }
+.tl-status.is-running { color: #1f5b8f; background: #dcebf7; }
+.tl-status.is-done { color: #2e6b34; background: #dff0da; }
+.tl-status.is-failed { color: #a83226; background: #f6dcd7; }
+.tl-status.is-expired { color: #7d7468; background: #e9e2d4; }
 .tl-booked-list { display: flex; flex-wrap: wrap; gap: 5px 15px; margin-top: 9px; }
 .tl-booking-warning { margin: 8px 0 0; color: #a23e32; font-size: 11px; }
 .tl-booking-message { margin: 8px 0 0; color: var(--ink-soft); font-size: 11px; }

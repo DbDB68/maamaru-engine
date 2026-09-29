@@ -2175,13 +2175,63 @@ async def api_save_day_raid_plan(request: Request):
         raise HTTPException(409, "现在没有可安排的联队战，等任务收工并更新进度后再试")
     blocks = body.get("blocks") if isinstance(body, dict) else None
     plan = {"day_start": timeline["day_start"],
-            "event_end_at": activity["event_end_at"], "blocks": blocks}
+            "event_end_at": activity["event_end_at"],
+            "blocks": [{"start_min": b["start_min"], "kind": "raid",
+                        "runs": b["runs"]} for b in blocks or []]}
     issues = review_plan(plan, timeline)
     if issues:
         raise HTTPException(409, "；".join(issues))
-    saved = save_plan(plan["day_start"], plan["event_end_at"],
-                      [{"start_min": b["start_min"], "runs": b["runs"]} for b in blocks])
+    saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
     return {"booking": {**saved, "issues": []}}
+
+
+@app.put("/api/day-timeline/schedule")
+async def api_save_day_schedule(request: Request):
+    """保存今日时段表并当场开启大总管：保存即开工，一次到位。"""
+    from .day_conductor import BUILTIN_ID, arm
+    from .day_plan import review_plan, save_plan
+
+    if _ledger_mode():
+        raise HTTPException(403, "纯净账房模式不能自动开工")
+    body = await request.json()
+    blocks = body.get("blocks") if isinstance(body, dict) else None
+    timeline = _day_timeline_payload()
+    activity = timeline.get("activity") or {}
+    plan = {"day_start": timeline["day_start"],
+            "event_end_at": activity.get("event_end_at"), "blocks": blocks}
+    issues = review_plan(plan, timeline)
+    if issues:
+        raise HTTPException(409, "；".join(issues))
+    plan["blocks"] = _clean_schedule_blocks(blocks)
+    saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
+    workflow_id = body.get("raid_workflow_id")
+    try:
+        arm(saved, timeline,
+            workflow_id if isinstance(workflow_id, str) and workflow_id
+            else BUILTIN_ID,
+            (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    timeline = _day_timeline_payload()
+    return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
+
+
+def _clean_schedule_blocks(blocks) -> list[dict]:
+    """只留前端该给的字段；review_plan 已把关，这里放心转型。"""
+    clean = []
+    for block in blocks or []:
+        kind = block.get("kind")
+        if kind == "raid":
+            clean.append({"start_min": int(block["start_min"]), "kind": "raid",
+                          "runs": int(block["runs"])})
+        elif kind == "workflow":
+            clean.append({"start_min": int(block["start_min"]),
+                          "kind": "workflow",
+                          "workflow_id": str(block["workflow_id"])})
+        else:
+            clean.append({"start_min": int(block["start_min"]),
+                          "kind": "daily"})
+    return clean
 
 
 @app.post("/api/expedition-schedule")

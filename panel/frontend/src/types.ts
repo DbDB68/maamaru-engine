@@ -1027,17 +1027,41 @@ export interface DayTimelineSuggestion {
   note: string
 }
 
-export interface DayRaidPlanBlock {
+export type ScheduleBlockKind = 'raid' | 'workflow' | 'daily'
+
+/** 计划块 v2：raid 带 runs（1–99），workflow 带 workflow_id，daily 无参数 */
+export interface DayScheduleBlock {
   start_min: number
-  runs: number
+  kind: ScheduleBlockKind
+  runs?: number
+  workflow_id?: string
 }
 
-export interface DayRaidBooking {
+export interface DayBooking {
   version: number
   day_start: number
-  event_end_at: number
-  blocks: DayRaidPlanBlock[]
+  /** 没有联队战活动时允许为 null（纯 workflow/daily 安排） */
+  event_end_at: number | null
+  blocks: DayScheduleBlock[]
   issues: string[]
+}
+
+export type ConductorBlockStatus =
+  | 'pending'
+  | 'running'
+  | 'ended'
+  | 'interrupted'
+  | 'missed'
+  | 'blocked'
+
+/** 大总管块：计划块 + 展示名 + 运行状态 */
+export interface DayConductorBlock extends DayScheduleBlock {
+  label: string
+  status: ConductorBlockStatus
+  run_id?: string
+  started_at?: number
+  finished_at?: number
+  reason?: string
 }
 
 export interface DayConductor {
@@ -1045,10 +1069,7 @@ export interface DayConductor {
   available: boolean
   workflow_id: string
   workflow_name: string
-  blocks: Array<DayRaidPlanBlock & {
-    status: 'pending' | 'running' | 'ended' | 'interrupted' | 'missed' | 'blocked'
-    reason?: string
-  }>
+  blocks: DayConductorBlock[]
   issues: string[]
   options: Array<{ id: string; name: string }>
 }
@@ -1063,7 +1084,7 @@ export interface DayTimeline {
   hint: string | null
   suggestions: DayTimelineSuggestion[] | null
   shortfall_seconds: number | null
-  booking: DayRaidBooking | null
+  booking: DayBooking | null
   conductor: DayConductor
   activity?: {
     name: string
