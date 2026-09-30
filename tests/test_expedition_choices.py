@@ -105,7 +105,7 @@ class ExpeditionChoiceTests(unittest.TestCase):
             timeline = day_timeline.build_day_timeline(
                 _today_at(12), cfg=cfg, store=object(),
                 expedition_forced=forced, expedition_records={},
-                expedition_help={"teams_out": 0, "available_teams": []})
+                expedition_help={"rounds_per_team": 0, "available_teams": []})
         self.assertEqual([(item["time_min"], item["map_code"])
                           for item in timeline["expeditions"]],
                          [(60, "B4"), (1200, "B3")])
@@ -127,11 +127,11 @@ class ExpeditionChoiceTests(unittest.TestCase):
             before = day_timeline.build_day_timeline(
                 now, cfg=cfg, store=object(), raid_team_no=3,
                 expedition_forced=forced, expedition_records={},
-                expedition_help={"teams_out": 0, "available_teams": []})
+                expedition_help={"rounds_per_team": 0, "available_teams": []})
             after = day_timeline.build_day_timeline(
                 now, cfg=cfg, store=object(), raid_team_no=3,
                 expedition_forced={}, expedition_records={},
-                expedition_help={"teams_out": 0, "available_teams": []})
+                expedition_help={"rounds_per_team": 0, "available_teams": []})
         self.assertEqual([(b["start_min"], b["runs"])
                           for b in before["suggestions"]],
                          [(480, 16), (690, 2)])

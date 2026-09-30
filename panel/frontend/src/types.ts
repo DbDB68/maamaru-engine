@@ -1034,9 +1034,9 @@ export interface DayTimelineSuggestion {
   note: string
 }
 
-/** 远征建议引擎的长期偏好：今天丢几队 + 哪些队可以丢（换日不重置） */
+/** 远征建议引擎的长期偏好：可丢的队伍各派几次 + 哪些队可以丢（换日不重置） */
 export interface DayExpeditionHelpPrefs {
-  teams_out: number
+  rounds_per_team: number
   available_teams: number[]
 }
 
@@ -1050,6 +1050,7 @@ export interface DayExpeditionSuggestion {
   resource: string
   duration_min: number
   start_min: number
+  shift_no: number
   reason: string
 }
 

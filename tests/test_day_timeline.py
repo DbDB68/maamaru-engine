@@ -77,7 +77,7 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                                      script_labels={},
                                      expedition_forced={},
                                      expedition_records={},
-                                     expedition_help={"teams_out": 0,
+                                     expedition_help={"rounds_per_team": 0,
                                                       "available_teams": []})
         self.assertEqual(out["expeditions"], [])
 
@@ -92,7 +92,7 @@ class DayTimelineExpeditionTests(unittest.TestCase):
                                      script_labels={},
                                      expedition_forced=forced,
                                      expedition_records={},
-                                     expedition_help={"teams_out": 0,
+                                     expedition_help={"rounds_per_team": 0,
                                                       "available_teams": []})
         self.assertEqual(len(out["expeditions"]), 1)
         item = out["expeditions"][0]
@@ -317,7 +317,7 @@ class DayTimelineMiscTests(unittest.TestCase):
                 _today_at(9, 0), cfg={}, store=self.store, script_labels={},
                 expedition_forced={},
                 expedition_records={},
-                expedition_help={"teams_out": 0, "available_teams": []})
+                expedition_help={"rounds_per_team": 0, "available_teams": []})
         self.assertEqual(out["expeditions"], [])
         self.assertEqual(out["runs"], [])
         self.assertIsNone(out["hint"])
@@ -467,7 +467,7 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
                                           expedition_forced=forced or {},
                                           expedition_records={},
                                           expedition_help={
-                                              "teams_out": 0,
+                                              "rounds_per_team": 0,
                                               "available_teams": []})
 
     def test_daily_quota_spread_over_days_left(self):
@@ -540,7 +540,7 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
                 script_labels={}, raid_team_no=raid_team_no,
                 expedition_forced=forced or {},
                 expedition_records={},
-                expedition_help={"teams_out": 0, "available_teams": []},
+                expedition_help={"rounds_per_team": 0, "available_teams": []},
                 active=active)
 
     def test_raid_daily_rounds_split_around_same_team_expedition(self):

@@ -2230,7 +2230,7 @@ async def api_adopt_day_expedition_suggestion(request: Request):
 
 @app.put("/api/expedition-help-prefs")
 async def api_save_expedition_help_prefs(request: Request):
-    """记住长期偏好：今天丢几队 + 哪些队可以丢；换日不重置，想改再改。"""
+    """记住长期偏好：每队各派几次 + 哪些队可以丢；换日不重置，想改再改。"""
     from . import expedition_advisor
 
     body = await request.json()
@@ -2238,7 +2238,8 @@ async def api_save_expedition_help_prefs(request: Request):
         raise HTTPException(400, "偏好格式不对")
     try:
         prefs = expedition_advisor.save_prefs(
-            teams_out=body.get("teams_out"),
+            rounds_per_team=body.get("rounds_per_team",
+                                     body.get("teams_out")),  # 旧前端兜底
             available_teams=body.get("available_teams"))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

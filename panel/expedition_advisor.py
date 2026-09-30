@@ -21,10 +21,10 @@ from pathlib import Path
 from touken.runtime_paths import STATE_DIR
 
 PREFS_PATH = STATE_DIR / "expedition_help_prefs.json"
-PREFS_VERSION = 1
-DEFAULT_TEAMS_OUT = 1
+PREFS_VERSION = 2
+DEFAULT_ROUNDS_PER_TEAM = 1
 DEFAULT_AVAILABLE_TEAMS = [1, 4, 5]
-MAX_TEAMS_OUT = 5
+MAX_ROUNDS_PER_TEAM = 5
 VALID_TEAMS = (1, 2, 3, 4, 5)
 
 TEAM_NAMES = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
@@ -38,18 +38,24 @@ SITUATION_FILENAME = "youzu_home_situation.json"
 _WRITE_LOCK = threading.Lock()
 
 
-# ── 长期偏好：今天丢几队 + 哪些队可以丢 ──
+# ── 长期偏好：每队各派几次 + 哪些队可以丢 ──
 
 
 def _normalize_prefs(value) -> dict:
-    """宽容归一：缺键用默认、坏值回退，永远吐得出能用的偏好。"""
+    """宽容归一：缺键用默认、坏值回退，永远吐得出能用的偏好。
+
+    v1 → v2 迁移：旧字段 teams_out（总共丢几队）读作 rounds_per_team
+    （每队各派几次）——老大拍板的新语义，队伍是载体、次数按队算。
+    """
     if not isinstance(value, dict):
         value = {}
+    raw_rounds = value.get("rounds_per_team",
+                           value.get("teams_out", DEFAULT_ROUNDS_PER_TEAM))
     try:
-        teams_out = int(value.get("teams_out", DEFAULT_TEAMS_OUT))
+        rounds = int(raw_rounds)
     except (TypeError, ValueError):
-        teams_out = DEFAULT_TEAMS_OUT
-    teams_out = max(0, min(MAX_TEAMS_OUT, teams_out))
+        rounds = DEFAULT_ROUNDS_PER_TEAM
+    rounds = max(0, min(MAX_ROUNDS_PER_TEAM, rounds))
     raw_teams = value.get("available_teams", DEFAULT_AVAILABLE_TEAMS)
     teams: list[int] = []
     if isinstance(raw_teams, list):
@@ -62,17 +68,21 @@ def _normalize_prefs(value) -> dict:
                 teams.append(team)
     if not teams:
         teams = list(DEFAULT_AVAILABLE_TEAMS)
-    return {"version": PREFS_VERSION, "teams_out": teams_out,
+    return {"version": PREFS_VERSION, "rounds_per_team": rounds,
             "available_teams": sorted(teams)}
 
 
 def load_prefs(path: Path = PREFS_PATH) -> dict:
-    """坏文件当没有；不存在的键用默认。只读不写。"""
+    """坏文件当没有；不存在的键用默认。只读不写（v1 老文件读出即迁移，
+    下次保存落 v2）。"""
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return _normalize_prefs(None)
-    if not isinstance(value, dict) or value.get("version") != PREFS_VERSION:
+    if not isinstance(value, dict):
+        return _normalize_prefs(None)
+    version = value.get("version")
+    if version not in (1, PREFS_VERSION):  # v1 走迁移，再老的当没有
         return _normalize_prefs(None)
     return _normalize_prefs(value)
 
@@ -88,12 +98,12 @@ def _as_count(value, label: str) -> int:
     raise ValueError(f"{label}得是个数")
 
 
-def save_prefs(*, teams_out, available_teams,
+def save_prefs(*, rounds_per_team, available_teams,
                path: Path = PREFS_PATH) -> dict:
     """校验落盘（原子替换 + 备份上一版）；参数不合法抛 ValueError。"""
-    teams_out = _as_count(teams_out, "丢几队")
-    if not 0 <= teams_out <= MAX_TEAMS_OUT:
-        raise ValueError(f"丢几队要在 0 到 {MAX_TEAMS_OUT} 之间")
+    rounds = _as_count(rounds_per_team, "每队派几次")
+    if not 0 <= rounds <= MAX_ROUNDS_PER_TEAM:
+        raise ValueError(f"每队派几次要在 0 到 {MAX_ROUNDS_PER_TEAM} 之间")
     if not isinstance(available_teams, list):
         raise ValueError("可丢的队伍得是一串队号")
     teams: list[int] = []
@@ -104,7 +114,7 @@ def save_prefs(*, teams_out, available_teams,
         if team not in teams:
             teams.append(team)
     prefs = _normalize_prefs({"version": PREFS_VERSION,
-                              "teams_out": teams_out,
+                              "rounds_per_team": rounds,
                               "available_teams": sorted(teams)})
     path = Path(path)
     with _WRITE_LOCK:
@@ -395,6 +405,7 @@ def _level_ok(meta, party) -> bool:
 
 SUGGEST_LEAD_MIN = 5          # 建议从 now+5 分钟起排
 DAY_END_MIN = 23 * 60 + 59    # 当天 23:59 前排得下才给这班建议
+COLLECT_BUFFER_MIN = 10       # 同队连班之间的收菜缓冲
 
 
 def _reason(resource, tag, team_no, map_code, map_name, rank,
@@ -429,30 +440,35 @@ def build_expedition_suggestions(prefs: dict, *,
                                  planning=None, maps: dict | None = None,
                                  situation_path: Path | None = None,
                                  now_min: float = 0.0,
-                                 committed_teams=(),
+                                 committed_counts=None,
+                                 team_busy_until=None,
                                  occupied_maps=(),
                                  failed_combos=()) -> dict:
-    """玩家驱动的建议：丢 N 队 → 缺口前 N 种资源 → 每种资源配对口图和队。
+    """玩家驱动的建议：每个可丢队伍今天各派 N 班（rounds_per_team）。
 
-    - 图：按该资源时薪从高到低试，23:59 前排不下就换次优图，全排不下
-      今天不给这班建议（note 说明）。
-    - 图排除：occupied_maps 里「今天已有未完结班」的图不入选（游戏机制
-      一张图同时只能一队在跑）；本批建议内部也互相去重，两张建议不落同图。
-    - 队：在「可丢且还没被派建议、没在外面跑、没已点的班」的队伍里，
-      滤图的等级条件（total_level/level_req）和刀种条件
-      （required_types「含有」语义 / min_distinct_types，有近况才核），
-      都满足时优先番号小的；每队最多一条建议。
+    - 班次轮转：各队第 1 班依次取缺口榜第 1、2… 种资源的对口图，
+      第 2 班接着往后排；榜轮完从头再轮（越缺的资源出现越勤）。
+    - 图：该资源时薪从高到低试，23:59 前排不下就换次优图；
+      occupied_maps（未完结班占图）不入选，本批建议内部也一图一班
+      （游戏机制一张图同时只能一队在跑）。
+    - 队：滤图的等级条件（total_level/level_req）和刀种条件
+      （required_types「含有」语义 / min_distinct_types，有近况才核）。
+    - 同队多班串行：下一班从上一班 start+duration+10 分钟收菜缓冲后
+      起排（一队同时只能跑一班）；不同队伍同刻出发是游戏常态。
+    - committed_counts：{队号: 今天已排班数}（forced/在跑/待收都算），
+      引擎只补足到 N 班；team_busy_until {队号: 已排班到几点（分钟)}，
+      补的班从该时刻+10 分钟收菜缓冲后起排。
     - 黑名单：failed_combos 里「今天同图同队没派成」的组合不再荐
       （failed 会释放图，但同组合拉黑到今天结束），note 如实说明。
-    - 多队建议同一起排时刻（now+5min）——不同队伍同时远征是游戏常态。
     返回 {"suggestions": [...], "note": 玩家可看的原因/None}。
     """
     prefs = _normalize_prefs(prefs)
-    teams_out = prefs["teams_out"]
+    rounds = prefs["rounds_per_team"]
     empty = {"suggestions": [], "note": None}
-    if teams_out <= 0:
-        empty["note"] = "今天不丢队出门；想丢就在上面把队数挑起来。"
+    if rounds <= 0:
+        empty["note"] = "今天不丢队出门；想丢就在上面把每队次数挑起来。"
         return empty
+    teams = sorted(prefs["available_teams"])
     if not _planning_has_data(planning):
         empty["note"] = ("还不知道你家底缺什么——先去跑一次盘点/同步，"
                          "回来再点建议。")
@@ -464,14 +480,20 @@ def build_expedition_suggestions(prefs: dict, *,
     party_levels = party_levels_from_situation(situation_path)
     start_min = max(0, int(now_min) + SUGGEST_LEAD_MIN)
 
-    committed = set()
-    for team in committed_teams or ():
+    counts: dict[int, int] = {}
+    for team, count in (committed_counts or {}).items():
         try:
-            committed.add(int(team))
+            team_no, c = int(team), int(count)
         except (TypeError, ValueError):
             continue
-    free_teams = [t for t in sorted(prefs["available_teams"])
-                  if t not in committed]
+        if c > 0:
+            counts[team_no] = c
+    remaining = {t: max(0, rounds - counts.get(t, 0)) for t in teams}
+    wanted = sum(remaining.values())
+    if wanted <= 0:
+        empty["note"] = (f"能丢的队伍今天的班都排上了（每队 {rounds} 班），"
+                         "不用再点。")
+        return empty
 
     occupied = {str(code) for code in occupied_maps or () if code}
 
@@ -483,89 +505,133 @@ def build_expedition_suggestions(prefs: dict, *,
         except (TypeError, ValueError):
             continue
 
-    order = shortage_order(planning, teams_out)
+    base_order = shortage_order(planning, len(FORGE_RESOURCES) + 1)
     suggestions = []
     misses = []
-    used: set[int] = set()
-    for resource, tag in order:
-        ranked = sorted(
-            (item for item in maps.items()
-             if _per_hour(item[1], resource) > 0
-             and int(item[1].get("duration_min") or 0) > 0),
-            key=lambda item: -_per_hour(item[1], resource))
-        placed = False
-        miss = {"resource": resource, "fit": False, "level": False,
-                "occupied": False, "type": False, "retry": False,
-                "detail": ""}
-        for map_code, meta in ranked:
-            if map_code in occupied:
-                miss["occupied"] = True
+    placed_retry_notes = []  # 班排上了但撞过拉黑组合，如实知会一声
+    busy: dict[int, int] = {}
+    for team, until in (team_busy_until or {}).items():
+        try:
+            team_no, minute = int(team), int(until)
+        except (TypeError, ValueError):
+            continue
+        busy[team_no] = max(busy.get(team_no, 0), minute)
+    next_start = {}
+    for t in teams:
+        start = start_min
+        if t in busy:  # 已排的班占着时间，补班排在收工+缓冲后
+            start = max(start, busy[t] + COLLECT_BUFFER_MIN)
+        next_start[t] = start
+    slot = 0
+    for r in range(rounds):
+        for team in teams:
+            if remaining[team] <= r:
                 continue
-            duration = int(meta.get("duration_min") or 0)
-            if start_min + duration > DAY_END_MIN:
-                miss["fit"] = True
-                continue
-            candidates = [t for t in free_teams if t not in used]
-            # 今天同图同队 failed 过的组合拉黑到今天结束（图本身不拉黑）
-            blocked = [t for t in candidates if (map_code, t) in failed]
-            if blocked:
-                miss["retry"] = True
-                candidates = [t for t in candidates if t not in blocked]
-            eligible = []
-            for team in candidates:
-                party = (party_levels or {}).get(team)
-                if not _level_ok(meta, party):
-                    miss["level"] = True
+            start = next_start[team]
+            shift_no = counts.get(team, 0) + r + 1  # 今天第几班（含已排的）
+            assigned = base_order[slot % len(base_order)]
+            placed = False
+            miss = {"team": team, "shift": r + 1, "resource": "",
+                    "fit": False, "level": False, "occupied": False,
+                    "type": False, "retry": False, "detail": "",
+                    "retry_resource": ""}
+            for i in range(len(base_order)):
+                # 本轮资源排不出（没产图/图被占/队不够格）就顺延下一种
+                resource, tag = base_order[(slot + i) % len(base_order)]
+                ranked = sorted(
+                    (item for item in maps.items()
+                     if _per_hour(item[1], resource) > 0
+                     and int(item[1].get("duration_min") or 0) > 0),
+                    key=lambda item: -_per_hour(item[1], resource))
+                if not ranked:
+                    if not miss["resource"]:
+                        miss["resource"] = resource
                     continue
-                shortfall = _type_shortfall(meta, party)
-                if shortfall is not None:
-                    miss["type"] = True
-                    if not miss["detail"]:
-                        miss["detail"] = (
-                            f"{map_code}要{_type_req_text(meta)}，"
-                            + _type_block_detail(team, party, shortfall))
-                    continue
-                eligible.append(team)
-            if not eligible:
-                continue
-            team_no = min(eligible)
-            used.add(team_no)
-            per_hour = _per_hour(meta, resource)
-            rank = _resource_rank(maps, resource, map_code)
-            capacity = _forge_capacity(planning, resource)
-            party = party_levels.get(team_no) if party_levels else None
-            req_text = _type_req_text(meta)
-            type_note = ""
-            if req_text:
-                known = [t for t in party_sword_types(party) if t] \
-                    if party else []
-                type_note = f"刀种也够格（{req_text}）" if known \
-                    else "刀种没核到"
-            suggestions.append({
-                "kind": "expedition",
-                "key": f"suggest:{team_no}:{map_code}",
-                "team_no": team_no,
-                "map_code": map_code,
-                "map_name": str(meta.get("name") or map_code),
-                "resource": resource,
-                "duration_min": duration,
-                "start_min": start_min,
-                "reason": _reason(resource, tag, team_no, map_code,
-                                  str(meta.get("name") or map_code),
-                                  rank if per_hour > 0 else None,
-                                  capacity, party, type_note),
-            })
-            placed = True
-            occupied.add(map_code)  # 本批建议内部也去重：一张图一班
-            break
-        if not placed:
-            misses.append(miss)
+                if not miss["resource"]:
+                    miss["resource"] = resource
+                for map_code, meta in ranked:
+                    if map_code in occupied:
+                        miss["occupied"] = True
+                        continue
+                    duration = int(meta.get("duration_min") or 0)
+                    if start + duration > DAY_END_MIN:
+                        miss["fit"] = True
+                        continue
+                    # 同图同队今天 failed 过的组合拉黑到今天结束（图不拉黑）
+                    if (map_code, team) in failed:
+                        miss["retry"] = True
+                        if not miss["retry_resource"]:
+                            miss["retry_resource"] = resource
+                        continue
+                    party = (party_levels or {}).get(team)
+                    if not _level_ok(meta, party):
+                        miss["level"] = True
+                        continue
+                    shortfall = _type_shortfall(meta, party)
+                    if shortfall is not None:
+                        miss["type"] = True
+                        if not miss["detail"]:
+                            miss["detail"] = (
+                                f"{map_code}要{_type_req_text(meta)}，"
+                                + _type_block_detail(team, party, shortfall))
+                        continue
+                    per_hour = _per_hour(meta, resource)
+                    rank = _resource_rank(maps, resource, map_code)
+                    capacity = _forge_capacity(planning, resource)
+                    req_text = _type_req_text(meta)
+                    type_note = ""
+                    if req_text:
+                        known = [t for t in party_sword_types(party) if t] \
+                            if party else []
+                        type_note = f"刀种也够格（{req_text}）" if known \
+                            else "刀种没核到"
+                    reason = _reason(resource, tag, team, map_code,
+                                     str(meta.get("name") or map_code),
+                                     rank if per_hour > 0 else None,
+                                     capacity, party, type_note)
+                    shift_cn = TEAM_NAMES.get(shift_no, shift_no)
+                    reason += f"；这队今天第{shift_cn}班"
+                    if i:
+                        reason += (f"；本轮的{assigned[0]}排不出，"
+                                   f"顺延补{resource}")
+                    suggestions.append({
+                        "kind": "expedition",
+                        "key": f"suggest:{team}:{map_code}:{start}",
+                        "team_no": team,
+                        "map_code": map_code,
+                        "map_name": str(meta.get("name") or map_code),
+                        "resource": resource,
+                        "duration_min": duration,
+                        "start_min": start,
+                        "shift_no": shift_no,
+                        "reason": reason,
+                    })
+                    next_start[team] = start + duration + COLLECT_BUFFER_MIN
+                    occupied.add(map_code)  # 本批建议内部也去重：一张图一班
+                    slot += i + 1
+                    placed = True
+                    break
+                if placed:
+                    break
+            if placed:
+                if miss["retry"]:
+                    placed_retry_notes.append(
+                        (team, shift_no, miss["retry_resource"],
+                         suggestions[-1]["resource"]))
+            else:
+                misses.append(miss)
 
     notes = []
-    if not free_teams and not suggestions:
-        notes.append("能丢的队伍今天都已经有安排或还在外面，没队可丢。")
+    for team, shift_no, blocked_resource, placed_resource \
+            in placed_retry_notes:
+        team_cn = TEAM_NAMES.get(team, team)
+        shift_cn = TEAM_NAMES.get(shift_no, shift_no)
+        notes.append(f"部队{team_cn}第{shift_cn}班：{blocked_resource}这班"
+                     f"今天没派成，同图同队先拉黑；改排了{placed_resource}。")
     for miss in misses:
-        resource = miss["resource"]
+        team_cn = TEAM_NAMES.get(miss["team"], miss["team"])
+        shift_cn = TEAM_NAMES.get(miss["shift"], miss["shift"])
+        head = f"部队{team_cn}第{shift_cn}班（{miss['resource']}）"
         frags = []
         if miss["occupied"]:
             frags.append("对口图今天都有班在跑或已点上，明天再丢")
@@ -574,14 +640,15 @@ def build_expedition_suggestions(prefs: dict, *,
         if miss["type"]:
             frags.append(f"刀种门槛卡住：{miss['detail']}")
         if miss["fit"]:
-            frags.append("对口图 23:59 前排不下，明天早点丢")
+            frags.append("对口图 23:59 前排不下，今天塞不进这班了")
         if miss["level"]:
-            frags.append("能丢的队伍等级都不够对口图")
+            frags.append("这队等级都不够对口图")
         if frags:
-            notes.append(f"{resource}：" + "；".join(frags) + "。")
+            notes.append(f"{head}：" + "；".join(frags) + "。")
         else:
-            notes.append(f"{resource}今天排不出班（图太晚或没队够格）。")
-    if suggestions and len(suggestions) < teams_out:
-        notes.append(f"想丢 {teams_out} 队，只排得出 {len(suggestions)} 班。")
+            notes.append(f"{head}排不出班（图太晚或队不够格）。")
+    if suggestions and len(suggestions) < wanted:
+        notes.append(f"想给能丢的队各排 {rounds} 班，"
+                     f"只排得出 {len(suggestions)} 班。")
     return {"suggestions": suggestions,
             "note": "；".join(notes) if notes else None}

@@ -570,14 +570,25 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                                     records=expedition_records)
     if expedition_help is None:
         expedition_help = expedition_advisor.load_prefs()
-    if planning is None and int(expedition_help.get("teams_out") or 0) > 0:
+    if planning is None and int(expedition_help.get("rounds_per_team")
+                                or 0) > 0:
         planning = _load_planning_snapshot(store)
     now_min = (now - day_start) / 60
-    # 已有安排（在外面跑/待收/已点的班）的队伍不再给新建议
-    committed = {item["team_no"] for item in expeditions
-                 if item["kind"] == "running"
-                 or (item["will_run"]
-                     and item["state"] not in scheduler.TERMINAL_STATES)}
+    # 每队已排班计数（在跑/待收/已点的班都算一班），引擎按每队 N 班补足；
+    # team_busy_until 记每队最后一班几点收工，补的班往那之后排
+    committed_counts: dict[int, int] = {}
+    team_busy_until: dict[int, int] = {}
+    for item in expeditions:
+        if item["kind"] == "running" \
+                or (item["will_run"]
+                    and item["state"] not in scheduler.TERMINAL_STATES):
+            team_no = int(item.get("team_no") or 0)
+            if team_no:
+                committed_counts[team_no] = committed_counts.get(team_no, 0) + 1
+                end_min = int(item.get("time_min") or 0) + int(
+                    item.get("duration_min") or 0)
+                team_busy_until[team_no] = max(
+                    team_busy_until.get(team_no, 0), end_min)
     # 一张图同时只能一队在跑：未完结班（running/待收/已点且时段没过完）
     # 占住的图不再给新建议；expired/failed 的班 will_run=False，不占图
     occupied_maps = set()
@@ -600,7 +611,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                      and item.get("map_code")}
     advice = expedition_advisor.build_expedition_suggestions(
         expedition_help, planning=planning, situation_path=situation_path,
-        now_min=now_min, committed_teams=committed,
+        now_min=now_min, committed_counts=committed_counts,
+        team_busy_until=team_busy_until,
         occupied_maps=occupied_maps, failed_combos=failed_combos)
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
@@ -652,7 +664,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         "expeditions": expeditions,
         "expedition_schedule_enabled": bool(cfg.get("automation", {}).get("enabled")),
         "expedition_help": {
-            "teams_out": int(expedition_help.get("teams_out") or 0),
+            "rounds_per_team": int(expedition_help.get("rounds_per_team")
+                                   or 0),
             "available_teams": list(expedition_help.get("available_teams") or []),
         },
         "expedition_suggestions": advice["suggestions"],

@@ -5,7 +5,7 @@ import { canAdoptRaidRecommendation, raidDayRecommendation } from './planningLin
 function day(overrides: Partial<DayTimeline> = {}): DayTimeline {
   return {
     now: 1000, day_start: 0, markers: [], expeditions: [], expedition_schedule_enabled: true,
-    expedition_help: { teams_out: 1, available_teams: [1, 4, 5] },
+    expedition_help: { rounds_per_team: 1, available_teams: [1, 4, 5] },
     expedition_suggestions: [], expedition_advice_note: null,
     runs: [], hint: null, suggestions: null, shortfall_seconds: null, booking: null,
     conductor: { enabled: false, available: false, workflow_id: '', workflow_name: '', blocks: [], issues: [], options: [] },

@@ -103,11 +103,11 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
 
 /* ── 远征建议：偏好即存即生效；点淡影 = 采纳（那班记 forced，不会自动跑） ── */
 
-async function updateTeamsOut(event: Event) {
+async function updateRounds(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   if (!data.value || prefsBusy.value) return
-  const previous = data.value.expedition_help.teams_out
-  data.value.expedition_help.teams_out = value
+  const previous = data.value.expedition_help.rounds_per_team
+  data.value.expedition_help.rounds_per_team = value
   prefsBusy.value = true
   expeditionMessage.value = ''
   try {
@@ -115,7 +115,7 @@ async function updateTeamsOut(event: Event) {
     await load()
   } catch (error) {
     expeditionMessage.value = error instanceof Error ? error.message : '偏好没存上，请重试'
-    if (data.value) data.value.expedition_help.teams_out = previous
+    if (data.value) data.value.expedition_help.rounds_per_team = previous
     await load()
   } finally {
     prefsBusy.value = false
@@ -133,7 +133,7 @@ async function toggleAvailableTeam(team: number) {
   prefsBusy.value = true
   expeditionMessage.value = ''
   try {
-    await api.setExpeditionHelpPrefs(data.value.expedition_help.teams_out, next)
+    await api.setExpeditionHelpPrefs(data.value.expedition_help.rounds_per_team, next)
     await load()
   } catch (error) {
     expeditionMessage.value = error instanceof Error ? error.message : '偏好没存上，请重试'
@@ -913,12 +913,12 @@ const caption = computed(() => {
         </div>
       </div>
       <div v-if="data.expedition_help" class="tl-expedition-help">
-        <label class="tl-expedition-help-count">今天丢
-          <select :value="data.expedition_help.teams_out" :disabled="prefsBusy" @change="updateTeamsOut">
+        <label class="tl-expedition-help-count">可丢的队伍各派
+          <select :value="data.expedition_help.rounds_per_team" :disabled="prefsBusy" @change="updateRounds">
             <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
           </select>
-        队出门</label>
-        <span class="tl-expedition-help-teams">可丢的队伍
+        次远征</label>
+        <span class="tl-expedition-help-teams">队伍
           <button v-for="t in [1, 2, 3, 4, 5]" :key="t" type="button" class="tlx-chip" :class="{ 'is-on': data.expedition_help.available_teams.includes(t) }" :aria-pressed="data.expedition_help.available_teams.includes(t)" :disabled="prefsBusy" @click="toggleAvailableTeam(t)">{{ TEAM_NAMES[t] }}</button>
         </span>
         <small v-if="data.expedition_advice_note" class="tl-expedition-help-note">{{ data.expedition_advice_note }}</small>
