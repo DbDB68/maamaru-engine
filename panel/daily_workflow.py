@@ -140,6 +140,8 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
                                       dest_dir=DEBUG_DIR)
             try:
                 events = youzu_log.parse_events(path)
+                from .expedition_observation import FILENAME, save_observations
+                save_observations(events, STATUS_DIR / FILENAME)
                 result = youzu_log.write_ledger(TelemetryStore(),
                                                  youzu_log.build_ledger(events))
                 youzu_log.save_home_situation(

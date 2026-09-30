@@ -2076,7 +2076,44 @@ async def api_get_schedule():
 @app.get("/api/day-timeline")
 async def api_day_timeline():
     """今日时间表与玩家选定的联队战安排。"""
+    await asyncio.to_thread(_refresh_expedition_observations)
     return _day_timeline_payload()
+
+
+_expedition_observation_lock = threading.Lock()
+_expedition_observation_next = 0.0
+
+
+def _refresh_expedition_observations():
+    """Idle-only, at most once a minute; failure leaves the time estimate intact."""
+    global _expedition_observation_next
+    from .expedition_observation import FILENAME, load_observations, visible_records
+    records = visible_records(_read_expedition_records(),
+                              load_observations(STATUS_DIR / FILENAME))
+    if (get_runner().is_running or not records
+            or all(_expedition_remaining(record) > 0 for record in records.values())):
+        return
+    if not _expedition_observation_lock.acquire(blocking=False):
+        return
+    try:
+        now = time.monotonic()
+        if now < _expedition_observation_next:
+            return
+        _expedition_observation_next = now + 60
+        from touken import youzu_log
+        from .expedition_observation import save_observations
+        cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        path = youzu_log.pull_log(cfg.get("adb_path") or _DEFAULT_ADB_PATH,
+                                  cfg.get("adb_address") or _DEFAULT_ADB_ADDR,
+                                  dest_dir=DEBUG_DIR)
+        try:
+            save_observations(youzu_log.parse_events(path), STATUS_DIR / FILENAME)
+        finally:
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        _expedition_observation_lock.release()
 
 
 def _day_timeline_payload():
@@ -2835,8 +2872,11 @@ def api_refresh_home_situation():
             cfg.get("adb_address") or _DEFAULT_ADB_ADDR,
             dest_dir=DEBUG_DIR)
         try:
+            events = youzu_log.parse_events(path)
+            from .expedition_observation import FILENAME, save_observations
+            save_observations(events, STATUS_DIR / FILENAME)
             situation = youzu_log.save_home_situation(
-                youzu_log.parse_events(path),
+                events,
                 STATUS_DIR / "youzu_home_situation.json")
         finally:
             path.unlink(missing_ok=True)

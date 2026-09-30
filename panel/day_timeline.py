@@ -563,6 +563,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     if expedition_records is None:
         try:
             expedition_records = scheduler.expedition_records()
+            from .expedition_observation import load_observations, visible_records
+            expedition_records = visible_records(expedition_records, load_observations())
         except Exception:
             expedition_records = {}
     expeditions = _expedition_items(cfg, now, day_start,
