@@ -132,7 +132,7 @@ def _run_boot_emulator(agent, params, config_path):
     if result.get("ok"):
         yield "[模拟器] ✓ 模拟器已就绪"
     else:
-        yield f"[工作流] ✗ 模拟器未能就绪，停（{result.get('error', '原因不明')}）"
+        yield f"[工作流] ✗ 模拟器启动失败，后续停止（{result.get('error', '原因不明')}）"
 
 
 def _run_login(agent, params, config_path):
@@ -586,7 +586,7 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False)
             report.extend(_skipped_entries(plan[start:]))
             payload = _flush_report(report, finished=True)
             yield from _finale(report, payload)
-            return
+            return False
 
     yield "【工作流】正在连接游戏（创建 Agent）..."
     agent = make_agent(config_path)

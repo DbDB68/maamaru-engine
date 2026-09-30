@@ -431,6 +431,70 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(report["steps"][1]["status"], "⏭ 跳过（翻车即停）")
         self.assertFalse(any(c[0] == "signin_stream" for c in agent.calls))
 
+    def test_scheduled_raid_cold_start_and_failures(self):
+        from panel import server, day_conductor
+        from touken.flow_control import FlowAborted
+        import touken.emulator as emulator
+
+        config_path = Path(self._tmp.name) / "scheduled.json"
+        config_path.write_text('{}', encoding="utf-8")
+        signature = day_conductor.workflow_spec(day_conductor.BUILTIN_ID, {})["signature"]
+        params = {"workflow_id": day_conductor.BUILTIN_ID,
+                  "scheduled_raid_runs": 8, "scheduled_workflow_signature": signature}
+
+        for failed in (None, "boot", "game", "login", "sweep", "update"):
+            with self.subTest(failed=failed):
+                calls = []
+
+                class Agent(_FakeAgent):
+                    def _ensure_game_started(self):
+                        calls.append("game")
+                        yield "[fake] 检查游戏启动"
+                        return failed != "game"
+
+                    def login(self):
+                        calls.append("login")
+                        return failed != "login"
+
+                    def _popup_sweep(self, **kwargs):
+                        calls.append("sweep")
+                        return failed != "sweep"
+
+                    def _daily_update_gate(self):
+                        calls.append("update")
+                        yield "[fake] 检查更新"
+                        return None if failed == "update" else False
+
+                def boot(*args, **kwargs):
+                    calls.append("boot")
+                    return failed != "boot"
+
+                def make_agent(path):
+                    calls.append("agent")
+                    return Agent()
+
+                def raid(agent, raid_params, path):
+                    calls.append("raid")
+                    self.assertEqual(raid_params["rounds"], 8)
+                    yield "[fake] ✓ 联队战完成"
+
+                raid_node = {**workflow.NODE_REGISTRY["raid"], "run": raid}
+                with patch.object(server, "_load_panel_settings", return_value={"params": {}}), \
+                     patch.object(server, "_make_agent", make_agent), \
+                     patch.object(emulator, "ensure_emulator", boot), \
+                     patch.dict(workflow.NODE_REGISTRY, {"raid": raid_node}):
+                    if failed:
+                        with self.assertRaises(FlowAborted):
+                            list(server._build_workflow(str(config_path), params))
+                        self.assertNotIn("raid", calls)
+                        self.assertFalse(self._latest_report()["all_green"])
+                        if failed == "boot":
+                            self.assertNotIn("agent", calls)
+                    else:
+                        list(server._build_workflow(str(config_path), params))
+                        self.assertEqual(calls[:7],
+                                         ["boot", "agent", "game", "login", "sweep", "update", "raid"])
+
     def test_logout_node_skips_closing_navigation(self):
         """下班积木跑过后游戏已关，收尾导航只会撞死在离线设备上——
         日课 9-04 凌晨翻车冤案同款，必须跳过。"""

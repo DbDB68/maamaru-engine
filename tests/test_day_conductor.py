@@ -308,9 +308,13 @@ class DayConductorTests(unittest.TestCase):
                 "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
                 "scheduled_workflow_signature": signature}))
             self.assertEqual(messages, ["ok"])
-            self.assertEqual(run.call_args.args[1][0]["params"]["rounds"], 8)
-            self.assertEqual(run.call_args.args[1][0]["params"]["team_no"], "3")
-            self.assertTrue(run.call_args.args[1][0]["params"]["auto_refill"])
+            plan = run.call_args.args[1]
+            self.assertEqual([node["type"] for node in plan],
+                             ["boot_emulator", "login", "raid"])
+            self.assertTrue(all(node["on_error"] == "stop" for node in plan))
+            self.assertEqual(plan[2]["params"]["rounds"], 8)
+            self.assertEqual(plan[2]["params"]["team_no"], "3")
+            self.assertTrue(plan[2]["params"]["auto_refill"])
             self.assertEqual(settings["rounds"], 99)
             run.reset_mock()
             with self.assertRaises(FlowAborted):
@@ -338,7 +342,7 @@ class DayConductorTests(unittest.TestCase):
                 self.assertEqual(list(server._build_workflow("config.json", {
                     "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
                     "scheduled_workflow_signature": signature})), ["ok"])
-                self.assertEqual(run.call_args.args[1][0]["params"]["rounds"], 8)
+                self.assertEqual(run.call_args.args[1][2]["params"]["rounds"], 8)
             changed_settings = {**settings, "team_no": "4"}
             with patch.object(server, "_load_panel_settings", return_value={
                 "params": {"raid": changed_settings}}):

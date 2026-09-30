@@ -1407,6 +1407,12 @@ def _build_workflow(config_path, params):
         return
     if scheduled_runs is not None:
         plan[0]["params"] = {**plan[0]["params"], "rounds": scheduled_runs}
+        # 授权签名仍核对原联队战设置；冷启动前置步骤不改玩家保存的任务流。
+        plan = [
+            {"type": "boot_emulator", "params": {}, "on_error": "stop"},
+            {"type": "login", "params": {}, "on_error": "stop"},
+            *plan,
+        ]
     completed = yield from _workflow.run_workflow(
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
