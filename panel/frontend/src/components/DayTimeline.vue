@@ -982,8 +982,8 @@ const caption = computed(() => {
             <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
             <label>类型
               <select v-model="row.kind" @change="normalizeRow(row)">
-                <option v-if="raidKindAvailable" value="raid">联队战圈数</option>
-                <option value="workflow">任务流</option>
+                <option v-if="raidKindAvailable" value="raid">联队战（推荐或自定圈数）</option>
+                <option value="workflow">任务流（按保存设置）</option>
                 <option value="daily">一键日课</option>
               </select>
             </label>
@@ -998,14 +998,15 @@ const caption = computed(() => {
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button v-if="draft.length > 1" type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
+          <p v-if="draft.some(row => row.kind === 'workflow')" class="tl-booking-message">「任务流」按保存的设置执行，里面的联队战也用原来的圈数。想把今天推荐的圈数带进整套流程，请把类型换成「联队战」，再选你的任务流。</p>
           <button v-if="draft.length < MAX_BLOCKS" type="button" class="tl-booking-link" @click="addBlock">＋ 再加一段</button>
           <div v-if="draftHasRaid" class="tl-booking-raidwf">
-            <label>推荐圈数怎么跑
+            <label>这些圈数怎么跑
               <select v-model="conductorChoice">
                 <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
               </select>
             </label>
-            <small>默认只刷联队战；也可选整套任务流。本次圈数自动带入其中的联队战，其他步骤照常跑，保存的任务流不改。每个联队战时段都会跑一遍所选流程。</small>
+            <small>上面填的圈数只用于本次执行。默认只刷联队战；选整套任务流时，替换其中联队战的圈数，其余步骤照常跑，保存的任务流不改。每个联队战时段都会跑一遍所选流程。</small>
             <small v-if="conductorChoice !== 'builtin-scheduled-raid'">预计收工时间只算联队战，其他步骤另需时间；前一段没结束，后一段排队等。</small>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>

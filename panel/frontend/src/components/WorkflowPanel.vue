@@ -326,6 +326,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                 <div v-if="expanded === node" class="wf-step-detail">
                   <p>{{ description(node.type) }}</p>
                   <p v-if="defOf(node.type)?.saved_params && !Object.keys(node.params).length" class="wf-inherited">沿用该玩法已保存的配置；在这里修改后，会作为这一步的专用设置。</p>
+                  <p v-if="node.type === 'raid'" class="wf-inherited">直接运行任务流时，按这里的圈数执行。只有在时间表选「联队战」并指定这份任务流时，才会用时间表填写的圈数替换本次执行；这里的设置不变。</p>
                   <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="valueFor(node, field.key)" @update:model-value="node.params[field.key] = $event" /></div>
                   <p v-if="draft.daily_mode && node.type === 'login'" class="wf-inherited">登录未成功时，会停止后面的日课安排。</p>
                   <div v-else class="wf-error-policy"><span>这一步没完成时</span><SegmentedControl v-model="node.on_error" label="失败后的安排" :items="[{ value: 'stop', label: '停下等我', caption: '暂停后面的安排' }, { value: 'continue', label: '继续下一步', caption: '记录失败，接着执行' }]" /></div>
