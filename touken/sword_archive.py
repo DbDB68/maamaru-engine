@@ -190,6 +190,7 @@ def build_sword_archive(store) -> dict:
             "fatigue": entry.get("fatigue"), "locked": entry.get("locked"),
             "stats": entry.get("stats") or {},
             "equipment_serials": entry.get("equipment_serials") or {},
+            "acquisition": entry.get("acquisition"),
             "sword_catalog_id": entry.get("sword_catalog_id"),
             "name_zh": entry.get("name_zh"),
             "sword_type": _catalog_type(entry.get("sword_catalog_id")),

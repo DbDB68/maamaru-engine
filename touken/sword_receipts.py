@@ -77,6 +77,7 @@ def build_receipts(events):
             source = ("sortie.drop" if route.get("chapter") and route.get("map_no")
                       else "battle.drop") if normal else "raid.drop"
             detail = {"name": _sword_name(sid, sword_db), "sword_id": sid,
+                      "acquired_at": payload.get("now") or event["ts"],
                       "source": source, **(route if normal else {}),
                       "square_id": square if normal else None,
                       "is_first_get_sword": bool(result.get("is_first_get_sword"))}
@@ -87,7 +88,10 @@ def build_receipts(events):
         detail.update(evidence_source="youzu_log", endpoint=endpoint,
                       receipt_key=key)
         receipts.append({"ts": ts, "event_type": kind, "payload": detail})
-    return receipts
+    from .inbox_receipts import build_inbox_receipts, link_receipt_serials, observed_swords
+    swords = observed_swords(events)
+    link_receipt_serials(receipts, swords)
+    return receipts + build_inbox_receipts(events, swords)
 
 
 def write_receipts(store, receipts):
@@ -101,7 +105,7 @@ def write_receipts(store, receipts):
         rows = conn.execute(
             "SELECT id, ts, run_id, script, event_type, payload FROM events "
             "WHERE ts BETWEEN ? AND ? AND event_type IN "
-            "('forge.collected', 'sword.obtained', 'sword.drop_unrecognized')",
+            "('forge.collected', 'sword.obtained', 'sword.drop_unrecognized', 'sword.inbox_received')",
             (min(r["ts"] for r in receipts) - 90,
              max(r["ts"] for r in receipts) + 90)).fetchall()
         existing = [dict(zip(("id", "ts", "run_id", "script", "event_type", "payload"), row))
@@ -122,7 +126,8 @@ def write_receipts(store, receipts):
                         and p.get("slot") == old.get("slot")
                         and (not old.get("name") or old["name"] in
                              [s["name"] for s in p["swords"]]))
-            return (row["event_type"] in ("sword.obtained", "sword.drop_unrecognized")
+            return (receipt["event_type"] == "sword.obtained" and p.get("source") == "sortie.drop"
+                    and row["event_type"] in ("sword.obtained", "sword.drop_unrecognized")
                     and old.get("source") == "sortie.drop"
                     and (not old.get("name") or old["name"] == p["name"])
                     and all(not old.get(k) or str(old[k]) == str(p.get(k))
@@ -156,7 +161,8 @@ def sync_receipts(events, store=None):
     if store is None:
         from .telemetry import TelemetryStore
         store = TelemetryStore()
-    result = write_receipts(store, build_receipts(events))
+    receipts = build_receipts(events)
+    result = write_receipts(store, receipts)
     from .game_sword_archive import sync_archive
-    sync_archive(events, store)
+    sync_archive(events, store, receipts=receipts)
     return result

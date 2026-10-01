@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { LedgerAttribution } from '../../types'
 import { categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, swordReceiptEntries } from './reportModel'
 
+it('收件箱记录按振展开，同一已知掉落实例不重复计数', () => {
+  const events = [
+    { event_type: 'sword.obtained', payload: { name: '物吉贞宗', serial_id: 1 } },
+    { event_type: 'sword.inbox_received', payload: { swords: [
+      { name: '物吉贞宗', serial_id: 1 }, { name: '火车切', serial_id: 2 }] } },
+  ]
+  expect(swordReceiptEntries(events).map(e => e.payload.name)).toEqual(['物吉贞宗', '火车切'])
+})
+
 it('counts every sword in a batch including duplicate names, alongside battle drops', () => {
   const batch = { event_type: 'forge.collected', payload: { swords: Array.from({ length: 10 }, (_, i) => ({ name: '堀川国广', serial_id: i + 1 })) } }
   const entries = swordReceiptEntries([batch, { event_type: 'sword.obtained', payload: { name: '宗三左文字' } }, { event_type: 'forge.started', payload: { name: '不应计入' } }])

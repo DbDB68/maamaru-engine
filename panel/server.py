@@ -363,7 +363,7 @@ def _wrap_inventory(tag: str, runner, inventory=False):
                            "去看看")
             except Exception as exc:
                 yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
-            if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札"}:
+            if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札", "炼糖", "收杂物"}:
                 try:
                     from touken import youzu_log
                     from touken.sword_receipts import sync_receipts

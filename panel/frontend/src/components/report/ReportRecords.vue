@@ -40,6 +40,7 @@ const eventNames: Record<string, string> = {
   'task_rewards.claimed': '领取任务奖励', 'task_rewards.none': '任务奖励已清空',
   'task_rewards.unconfirmed': '任务奖励状态未确认', 'inventory.captured': '保存库存快照',
   'sword.obtained': '刀剑男士来本丸', 'naihanka.gains': '内番收工',
+  'sword.inbox_received': '收件箱领取刀剑',
   'dismantle.completed': '刀解完成', 'equipment.restored': '恢复刀装',
   'ticket.refilled': '补充活动手形', 'yosari.ticket_refilled': '补充异去提灯',
   'yosari.fragments': '记录异去碎片', 'sword_inventory.completed': '刀帐盘点完成',
@@ -107,6 +108,7 @@ function eventDetail(item: any) {
     return parts.join(' · ')
   }
   if (item.event_type === 'pumpkin.sword_obtained') return p.name || p.sword_name || '获得刀剑已记录'
+  if (item.event_type === 'sword.inbox_received') return `【${p.name}】${p.count > 1 ? ` ×${p.count}` : ''} · ${p.origin_label || '收件箱'}`
   if (item.event_type === 'repair.session_completed') return p.repaired != null ? `完成 ${p.repaired} 振` : '本轮手入结束'
   if (item.event_type === 'sword.obtained') {
     const src = obtainSourceLabel(p.source)
@@ -211,6 +213,7 @@ function activityDetail(item: any) {
 }
 function instanceDetail(item: any) {
   const p = item.payload || {}
+  if (item.event_type === 'sword.inbox_received') return `${eventDetail(item)} · 入箱 ${p.inbox_at || '未知'} · 领取 ${p.received_at}${p.origin_message ? ` · ${p.origin_message}` : ''}`
   if (item.event_type === 'osaka.floor_completed' && p.completed != null) return `第 ${p.completed} 圈 · ${p.selected_floor == null ? '未指定层数' : `${p.selected_floor}F`}`
   if (item.event_type === 'edocastle.run_completed') return `第 ${p.run_no ?? '？'} 圈 · ${Number(p.keys || 0).toLocaleString()} 把钥匙`
   if (item.event_type === 'hanafuda.run_completed') return `第 ${p.run_no ?? '？'} 圈 · ${p.tama == null ? '玉数没读出来' : `${Number(p.tama).toLocaleString()} 个玉`}`
@@ -523,7 +526,7 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
             <span><small>审神者手动</small><b>{{ slotProps.item.session.activity }} {{ slotProps.item.session.loops }} 圈</b><em>{{ elapsedTime(slotProps.item.session.duration_seconds) }} · {{ loopTime(slotProps.item.session.average_loop_seconds) }}</em><p v-if="slotProps.item.session.note">{{ slotProps.item.session.note }}</p></span>
             <button type="button" :disabled="deletingManual === slotProps.item.session.id" @click="deleteManualSession(slotProps.item.session)">{{ deletingManual === slotProps.item.session.id ? '删除中…' : '删除' }}</button>
           </article>
-          <article v-else :key="recordKey(slotProps.item)" class="record-activity"><span><b>{{ activityTitle(slotProps.item.item) }}</b><small>{{ activityDetail(slotProps.item.item) }}</small></span><details v-if="slotProps.item.item.items.length > 1"><summary>查看 {{ slotProps.item.item.items.length }} 条明细</summary><p v-for="child in slotProps.item.item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></article>
+          <article v-else :key="recordKey(slotProps.item)" class="record-activity"><span><b>{{ activityTitle(slotProps.item.item) }}</b><small>{{ activityDetail(slotProps.item.item) }}</small></span><details v-if="slotProps.item.item.items.length > 1 || slotProps.item.item.event_type === 'sword.inbox_received'"><summary>查看 {{ slotProps.item.item.items.length }} 条明细</summary><p v-for="child in slotProps.item.item.items" :key="child.id"><time>{{ eventTime(child.ts) }}</time>{{ instanceDetail(child) }}</p></details></article>
         </template>
       </Timeline>
       <p v-else class="report-empty">这一天还没有完成的任务记录。</p>

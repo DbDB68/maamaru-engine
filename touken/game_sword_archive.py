@@ -101,12 +101,34 @@ def update_archive(events, previous=None):
     return state if state.get("complete_at") else previous
 
 
-def sync_archive(events, store):
+def sync_archive(events, store, receipts=None):
     # 和进账共用数据库锁；原始响应及账号凭证绝不落进档案。
     with store._conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         previous = read_archive(store)
         state = update_archive(events, previous)
+        if state is not None:
+            origins = state.setdefault("origins", {})
+            for receipt in receipts or []:
+                p = receipt["payload"]
+                for sword in p.get("swords", [p]):
+                    serial = _integer(sword.get("serial_id"))
+                    if not serial or serial <= 0:
+                        continue
+                    source = p.get("source")
+                    label = p.get("origin_label") if source == "inbox.claim" else {
+                        "forge": "锻刀", "sortie.drop": "出阵掉落", "battle.drop": "战斗掉落",
+                        "raid.drop": "联队战掉落"}.get(source)
+                    if not label:
+                        continue
+                    origin = origins.setdefault(str(serial), {})
+                    if not origin.get("label") or origin.get("source") == "inbox.claim":
+                        origin.update(source=source, label=label)
+                        if p.get("chapter") and p.get("map_no"):
+                            origin["location"] = f'{p["chapter"]}-{p["map_no"]}'
+                    if source == "inbox.claim":
+                        for key in ("mailbox_id", "origin_message", "inbox_at", "received_at"):
+                            origin[key] = p.get(key)
         if state is None or state == previous:
             return False
         path = archive_path(store)
@@ -156,6 +178,7 @@ def candidate_pool(store):
             "equipment_serials": {key: _integer(row[key]) for key in FIELDS
                                   if "serial_id" in key and key != "serial_id" and key in row},
             "observed_at": row.get("observed_at"), "data_source": "youzu_log",
+            "acquisition": (state.get("origins") or {}).get(serial),
         }
         entry["unknown_fields"] = [key for key in ("level", "tou_level", "survival", "survival_max",
                                                     "fatigue", "fatigue_max", "kiwame_date", "locked")

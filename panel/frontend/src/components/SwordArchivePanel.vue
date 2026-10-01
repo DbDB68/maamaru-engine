@@ -316,6 +316,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
                 <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
               </div>
               <div v-if="expandedEntryId === entry.observation_id" class="archive-entry-actions">
+                <span v-if="entry.acquisition" :title="entry.acquisition.origin_message">获得：{{ entry.acquisition.label }}{{ entry.acquisition.location ? ` · ${entry.acquisition.location}` : '' }}{{ entry.acquisition.mailbox_id ? ' · 收件箱领取' : '' }}</span>
                 <span v-if="entry.data_source === 'youzu_log'">生存 {{ entry.survival ?? '—' }}/{{ entry.survival_max ?? '—' }} · 疲劳 {{ entry.fatigue ?? '—' }} · {{ entry.locked == null ? '保护状态未知' : entry.locked ? '已保护' : '未保护' }}</span>
                 <span class="archive-form-confirm" role="group" aria-label="改判形态">
                   <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'kiwame')">是极</button>

@@ -708,6 +708,7 @@ export interface SwordArchiveHuman {
 export type SwordMachineFormStatus = SwordFormStatus | null
 
 export interface SwordArchiveEntry {
+  acquisition?: { label: string; location?: string; mailbox_id?: string; origin_message?: string; inbox_at?: string; received_at?: string } | null
   observation_id: string
   serial_id?: number | null
   data_source?: 'youzu_log' | 'ocr'
