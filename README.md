@@ -4,11 +4,11 @@
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
-[![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
+[![GitHub stars](https://img.shields.io/github/stars/qymd-NOT-official/maamaru-engine?style=social)](https://github.com/qymd-NOT-official/maamaru-engine)
 
 > **你决定今天的本丸要做什么，执行、照看、收尾和记录交给まあ丸。**
 
-**[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v1.0.0 更新内容](docs/releases/v1.0.0.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
+**[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v1.0.1 更新内容](docs/releases/v1.0.1.md) · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 ## 从今天的安排，到本丸里的新一页
 
@@ -107,7 +107,7 @@
 
 ## 下载与开始
 
-从 [GitHub Releases](https://github.com/DbDB68/maamaru-engine/releases) 下载：
+从 [GitHub Releases](https://github.com/qymd-NOT-official/maamaru-engine/releases) 下载：
 
 - `maamaru-setup-v*.exe`：Windows 安装版；
 - `maamaru-launcher-v*.zip`：Windows 免安装版，解压后运行 `まあ丸启动器.exe`；
@@ -142,7 +142,7 @@ v1.0.0 已把本丸动态、游戏刀账、资源账房与规划连接起来。�
 
 ## 问题反馈
 
-遇到任务停止、识别异常或安装问题，请先保留模拟器当前画面，再从面板或启动器导出反馈包，并在 [GitHub Issues](https://github.com/DbDB68/maamaru-engine/issues) 说明版本、任务和复现步骤。
+遇到任务停止、识别异常或安装问题，请先保留模拟器当前画面，再从面板或启动器导出反馈包，并在 [GitHub Issues](https://github.com/qymd-NOT-official/maamaru-engine/issues) 说明版本、任务和复现步骤。
 
 <details>
 <summary><strong>开发者运行与项目结构</strong></summary>
@@ -150,7 +150,7 @@ v1.0.0 已把本丸动态、游戏刀账、资源账房与规划连接起来。�
 环境要求：Windows、Python 3.12+；正常管家模式还需要 MuMu 模拟器和 ADB。
 
 ```powershell
-git clone https://github.com/DbDB68/maamaru-engine.git
+git clone https://github.com/qymd-NOT-official/maamaru-engine.git
 cd maamaru-engine
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .

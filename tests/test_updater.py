@@ -24,7 +24,7 @@ class UpdaterTests(unittest.TestCase):
             "version": "0.1.6",
             "name": "maamaru-setup-v0.1.6.exe",
             "digest": f"sha256:{digest}",
-            "url": "https://github.com/DbDB68/maamaru-engine/releases/download/v0.1.6/maamaru-setup-v0.1.6.exe",
+            "url": "https://github.com/qymd-NOT-official/maamaru-engine/releases/download/v0.1.6/maamaru-setup-v0.1.6.exe",
             "size": len(payload),
         }
 

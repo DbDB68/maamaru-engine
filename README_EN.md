@@ -4,11 +4,11 @@
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
-[![GitHub stars](https://img.shields.io/github/stars/DbDB68/maamaru-engine?style=social)](https://github.com/DbDB68/maamaru-engine)
+[![GitHub stars](https://img.shields.io/github/stars/qymd-NOT-official/maamaru-engine?style=social)](https://github.com/qymd-NOT-official/maamaru-engine)
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-**[Download the latest release](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.0.0 (Chinese)](docs/releases/v1.0.0.md) · [Report an issue](https://github.com/DbDB68/maamaru-engine/issues)
+**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.0.1 (Chinese)](docs/releases/v1.0.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 Maamaru supports the **Simplified Chinese client on the China server**. The app is currently in Simplified Chinese.
 
@@ -109,7 +109,7 @@ Reading game lists and records does not change the game. Applying a team preset,
 
 ## Download and Get Started
 
-Download a package from [GitHub Releases](https://github.com/DbDB68/maamaru-engine/releases):
+Download a package from [GitHub Releases](https://github.com/qymd-NOT-official/maamaru-engine/releases):
 
 - `maamaru-setup-v*.exe`: Windows installer;
 - `maamaru-launcher-v*.zip`: portable Windows package—extract it, then run `まあ丸启动器.exe`;
@@ -144,7 +144,7 @@ v1.0.0 connects the honmaru journal, game sword archive, resource ledger, and pl
 
 ## Reporting a Problem
 
-If a task stops, visual recognition fails, or installation goes wrong, preserve the current emulator screen first. Then export a feedback bundle from the panel or launcher and open a [GitHub Issue](https://github.com/DbDB68/maamaru-engine/issues) with the version, task, and steps to reproduce.
+If a task stops, visual recognition fails, or installation goes wrong, preserve the current emulator screen first. Then export a feedback bundle from the panel or launcher and open a [GitHub Issue](https://github.com/qymd-NOT-official/maamaru-engine/issues) with the version, task, and steps to reproduce.
 
 <details>
 <summary><strong>Running from source and project structure</strong></summary>
@@ -152,7 +152,7 @@ If a task stops, visual recognition fails, or installation goes wrong, preserve 
 Requirements: Windows and Python 3.12+. Normal steward mode also requires MuMu Player and ADB.
 
 ```powershell
-git clone https://github.com/DbDB68/maamaru-engine.git
+git clone https://github.com/qymd-NOT-official/maamaru-engine.git
 cd maamaru-engine
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .

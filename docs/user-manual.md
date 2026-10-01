@@ -9,7 +9,7 @@
 
 ## 安装与启动
 
-从 [GitHub Releases](https://github.com/DbDB68/maamaru-engine/releases) 下载最新版：
+从 [GitHub Releases](https://github.com/qymd-NOT-official/maamaru-engine/releases) 下载最新版：
 
 - `maamaru-setup-v*.exe`：安装版；
 - `maamaru-launcher-v*.zip`：免安装版，解压后运行 `まあ丸启动器.exe`。
@@ -353,7 +353,7 @@
 
 ## 反馈错误
 
-面板能打开时，点击日志右上角的“反馈错误”；面板打不开时，在启动器中点击“反馈错误”。把生成的 ZIP 和问题发生时的完整模拟器画面一起附到 [GitHub Issues](https://github.com/DbDB68/maamaru-engine/issues)。
+面板能打开时，点击日志右上角的“反馈错误”；面板打不开时，在启动器中点击“反馈错误”。把生成的 ZIP 和问题发生时的完整模拟器画面一起附到 [GitHub Issues](https://github.com/qymd-NOT-official/maamaru-engine/issues)。
 
 反馈包只收集版本、系统摘要、启动失败记录、最近任务日志和少量框架文本日志。它不会包含まあ丸配置、API Key、聊天记录、库存、状态数据库或截图，并会遮掉本机用户名路径和常见密钥字段。上传前仍可自行解压查看。
 

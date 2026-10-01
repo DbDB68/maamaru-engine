@@ -21,7 +21,7 @@ const visibleEntries = computed(() => entries.value.filter(entry =>
   (!props.onlyScript || entry.script === props.onlyScript)
   && (raw.value || !/^\[(?:NAV|ADB|MAA)\]/.test(entry.message))))
 const feedbackLabel = computed(() => feedbackDisabled.value ? '狐之助已下班' : '反馈错误')
-const issueUrl = 'https://github.com/DbDB68/maamaru-engine/issues/new'
+const issueUrl = 'https://github.com/qymd-NOT-official/maamaru-engine/issues/new'
 const feedbackLines: Record<number, string> = {
   1: '导出失败？问问上天',
   2: '还失败？去issue骂作者',

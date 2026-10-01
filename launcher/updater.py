@@ -12,7 +12,7 @@ from pathlib import Path
 from touken.runtime_paths import UPDATES_DIR
 
 
-REPOSITORY = "DbDB68/maamaru-engine"
+REPOSITORY = "qymd-NOT-official/maamaru-engine"
 _SHA256 = re.compile(r"sha256:([0-9a-fA-F]{64})\Z")
 
 

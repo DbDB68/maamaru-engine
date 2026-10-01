@@ -124,7 +124,7 @@ document.querySelectorAll('.tools button[data-icon]').forEach(button=>setToolLab
 const stateIcon={error:'close',warn:'warn',info:'info',ok:'check'};
 const stateMarkIcon={'×':'close','!':'warn','i':'info','✓':'check','…':'wait'};
 document.querySelector('#stateMark').innerHTML=icon('wait');
-const issueUrl='https://github.com/DbDB68/maamaru-engine/issues/new';let feedbackFailures=0;let feedbackResetTimer=0;const feedbackLines={1:'导出失败？问问上天',2:'还失败？去issue骂作者',4:'干嘛不去？',5:'你是不是想骂连错误处理系统都做不好？',6:'噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',7:'面包店里卖面包，蛋糕店里卖蛋糕。',8:'你还点',9:'？',10:'我没有日志，你也不去issue，你到底想让我怎样'};
+const issueUrl='https://github.com/qymd-NOT-official/maamaru-engine/issues/new';let feedbackFailures=0;let feedbackResetTimer=0;const feedbackLines={1:'导出失败？问问上天',2:'还失败？去issue骂作者',4:'干嘛不去？',5:'你是不是想骂连错误处理系统都做不好？',6:'噫吁嚱，惶恐滩头说惶恐，零丁洋里叹零丁。',7:'面包店里卖面包，蛋糕店里卖蛋糕。',8:'你还点',9:'？',10:'我没有日志，你也不去issue，你到底想让我怎样'};
 function setState(kind,title,copy,mark){const status=document.querySelector('#status');status.className='status '+kind;document.querySelector('#stateTitle').textContent=title;document.querySelector('#stateCopy').textContent=copy;document.querySelector('#stateMark').innerHTML=icon(stateMarkIcon[mark]||'info');document.querySelector('#runbar').classList.toggle('busy',kind==='')}
 function setProgress(ratio){document.querySelector('#barFill').style.width=(Math.max(0,Math.min(1,ratio))*100).toFixed(1)+'%'}
 function renderChecks(items){
@@ -329,7 +329,7 @@ class Api:
     def check_update(self):
         try:
             request = urllib.request.Request(
-                "https://api.github.com/repos/DbDB68/maamaru-engine/releases/latest",
+                "https://api.github.com/repos/qymd-NOT-official/maamaru-engine/releases/latest",
                 headers={"User-Agent": "MaamaruLauncher/0.1"})
             with urllib.request.urlopen(request, timeout=8) as response:
                 data = json.load(response)
@@ -355,7 +355,7 @@ class Api:
                 "message": message,
                 "update_available": update_available,
                 "download_ready": self._pending_update is not None,
-                "url": data.get("html_url") or "https://github.com/DbDB68/maamaru-engine/releases/latest",
+                "url": data.get("html_url") or "https://github.com/qymd-NOT-official/maamaru-engine/releases/latest",
             }
         except Exception:
             self._pending_update = None
@@ -427,7 +427,7 @@ class Api:
         return {"ok": True}
 
     def open_url(self, url):
-        if isinstance(url, str) and url.startswith("https://github.com/DbDB68/maamaru-engine/"):
+        if isinstance(url, str) and url.startswith("https://github.com/qymd-NOT-official/maamaru-engine/"):
             os.startfile(url)
             return {"ok": True}
         return {"ok": False}

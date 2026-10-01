@@ -185,7 +185,7 @@ class DiagnosticUiContractTests(unittest.TestCase):
         self.assertIn("/api/diagnostics/export-local", log_panel)
         self.assertIn("/api/diagnostics/export-local",
                       (root / "panel" / "server.py").read_text(encoding="utf-8"))
-        self.assertIn("https://github.com/DbDB68/maamaru-engine/issues/new", combined)
+        self.assertIn("https://github.com/qymd-NOT-official/maamaru-engine/issues/new", combined)
         for line in (
             "导出失败？问问上天",
             "还失败？去issue骂作者",
