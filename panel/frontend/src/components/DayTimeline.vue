@@ -517,7 +517,7 @@ async function saveSchedule() {
   saving.value = true
   planMessage.value = ''
   try {
-    await persistSchedule(blocks, '已记下并交给大总管；到点自动开工，手头有活跑完就接上。')
+    await persistSchedule(blocks, '')
     editing.value = false
     highlightIndex.value = -1
   } catch (error) {
@@ -721,7 +721,7 @@ const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
   return booking.blocks.map((block, index) => {
     const end = blockEndMin(block) ?? block.start_min + GENERIC_BLOCK_MIN
     const cblock = conductorBlockFor(block)
-    const lane: 'task' | 'daily' = block.kind === 'daily' ? 'daily' : 'task'
+    const lane = 'task' as const
     return {
       key: `booked-${index}`,
       index,
@@ -729,7 +729,7 @@ const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
       lane,
       left: pct(block.start_min),
       width: Math.max(pct(Math.max(end - block.start_min, 4)), 0.7),
-      cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : lane === 'daily' ? 'tlx-daily' : 'tlx-task',
+      cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : block.kind === 'daily' ? 'tlx-daily' : 'tlx-task',
       title: `${fmtMin(block.start_min)} ${blockLabel(block)}${cblock ? ` · ${blockStatusText(cblock)}` : ' · 点我改参数/移出'}`,
       text: block.kind === 'raid' ? `${block.runs} 圈` : block.kind === 'daily' ? '日课' : '任务流',
     }
@@ -737,7 +737,6 @@ const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
 })
 
 const taskBlocks = computed(() => scheduleBlocks.value.filter(block => block.lane === 'task'))
-const dailyBlocks = computed(() => scheduleBlocks.value.filter(block => block.lane === 'daily'))
 
 const bookedRows = computed(() => (data.value?.booking?.blocks || []).map((block, index) => ({
   key: index,
@@ -896,20 +895,7 @@ const caption = computed(() => {
               </div>
             </div>
           </div>
-          <div class="tl-lane">
-            <span class="tl-lane-tag">日课</span>
-            <button v-for="b in dailyBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="openBlockPopover(b)">{{ b.text }}</button>
-            <span v-if="!dailyBlocks.length" class="tl-lane-empty">可排 03:30 一键日课</span>
-            <div v-if="popover && popover.lane === 'daily' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
-              <strong>{{ blockLabel(popoverBlock) }}</strong>
-              <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
-              <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
-              <div class="tl-popover-actions">
-                <button type="button" @click="editFromPopover">改参数</button>
-                <button type="button" :disabled="removing || (data.booking?.blocks.length ?? 0) <= 1" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
-              </div>
-            </div>
-          </div>
+
         </div>
       </div>
       <div v-if="data.expedition_help" class="tl-expedition-help">
@@ -921,7 +907,7 @@ const caption = computed(() => {
         <span class="tl-expedition-help-teams">队伍
           <button v-for="t in [1, 2, 3, 4, 5]" :key="t" type="button" class="tlx-chip" :class="{ 'is-on': data.expedition_help.available_teams.includes(t) }" :aria-pressed="data.expedition_help.available_teams.includes(t)" :disabled="prefsBusy" @click="toggleAvailableTeam(t)">{{ TEAM_NAMES[t] }}</button>
         </span>
-        <small v-if="data.expedition_advice_note" class="tl-expedition-help-note">{{ data.expedition_advice_note }}</small>
+
       </div>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
@@ -952,7 +938,7 @@ const caption = computed(() => {
         </div>
         <p v-else class="empty">今天的时间表还空着</p>
       </div>
-      <p v-if="data.hint" class="tl-hint">{{ data.hint }}</p>
+
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
       <section class="tl-booking" aria-label="今日安排">
         <div class="tl-booking-head">
@@ -998,7 +984,7 @@ const caption = computed(() => {
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button v-if="draft.length > 1" type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
-          <p v-if="draft.some(row => row.kind === 'workflow')" class="tl-booking-message">「任务流」按保存的设置执行，里面的联队战也用原来的圈数。想把今天推荐的圈数带进整套流程，请把类型换成「联队战」，再选你的任务流。</p>
+          <p v-if="draft.some(row => row.kind === 'workflow')" class="tl-booking-message">按任务流保存的圈数运行；用推荐圈数请选「联队战」。</p>
           <button v-if="draft.length < MAX_BLOCKS" type="button" class="tl-booking-link" @click="addBlock">＋ 再加一段</button>
           <div v-if="draftHasRaid" class="tl-booking-raidwf">
             <label>这些圈数怎么跑
@@ -1006,8 +992,8 @@ const caption = computed(() => {
                 <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
               </select>
             </label>
-            <small>上面填的圈数只用于本次执行。默认只刷联队战；选整套任务流时，替换其中联队战的圈数，其余步骤照常跑，保存的任务流不改。每个联队战时段都会跑一遍所选流程。</small>
-            <small v-if="conductorChoice !== 'builtin-scheduled-raid'">预计收工时间只算联队战，其他步骤另需时间；前一段没结束，后一段排队等。</small>
+            <small>选整套流程时，仅替换本次联队战圈数；每段跑一遍整套。</small>
+            <small v-if="conductorChoice !== 'builtin-scheduled-raid'">收工时间仅估算联队战，其他步骤另计。</small>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">

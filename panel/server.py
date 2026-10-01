@@ -1408,7 +1408,8 @@ def _build_workflow(config_path, params):
         return
     if scheduled_runs is not None:
         raid_index = spec["raid_index"]
-        plan[raid_index]["params"] = {**plan[raid_index]["params"], "rounds": scheduled_runs}
+        plan[raid_index]["params"] = {**plan[raid_index]["params"],
+                                      "runs": scheduled_runs, "rounds": scheduled_runs}
         # 推荐圈数只覆盖本次联队战；原有前后步骤、参数及下班安排照常执行。
         if plan[0]["type"] != "boot_emulator":
             plan.insert(0, {"type": "boot_emulator", "params": {}, "on_error": "stop"})

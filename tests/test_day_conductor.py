@@ -346,28 +346,40 @@ class DayConductorTests(unittest.TestCase):
             self.assertNotEqual(dc.workflow_spec("full", {})["signature"], signature)
 
     def test_worker_uses_booked_runs_without_changing_saved_settings(self):
-        settings = {"team_no": "3", "rounds": 99, "auto_refill": True}
+        settings = {"team_no": "3", "runs": 1, "rounds": 99, "auto_refill": True}
         signature = dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"]
         with patch.object(server, "_load_panel_settings", return_value={
             "params": {"raid": settings}}), \
              patch.object(server._workflow, "run_workflow",
                           side_effect=lambda *args, **kwargs: iter(["ok"])) as run:
             messages = list(server._build_workflow("config.json", {
-                "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
+                "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 24,
                 "scheduled_workflow_signature": signature}))
             self.assertEqual(messages, ["ok"])
             plan = run.call_args.args[1]
             self.assertEqual([node["type"] for node in plan],
                              ["boot_emulator", "login", "raid"])
             self.assertTrue(all(node["on_error"] == "stop" for node in plan))
-            self.assertEqual(plan[2]["params"]["rounds"], 8)
+            self.assertEqual(plan[2]["params"]["rounds"], 24)
+            self.assertEqual(plan[2]["params"]["runs"], 24)
+            # 走真实玩法入口，验证最终交给 raid_stream 的圈数，而非只看中间字段。
+            from unittest.mock import Mock
+            agent = Mock()
+            agent.raid_stream.return_value = iter([])
+            def selected(*args):
+                yield "ready"
+                return 3
+            with patch.object(server, "_team_with_preset_stream", selected):
+                list(server._build_raid(agent, "cfg", plan[2]["params"]))
+            self.assertEqual(agent.raid_stream.call_args.kwargs["max_rounds"], 24)
+            self.assertEqual(settings["runs"], 1)
             self.assertEqual(plan[2]["params"]["team_no"], "3")
             self.assertTrue(plan[2]["params"]["auto_refill"])
             self.assertEqual(settings["rounds"], 99)
             run.reset_mock()
             with self.assertRaises(FlowAborted):
                 list(server._build_workflow("config.json", {
-                    "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 8,
+                    "workflow_id": dc.BUILTIN_ID, "scheduled_raid_runs": 24,
                     "scheduled_workflow_signature": "old"}))
             run.assert_not_called()
 
