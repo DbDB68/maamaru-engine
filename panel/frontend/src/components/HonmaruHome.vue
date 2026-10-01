@@ -326,7 +326,6 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     <p v-if="notice" class="home-notice" role="status">{{ notice }}</p>
     <aside class="honmaru-profile" aria-label="审神者档案">
       <div class="profile-portrait"><img v-if="profile.avatar" :src="profile.avatar" alt="我的头像"><span v-else aria-hidden="true">{{ (profile.saniwa_name || profile.honmaru_name || '丸').slice(0, 1) }}</span></div>
-      <p class="home-eyebrow">在这里，过我们的日子</p>
       <h1>{{ homeName }}</h1>
       <p class="profile-motto">{{ profile.motto || '留一句喜欢的话，给每次回来的自己。' }}</p>
       <div v-if="daysTogether" class="profile-anniversary"><small>就任第</small><strong>{{ daysTogether }}<span> 天</span></strong></div>
@@ -336,11 +335,10 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <div><dt>就任日</dt><dd>{{ profile.joined_on?.replaceAll('-', '.') || '待填写' }}</dd></div>
       </dl>
       <button type="button" class="home-text-button profile-edit" :disabled="!homeReady" @click="editProfile">{{ profile.saniwa_name ? '整理我的档案' : '写下我的档案' }} <span aria-hidden="true">↗</span></button>
-      <p class="profile-footnote">庭院里有熟悉的身影，<br>这里有慢慢积攒的日常。</p>
     </aside>
 
     <section class="honmaru-journal" aria-label="本丸动态">
-      <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2><p>今天，也在这里留一页。</p></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
+      <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
       <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? (activity?.label || '本丸正在执务') : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && activity?.step">{{ activity.step }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
@@ -357,8 +355,8 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
-      <section class="home-situation" aria-label="游戏里的本丸近况">
-        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>本丸近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
+      <section class="home-situation" aria-label="本丸近况">
+        <header><div><h2>本丸近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
         <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
         <template v-else>
