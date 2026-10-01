@@ -21,6 +21,36 @@ from panel import expedition_choices as ec
 from panel import server
 
 
+def test_explicit_total_level_does_not_require_one_sword_to_reach_total():
+    meta = {"level_req": 350, "rules": {"total_level": 350}}
+    assert ea._level_ok(meta, {"sum": 396, "max": 99})
+    assert ea._level_shortfall(meta, {"sum": 315, "max": 99}) == "等级合计 315，要求 350（差 35）"
+    assert ea._level_shortfall({"level_req": 50}, {"sum": 200, "max": 40}) == "最高等级 40，要求 50（差 10）"
+
+
+def test_fallback_explains_map_occupation_missing_types_and_actual_level_gap(tmp_path):
+    situation = tmp_path / "situation.json"
+    situation.write_text(json.dumps({"parties": [{"party_no": 5, "members": [
+        {"name": "小豆长光·极", "level": 39}, {"name": "大千鸟十文字枪", "level": 99}]}]}), encoding="utf-8")
+    maps = {
+        "B1": {"duration_min": 90, "冷却材": 135, "rules": {"total_level": 50}},
+        "A2": {"duration_min": 20, "冷却材": 45, "rules": {"required_types": {"短刀": 1}}},
+        "A3": {"duration_min": 20, "冷却材": 30, "rules": {"required_types": {"胁差": 1}}},
+        "C3": {"duration_min": 60, "冷却材": 750, "level_req": 350, "rules": {"total_level": 350}},
+        "A1": {"duration_min": 10, "玉钢": 10, "rules": {}},
+    }
+    result = ea.build_expedition_suggestions({"rounds_per_team": 1, "available_teams": [5]},
+        planning=_planning(limiting=("冷却材",)), maps=maps, situation_path=situation,
+        occupied_maps=["B1"], now_min=500)
+    suggestion = result["suggestions"][0]
+    assert suggestion["resource"] == "玉钢"
+    assert suggestion["blocked_resource"] == "冷却材"
+    reasons = "；".join(suggestion["restrictions"])
+    assert "B1：已有远征安排" in reasons
+    assert "没有短刀" in reasons and "没有胁差" in reasons
+    assert "等级合计 138，要求 350（差 212）" in reasons
+
+
 # 假图数据：时薪都是 120/小时，靠 total_level / 资源种类区分
 _MAPS = {
     "A1": {"era": 1, "slot": 1, "name": "练习场", "duration_min": 30,

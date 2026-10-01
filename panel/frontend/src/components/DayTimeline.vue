@@ -912,6 +912,12 @@ const caption = computed(() => {
 
       </div>
       <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}</template></p>
+      <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
+        <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
+        <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>
+        <p v-if="s.formation_change">想优先补{{ s.blocked_resource }}，先在游戏里调整部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}，同步近况后再看推荐。</p>
+        <p v-else>换个出发时间，或等远征图空出来，再看推荐。</p>
+      </details>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
         <div class="tl-mini-meta">

@@ -396,20 +396,24 @@ def _planning_has_data(planning) -> bool:
             or bool(watch.get("limiting")))
 
 
+def _level_shortfall(meta, party) -> str | None:
+    """明确的合计等级规则优先；level_req 是旧表兼容字段，不能再当单振要求。"""
+    if not party:
+        return None
+    rules = meta.get("rules") if isinstance(meta, dict) else None
+    total = rules.get("total_level") if isinstance(rules, dict) else None
+    if isinstance(total, (int, float)) and total > 0:
+        return f"等级合计 {party['sum']}，要求 {int(total)}（差 {int(total - party['sum'])}）" if party["sum"] < total else None
+    req = meta.get("level_req") if isinstance(meta, dict) else None
+    if isinstance(req, (int, float)) and req > 0 and party["max"] < req:
+        return f"最高等级 {party['max']}，要求 {int(req)}（差 {int(req - party['max'])}）"
+    return None
+
+
 def _level_ok(meta, party) -> bool:
     """队伍等级门槛：有近况就核（total_level 看队伍等级和、level_req 看
     最高等级）；没近况不拦，由 reason 注明。"""
-    if not party:
-        return True
-    rules = meta.get("rules") if isinstance(meta, dict) else None
-    total = rules.get("total_level") if isinstance(rules, dict) else None
-    if isinstance(total, (int, float)) and total > 0 \
-            and party["sum"] < total:
-        return False
-    req = meta.get("level_req") if isinstance(meta, dict) else None
-    if isinstance(req, (int, float)) and req > 0 and party["max"] < req:
-        return False
-    return True
+    return _level_shortfall(meta, party) is None
 
 
 # ── 建议生成 v2：引擎现算班，不依赖排班投影 ──
@@ -548,6 +552,8 @@ def build_expedition_suggestions(prefs: dict, *,
             priority_slot = 0 if focus in FOCUS_RESOURCES else slot
             assigned = base_order[priority_slot % len(base_order)]
             placed = False
+            restrictions = []
+            formation_change = False
             miss = {"team": team, "shift": r + 1, "resource": "",
                     "fit": False, "level": False, "occupied": False,
                     "type": False, "retry": False, "detail": "",
@@ -567,26 +573,41 @@ def build_expedition_suggestions(prefs: dict, *,
                 if not miss["resource"]:
                     miss["resource"] = resource
                 for map_code, meta in ranked:
+                    def blocked(detail):
+                        if resource == assigned[0]:
+                            restrictions.append(f"{map_code}：{detail}")
+
                     if map_code in occupied:
                         miss["occupied"] = True
+                        owner = next((s["team_no"] for s in suggestions if s["map_code"] == map_code), None)
+                        blocked(f"已安排部队{TEAM_NAMES.get(owner, owner)}" if owner else "已有远征安排")
                         continue
                     duration = int(meta.get("duration_min") or 0)
                     if start + duration > DAY_END_MIN:
                         miss["fit"] = True
+                        blocked("今天剩余时间排不下")
                         continue
                     # 同图同队今天 failed 过的组合拉黑到今天结束（图不拉黑）
                     if (map_code, team) in failed:
                         miss["retry"] = True
+                        blocked("本队今天派遣失败，暂不重试")
                         if not miss["retry_resource"]:
                             miss["retry_resource"] = resource
                         continue
                     party = (party_levels or {}).get(team)
-                    if not _level_ok(meta, party):
-                        miss["level"] = True
-                        continue
+                    level_detail = _level_shortfall(meta, party)
                     shortfall = _type_shortfall(meta, party)
+                    if level_detail:
+                        miss["level"] = True
+                        if resource == assigned[0]:
+                            formation_change = True
+                        blocked(level_detail + (f"；{_type_block_detail(team, party, shortfall)}" if shortfall else ""))
+                        continue
                     if shortfall is not None:
                         miss["type"] = True
+                        if resource == assigned[0]:
+                            formation_change = True
+                        blocked(_type_block_detail(team, party, shortfall))
                         if not miss["detail"]:
                             miss["detail"] = (
                                 f"{map_code}要{_type_req_text(meta)}，"
@@ -622,6 +643,9 @@ def build_expedition_suggestions(prefs: dict, *,
                         "start_min": start,
                         "shift_no": shift_no,
                         "reason": reason,
+                        "blocked_resource": assigned[0] if i else None,
+                        "restrictions": restrictions if i else [],
+                        "formation_change": formation_change if i else False,
                     })
                     next_start[team] = start + duration + COLLECT_BUFFER_MIN
                     occupied.add(map_code)  # 本批建议内部也去重：一张图一班

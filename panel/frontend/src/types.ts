@@ -1059,6 +1059,9 @@ export interface DayExpeditionHelpPrefs {
 
 /** 一条远征建议：引擎按缺口现算的班（队伍/图/时刻自描述）；点采纳 = 记 forced */
 export interface DayExpeditionSuggestion {
+  blocked_resource?: string | null
+  restrictions?: string[]
+  formation_change?: boolean
   kind: 'expedition'
   key: string
   team_no: number
