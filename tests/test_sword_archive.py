@@ -692,3 +692,19 @@ def archive_reasons(store):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_old_annotation_can_be_revoked_without_changing_current_sword():
+    store = _store()
+    _owned_snapshot(store, [_row(IMA_GIRI, "今剑", kiwame_date="2017-6-4")], captured_at=100)
+    ann = _annotate(store, IMA_GIRI, "2026-8-29", form_confirmed="kiwame", keeper=True)
+    archive = build_sword_archive(store)
+    item = next(item for item in archive["attention"] if "stale_annotation" in item["reasons"])
+    assert item["annotation_id"] == ann["id"]
+    assert archive["entries"][0]["human"] is None
+    before = archive["entries"][0]
+    store.revoke_sword_annotation(item["annotation_id"])
+    after = build_sword_archive(store)
+    assert not any("stale_annotation" in item["reasons"] for item in after["attention"])
+    assert after["entries"][0] == before
+    assert store.sword_annotations(include_revoked=True)[0]["revoked"]

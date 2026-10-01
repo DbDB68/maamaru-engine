@@ -739,6 +739,7 @@ export interface SwordArchiveEntry {
 export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicate_fingerprint' | 'stale_annotation' | 'level_unknown'
 
 export interface SwordArchiveAttentionItem {
+  annotation_id?: number
   observation_id: string | null
   sword_catalog_id: string | null
   name_zh: string | null

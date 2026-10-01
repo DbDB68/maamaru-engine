@@ -221,6 +221,7 @@ def build_sword_archive(store) -> dict:
             continue
         attention.append({
             "observation_id": None,
+            "annotation_id": ann.get("id"),
             "sword_catalog_id": ann.get("sword_catalog_id"),
             "name_zh": _catalog_display_name(ann.get("sword_catalog_id")),
             "level": None,

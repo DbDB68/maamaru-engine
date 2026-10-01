@@ -60,7 +60,7 @@ const inventoryRunning = computed(() => props.running && props.current === 'swor
 const inventoryBusy = computed(() => props.running || props.stopping || props.starting)
 const inventoryButtonLabel = computed(() => props.starting
   ? '正在启动……'
-  : inventoryRunning.value ? '正在盘点……' : '刀帐盘点')
+  : inventoryRunning.value ? '正在盘点……' : '截图盘点（备用）')
 
 const sortedEntries = computed(() => sortArchiveEntries(entries.value))
 const ordinals = computed(() => duplicateOrdinals(entries.value))
@@ -224,6 +224,27 @@ async function revokeEntry(entry: SwordArchiveEntry) {
   }
 }
 
+function viewSameName(item: SwordArchiveAttentionItem) {
+  query.value = item.name_zh || ''
+  swordType.value = ARCHIVE_ALL_TYPES
+  archiveView.value = 'all'
+}
+
+async function revokeOldAnnotation(item: SwordArchiveAttentionItem) {
+  if (!item.annotation_id || saving.value) return
+  if (!window.confirm(`撤销「${item.name_zh || '这振刀'}」${item.kiwame_date || ''} 的旧标注吗？\n只撤销本地标记，不影响游戏里的刀剑。`)) return
+  saving.value = true
+  error.value = ''
+  try {
+    await api.revokeSwordAnnotation(item.annotation_id)
+    await load()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '旧标注未能撤销'
+  } finally {
+    saving.value = false
+  }
+}
+
 // 待核对区：是极 / 是普通 / 是要练的刀。旧标注从同 observation_id
 // 的档案行里找回来，改一位、其余原样带回。
 function confirmAttention(item: SwordArchiveAttentionItem, form: 'kiwame' | 'normal') {
@@ -263,9 +284,11 @@ watch(() => props.running, (isRunning, wasRunning) => {
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
           <div class="archive-header-actions">
-            <button type="button" class="primary" :disabled="syncing || inventoryBusy" @click="syncGame">{{ syncing ? '正在同步……' : '同步游戏' }}</button>
-            <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在翻档……' : '刷新档案' }}</button>
-            <button type="button" class="secondary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : ''" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
+            <button type="button" class="primary" :disabled="syncing || inventoryBusy" @click="syncGame">{{ syncing ? '正在更新……' : '更新刀账' }}</button>
+            <details class="archive-more">
+              <summary>更多</summary>
+              <button type="button" class="secondary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : '操作游戏，逐页读取刀账'" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
+            </details>
           </div>
         </template>
       </PanelHeader>
@@ -276,7 +299,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
         <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
       <p v-if="!done && data" class="archive-notice">
-        {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“同步游戏”，也可用刀帐盘点。
+        {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“更新刀账”。
       </p>
     </PaperCard>
 
@@ -340,6 +363,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
         <template v-else>
           <div v-for="group in attentionGroups" :key="group.reason" class="archive-attention-group">
             <h4 class="archive-group-title">{{ group.title }} · {{ group.items.length }} 条</h4>
+            <p v-if="group.reason === 'stale_annotation'" class="archive-sub">旧标注的日期与当前名单未匹配，暂未套用。</p>
             <ul class="archive-attention-list">
               <li v-for="item in group.items" :key="attentionKey(item)" class="archive-attention-row">
                 <div class="archive-row-head">
@@ -347,14 +371,18 @@ watch(() => props.running, (isRunning, wasRunning) => {
                   <small v-if="item.observation_id && ordinals.get(item.observation_id)">第 {{ ordinals.get(item.observation_id) }} 振</small>
                   <span class="archive-facts">
                     <template v-if="item.level != null">Lv.{{ item.level }}</template>
-                    <template v-if="item.kiwame_date"> · 显现 {{ item.kiwame_date }}</template>
+                    <template v-if="item.kiwame_date"> · {{ item.reasons.includes('stale_annotation') ? '旧标注日期' : '显现' }} {{ item.kiwame_date }}</template>
                   </span>
                 </div>
                 <div class="archive-badges">
                   <i v-for="text in attentionReasonTexts(item.reasons)" :key="text" class="archive-reason">{{ text }}</i>
                   <i v-for="hint in item.hints" :key="hint" class="archive-hint">{{ hint }}</i>
                 </div>
-                <div class="archive-actions">
+                <div v-if="item.reasons.includes('stale_annotation')" class="archive-actions">
+                  <button type="button" class="secondary" @click="viewSameName(item)">查看同名刀</button>
+                  <button v-if="item.annotation_id" type="button" class="secondary" :disabled="saving" @click="revokeOldAnnotation(item)">撤销旧标注</button>
+                </div>
+                <div v-else class="archive-actions">
                   <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'kiwame')">是极</button>
                   <button type="button" class="secondary" :disabled="saving" @click="confirmAttention(item, 'normal')">是普通</button>
                   <button type="button" class="secondary" :disabled="saving" @click="keepAttention(item)">是要练的刀</button>
@@ -392,7 +420,9 @@ watch(() => props.running, (isRunning, wasRunning) => {
    内容宽悬在中间（编队页"东一块西一块"就是这么来的）。 */
 .archive-panel { display: grid; gap: 13px; align-content: start; }
 .archive-panel :deep(.task-card) { max-width: none; margin: 0; }
-.archive-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.archive-more summary { cursor: pointer; color: var(--ink-dim); padding: 12px 4px; }
+.archive-more button { margin-top: 6px; }
+.archive-header-actions { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .archive-view-switch { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; padding: 0; }
 .archive-view-switch :deep(button) { min-width: 0; }
 .archive-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -473,7 +503,9 @@ watch(() => props.running, (isRunning, wasRunning) => {
 .archive-level-bad { color: #9f3d28; font-size: 11px; }
 
 @media (max-width: 900px) {
-  .archive-header-actions { justify-content: flex-start; }
+  .archive-more summary { cursor: pointer; color: var(--ink-dim); padding: 12px 4px; }
+.archive-more button { margin-top: 6px; }
+.archive-header-actions { justify-content: flex-start; }
   .archive-view-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .archive-view-switch :deep(button:last-child) { grid-column: 1 / -1; }
   .archive-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

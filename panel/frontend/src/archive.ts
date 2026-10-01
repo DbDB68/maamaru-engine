@@ -128,7 +128,7 @@ export const ATTENTION_REASON_TEXT: Record<SwordAttentionReason, string> = {
   form_unknown: '形态没读出来',
   form_ambiguous: '两处证据打架',
   duplicate_fingerprint: '同名同日多振，指纹撞车',
-  stale_annotation: '标注对不上号',
+  stale_annotation: '旧标注未匹配',
   level_unknown: '等级没读出来',
 }
 

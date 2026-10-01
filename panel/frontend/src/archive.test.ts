@@ -162,7 +162,7 @@ describe('reason 人话', () => {
     expect(ATTENTION_REASON_TEXT.form_unknown).toBe('形态没读出来')
     expect(ATTENTION_REASON_TEXT.form_ambiguous).toBe('两处证据打架')
     expect(ATTENTION_REASON_TEXT.duplicate_fingerprint).toBe('同名同日多振，指纹撞车')
-    expect(ATTENTION_REASON_TEXT.stale_annotation).toBe('标注对不上号')
+    expect(ATTENTION_REASON_TEXT.stale_annotation).toBe('旧标注未匹配')
     expect(ATTENTION_REASON_TEXT.level_unknown).toBe('等级没读出来')
   })
 
@@ -170,7 +170,7 @@ describe('reason 人话', () => {
     expect(attentionReasonTexts(['form_unknown', 'level_unknown']))
       .toEqual(['形态没读出来', '等级没读出来'])
     expect(attentionReasonTexts(['duplicate_fingerprint', 'stale_annotation']))
-      .toEqual(['同名同日多振，指纹撞车', '标注对不上号'])
+      .toEqual(['同名同日多振，指纹撞车', '旧标注未匹配'])
     expect(attentionReasonTexts(['some_new_reason' as never])).toEqual(['some_new_reason'])
   })
 })
@@ -394,7 +394,7 @@ describe('待核对分组', () => {
     expect(groups.map(group => group.reason))
       .toEqual(['form_unknown', 'form_ambiguous', 'duplicate_fingerprint', 'stale_annotation', 'level_unknown'])
     expect(groups.map(group => group.title))
-      .toEqual(['形态没读出来', '两处证据打架', '同名同日多振，指纹撞车', '标注对不上号', '等级没读出来'])
+      .toEqual(['形态没读出来', '两处证据打架', '同名同日多振，指纹撞车', '旧标注未匹配', '等级没读出来'])
     // 多因条目归首条 reason 那一组，不跨组重复
     expect(groups[0].items.map(item => item.observation_id)).toEqual(['9:3', '9:6'])
     expect(groups.reduce((sum, group) => sum + group.items.length, 0)).toBe(items.length)
