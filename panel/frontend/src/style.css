@@ -78,6 +78,7 @@ button { cursor: pointer; }
 .topnav button { height: 37px; min-width: 96px; padding: 7px 12px; color: inherit; background: var(--paper-card); border: 1px solid var(--paper-line); border-bottom: 0; border-radius: 9px 9px 0 0; font-size: 13px; }
 .topnav button::before, .theme-button::before { content: ''; display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; background: currentColor; -webkit-mask: var(--nav-icon) center / contain no-repeat; mask: var(--nav-icon) center / contain no-repeat; image-rendering: pixelated; }
 .topnav .nav-home { --nav-icon: url('/static/img/ui/home.png'); }
+.topnav .nav-swords { --nav-icon: url('/static/img/ui/sword.svg'); }
 .topnav .nav-office { --nav-icon: url('/static/img/ui/office.svg'); }
 .topnav .nav-tasks { --nav-icon: url('/static/img/ui/gear.png'); }
 .topnav .nav-report { --nav-icon: url('/static/img/ui/menuList.png'); }
