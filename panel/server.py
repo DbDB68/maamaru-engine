@@ -2352,6 +2352,12 @@ async def api_save_day_schedule(request: Request):
     activity = timeline.get("activity") or {}
     plan = {"day_start": timeline["day_start"],
             "event_end_at": activity.get("event_end_at"), "blocks": blocks}
+    if blocks == []:
+        from .day_conductor import disarm
+        disarm()
+        save_plan(plan["day_start"], plan["event_end_at"], [])
+        timeline = _day_timeline_payload()
+        return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
     issues = review_plan(plan, timeline)
     if issues:
         raise HTTPException(409, "；".join(issues))

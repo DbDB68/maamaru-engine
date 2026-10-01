@@ -562,12 +562,11 @@ async function removeFromSchedule() {
   const booking = data.value?.booking
   if (!booking || popover.value == null || removing.value) return
   const remaining = booking.blocks.filter((_, index) => index !== popover.value!.index)
-  if (!remaining.length) return
   removing.value = true
   planMessage.value = ''
   try {
     await persistSchedule([...remaining].sort((a, b) => a.start_min - b.start_min),
-      '这一段已移出，剩下的照常到点开工。')
+      remaining.length ? '这一段已移出，剩下的照常到点开工。' : '安排已移除，不再定时启动。')
   } catch (error) {
     planMessage.value = error instanceof Error ? error.message : '移出失败，请重试'
     await load()
@@ -899,7 +898,7 @@ const caption = computed(() => {
               <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
               <div class="tl-popover-actions">
                 <button type="button" @click="editFromPopover">改参数</button>
-                <button type="button" :disabled="removing || (data.booking?.blocks.length ?? 0) <= 1" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
+                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
               </div>
             </div>
           </div>
@@ -964,20 +963,17 @@ const caption = computed(() => {
             <small v-else>添加联队战或定时任务流</small>
           </div>
           <div class="tl-booking-actions">
-            <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="fillRecommended">安排 {{ recommendedBlocks().reduce((sum, block) => sum + (block.runs || 0), 0) }} 圈联队战</button>
-            <button v-if="!editing" type="button" :disabled="saving" @click="highlightIndex = -1; editPlan()">{{ data.booking ? '改安排' : '添加安排' }}</button>
             <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 定时启动任务流</button>
-            <button v-if="data.conductor.enabled && !editing" type="button" :disabled="conductorBusy" @click="stopConductor">{{ conductorBusy ? '正在停用…' : '停用自动开工' }}</button>
           </div>
         </div>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
-          <span v-for="row in bookedRows" :key="row.key">
+          <button v-for="row in bookedRows" :key="row.key" type="button" class="tl-booking-link" @click="highlightIndex = data.booking!.blocks.indexOf(row.block); editPlan()">
             {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
             <template v-if="row.cblock"> · <small class="tl-status" :class="blockStatusClass(row.cblock)">{{ blockStatusText(row.cblock) }}</small></template>
             <template v-else-if="row.block.kind === 'raid' && blockEndMin(row.block) != null"> · 预计 {{ fmtMin(blockEndMin(row.block)!) }} 收工</template>
-          </span>
+          </button>
         </div>
         <div v-if="editing" class="tl-booking-editor">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
@@ -992,7 +988,7 @@ const caption = computed(() => {
             </label>
             <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
-            <button v-if="draft.length > 1" type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
+            <button type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
           <p v-if="draftHasRaid" class="tl-booking-message">手形不足时自动补充（消耗小判）。</p>
           <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">

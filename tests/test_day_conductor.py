@@ -457,6 +457,7 @@ class ScheduleEndpointTests(unittest.TestCase):
 
     def _patches(self, find_preset=None):
         real_arm = dc.arm
+        real_disarm = dc.disarm
         real_save = dp.save_plan
 
         def arm_to_temp(plan, timeline, workflow_id, raid_settings):
@@ -472,6 +473,7 @@ class ScheduleEndpointTests(unittest.TestCase):
             patch.object(server, "_load_panel_settings",
                          return_value={"params": {"raid": {}}}),
             patch.object(dc, "arm", side_effect=arm_to_temp),
+            patch.object(dc, "disarm", side_effect=lambda: real_disarm(self.state_path)),
             patch.object(dp, "save_plan", side_effect=save_to_temp),
         ]
         if find_preset is not None:
@@ -500,7 +502,8 @@ class ScheduleEndpointTests(unittest.TestCase):
         self.assertTrue(state["enabled"])
         self.assertEqual(state["blocks"][0]["label"], "联队战 8 圈")
 
-    def test_schedule_rejects_empty_blocks_with_409(self):
+    def test_schedule_clears_empty_blocks(self):
+        dc.arm(self.canned["booking"], self.canned, dc.BUILTIN_ID, {}, self.state_path)
         client = TestClient(server.app)
         stacks = self._patches()
         for item in stacks:
@@ -510,8 +513,9 @@ class ScheduleEndpointTests(unittest.TestCase):
         finally:
             for item in stacks:
                 item.stop()
-        self.assertEqual(response.status_code, 409)
-        self.assertFalse(self.plan_path.exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(load_plan(self.plan_path))
+        self.assertFalse(dc.load_state(self.state_path)["enabled"])
 
     def test_schedule_forbidden_in_ledger_mode(self):
         client = TestClient(server.app)
