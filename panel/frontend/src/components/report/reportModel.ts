@@ -199,3 +199,21 @@ export function obtainSourceLabel(source: string | undefined): string {
   if (source === 'pumpkin') return '南瓜大作战'
   return source || ''
 }
+
+// 收入和支出分别汇总；不同资源不按数量争“第一”。
+export function honmaruReceipts(items: LedgerAttribution[], direction: 'gain' | 'cost') {
+  return resourceNames.flatMap(resource => {
+    const sources = new Map<string, number>()
+    for (const item of items) {
+      if (item.resource !== resource || !Number.isFinite(item.delta)) continue
+      if (direction === 'gain' ? item.delta <= 0 : item.delta >= 0) continue
+      const source = categoryOf(item.source)
+      if (source === 'unknown') continue
+      sources.set(source, (sources.get(source) || 0) + Math.abs(item.delta))
+    }
+    if (!sources.size) return []
+    const total = [...sources.values()].reduce((a, b) => a + b, 0)
+    const leader = [...sources].sort((a, b) => b[1] - a[1])[0]
+    return [{ resource, total, source: leader[0], sourceAmount: leader[1] }]
+  })
+}

@@ -8,7 +8,7 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import { categoryLabel, categoryOf, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
+import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{
@@ -206,33 +206,7 @@ const confidence = computed(() => {
   if (levels.some(level => level === 'low')) return { level: 'rough', label: '仅供参考', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段数据缺口` : ''}` }
   return { level: 'fair', label: '基本可信', detail: `${count} 次库存观察${gaps ? `，另有 ${gaps} 段变化无法完整归因` : ''}` }
 })
-// ---- 顶部小结：这段时间狐之助干啥了 ----
-
-function isWin(payload: any) {
-  const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
-  return value.includes('胜') || value.startsWith('win') || value === 'won'
-}
-function isLoss(payload: any) {
-  const value = String(payload?.result ?? payload?.outcome ?? '').toLowerCase()
-  return value.includes('败') || value.startsWith('lose') || value === 'lost'
-}
-function summaryEventCount(...types: string[]) { return types.reduce((total, type) => total + Number(summary.value?.events?.by_type?.[type] || 0), 0) }
-const sortieCount = computed(() => Number(summary.value?.activity?.sorties ?? summaryEventCount('sortie.completed')))
-const practiceWins = computed(() => Number(summary.value?.activity?.practice?.wins ?? 0))
-const practiceLosses = computed(() => Number(summary.value?.activity?.practice?.losses ?? 0))
-const practiceTotal = computed(() => Number(summary.value?.activity?.practice?.total ?? 0))
-const topSortie = computed(() => {
-  const group = (summary.value?.activity?.sortie_groups || [])[0]
-  if (!group) return ''
-  if (group.label) return String(group.label)
-  if (group.event_type === 'edocastle.run_completed') return '江户城'
-  if (group.event_type === 'osaka.floor_completed') return '大阪城'
-  if (group.event_type === 'raid.round_completed') return '联队战'
-  if (group.event_type === 'pumpkin.sortie_completed') return '南瓜大作战'
-  if (group.event_type === 'sortie.completed') return scriptNames[group.payload?.mode] || '合战场'
-  if (group.event_type === 'sortie.retreated_before_boss') return '合战场'
-  return ''
-})
+// ---- 本丸收获与花费 ----
 type ReportInsight = {
   key: string
   title: string
@@ -244,22 +218,10 @@ type ReportInsight = {
   runId?: string
   target?: 'chart' | 'planning' | 'records'
 }
-
-const sourceLeaders = computed(() => {
-  const totals = new Map<string, { source: string; resource: string; delta: number }>()
-  for (const item of ledger.value?.attributions || []) {
-    const source = categoryOf(item.source)
-    if (source === 'unknown' || source === 'human') continue
-    const key = `${source}:${item.resource}`
-    const found = totals.get(key) || { source, resource: item.resource, delta: 0 }
-    found.delta += Number(item.delta || 0)
-    totals.set(key, found)
-  }
-  const entries = [...totals.values()].filter(item => item.delta)
-  return {
-    gain: entries.filter(item => item.delta > 0).sort((a, b) => b.delta - a.delta)[0] || null,
-    cost: entries.filter(item => item.delta < 0).sort((a, b) => a.delta - b.delta)[0] || null,
-  }
+const caretakerSummary = computed(() => {
+  const completed = Number(summary.value?.runs?.by_status?.completed || 0)
+  const failed = Number(summary.value?.runs?.by_status?.failed || 0)
+  return { completed, failed }
 })
 
 const anomalyInsight = computed<ReportInsight | null>(() => {
@@ -318,56 +280,31 @@ const wishlistFooter = computed(() => wishlistHits.value
   .map(item => `${item.name}${item.count > 1 ? ` ×${item.count}` : ''}`).join('、'))
 
 const reportInsights = computed<ReportInsight[]>(() => {
-  if (loading.value) return [{ key: 'loading', tone: 'plain', score: 1, title: '狐之助正在看账', detail: '稍等一下，马上挑出最值得说的事情。' }]
+  if (loading.value) return [{ key: 'loading', tone: 'plain', score: 1, title: '正在整理本丸记录', detail: '' }]
   const items: ReportInsight[] = []
   if (wishlistHitTotal.value) items.push({
-    key: `wishlist:${wishlistHits.value.map(item => `${item.name}:${item.count}`).join('|')}`,
-    tone: 'gain', score: 120, target: 'records',
-    title: `🎉 心愿刀到账：${wishlistNames()}`,
-    detail: `这段时间命中 ${wishlistHitTotal.value} 振，完整入手记录已经替你收好。`,
+    key: 'wishlist', tone: 'gain', score: 120, target: 'records',
+    title: `心愿刀入手：${wishlistNames()}`, detail: `共 ${wishlistHitTotal.value} 振。`,
   })
-  const completed = Number(summary.value?.runs?.by_status?.completed || 0)
-  const failed = Number(summary.value?.runs?.by_status?.failed || 0)
-  if (failed) items.push({ key: 'failed-runs', tone: 'alert', score: 98,
-    title: `${rangeLabel.value}有 ${failed} 次任务没顺利收工`, detail: '已经停止继续操作；点开会带你到最近一次翻车记录。', target: 'records',
-    date: failedRun.value ? shanghaiDate(Number(failedRun.value.started_at)) : undefined,
-    runId: failedRun.value?.run_id })
-  if (completed || sortieCount.value) {
-    const details = []
-    if (sortieCount.value) details.push(`出阵 ${sortieCount.value.toLocaleString()} 圈${topSortie.value ? `，主要在${topSortie.value}` : ''}`)
-    if (practiceTotal.value) details.push(`演练 ${practiceWins.value} 胜 ${practiceLosses.value} 负`)
-    items.push({ key: 'activity', tone: 'plain', score: 90,
-      title: completed > 0
-        ? `${rangeLabel.value}完成 ${completed} 次任务`
-        : `${rangeLabel.value}留下 ${sortieCount.value.toLocaleString()} 次出阵记录`,
-      detail: details.join('；') || '任务记录已经整理完成。' })
+  for (const direction of ['gain', 'cost'] as const) {
+    const receipts = honmaruReceipts(ledger.value?.attributions || [], direction)
+    if (!receipts.length) continue
+    const koban = receipts.find(item => item.resource === '小判')
+    const focus = koban || receipts[0]
+    const amount = (n: number) => n.toLocaleString()
+    const details = receipts.filter(item => item !== koban).map(item =>
+      `${item.resource} ${amount(item.total)}（${categoryLabel(item.source)}${item.sourceAmount < item.total ? ` ${amount(item.sourceAmount)}` : ''}）`)
+    if (koban) details.unshift(`${direction === 'gain' ? '主要来自' : '主要用于'}${categoryLabel(koban.source)} ${amount(koban.sourceAmount)}`)
+    items.push({ key: direction, tone: direction, score: direction === 'gain' ? 90 : 80,
+      title: koban ? `${direction === 'gain' ? '进账' : '花了'} ${amount(koban.total)} 小判` : direction === 'gain' ? '收到了这些资源' : '用了这些资源',
+      detail: details.join('；'), resource: focus.resource, target: 'chart' })
   }
-
-  const goal = [...(planning.value?.goals || [])]
-    .filter(item => (item.kind || 'resource') !== 'event' && ['behind', 'on_track', 'active', 'done'].includes(item.status))
-    .sort((left, right) => goalStatusRank[left.status] - goalStatusRank[right.status])[0]
-  if (goal) {
-    const urgent = goal.status === 'behind'
-    items.push({ key: `goal:${goal.id}`, tone: urgent ? 'alert' : 'goal', score: urgent ? 100 : 64,
-      title: urgent ? `${goal.resource}目标需要加把劲` : `${goal.resource}目标${goal.status === 'done' ? '已经达成' : '进展正常'}`,
-      detail: goal.message || goalSummary(goal), target: 'planning' })
-  }
-
-  if (anomalyInsight.value) items.push(anomalyInsight.value)
-  const gain = sourceLeaders.value.gain
-  if (gain) items.push({ key: `gain:${gain.source}:${gain.resource}`, tone: 'gain', score: 72,
-    title: `${gain.resource}是这段时间的进账冠军`,
-    detail: `从${categoryLabel(gain.source)}确认获得 ${signed(gain.delta)}。`, resource: gain.resource, target: 'chart' })
-  const cost = sourceLeaders.value.cost
-  if (cost) items.push({ key: `cost:${cost.source}:${cost.resource}`, tone: 'cost', score: 68,
-    title: `最大支出是${cost.resource}`, detail: `${categoryLabel(cost.source)}消耗 ${signed(cost.delta)}。`, resource: cost.resource, target: 'chart' })
-
   if (!items.length) items.push({ key: 'empty', tone: 'plain', score: 1,
-    title: '这段时间还没有足够的账', detail: '再跑几次任务或补一次家底，狐之助就能开始替你挑重点。' })
-  return items.sort((left, right) => right.score - left.score).slice(0, 3)
+    title: '这段时间还没有确认的收获或花费', detail: '已有家底和执行记录仍可在下面查看。' })
+  return items
 })
 
-const insightHeading = computed(() => days.value === 7 ? '本周本丸小结' : `${rangeLabel.value}本丸小结`)
+const insightHeading = computed(() => `${rangeLabel.value}本丸小结`)
 
 function insightToneLabel(tone: ReportInsight['tone']) {
   return { plain: '记', gain: '得', cost: '用', alert: '留意', goal: '目标' }[tone]
@@ -1180,20 +1117,22 @@ onMounted(async () => {
         </section>
         <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
           <header>
-            <div><small>狐之助从账里圈出的三笔</small><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
-            <span>{{ rangeLabel }} · 回看</span>
+            <div><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
+            <span>已确认的收获与花费</span>
           </header>
           <ol class="report-insight-list">
             <li v-for="(insight, index) in reportInsights" :key="insight.key" :class="[insight.tone, { lead: index === 0 }]">
-              <i>{{ insightToneLabel(insight.tone) }}</i><div><strong>{{ insight.title }}</strong><p>{{ insight.detail }}</p></div>
+              <i>{{ insightToneLabel(insight.tone) }}</i><div><strong>{{ insight.title }}</strong><p v-if="insight.detail">{{ insight.detail }}</p></div>
               <button v-if="insight.target" type="button" @click="followInsight(insight)">{{ insight.target === 'planning' ? '看规划' : insight.target === 'records' ? '看记录' : '看证据' }} →</button>
             </li>
           </ol>
-          <footer v-if="swordDropTotal || manualLoops || swordWishlist.length">
-            <span v-if="swordDropTotal" class="obtain">入手 {{ swordDropTotal }} 振</span>
+          <footer v-if="swordDropTotal || manualLoops || swordWishlist.length || caretakerSummary.completed || caretakerSummary.failed">
+            <span v-if="swordDropTotal" class="obtain">记录到入手 {{ swordDropTotal }} 振</span>
             <span v-if="wishlistHitTotal" class="wishlist">🎯 心愿命中 {{ wishlistFooter }}</span>
             <button v-if="swordDropTotal || swordWishlist.length" type="button" class="wishlist-manage" @click="emit('open-wishlist')">{{ swordWishlist.length ? `心愿名单 ${swordWishlist.length} 把` : '＋ 设置心愿刀' }} →</button>
             <span v-if="manualLoops" class="manual">你手动记了 {{ manualLoops }} 圈</span>
+            <span v-if="caretakerSummary.completed">まあ丸完成 {{ caretakerSummary.completed }} 次任务</span>
+            <button v-if="caretakerSummary.failed" type="button" class="wishlist-manage" @click="followInsight({ key: 'failed', title: '', detail: '', tone: 'alert', score: 0, target: 'records', date: failedRun ? shanghaiDate(Number(failedRun.started_at)) : undefined, runId: failedRun?.run_id })">{{ caretakerSummary.failed }} 次没顺利收工 →</button>
           </footer>
         </section>
 
@@ -1370,16 +1309,16 @@ onMounted(async () => {
 .report-glance > header small { display: block; margin-bottom: 3px; color: var(--fox-gold-deep); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
 .report-glance > header h2 { margin: 0; font-size: clamp(19px, 2.3vw, 25px); line-height: 1.2; }
 .report-glance > header > span { padding-bottom: 2px; color: var(--ink-dim); border-bottom: 1px solid var(--paper-line); font-size: 10px; letter-spacing: .04em; }
-.report-insight-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; border-top: 1px solid var(--paper-line); border-bottom: 1px solid var(--paper-line); list-style: none; }
+.report-insight-list { display: grid; grid-template-columns: 1fr; margin: 0; padding: 0; border-top: 1px solid var(--paper-line); border-bottom: 1px solid var(--paper-line); list-style: none; }
 .report-insight-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; min-width: 0; padding: 12px 10px; border-left: 3px solid transparent; }
 .report-insight-list li:not(.lead) { border-top: 1px solid var(--paper-line); }
-.report-insight-list li:not(.lead):last-child { border-left-color: var(--paper-line); }
+
 .report-insight-list li.lead { grid-column: 1 / -1; padding: 14px 10px 15px; }
 .report-insight-list li > i { min-width: 27px; padding: 3px 5px; color: var(--ink-dim); background: var(--paper-panel); border: 1px solid var(--paper-line); font-size: 10px; font-style: normal; font-weight: 700; text-align: center; }
 .report-insight-list li > div { display: grid; gap: 3px; min-width: 0; }
 .report-insight-list strong { font-size: 13px; line-height: 1.4; }
 .report-insight-list .lead strong { font-size: clamp(16px, 2vw, 19px); }
-.report-insight-list p { margin: 0; color: var(--ink-dim); font-size: 11px; line-height: 1.55; }
+.report-insight-list p { margin: 0; color: var(--ink-dim); font-size: 12px; line-height: 1.55; }
 .report-insight-list button { align-self: center; padding: 4px 6px; color: var(--fox-gold-deep); background: transparent; border: 0; border-bottom: 1px solid var(--fox-gold); font-size: 10px; white-space: nowrap; cursor: pointer; }
 .report-insight-list li.gain > i { color: #47734f; border-color: #91ad8f; }
 .report-insight-list li.cost > i { color: #8d4c3e; border-color: #c79d91; }
