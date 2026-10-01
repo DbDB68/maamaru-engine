@@ -18,7 +18,35 @@ Check your resources and event progress, decide how many runs to do and what to 
 
 **Plan → Arrange tasks → Run and supervise → Record the results → Honmaru journal**
 
-<!-- Main demo: the maintainer will add a GIF, video, or sequence of screenshots from actual use. Show the path from a decision through execution to updated records, rather than a single long unattended grind. -->
+**1. Return to My Honmaru**
+
+Recent game state, new swords, and your own notes stay here.
+
+![1. Return to My Honmaru](docs/assets/v1-home.png)
+
+**2. Save a daily routine**
+
+Arrange the daily steps in order and save them for reuse.
+
+![2. Save a daily routine](docs/assets/v1-daily-workflow.png)
+
+**3. Put work on the timetable**
+
+Set Regiment Battle runs and a start time, or schedule a saved workflow separately.
+
+![3. Put work on the timetable](docs/assets/v1-timetable.png)
+
+**4. See what is happening**
+
+The task desk shows the current job and its execution log.
+
+![4. See what is happening](docs/assets/v1-running-log.png)
+
+**5. Review the ledger**
+
+Check balances, gains, and spending, then follow the records for details.
+
+![5. Review the ledger](docs/assets/v1-ledger.png)
 
 You arrange the day's work; when you return, you can see what got done: completed runs, where resources came from, and which swords came home. Open the report or ledger when you want the details.
 
@@ -32,7 +60,6 @@ Use your Honmaru's records to estimate the remaining event work, daily runs, and
 
 Change Konnosuke's resource focus and the expedition recommendations follow it. If a team cannot reach a useful map, Maamaru explains the missing sword type, total-level requirement, or occupied map. Existing team presets can also be used for expeditions.
 
-<!-- Planning demo: event runs or resource focus leading to timetable or expedition arrangements. -->
 
 ### Workflows: save your daily routine
 
@@ -40,7 +67,6 @@ Combine dailies, expeditions, sorties, and events in your preferred order, then 
 
 Before departure, Maamaru checks the team, injuries, and equipment. During the run, it follows your settings for repairs, troop replenishment, and common interruptions. It resumes where recovery is supported and stops with an explanation when it cannot confirm the situation. At the end, your chosen action can exit the game, close the emulator, or put the PC to sleep.
 
-<!-- Workflow demo: building, saving, and starting a workflow, plus its running steps or stop reason. -->
 
 ### Inventory and sword archive: balances with a history
 
@@ -50,7 +76,6 @@ The sword archive uses unique IDs from the game's owned-sword list, keeping dupl
 
 Game records are read during synchronization or at the end of related tasks, rather than monitored continuously. Unconfirmed sources remain unknown.
 
-<!-- Records demo: a transaction's source, a new sword's acquisition, or the archive before and after consuming duplicates. -->
 
 ### My Honmaru: look back on the day
 
@@ -58,7 +83,6 @@ New swords, returning expeditions, forging, and sword sorting become journal pos
 
 Switch between washi-paper and pixel themes whenever you like. Kogitsunemaru and Konnosuke are here in the courtyard, too.
 
-<!-- Home demo: the current homepage, generated posts, personal notes, or theme switching. -->
 
 ## Where to start
 
