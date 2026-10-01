@@ -739,6 +739,7 @@ export interface SwordArchiveEntry {
 export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicate_fingerprint' | 'stale_annotation' | 'level_unknown'
 
 export interface SwordArchiveAttentionItem {
+  serial_id?: number | null
   annotation_id?: number
   observation_id: string | null
   sword_catalog_id: string | null
@@ -769,6 +770,7 @@ export interface SwordArchiveResponse {
 }
 
 export interface SwordAnnotationBody {
+  serial_id?: number | null
   sword_catalog_id: string | null
   kiwame_date: string | null
   level_at_mark?: number

@@ -738,3 +738,24 @@ def test_old_annotation_can_be_revoked_without_changing_current_sword():
     assert not any("stale_annotation" in item["reasons"] for item in after["attention"])
     assert after["entries"][0] == before
     assert store.sword_annotations(include_revoked=True)[0]["revoked"]
+
+
+def test_serial_schema_upgrade_backs_up_old_annotations_and_can_restore(tmp_path):
+    db = tmp_path / "telemetry.db"
+    store = TelemetryStore(db)
+    store.save_sword_annotation(IMA_GIRI, "2024-5-1", keeper=True, note="保留")
+    store._conn().execute("ALTER TABLE sword_annotations DROP COLUMN serial_id")
+    store._conn().execute("UPDATE metadata SET value = '14' WHERE key = 'schema_version'")
+    store._conn().commit()
+    store.close()
+    upgraded = TelemetryStore(db)
+    assert upgraded.sword_annotations()[0]["serial_id"] is None
+    assert upgraded.sword_annotations()[0]["note"] == "保留"
+    backup = sqlite3.connect(str(db) + ".pre-serial.bak")
+    assert backup.execute("SELECT note, keeper FROM sword_annotations").fetchone() == ("保留", 1)
+    assert "serial_id" not in {r[1] for r in backup.execute("PRAGMA table_info(sword_annotations)")}
+    restored = sqlite3.connect(tmp_path / "restored.db")
+    backup.backup(restored)
+    restored.close()
+    backup.close()
+    assert TelemetryStore(tmp_path / "restored.db").sword_annotations()[0]["keeper"]

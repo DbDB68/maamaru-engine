@@ -51,6 +51,7 @@ def build_candidate_pool(store) -> dict:
     from .game_sword_archive import candidate_pool
     game_pool = candidate_pool(store) if hasattr(store, "db_path") else None
     if game_pool and (not chosen or game_pool["observed_at"] >= (chosen.get("captured_at") or 0)):
+        store.bind_sword_annotation_serials(game_pool["entries"])
         _apply_human_confirmations(game_pool["entries"], _human_annotations(store))
         return game_pool
     recent = store.recent_sword_snapshots(limit=200)
@@ -159,17 +160,25 @@ def _human_annotations(store) -> list:
         return []
 
 
-def _annotation_index(annotations: list) -> dict:
-    """有效标注按指纹 (sword_catalog_id, kiwame_date) 归组。
+def _annotation_key(item: dict):
+    if item.get("serial_id") is not None:
+        return ("serial", item["serial_id"])
+    return (item.get("sword_catalog_id"), item.get("kiwame_date"))
 
-    候选池合并与刀帐档案（sword_archive）共用这套挂接规则：指纹是标注
-    挂到具体某一振的唯一依据（显现日期终身不变），撞组的不自动裁决。
-    """
+
+def _entry_annotation_key(entry: dict, index: dict):
+    key = _annotation_key(entry)
+    legacy = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+    return key if key in index or legacy not in index else legacy
+
+
+def _annotation_index(annotations: list) -> dict:
+    """优先按独立编号归组；未绑定旧标注仍按目录与日期归组。"""
     index = {}
     for ann in annotations or []:
         if not ann or ann.get("revoked"):
             continue
-        key = (ann.get("sword_catalog_id"), ann.get("kiwame_date"))
+        key = _annotation_key(ann)
         index.setdefault(key, []).append(ann)
     return index
 
@@ -200,10 +209,13 @@ def _apply_human_confirmations(entries: list, annotations: list) -> None:
     index = _annotation_index(annotations)
     row_counts = {}
     for entry in entries:
-        key = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        key = _entry_annotation_key(entry, index)
         row_counts[key] = row_counts.get(key, 0) + 1
+        legacy = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        if key != legacy:
+            row_counts[legacy] = row_counts.get(legacy, 0) + 1
     for entry in entries:
-        key = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        key = _entry_annotation_key(entry, index)
         anns = index.get(key) or []
         if len(anns) != 1 or row_counts.get(key, 0) != 1:
             continue

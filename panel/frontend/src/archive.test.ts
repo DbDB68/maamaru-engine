@@ -408,3 +408,14 @@ describe('待核对分组', () => {
     expect(groups[0].items).toHaveLength(1)
   })
 })
+
+
+describe('game sword identity', () => {
+  it('passes the exact serial for all annotation actions', () => {
+    const target = entry({ serial_id: 123 });
+    expect(keeperBody(target, true).serial_id).toBe(123);
+    expect(favoriteBody(target, true).serial_id).toBe(123);
+    expect(watchBody(target, true).serial_id).toBe(123);
+    expect(formConfirmBody(target, 'normal').serial_id).toBe(123);
+  });
+});

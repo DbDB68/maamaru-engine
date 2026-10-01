@@ -2991,7 +2991,8 @@ async def api_save_sword_annotation(request: Request):
             favorite=None if favorite is None else int(bool(favorite)),
             watch=None if watch is None else int(bool(watch)),
             note=body.get("note"),
-            level_confirmed=body.get("level_confirmed"))
+            level_confirmed=body.get("level_confirmed"),
+            serial_id=body.get("serial_id"))
     except (TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
     return {"ok": True, "annotation": annotation}

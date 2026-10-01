@@ -105,6 +105,37 @@ def test_genji_special_stages_are_not_kiwame(tmp_path):
     assert all(entries[sid]["form_status"] == "kiwame" for sid in (111, 115))
 
 
+def test_serial_annotations_distinguish_same_day_and_never_follow_replacement(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    catalog = "touken_003_mikazuki_munechika"
+    sync_archive([full(sword(1), sword(2))], store)
+    first = store.save_sword_annotation(catalog, "2023-1-27", serial_id=1, keeper=True)
+    second = store.save_sword_annotation(catalog, "2023-1-27", serial_id=2, watch=True)
+    assert first["id"] != second["id"]
+    entries = {e["serial_id"]: e for e in build_sword_archive(store)["entries"]}
+    assert entries[1]["human"]["keeper"] and not entries[1]["human"]["watch"]
+    assert entries[2]["human"]["watch"] and not entries[2]["human"]["keeper"]
+    assert not entries[1]["human"]["stale"]
+    sync_archive([full(sword(2), sword(3), minute=3)], store)
+    archive = build_sword_archive(store)
+    assert [a["annotation_id"] for a in archive["historical_annotations"]] == [first["id"]]
+    assert next(e for e in archive["entries"] if e["serial_id"] == 3)["human"] is None
+
+
+def test_unique_legacy_annotation_binds_once_and_survives_form_and_date_change(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    catalog = "touken_003_mikazuki_munechika"
+    old = store.save_sword_annotation(catalog, "2023-1-27", favorite=True)
+    sync_archive([full(sword(1))], store)
+    build_sword_archive(store)
+    assert store.sword_annotations()[0]["serial_id"] == 1
+    changed = sword(1, sid=4)
+    changed["created_at"] = "2023-01-28 00:00:00"
+    sync_archive([full(changed, minute=3)], store)
+    entry = build_sword_archive(store)["entries"][0]
+    assert entry["human"]["id"] == old["id"] and entry["human"]["favorite"]
+
+
 def test_game_sword_types_match_player_filters(tmp_path):
     store = TelemetryStore(tmp_path / "telemetry.db")
     sync_archive([full(sword(1, sid=99), sword(2, sid=65))], store)

@@ -21,7 +21,7 @@ from typing import Any
 from .runtime_paths import LOG_DIR
 
 
-TELEMETRY_SCHEMA_VERSION = 14
+TELEMETRY_SCHEMA_VERSION = 15
 DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
@@ -181,6 +181,12 @@ class TelemetryStore:
 
     def _init_db(self) -> None:
         conn = self._conn()
+        exists = conn.execute("SELECT 1 FROM sqlite_master WHERE name='sword_annotations'").fetchone()
+        if exists and "serial_id" not in {r["name"] for r in conn.execute("PRAGMA table_info(sword_annotations)")}:
+            backup_path = Path(str(self.db_path) + ".pre-serial.bak")
+            if not backup_path.exists():
+                with sqlite3.connect(backup_path) as backup:
+                    conn.backup(backup)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
@@ -369,6 +375,8 @@ class TelemetryStore:
         # v13 原地补列：人工确认的等级。旧标注保持 NULL，不回填不猜测。
         ann_cols = {row["name"] for row in conn.execute(
             "PRAGMA table_info(sword_annotations)").fetchall()}
+        if "serial_id" not in ann_cols:
+            conn.execute("ALTER TABLE sword_annotations ADD COLUMN serial_id INTEGER")
         if "level_confirmed" not in ann_cols:
             conn.execute(
                 "ALTER TABLE sword_annotations ADD COLUMN level_confirmed INTEGER")
@@ -1033,7 +1041,7 @@ class TelemetryStore:
     def save_sword_annotation(self, sword_catalog_id, kiwame_date,
                               level_at_mark=None, form_confirmed=None,
                               keeper=None, note=None, level_confirmed=None,
-                              favorite=None, watch=None) -> dict:
+                              favorite=None, watch=None, serial_id=None) -> dict:
         """保存一条人工标注；同指纹（目录 id + 显现日期）已存在有效标注时更新。
 
         更新只覆盖传入的非 None 字段（updated_at 随刷新），软删的指纹视为
@@ -1061,17 +1069,22 @@ class TelemetryStore:
                     or not 1 <= int(level_confirmed) <= 99):
                 raise ValueError("确认等级必须是 1 到 99 的整数")
             level_confirmed = int(level_confirmed)
+        if serial_id is not None:
+            if isinstance(serial_id, bool) or not isinstance(serial_id, int) or serial_id <= 0:
+                raise ValueError("刀剑独立编号必须是正整数")
         keeper_value = None if keeper is None else int(bool(keeper))
         favorite_value = None if favorite is None else int(bool(favorite))
         watch_value = None if watch is None else int(bool(watch))
         note = str(note).strip()[:300] if note is not None else None
         conn = self._conn()
         now = time.time()
-        row = conn.execute(
-            "SELECT id FROM sword_annotations "
-            "WHERE sword_catalog_id = ? AND kiwame_date = ? AND revoked = 0",
-            (sword_catalog_id, kiwame_date),
-        ).fetchone()
+        if serial_id is not None:
+            row = conn.execute("SELECT id FROM sword_annotations WHERE serial_id = ? AND revoked = 0", (serial_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM sword_annotations WHERE sword_catalog_id = ? AND kiwame_date = ? "
+                "AND serial_id IS NULL AND revoked = 0", (sword_catalog_id, kiwame_date),
+            ).fetchone()
         if row:
             sets, args = [], []
             if level_at_mark is not None:
@@ -1104,20 +1117,36 @@ class TelemetryStore:
             conn.commit()
             return self._sword_annotation_dict(row["id"])
         cursor = conn.execute(
-            "INSERT INTO sword_annotations(sword_catalog_id, kiwame_date, "
+            "INSERT INTO sword_annotations(serial_id, sword_catalog_id, kiwame_date, "
             "level_at_mark, level_confirmed, form_confirmed, keeper, "
             "favorite, watch, note, created_at, updated_at, revoked) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (sword_catalog_id, kiwame_date, level_at_mark, level_confirmed,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (serial_id, sword_catalog_id, kiwame_date, level_at_mark, level_confirmed,
              form_confirmed, keeper_value or 0, favorite_value or 0,
              watch_value or 0, note, now, now),
         )
         conn.commit()
         return self._sword_annotation_dict(cursor.lastrowid)
 
+    def bind_sword_annotation_serials(self, entries: list[dict]) -> None:
+        """只把唯一旧指纹绑定到唯一游戏编号；绑定之后不再回退日期匹配。"""
+        from collections import Counter
+        counts = Counter((e.get("sword_catalog_id"), e.get("kiwame_date")) for e in entries)
+        annotations = self.sword_annotations()
+        ann_counts = Counter((a["sword_catalog_id"], a["kiwame_date"]) for a in annotations if a["serial_id"] is None)
+        occupied = {a["serial_id"] for a in annotations if a["serial_id"] is not None}
+        unique = {(e.get("sword_catalog_id"), e.get("kiwame_date")): e.get("serial_id") for e in entries if e.get("serial_id")}
+        for ann in annotations:
+            key = (ann["sword_catalog_id"], ann["kiwame_date"])
+            serial = unique.get(key)
+            if ann["serial_id"] is None and counts[key] == 1 and ann_counts[key] == 1 and serial and serial not in occupied:
+                self._conn().execute("UPDATE sword_annotations SET serial_id = ? WHERE id = ? AND serial_id IS NULL", (serial, ann["id"]))
+                occupied.add(serial)
+        self._conn().commit()
+
     def _sword_annotation_dict(self, annotation_id: int) -> dict:
         row = self._conn().execute(
-            "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
+            "SELECT id, serial_id, sword_catalog_id, kiwame_date, level_at_mark, "
             "level_confirmed, form_confirmed, keeper, favorite, watch, note, "
             "created_at, updated_at, revoked "
             "FROM sword_annotations WHERE id = ?", (int(annotation_id),),
@@ -1132,7 +1161,7 @@ class TelemetryStore:
     def sword_annotations(self, include_revoked: bool = False) -> list[dict]:
         where = "" if include_revoked else " WHERE revoked = 0"
         rows = self._conn().execute(
-            "SELECT id, sword_catalog_id, kiwame_date, level_at_mark, "
+            "SELECT id, serial_id, sword_catalog_id, kiwame_date, level_at_mark, "
             "level_confirmed, form_confirmed, keeper, favorite, watch, note, "
             "created_at, updated_at, revoked "
             f"FROM sword_annotations{where} ORDER BY updated_at DESC, id DESC",

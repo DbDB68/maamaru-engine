@@ -2,9 +2,9 @@
 """刀帐档案：机器盘点 + 人工标注的合并视图（build_sword_archive）。
 
 与「当前本丸共用档案」同一份最新完整盘点做地基；人工标注
-（telemetry schema v12 建表、v13/v14 补列的 sword_annotations）按指纹
-(sword_catalog_id, kiwame_date) 挂到具体某一振上，形态合并、要练
-标记、待人工清单（attention）都在这里合成。只读生成，不写库。
+（sword_annotations）优先按游戏独立编号 serial_id 挂到具体一振。
+旧指纹只有唯一对应时才持久绑定编号；未能绑定的 OCR 标注保留原匹配规则。
+形态合并、要练标记、待人工清单与历史标注在这里合成。
 
 铁律（与 honmaru_profile 同一套）：
   - 一振一行，同名多振保留；指纹撞车（一标注多行/一行多标注）不自动
@@ -14,8 +14,8 @@
     改判后 form_status 是确定值，attention 的 form_unknown/form_ambiguous
     自然不再触发；
   - 人工等级只补空缺，永不覆盖机器读数（等级会随练级涨，人填的会过期）；
-  - 标注匹配不到任何行（刀解了/快照过期）不进 entries，进 attention
-    记 stale_annotation。
+  - 绑定编号已从完整游戏名单消失，或旧完整盘点证明曾持有的条目，
+    进入历史；其余未匹配旧标注仍进 attention，不猜具体处理方式。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import re
 from collections import Counter
 from datetime import date
 
-from .honmaru_profile import (_annotation_index, _human_annotations,
+from .honmaru_profile import (_entry_annotation_key, _annotation_index, _human_annotations,
                               build_honmaru_profile)
 
 ARCHIVE_SCHEMA_VERSION = 1
@@ -124,7 +124,7 @@ def _build_hints(entries: list) -> dict:
 
 
 def build_sword_archive(store) -> dict:
-    """生成刀帐档案（纯函数，不写库）。
+    """生成刀帐档案；候选池会把能唯一对应的旧标注绑定到游戏编号。
 
     机器形态结论直接复用 honmaru_profile 的完整管线（盘点落盘事实 +
     编队页直读 + 图鉴极标），人工合并在候选池输出前已完成（unknown ←
@@ -145,14 +145,18 @@ def build_sword_archive(store) -> dict:
     annotations = _human_annotations(store)
     index = _annotation_index(annotations)
     row_counts = Counter(
-        (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        _entry_annotation_key(entry, index)
         for entry in entries)
+    for entry in entries:
+        legacy = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        if _entry_annotation_key(entry, index) != legacy:
+            row_counts[legacy] += 1
     matched_ids = set()
     hints = _build_hints(entries)
     out_entries = []
     attention = []
     for entry in entries:
-        key = (entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+        key = _entry_annotation_key(entry, index)
         anns = index.get(key) or []
         matched_ids.update(ann.get("id") for ann in anns)
         row_hints = hints.get(entry.get("observation_id"), [])
@@ -208,6 +212,7 @@ def build_sword_archive(store) -> dict:
         if reasons:
             attention.append({
                 "observation_id": entry.get("observation_id"),
+                "serial_id": entry.get("serial_id"),
                 "sword_catalog_id": entry.get("sword_catalog_id"),
                 "name_zh": entry.get("name_zh"),
                 "level": entry.get("level"),
@@ -223,6 +228,7 @@ def build_sword_archive(store) -> dict:
             continue
         item = {
             "observation_id": None,
+            "serial_id": ann.get("serial_id"),
             "annotation_id": ann.get("id"),
             "sword_catalog_id": ann.get("sword_catalog_id"),
             "name_zh": _catalog_display_name(ann.get("sword_catalog_id")),
@@ -231,11 +237,11 @@ def build_sword_archive(store) -> dict:
             "reasons": ["stale_annotation"],
             "hints": [],
         }
-        if (ann.get("sword_catalog_id") and ann.get("kiwame_date")
+        if ((ann.get("serial_id") is not None and (pool.get("source") or {}).get("kind") == "youzu_log") or (ann.get("sword_catalog_id") and ann.get("kiwame_date")
                 and hasattr(store, "previously_owned_sword")
                 and store.previously_owned_sword(
                     ann["sword_catalog_id"], ann["kiwame_date"],
-                    pool.get("observed_at") or 0)):
+                    pool.get("observed_at") or 0))):
             historical_annotations.append(item)
         else:
             attention.append(item)

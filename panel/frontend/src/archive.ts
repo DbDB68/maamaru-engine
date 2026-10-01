@@ -170,6 +170,7 @@ export function groupAttentionItems(items: SwordArchiveAttentionItem[]): Archive
 
 // 档案行和 attention 条目都够格当标注目标（字段名一致）。
 export interface ArchiveAnnotationTarget {
+  serial_id?: number | null
   sword_catalog_id: string | null
   kiwame_date: string | null
   level?: number | null
@@ -179,7 +180,7 @@ export interface ArchiveAnnotationTarget {
 export type ArchiveHumanLike = Pick<SwordArchiveHuman, 'form' | 'keeper' | 'favorite' | 'watch' | 'note' | 'level'>
 
 function baseBody(target: ArchiveAnnotationTarget): SwordAnnotationBody {
-  return { sword_catalog_id: target.sword_catalog_id, kiwame_date: target.kiwame_date }
+  return { sword_catalog_id: target.sword_catalog_id, kiwame_date: target.kiwame_date, ...(target.serial_id != null ? { serial_id: target.serial_id } : {}) }
 }
 
 // 旧标注的人工等级原样递回（有的话）——它是合并进档案的空缺补值，
@@ -303,6 +304,7 @@ export function attentionTarget(item: SwordArchiveAttentionItem): ArchiveAnnotat
   return {
     sword_catalog_id: item.sword_catalog_id,
     kiwame_date: item.kiwame_date,
+    serial_id: item.serial_id,
     level: item.level,
     reasons: item.reasons,
   }
