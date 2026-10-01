@@ -909,6 +909,7 @@ const caption = computed(() => {
         </span>
 
       </div>
+      <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}</template></p>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
         <div class="tl-mini-meta">

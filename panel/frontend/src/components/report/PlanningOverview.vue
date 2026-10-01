@@ -32,8 +32,7 @@ function fmt(value: number | null | undefined) {
     <div v-if="suggestion" class="planning-focus">
       <div>
         <small>{{ manualFocus ? '你选的关注项' : '狐之助的小建议' }}</small>
-        <strong>今天先惦记 {{ focusResource }}</strong>
-        <p>{{ manualFocus ? `先关注${focusResource}；要获得多少、何时动手仍由你决定。` : suggestion.reason }}</p>
+        <strong>优先攒：{{ focusResource }}</strong>
       </div>
       <label>换个关注项
         <select v-model="manualFocus">
@@ -44,20 +43,17 @@ function fmt(value: number | null | undefined) {
     </div>
     <article class="resource-watch">
       <header>
-        <div><small>锻刀资源</small><h3>哪样先不够用</h3></div>
+        <div><small>锻刀资源</small><h3 v-if="watch?.forge_capacity != null">还能{{ forgeMode === 'ten' ? '十连锻' : '锻' }} {{ fmt(watch.forge_capacity) }} {{ forgeMode === 'ten' ? '次' : '炉' }}</h3><h3 v-else>锻刀余量未知</h3></div>
         <div class="forge-modes" role="group" aria-label="锻刀方式">
           <button type="button" :aria-pressed="forgeMode === 'normal'" @click="forgeMode = 'normal'">普通锻刀</button>
           <button v-if="planning.resource_watch?.ten_forge" type="button" :aria-pressed="forgeMode === 'ten'" @click="forgeMode = 'ten'">十连限锻</button>
         </div>
       </header>
       <div v-if="watch?.forge_capacity != null" class="watch-verdict">
-        <small>现在最先卡住</small>
-        <strong>{{ limitingLabel }}</strong>
-        <p>按当前配比，最多还能{{ forgeMode === 'ten' ? '十连锻' : '锻' }} <b>{{ fmt(watch.forge_capacity) }} {{ forgeMode === 'ten' ? '次' : '炉' }}</b>。</p>
+        <small>{{ limitingLabel }}最少 · 按当前配比</small>
       </div>
       <div v-else class="watch-verdict unknown">
-        <strong>还缺一次完整盘点</strong>
-        <p>材料和符的数量读齐后，才能判断哪样先卡住。</p>
+        <small>待完整盘点</small>
       </div>
       <div class="forge-resources">
         <p v-for="row in watch?.resources || []" :key="row.resource" :class="{ limiting: watch?.limiting.includes(row.resource) }">
@@ -73,12 +69,9 @@ function fmt(value: number | null | undefined) {
     <article class="koban-watch">
       <header>
         <span class="hakata-seal" aria-hidden="true">博</span>
-        <div><small>博多账房</small><h3>小判消耗监督</h3></div>
+        <div><small>博多账房</small><h3>小判与预算</h3></div>
       </header>
-      <blockquote v-if="koban?.current != null">
-        账上有 {{ fmt(koban.current) }}，已安排 {{ fmt(koban.reserved) }} 小判；能动用 {{ fmt(koban.available) }}。有余力就继续攒，博多很满意。
-      </blockquote>
-      <blockquote v-else>等盘点读到小判，咱再把能花的、留好的分开算清楚。</blockquote>
+      <p v-if="koban?.current == null" class="forge-note">小判尚未盘点</p>
       <div class="koban-numbers">
         <p><small>现有家底</small><b>{{ fmt(koban?.current) }}</b></p>
         <p><small>已留预算</small><b>{{ fmt(koban?.reserved) }}</b></p>
