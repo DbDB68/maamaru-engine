@@ -10,8 +10,18 @@ function optionValue(option: string | [string, string]) {
   return Array.isArray(option) ? option[0] : option
 }
 
+const formationEffects: Record<string, string> = {
+  鱼鳞阵: '打击↑ 冲力↑ 统率↓↓',
+  鹤翼阵: '打击↑↑ 机动↓ 统率↓',
+  横队阵: '必杀↑ 统率↑ 冲力↓↓',
+  方阵: '统率↑↑ 打击↓ 机动↓',
+  雁行阵: '机动↑ 冲力↑ 必杀↓ 统率↓',
+  逆行阵: '机动↑↑ 统率↓↓',
+}
 function optionLabel(option: string | [string, string]) {
-  return Array.isArray(option) ? option[1] : option
+  const label = Array.isArray(option) ? option[1] : option
+  const effects = props.field.key === 'formation' ? formationEffects[optionValue(option)] : undefined
+  return effects ? `${label}：${effects}` : label
 }
 
 function updateChecks(value: string) {
