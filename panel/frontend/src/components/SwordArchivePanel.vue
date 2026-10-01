@@ -410,6 +410,16 @@ watch(() => props.running, (isRunning, wasRunning) => {
           </div>
         </template>
       </PaperCard>
+      <details v-if="data?.historical_annotations?.length" class="archive-history">
+        <summary>历史标注 · {{ data.historical_annotations.length }} 条</summary>
+        <p class="archive-sub">已不在当前所持名单，保留原标注。</p>
+        <ul class="archive-attention-list">
+          <li v-for="item in data.historical_annotations" :key="item.annotation_id" class="archive-attention-row">
+            <b>{{ item.name_zh }}</b>
+            <span class="archive-facts"> · 显现 {{ item.kiwame_date }}</span>
+          </li>
+        </ul>
+      </details>
     </template>
   </section>
 </template>
@@ -422,6 +432,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
 .archive-panel :deep(.task-card) { max-width: none; margin: 0; }
 .archive-more summary { cursor: pointer; color: var(--ink-dim); padding: 12px 4px; }
 .archive-more button { margin-top: 6px; }
+.archive-history summary { cursor: pointer; color: var(--ink-dim); }
 .archive-header-actions { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .archive-view-switch { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; padding: 0; }
 .archive-view-switch :deep(button) { min-width: 0; }

@@ -996,6 +996,17 @@ class TelemetryStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def previously_owned_sword(self, catalog_id: str, acquired_date: str,
+                               before: float) -> bool:
+        """旧完整所持盘点证明曾持有；图鉴、局部读取不能作为离开依据。"""
+        return self._conn().execute(
+            "SELECT 1 FROM sword_snapshot_rows r JOIN sword_snapshots s "
+            "ON s.id = r.snapshot_id WHERE r.sword_id = ? AND r.kiwame_date = ? "
+            "AND s.source = 'owned_inventory' AND s.completeness = 'complete' "
+            "AND s.captured_at < ? LIMIT 1",
+            (catalog_id, acquired_date, before),
+        ).fetchone() is not None
+
     def sword_snapshot_detail(self, snapshot_id: int) -> dict | None:
         head = self._conn().execute(
             "SELECT id, captured_at, owned, capacity, sword_count, missing, "

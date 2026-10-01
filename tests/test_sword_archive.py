@@ -694,6 +694,36 @@ if __name__ == "__main__":
     unittest.main()
 
 
+def test_missing_previously_owned_annotation_is_history_and_returns_when_owned():
+    store = _store()
+    old = _row(IMA_GIRI, "今剑", kiwame_date="2026-8-29")
+    current = _row(IMA_GIRI, "今剑", kiwame_date="2017-6-4")
+    _owned_snapshot(store, [old, current], captured_at=CONFIRM_TS - 20)
+    ann = _annotate(store, IMA_GIRI, "2026-8-29", form_confirmed="normal", keeper=True)
+    _owned_snapshot(store, [current], captured_at=CONFIRM_TS - 10)
+    archive = build_sword_archive(store)
+    assert not any("stale_annotation" in a["reasons"] for a in archive["attention"])
+    assert [a["annotation_id"] for a in archive["historical_annotations"]] == [ann["id"]]
+    assert store.sword_annotations()[0]["keeper"]
+    assert archive["entries"][0]["human"] is None
+    _owned_snapshot(store, [old, current], captured_at=CONFIRM_TS)
+    restored = build_sword_archive(store)
+    assert restored["historical_annotations"] == []
+    assert next(e for e in restored["entries"] if e["kiwame_date"] == "2026-8-29")["human"]["keeper"]
+
+
+def test_partial_previous_inventory_does_not_prove_historical_annotation():
+    store = _store()
+    _owned_snapshot(store, [_row(IMA_GIRI, "今剑", kiwame_date="2026-8-29")],
+                    captured_at=CONFIRM_TS - 20, owned=2, missing=1)
+    _annotate(store, IMA_GIRI, "2026-8-29", form_confirmed="normal")
+    _owned_snapshot(store, [_row(IMA_GIRI, "今剑", kiwame_date="2017-6-4")],
+                    captured_at=CONFIRM_TS - 10)
+    archive = build_sword_archive(store)
+    assert archive["historical_annotations"] == []
+    assert any("stale_annotation" in a["reasons"] for a in archive["attention"])
+
+
 def test_old_annotation_can_be_revoked_without_changing_current_sword():
     store = _store()
     _owned_snapshot(store, [_row(IMA_GIRI, "今剑", kiwame_date="2017-6-4")], captured_at=100)

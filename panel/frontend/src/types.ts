@@ -765,6 +765,7 @@ export interface SwordArchiveResponse {
   summary: SwordArchiveSummary
   entries: SwordArchiveEntry[]
   attention: SwordArchiveAttentionItem[]
+  historical_annotations?: SwordArchiveAttentionItem[]
 }
 
 export interface SwordAnnotationBody {

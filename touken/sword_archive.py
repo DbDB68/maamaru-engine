@@ -215,11 +215,13 @@ def build_sword_archive(store) -> dict:
                 "reasons": reasons,
                 "hints": row_hints,
             })
-    # 标注没挂到任何行（刀解了/快照过期）：不进 entries，进 attention 等人来认
+    historical_annotations = []
+    # 旧完整名单能证明曾持有、当前完整名单已经没有：保留标注，退出待核对。
+    # 没有旧名单佐证的错误指纹仍待核对；不能猜它被用于乱舞、链结或刀解。
     for ann in annotations:
         if ann.get("id") in matched_ids:
             continue
-        attention.append({
+        item = {
             "observation_id": None,
             "annotation_id": ann.get("id"),
             "sword_catalog_id": ann.get("sword_catalog_id"),
@@ -228,7 +230,15 @@ def build_sword_archive(store) -> dict:
             "kiwame_date": ann.get("kiwame_date"),
             "reasons": ["stale_annotation"],
             "hints": [],
-        })
+        }
+        if (ann.get("sword_catalog_id") and ann.get("kiwame_date")
+                and hasattr(store, "previously_owned_sword")
+                and store.previously_owned_sword(
+                    ann["sword_catalog_id"], ann["kiwame_date"],
+                    pool.get("observed_at") or 0)):
+            historical_annotations.append(item)
+        else:
+            attention.append(item)
     attention.sort(key=_attention_sort_key)
     summary = {
         "total": len(out_entries),
@@ -245,7 +255,8 @@ def build_sword_archive(store) -> dict:
             "observed_at": pool.get("observed_at"),
             "snapshot_id": (pool.get("source") or {}).get("snapshot_id"),
             "data_source": (pool.get("source") or {}).get("kind") or "ocr",
-            "summary": summary, "entries": out_entries, "attention": attention}
+            "summary": summary, "entries": out_entries, "attention": attention,
+            "historical_annotations": historical_annotations}
 
 
 def get_sword_archive(store=None) -> dict:
