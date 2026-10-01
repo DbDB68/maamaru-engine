@@ -2,6 +2,7 @@ from touken.game_sword_archive import archive_path, candidate_pool, read_archive
 from touken.honmaru_profile import build_candidate_pool
 from touken.sword_archive import build_sword_archive
 from touken.telemetry import TelemetryStore
+import pytest
 
 
 def event(endpoint, payload, minute=0, status=0):
@@ -140,4 +141,59 @@ def test_game_sword_types_match_player_filters(tmp_path):
     store = TelemetryStore(tmp_path / "telemetry.db")
     sync_archive([full(sword(1, sid=99), sword(2, sid=65))], store)
     assert {e["sword_type"] for e in build_sword_archive(store)["entries"]} == {"胁差", "枪"}
+
+
+def consumption(endpoint, materials, base=1, minute=2, status=0):
+    fields = {
+        "/composition/compose": {"base_id": str(base), "material_id": materials},
+        "/composition/union": {"base_serial_id": str(base), "material_serial_id": materials},
+        "/sword/dismantle_many": {"serial_ids": materials},
+    }
+    response = event(endpoint, {} if endpoint.startswith('/sword/') else
+                     {"sword": {**sword(base, level=22), "ranbu_level": 5, "atk": 70}}, minute, status)
+    request = {**response, "direction": "C->S", "payload": {**fields[endpoint], "t": "never-store-this"}}
+    return [request, response]
+
+
+@pytest.mark.parametrize('endpoint,label', [('/composition/compose', '链结'),
+                         ('/composition/union', '习合'), ('/sword/dismantle_many', '刀解')])
+def test_successful_consumption_removes_exact_instances_and_is_idempotent(tmp_path, endpoint, label):
+    store = TelemetryStore(tmp_path / 'telemetry.db')
+    sync_archive([full(sword(1), sword(2), sword(3), sword(4))], store)
+    store.save_sword_annotation('touken_003_mikazuki_munechika', '2023-1-27', serial_id=2, keeper=True)
+    events = consumption(endpoint, '2,3')
+    assert sync_archive(events, store)
+    state = read_archive(store)
+    assert set(state['swords']) == {'1', '4'}
+    assert state['departures']['2']['reason'] == label
+    assert 'never-store-this' not in archive_path(store).read_text(encoding='utf-8')
+    if endpoint != '/sword/dismantle_many':
+        assert state['swords']['1']['ranbu_level'] == 5
+        assert state['swords']['1']['atk'] == 70
+    assert not sync_archive(events, store)
+    assert build_sword_archive(store)['historical_annotations'][0]['departure_reason'] == label
+    # 同一旧完整名单不能复活材料；备份能恢复同步前的档案。
+    assert set(update_archive([full(sword(1), sword(2), sword(3), sword(4))], state)['swords']) == {'1', '4'}
+    archive_path(store).write_bytes(archive_path(store).with_suffix('.json.bak').read_bytes())
+    assert set(read_archive(store)['swords']) == {'1', '2', '3', '4'}
+
+
+@pytest.mark.parametrize('mutation', ['failed', 'missing_request', 'wrong_base', 'bad_ids', 'base_as_material', 'missing_status'])
+def test_unconfirmed_consumption_never_removes_swords(mutation):
+    state = update_archive([full(sword(1), sword(2))])
+    events = consumption('/composition/compose', '2')
+    if mutation == 'failed': events[1]['payload']['status'] = 1
+    if mutation == 'missing_request': events = events[1:]
+    if mutation == 'wrong_base': events[1]['payload']['sword']['serial_id'] = 9
+    if mutation == 'bad_ids': events[0]['payload']['material_id'] = '2,invalid'
+    if mutation == 'base_as_material': events[0]['payload']['material_id'] = '1'
+    if mutation == 'missing_status': events[1]['payload'].pop('status')
+    assert update_archive(events, state) == state
+
+
+def test_old_consumption_does_not_remove_sword_seen_in_newer_full_inventory():
+    state = update_archive([full(sword(1), sword(2), minute=5)])
+    updated = update_archive(consumption('/composition/union', '2', minute=2), state)
+    assert set(updated['swords']) == {'1', '2'}
+    assert updated['swords']['1']['ranbu_level'] == 2
 

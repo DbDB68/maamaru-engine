@@ -417,6 +417,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
           <li v-for="item in data.historical_annotations" :key="item.annotation_id" class="archive-attention-row">
             <b>{{ item.name_zh }}</b>
             <span class="archive-facts"> · 显现 {{ item.kiwame_date }}</span>
+            <small v-if="item.departure_reason">{{ item.departure_reason === '刀解' ? '已刀解' : `已用于${item.departure_reason}` }}</small>
           </li>
         </ul>
       </details>

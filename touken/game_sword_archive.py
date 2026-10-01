@@ -64,15 +64,61 @@ def _valid_rows(rows):
 
 def update_archive(events, previous=None):
     state = copy.deepcopy(previous) if previous else {"schema": SCHEMA, "complete_at": None, "swords": {}}
+    pending = {}
+    operations = {
+        "/composition/compose": ("链结", "base_id", "material_id"),
+        "/composition/union": ("习合", "base_serial_id", "material_serial_id"),
+        "/sword/dismantle_many": ("刀解", None, "serial_ids"),
+    }
     for event in events:
         p = event.get("payload")
+        endpoint = event.get("endpoint")
+        if endpoint in operations and event.get("direction") == "C->S":
+            # 同接口存在多个未完成请求时，无法可靠配对，宁可等完整名单。
+            pending[endpoint] = None if endpoint in pending else event
+            continue
+        request = pending.pop(endpoint, None) if endpoint in operations else None
         if (event.get("direction") != "S->C" or event.get("status") != 200
                 or not isinstance(p, dict) or str(p.get("status", 0)) != "0"):
             continue
         ts = _event_epoch(event)
         if not ts:
             continue
-        endpoint = event.get("endpoint")
+        if request and state.get("complete_at"):
+            if str(p.get("status")) != "0":
+                continue
+            request_ts = _event_epoch(request)
+            # 没有配对请求、失败响应、编号缺失或本体不一致都不能移除材料。
+            label, base_key, material_key = operations[endpoint]
+            params = request.get("payload") or {}
+            raw = params.get(material_key) if isinstance(params, dict) else None
+            parts = str(raw).split(",") if raw is not None else []
+            serials = [_integer(part) for part in parts]
+            base = _integer(params.get(base_key)) if base_key else None
+            target = _valid_rows({"target": p.get("sword")}) if base_key else None
+            if (request_ts and 0 <= ts - request_ts <= 60 and serials
+                    and all(serial and serial > 0 for serial in serials)
+                    and len(set(serials)) == len(serials)
+                    and (not base_key or (base and base not in serials and target
+                                         and set(target) == {str(base)}))):
+                departures = state.setdefault("departures", {})
+                for serial in serials:
+                    key = str(serial)
+                    old = state["swords"].get(key)
+                    gone = departures.get(key)
+                    if (gone and gone.get("observed_at", 0) >= ts):
+                        continue
+                    if old and old.get("observed_at", 0) > request_ts:
+                        continue
+                    departures[key] = {"reason": label, "observed_at": ts,
+                                       "base_serial_id": base,
+                                       "sword": old or (gone or {}).get("sword")}
+                    state["swords"].pop(key, None)
+                for key, update in (target or {}).items():
+                    old = state["swords"].get(key)
+                    if old is not None and ts > old.get("observed_at", 0):
+                        old.update(update, observed_at=ts)
+                state["updated_at"] = max(ts, state.get("updated_at") or state["complete_at"])
         if endpoint == "/party/list" and "sword" in p:
             rows = _valid_rows(p["sword"])
             if rows is None or ts < (state.get("complete_at") or 0):
@@ -83,6 +129,10 @@ def update_archive(events, previous=None):
                 old = state["swords"].get(serial)
                 if old and old.get("observed_at", 0) > ts:
                     row.update(old)
+            # 旧完整名单不能复活已经确认消耗的编号。
+            for serial, gone in (state.get("departures") or {}).items():
+                if gone.get("observed_at", 0) >= ts:
+                    rows.pop(serial, None)
             state.update(complete_at=ts, swords=rows)
         elif state.get("complete_at"):
             rows = None
@@ -187,5 +237,5 @@ def candidate_pool(store):
             entry["unknown_fields"].append("identity")
         entries.append(entry)
     return {"done": True, "completeness": "complete", "source": {"kind": "youzu_log", "snapshot_id": None},
-            "observed_at": state["complete_at"], "owned": len(entries),
+            "observed_at": max(state["complete_at"], state.get("updated_at") or 0), "owned": len(entries),
             "entry_count": len(entries), "entries": entries, "skipped_newer_snapshots": []}

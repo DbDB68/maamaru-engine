@@ -221,6 +221,9 @@ def build_sword_archive(store) -> dict:
                 "hints": row_hints,
             })
     historical_annotations = []
+    from .game_sword_archive import read_archive
+    game_state = read_archive(store) if hasattr(store, "db_path") else None
+    departures = (game_state or {}).get("departures") or {}
     # 旧完整名单能证明曾持有、当前完整名单已经没有：保留标注，退出待核对。
     # 没有旧名单佐证的错误指纹仍待核对；不能猜它被用于乱舞、链结或刀解。
     for ann in annotations:
@@ -229,6 +232,7 @@ def build_sword_archive(store) -> dict:
         item = {
             "observation_id": None,
             "serial_id": ann.get("serial_id"),
+            "departure_reason": (departures.get(str(ann.get("serial_id"))) or {}).get("reason"),
             "annotation_id": ann.get("id"),
             "sword_catalog_id": ann.get("sword_catalog_id"),
             "name_zh": _catalog_display_name(ann.get("sword_catalog_id")),

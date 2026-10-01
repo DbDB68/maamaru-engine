@@ -740,6 +740,7 @@ export type SwordAttentionReason = 'form_unknown' | 'form_ambiguous' | 'duplicat
 
 export interface SwordArchiveAttentionItem {
   serial_id?: number | null
+  departure_reason?: '链结' | '习合' | '刀解' | null
   annotation_id?: number
   observation_id: string | null
   sword_catalog_id: string | null
