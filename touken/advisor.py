@@ -1011,7 +1011,6 @@ def get_planning(store, goals_path: Path, *,
         if item.get("resource") == "小判"
         and (item.get("delta") or 0) < 0
         and (item.get("ts") or 0) >= now_ts - RATE_WINDOW_DAYS * 86400)
-    reserved = sum(int(goal["target"]) for goal in live_budgets)
     koban_current = current.get("小判")
     abacuses = [event_abacus(name, card, measured=resolutions.get(name),
                              today=today, now=now_dt)
@@ -1035,6 +1034,8 @@ def get_planning(store, goals_path: Path, *,
         else:
             abacus["shortfall"] = max(0, int(cost - koban_now))
             abacus["sufficient"] = abacus["shortfall"] == 0
+    budgets = koban_budget_rows(live_budgets, abacuses, cards, now_dt=now_dt)
+    reserved = sum(row["amount"] or 0 for row in budgets)
     return {
         "schema_version": PLANNING_SCHEMA_VERSION,
         "generated_at": now_ts,
@@ -1049,6 +1050,7 @@ def get_planning(store, goals_path: Path, *,
         "koban_watch": {
             "current": koban_current,
             "reserved": reserved,
+            "budgets": budgets,
             "available": (None if koban_current is None
                           else int(koban_current - reserved)),
             "confirmed_spending": confirmed_spending,
@@ -1368,6 +1370,44 @@ RAID_SHELLS_LOOP_CAP = CURRENCY_MECHANICS["raid"]["loop_cap"]
 HANAFUDA_LOOP_SECONDS_CAP = 1800
 # 样本下限：达不到就老实说“再完成几圈后可估算”，绝不拿一两个样本外推
 HANAFUDA_TAMA_MIN_SAMPLES = 3
+def koban_budget_rows(live_budgets: list, abacuses: list, cards: dict,
+                      *, now_dt: datetime) -> list[dict]:
+    """补票预估与手动预算合并，同一活动取较高值，不重复预留。"""
+    rows = []
+    by_event = {}
+    for goal in live_budgets:
+        event = goal.get("event")
+        if event and event in by_event:
+            by_event[event]["amount"] += int(goal["target"])
+            continue
+        row = {"id": f"goal-{goal['id']}",
+               "event": event or goal.get("note") or "活动预算",
+               "amount": int(goal["target"]), "source": "manual"}
+        rows.append(row)
+        if event:
+            by_event[event] = row
+    for plan in abacuses:
+        event = plan.get("event")
+        card = cards.get(event) or {}
+        if card.get("mechanics") != "raid":
+            continue
+        _, _, start, end = _currency_window_ts(card)
+        if start is None or end is None or not start <= now_dt < end:
+            continue
+        cost = plan.get("koban_cost")
+        if event in by_event:
+            row = by_event[event]
+            if cost is not None and cost > row["amount"]:
+                row.update(amount=int(cost), source="estimated")
+            continue
+        if cost == 0:
+            continue
+        rows.append({"id": f"tickets-{event}", "event": event,
+                     "amount": int(cost) if cost is not None else None,
+                     "source": "estimated"})
+    return rows
+
+
 HANAFUDA_PACE_MIN_SAMPLES = 2
 
 

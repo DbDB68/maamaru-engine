@@ -357,6 +357,7 @@ export interface PlanningReport {
     }
   }
   koban_watch?: {
+    budgets?: { id: string; event: string; amount: number | null; source: string }[]
     current: number | null
     reserved: number
     available: number | null

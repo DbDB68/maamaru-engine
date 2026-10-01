@@ -1352,6 +1352,57 @@ class WindowImpactTests(unittest.TestCase):
             "神秘活动", {"mechanics": "???"}, today=self.TODAY))
 
 
+class RaidKobanBudgetTests(unittest.TestCase):
+    NOW = datetime.fromisoformat("2026-10-01T12:00:00+08:00")
+    CARD = {"mechanics": "raid", "currency": "夜光贝", "ticket_price": 300,
+            "start_at": "2026-09-24T10:00:00+08:00",
+            "end_at": "2026-10-15T05:00:00+08:00"}
+
+    def rows(self, cost, manual=(), now=None):
+        return advisor.koban_budget_rows(list(manual),
+            [{"event": "联队战", "koban_cost": cost}],
+            {"联队战": self.CARD}, now_dt=now or self.NOW)
+
+    def test_paid_tickets_reserve_budget_in_actual_planning_report(self):
+        class Store:
+            def resource_ledger(self, *args):
+                return {"per_resource": [{"resource": "小判", "closing": 885356}],
+                        "daily_series": [], "attributions": []}
+
+            def recent_events(self, limit=100, event_type=None):
+                if event_type != "raid.round_completed":
+                    return []
+                return [{"ts": self_ts + i * 120,
+                         "payload": {"shells": 1000, "shells_total": 27000 + i * 1000}}
+                        for i in range(3)]
+
+        self_ts = self.NOW.timestamp() - 3600
+        card = {**self.CARD, "ticket_cap": 6, "refill_amount": 3,
+                "refill_hours": [5, 17]}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+                advisor, "load_event_cards", return_value={"联队战": card}):
+            report = advisor.get_planning(Store(), Path(tmp) / "goals.json", now=self.NOW)
+        plan = report["events"][0]
+        self.assertEqual(plan["runs_needed"], 271)
+        self.assertEqual(plan["koban_cost"], plan["paid_tickets"] * 300)
+        self.assertGreater(plan["koban_cost"], 0)
+        watch = report["koban_watch"]
+        self.assertEqual(watch["reserved"], plan["koban_cost"])
+        self.assertEqual(watch["available"], 885356 - plan["koban_cost"])
+        self.assertEqual(watch["budgets"][0]["event"], "联队战")
+
+    def test_manual_budget_does_not_double_reserve_same_event(self):
+        goal = {"id": 1, "event": "联队战", "target": 50000}
+        self.assertEqual(self.rows(74100, [goal])[0]["amount"], 74100)
+        self.assertEqual(self.rows(30000, [goal])[0]["amount"], 50000)
+
+    def test_unknown_is_not_zero_and_finished_event_releases_estimate(self):
+        self.assertIsNone(self.rows(None)[0]["amount"])
+        self.assertEqual(self.rows(0), [])
+        self.assertEqual(self.rows(74100, now=datetime.fromisoformat(
+            "2026-10-15T05:00:00+08:00")), [])
+
+
 class RaidCurrencyPlanTests(unittest.TestCase):
     def test_shells_use_raid_events_and_unknown_ticket_price_stays_unknown(self):
         class Store:

@@ -37,6 +37,19 @@ async function changeResourceFocus(resource: string) {
   }
 }
 const loading = ref(false)
+let refreshingPlanning = false
+watch(dayTimeline, async snapshot => {
+  if (!snapshot || !planning.value || loading.value || refreshingPlanning) return
+  refreshingPlanning = true
+  try {
+    const updated = await api.planning()
+    planning.value = updated
+  } catch {
+    // 保留上一份已读到的家底；下一次时间表刷新时再读取。
+  } finally {
+    refreshingPlanning = false
+  }
+})
 const error = ref('')
 const timelineError = ref('')
 const goalNotice = ref('')

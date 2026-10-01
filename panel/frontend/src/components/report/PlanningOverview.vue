@@ -20,6 +20,9 @@ const watch = computed(() => forgeMode.value === 'ten'
   ? props.planning.resource_watch?.ten_forge
   : props.planning.resource_watch)
 const koban = computed(() => props.planning.koban_watch)
+const budgetRows = computed(() => koban.value?.budgets ?? props.budgets.map(goal => ({
+  id: String(goal.id), event: goal.event || goal.note || '活动预算', amount: goal.target, source: 'manual',
+})))
 const limitingLabel = computed(() => watch.value?.limiting?.join('、') || '还没看清')
 
 function fmt(value: number | null | undefined) {
@@ -78,10 +81,10 @@ function fmt(value: number | null | undefined) {
         <p><small>还能动用</small><b>{{ fmt(koban?.available) }}</b></p>
       </div>
       <p class="spending-trace">近 {{ koban?.spending_days || 14 }} 天已记清的支出：<b>{{ fmt(koban?.confirmed_spending) }} 小判</b></p>
-      <ul v-if="budgets.length" class="budget-list">
-        <li v-for="goal in budgets" :key="goal.id">
-          <span><b>{{ goal.event || goal.note || '活动预算' }}</b><small v-if="goal.impact_days">会让攒钱目标推迟约 {{ goal.impact_days }} 天</small></span>
-          <strong>{{ fmt(goal.target) }}</strong>
+      <ul v-if="budgetRows.length" class="budget-list">
+        <li v-for="budget in budgetRows" :key="budget.id">
+          <span><b>{{ budget.event }}</b><small v-if="budget.source === 'estimated'">补票预估</small></span>
+          <strong>{{ budget.amount == null ? '待估算' : fmt(budget.amount) }}</strong>
         </li>
       </ul>
       <button type="button" class="secondary" @click="emit('openExpedition')">去安排小判远征</button>
