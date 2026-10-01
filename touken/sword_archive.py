@@ -224,6 +224,15 @@ def build_sword_archive(store) -> dict:
     from .game_sword_archive import read_archive
     game_state = read_archive(store) if hasattr(store, "db_path") else None
     departures = (game_state or {}).get("departures") or {}
+    from . import sword_db
+    from .youzu_log import _sword_name
+    sword_departures = [
+        {"serial_id": int(serial), "ts": item.get("observed_at"),
+         "reason": item.get("reason"),
+         "name": _sword_name((item.get("sword") or {}).get("sword_id"), sword_db)
+                 if (item.get("sword") or {}).get("sword_id") else None}
+        for serial, item in departures.items()
+    ]
     # 旧完整名单能证明曾持有、当前完整名单已经没有：保留标注，退出待核对。
     # 没有旧名单佐证的错误指纹仍待核对；不能猜它被用于乱舞、链结或刀解。
     for ann in annotations:
@@ -266,7 +275,8 @@ def build_sword_archive(store) -> dict:
             "snapshot_id": (pool.get("source") or {}).get("snapshot_id"),
             "data_source": (pool.get("source") or {}).get("kind") or "ocr",
             "summary": summary, "entries": out_entries, "attention": attention,
-            "historical_annotations": historical_annotations}
+            "historical_annotations": historical_annotations,
+            "sword_departures": sword_departures}
 
 
 def get_sword_archive(store=None) -> dict:

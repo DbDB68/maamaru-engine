@@ -768,6 +768,7 @@ export interface SwordArchiveResponse {
   entries: SwordArchiveEntry[]
   attention: SwordArchiveAttentionItem[]
   historical_annotations?: SwordArchiveAttentionItem[]
+  sword_departures?: Array<{ serial_id: number; ts: number; reason: string; name: string | null }>
 }
 
 export interface SwordAnnotationBody {

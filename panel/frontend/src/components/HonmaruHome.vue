@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { buildJournalPosts } from '../honmaruJournal'
+import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
 import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
@@ -17,6 +19,8 @@ const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
 const dayPlan = ref<DayTimeline | null>(null)
 const swordEvents = ref<any[]>([])
+const journalEvents = ref<any[]>([])
+const swordDepartures = ref<any[]>([])
 const swordEventsTruncated = ref(false)
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
@@ -55,9 +59,11 @@ const welcome = computed(() => profile.value.saniwa_name ? `${profile.value.sani
 const active = computed(() => props.busy || props.activity?.active)
 const homeName = computed(() => profile.value.honmaru_name || '我的本丸')
 const entries = computed(() => {
-  const personal = notes.value.map(note => ({ key: `note-${note.id}`, ts: note.created_at, note, run: null as any }))
-  const work = filter.value === 'notes' ? [] : runs.value.map(run => ({ key: `run-${run.run_id}`, ts: Number(run.ended_at || run.started_at), note: null as HonmaruNote | null, run }))
-  return [...personal, ...work].sort((a, b) => b.ts - a.ts)
+  const personal = notes.value.map(note => ({ key: `note-${note.id}`, ts: note.created_at, note, run: null as any, post: null as JournalPost | null }))
+  const work = filter.value === 'notes' ? [] : runs.value.map(run => ({ key: `run-${run.run_id}`, ts: Number(run.ended_at || run.started_at), note: null as HonmaruNote | null, run, post: null as JournalPost | null }))
+  const posts = filter.value === 'notes' ? [] : buildJournalPosts(journalEvents.value, swordDepartures.value)
+    .map(post => ({ key: post.key, ts: post.ts, note: null as HonmaruNote | null, run: null as any, post }))
+  return [...personal, ...work, ...posts].sort((a, b) => b.ts - a.ts)
 })
 const visibleEntries = computed(() => entries.value.slice(0, limit.value))
 const groups = computed(() => {
@@ -225,12 +231,14 @@ async function loadSummaries() {
     { label: '近期记录', run: async () => { runs.value = (await api.dataRuns(12)).items } },
     { label: '规划', run: async () => { planning.value = await api.planning() } },
     { label: '今日安排', run: async () => { dayPlan.value = await api.dayTimeline() } },
-    { label: '今日刀剑收获', run: async () => {
+    { label: '本丸收获', run: async () => {
       const from = Date.parse(`${today.value}T00:00:00+08:00`) / 1000
-      const data = await api.dataEvents(1000, undefined, from, from + 86400)
-      swordEvents.value = data.items
+      const data = await api.dataEvents(1000, undefined, from - 6 * 86400, from + 86400)
+      journalEvents.value = data.items
+      swordEvents.value = data.items.filter(item => Number(item.ts) >= from)
       swordEventsTruncated.value = data.has_more
     } },
+    { label: '刀剑整理', run: async () => { swordDepartures.value = (await api.swordArchive()).sword_departures || [] } },
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
     { label: '家底', run: async () => { inventory.value = (await api.dashboard()).inventory } },
     { label: '游戏近况', run: async () => { situation.value = (await api.honmaruSituation()).situation } },
@@ -340,6 +348,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         <h3 class="journal-date">{{ dateLabel(group.date) }}<span v-if="group.date === today">{{ today.replaceAll('-', '.') }}</span></h3>
         <article v-for="entry in group.entries" :key="entry.key" class="journal-entry" :class="{ 'personal-entry': entry.note, 'attention-entry': entry.run?.status === 'failed' }">
           <template v-if="entry.note"><header class="entry-head"><span class="entry-avatar personal-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt=""><span v-else aria-hidden="true">{{ (profile.saniwa_name || '审').slice(0, 1) }}</span></span><span class="entry-identity"><strong>{{ profile.saniwa_name || '审神者' }}</strong><small>我的小记 · <time>{{ eventTime(entry.ts) }}</time></small></span><button type="button" class="home-text-button" @click="writeNote(entry.note)">修改</button></header><p class="entry-body">{{ entry.note.body }}</p><small v-if="entry.note.updated_at" class="entry-updated">修改于 {{ eventTime(entry.note.updated_at) }}</small></template>
+          <template v-else-if="entry.post"><header class="entry-head"><span class="entry-avatar fox-avatar"><img :src="'/static/img/fox_frames/v2/idle/transparent/frame_01.png'" alt=""></span><span class="entry-identity"><strong>狐之助</strong><small>{{ entry.post.label }} · <time>{{ eventTime(entry.ts) }}</time></small></span></header><div class="entry-scene" :style="{ backgroundImage: `url('/static/img/${entry.post.scene}')` }" aria-hidden="true"><span class="scene-stamp"><img :src="`/static/img/ui/${entry.post.icon}`" alt=""></span></div><div class="entry-story"><h4>{{ entry.post.title }}</h4><p>{{ entry.post.text }}</p><div v-if="entry.post.facts.length" class="entry-facts"><span v-for="fact in entry.post.facts" :key="fact">{{ fact }}</span></div></div><footer v-if="entry.post.label !== '刀剑手记'"><button type="button" class="home-text-button" @click="emit('records')">去账房翻记录 →</button></footer></template>
           <template v-else><header class="entry-head"><span class="entry-avatar fox-avatar"><img :src="'/static/img/fox_frames/v2/idle/transparent/frame_01.png'" alt=""></span><span class="entry-identity"><strong>狐之助</strong><small>{{ runPostKind(entry.run).label }} · <time>{{ eventTime(entry.ts) }}</time></small></span><span class="entry-status" :class="{ 'needs-attention': entry.run.status === 'failed' }">{{ runStatusLabel(entry.run) }}</span></header><div class="entry-scene" :style="{ backgroundImage: `url('/static/img/${runPostKind(entry.run).scene}')` }" aria-hidden="true"><span class="scene-stamp"><img :src="`/static/img/ui/${runPostKind(entry.run).icon}`" alt=""></span></div><div class="entry-story"><h4>{{ runTitle(entry.run) }}</h4><p>{{ runPostText(entry.run) }}</p><div v-if="runPostFacts(entry.run).length" class="entry-facts"><span v-for="fact in runPostFacts(entry.run)" :key="fact">{{ fact }}</span></div></div><footer><button type="button" class="home-text-button" @click="emit('records')">翻开这趟记录 →</button></footer></template>
         </article>
       </section>
