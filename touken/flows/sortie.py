@@ -83,7 +83,8 @@ class SortieMixin:
                       auto_equip: bool = True,
                       retreat_before_boss: bool = False,
                       rotate_captain: bool = False,
-                      rotate_captain_margin: int = 10):
+                      rotate_captain_margin: int = 10,
+                      stop_on_fatigue: bool = True):
         yield from self._map_sortie_stream(
             chapter=chapter, map_no=map_no, team_no=team_no,
             auto_march=auto_march, max_loops=max_loops,
@@ -94,6 +95,7 @@ class SortieMixin:
             retreat_before_boss=retreat_before_boss,
             rotate_captain=rotate_captain,
             rotate_captain_margin=rotate_captain_margin,
+            stop_on_fatigue=stop_on_fatigue,
         )
 
     def yosari_stream(self, map_no: int, team_no: int = 3,
@@ -105,7 +107,8 @@ class SortieMixin:
                       injury_action: str = "continue",
                       auto_equip: bool = True,
                       rotate_captain: bool = False,
-                      rotate_captain_margin: int = 10):
+                      rotate_captain_margin: int = 10,
+                      stop_on_fatigue: bool = True):
         """流式跑常驻玩法“异去”；目前只有第一章。"""
         yield from self._map_sortie_stream(
             chapter=1, map_no=map_no, team_no=team_no,
@@ -117,6 +120,7 @@ class SortieMixin:
             auto_equip=auto_equip,
             rotate_captain=rotate_captain,
             rotate_captain_margin=rotate_captain_margin,
+            stop_on_fatigue=stop_on_fatigue,
             map_type="异去", cfg_key="yosari",
         )
 
@@ -132,7 +136,8 @@ class SortieMixin:
                            rotate_captain: bool = False,
                            rotate_captain_margin: int = 10,
                            map_type: str = "合战场",
-                           cfg_key: str = "sortie"):
+                           cfg_key: str = "sortie",
+                           stop_on_fatigue: bool = True):
         """
         流式跑合战场
 
@@ -169,6 +174,12 @@ class SortieMixin:
 
         # 硬保护：王点前撤退必须脚本亲手盯小地图走；委托挂上后路线全归游戏，
         # 撤退会静默失效直接进王点。面板只是隐藏开关不是清空，这里必须兜底。
+        from ..auto_march_settings import march_policy
+        policy = march_policy(repair_threshold, injury_action, auto_equip,
+                              stop_on_fatigue, formation)
+        if auto_march and policy is None:
+            yield "[出阵] 游戏没有轻伤停止设定，改用脚本行军执行轻伤停止"
+            auto_march = False
         if retreat_before_boss and auto_march and cfg_key == "sortie":
             yield ("[出阵] 🛡️ 王点前撤退和自动行军只能二选一"
                    "（撤退得脚本盯着小地图走），本轮改用脚本手动行军")
@@ -389,6 +400,9 @@ class SortieMixin:
             # ========== 6. 同步游戏自动行军开关 ==========
             delegated_march = False
             if auto_march:
+                if not self._configure_auto_march_settings(policy):
+                    yield "[出阵] ⚠️ 自动行军详细设定没能确认，停止出阵"
+                    return
                 delegated_march = self._enable_auto_march()
                 time.sleep(0.5)
                 if not delegated_march:
@@ -545,6 +559,10 @@ class SortieMixin:
                             end_loop("sortie.interrupted", "unknown",
                                      reason="auto_march_stopped_return_failed")
                             yield "[出阵] 找不到返回本丸按钮，停止点击，等你手动处理"
+                            return
+                        if not field_injury or not self._injury_reaches_threshold(field_injury, repair_threshold):
+                            end_loop("sortie.interrupted", "interrupted", reason="auto_march_non_injury_stop")
+                            yield "[出阵] 游戏自动行军因其他条件停止，已回本丸收工"
                             return
                         interrupted = True
                         interrupt_reason = "auto_march_stopped"

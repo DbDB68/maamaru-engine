@@ -931,6 +931,38 @@ class BattleMixin:
         print(f"[AUTO_MARCH] 委托{'成功' if ok else '失败（标记没出现）'}")
         return ok
 
+    def _configure_auto_march_settings(self, policy) -> bool:
+        from ..auto_march_settings import apply_details
+        cfg = self.config["team_select"]["auto_march"]
+        self.maa.screenshot(force=True)
+        if not self._click_template_config(cfg["enable_button"]):
+            return False
+        for _ in range(10):
+            time.sleep(0.5)
+            self.maa.screenshot(force=True)
+            if self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+                break
+        else:
+            return False
+        detail = self.maa.ocr("详细设定", roi_4to4(450, 400, 820, 510),
+                              match_mode="exact")
+        if not detail:
+            return False
+        self.maa.click(detail)
+        time.sleep(0.6)
+        if not apply_details(self.maa, policy):
+            return False
+        # 标题已验证，此 X 只关闭详细设定。
+        self._click_point([1250, 30])
+        time.sleep(0.6)
+        self.maa.screenshot(force=True)
+        if not self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+            return False
+        self._click_point(cfg["close_window"])
+        time.sleep(0.6)
+        self.maa.screenshot(force=True)
+        return bool(self.maa.template_match(cfg["enable_button"]["template"]))
+
     def _disable_auto_march(self) -> bool:
         """清除游戏记住的委托状态；弹窗未确认时绝不盲点关闭。"""
         cfg = self.config["team_select"]["auto_march"]
@@ -945,7 +977,7 @@ class BattleMixin:
         for _ in range(10):
             time.sleep(0.5)
             self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["delegate_button"]["template"]):
+            if self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
                 opened = True
                 break
         if not opened:

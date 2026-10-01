@@ -116,6 +116,9 @@ class _LoopHost(SortieMixin):
     def _disable_auto_march(self):
         return True
 
+    def _configure_auto_march_settings(self, policy):
+        return True
+
     def _enable_auto_march(self):
         return True
 
@@ -246,13 +249,21 @@ class LoopFactTests(unittest.TestCase):
         self.assertIsNotNone(payload["duration_seconds"])
         self.assertEqual(host.by_type("sortie.completed"), [])
 
+    def test_non_injury_stop_does_not_retry_forever(self):
+        host = _LoopHost(PRE + [{"march_stop"}], injuries=[None, None])
+        logs = _run(host, auto_march=True, max_loops=1, repair_threshold="medium")
+        self.assertEqual(len(host.by_type("sortie.loop_started")), 1)
+        self.assertEqual(host.by_type("sortie.interrupted")[0]["payload"]["interrupt_reason"],
+                         "auto_march_non_injury_stop")
+        self.assertTrue(any("其他条件停止" in msg for msg in logs))
+
     def test_interruption_then_retry_same_sequence(self):
         frames = (PRE
                   + [{"result"}, {"march_stop"}]
                   + PRE
                   + [{"result"}, {}, {"home"}])
         host = _LoopHost(frames, injuries=[None, "中伤", None])
-        _run(host, auto_march=True, max_loops=1)
+        _run(host, auto_march=True, max_loops=1, repair_threshold="medium")
 
         types = [e["event_type"] for e in host.events]
         self.assertEqual(types, ["sortie.loop_started", "sortie.interrupted",

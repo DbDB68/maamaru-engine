@@ -62,6 +62,9 @@ class _Host(SortieMixin):
     def _disable_auto_march(self):
         return True
 
+    def _configure_auto_march_settings(self, policy):
+        return True
+
     def _enable_auto_march(self):
         self.march_calls += 1
         return True
@@ -80,7 +83,7 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
         # 面板只是隐藏开关不是清空：retreat=true 和 auto_march=true 可能同时
         # 到达引擎。撤退必须脚本盯小地图，委托一旦挂上撤退就静默失效。
         host = _Host()
-        logs = _run(host, auto_march=True, retreat_before_boss=True)
+        logs = _run(host, auto_march=True, retreat_before_boss=True, repair_threshold="medium")
 
         self.assertTrue(any("二选一" in msg for msg in logs))
         self.assertEqual(host.march_calls, 0)
@@ -103,9 +106,26 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
         host._click_depart.assert_not_called()
         self.assertTrue(any("自动行军已关闭" in msg for msg in logs))
 
+    def test_light_stop_uses_script_without_configuring_game(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._configure_auto_march_settings = Mock()
+        logs = _run(host, auto_march=True, repair_threshold="light")
+        host._configure_auto_march_settings.assert_not_called()
+        self.assertEqual(host.march_calls, 0)
+        self.assertTrue(any("轻伤停止" in msg for msg in logs))
+
+    def test_detail_verification_failure_blocks_departure(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._configure_auto_march_settings = Mock(return_value=False)
+        host._click_depart = Mock()
+        _run(host, auto_march=True, repair_threshold="heavy")
+        host._click_depart.assert_not_called()
+
     def test_without_retreat_delegates_normally(self):
         host = _Host()
-        logs = _run(host, auto_march=True, retreat_before_boss=False)
+        logs = _run(host, auto_march=True, retreat_before_boss=False, repair_threshold="medium")
 
         self.assertFalse(any("二选一" in msg for msg in logs))
         self.assertEqual(host.march_calls, 1)

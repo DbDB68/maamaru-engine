@@ -1447,7 +1447,8 @@ class DisableAutoMarchTests(unittest.TestCase):
         host.maa = Mock()
         host.maa.exists.side_effect = [delegated, final]
         host.maa.template_match.side_effect = lambda tpl: opened if tpl == 'delegate' else True
-        host.maa.ocr.return_value = Point(400, 300) if cancel else None
+        host.maa.ocr.side_effect = lambda text, *args, **kwargs: (
+            Point(400, 300) if (text == '自动行军' and opened) or (text == '不委托' and cancel) else None)
         host._click_template_config = Mock(return_value=True)
         host._click_point = Mock()
         return host
@@ -1462,7 +1463,7 @@ class DisableAutoMarchTests(unittest.TestCase):
     def test_on_is_cancelled_and_verified(self, sleep):
         host = self.host(True)
         self.assertTrue(host._disable_auto_march())
-        host.maa.ocr.assert_called_once()
+        self.assertEqual(host.maa.ocr.call_args.args[0], '不委托')
         self.assertEqual(host.maa.ocr.call_args.kwargs['match_mode'], 'exact')
         host.maa.click.assert_called_once_with(Point(400, 300))
         host._click_point.assert_called_once_with([1038, 47])

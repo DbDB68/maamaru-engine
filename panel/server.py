@@ -233,11 +233,14 @@ def _captain_rotation_fields(*, daily_inherits: bool = False):
 
 
 def _march_and_injury_fields():
-    """合战场与异去共享；阵形仅在脚本行军时显示。"""
+    """合战场与异去共享；阵形策略仅脚本行军使用，兜底阵形也同步到游戏委托。"""
     return [
         *_captain_rotation_fields(daily_inherits=True),
         {"key": "auto_march", "type": "toggle", "label": "是否使用自动行军",
-         "default": True},
+         "default": True,
+         "help": "委托前同步游戏详细设定；轻伤停止改用脚本行军。"},
+        {"key": "stop_on_fatigue", "type": "toggle", "label": "重疲劳时停止",
+         "default": True, "visibleWhen": {"key": "auto_march", "is": "true"}},
         {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
          "options": [["manual", "手动阵形"],
                      ["auto", "自动阵形"]],
@@ -247,8 +250,7 @@ def _march_and_injury_fields():
          "label": "固定或识别失败时的兜底阵形",
          "options": [[name, name] for name in
                      ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
-         "default": "鱼鳞阵",
-         "visibleWhen": {"key": "auto_march", "is": "false"}},
+         "default": "鱼鳞阵"},
         {"key": "repair_threshold", "type": "select", "label": "伤势停止条件",
          "options": [["light", "轻伤时停止"],
                      ["medium", "中伤时停止"],
@@ -428,6 +430,7 @@ def _daily_plan_inputs(params):
                        "loops": _i(params, "yosari_runs", 1),
                        "auto_refill": _bool(params.get("yosari_auto_refill", False)),
                        "auto_march": _bool(params.get("auto_march", True)),
+                       "stop_on_fatigue": _bool(params.get("stop_on_fatigue", True)),
                        "formation_mode": params.get("formation_mode") or "manual",
                        "formation": params.get("formation") or "鱼鳞阵",
                        "repair_threshold": params.get("repair_threshold") or "light",
@@ -444,6 +447,7 @@ def _daily_plan_inputs(params):
                        "loops": _i(params, "loops", 1),
                        "team_no": sortie_team,
                        "auto_march": _bool(params.get("auto_march", True)),
+                       "stop_on_fatigue": _bool(params.get("stop_on_fatigue", True)),
                        "formation_mode": params.get("formation_mode") or "manual",
                        "formation": params.get("formation") or "鱼鳞阵",
                        "repair_threshold": params.get("repair_threshold") or "light",
@@ -665,6 +669,7 @@ def _build_sortie(agent, config_path, params):
         map_no=_i(params, "map_no", 1),
         team_no=team_no,
         auto_march=_bool(params.get("auto_march", True)),
+        stop_on_fatigue=_bool(params.get("stop_on_fatigue", True)),
         max_loops=_run_count(params, 1, "loops"),
         formation_mode=params.get("formation_mode") or "manual",
         formation=params.get("formation") or "鱼鳞阵",
@@ -684,6 +689,7 @@ def _build_yosari(agent, config_path, params):
         map_no=_i(params, "map_no", 1),
         team_no=team_no,
         auto_march=_bool(params.get("auto_march", True)),
+        stop_on_fatigue=_bool(params.get("stop_on_fatigue", True)),
         auto_refill=_bool(params.get("auto_refill", False)),
         max_loops=_run_count(params, 1, "loops"),
         formation_mode=params.get("formation_mode") or "manual",
@@ -1042,6 +1048,10 @@ register_script("daily", "一键日课", "",
                          "label": "是否使用自动行军", "default": True,
                          "visibleWhen": {"key": "sortie_mode",
                                          "is_any": ["yosari", "sortie"]}},
+                        {"key": "stop_on_fatigue", "type": "toggle", "label": "重疲劳时停止",
+                         "default": True, "visibleWhen": {"all": [
+                             {"key": "sortie_mode", "is_any": ["yosari", "sortie"]},
+                             {"key": "auto_march", "is": "true"}]}},
                         {"key": "formation_mode", "type": "select",
                          "label": "阵形选择方式",
                          "options": [["manual", "手动阵形"],
@@ -1057,11 +1067,7 @@ register_script("daily", "一键日课", "",
                          "options": [[name, name] for name in
                                      ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
                          "default": "鱼鳞阵",
-                         "visibleWhen": {"any": [
-                             {"key": "sortie_mode", "is": "osaka"},
-                             {"all": [{"key": "sortie_mode",
-                                       "is_any": ["yosari", "sortie"]},
-                                      {"key": "auto_march", "is": "false"}]}]}},
+                         "visibleWhen": {"key": "sortie_mode", "is_any": ["yosari", "sortie", "osaka"]}},
                         {"key": "repair_threshold", "type": "select",
                          "label": "伤势停止条件",
                          "options": [["light", "轻伤时停止"],
