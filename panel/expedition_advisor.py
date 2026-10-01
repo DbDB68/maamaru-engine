@@ -30,6 +30,7 @@ VALID_TEAMS = (1, 2, 3, 4, 5)
 TEAM_NAMES = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 FORGE_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石")
 KOBAN = "小判"
+FOCUS_RESOURCES = (*FORGE_RESOURCES, KOBAN, "委托符", "加速符")
 
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
               / "touken" / "data" / "expedition_maps.json")
@@ -69,7 +70,8 @@ def _normalize_prefs(value) -> dict:
     if not teams:
         teams = list(DEFAULT_AVAILABLE_TEAMS)
     return {"version": PREFS_VERSION, "rounds_per_team": rounds,
-            "available_teams": sorted(teams)}
+            "available_teams": sorted(teams),
+            "resource_focus": value.get("resource_focus") if value.get("resource_focus") in FOCUS_RESOURCES else ""}
 
 
 def load_prefs(path: Path = PREFS_PATH) -> dict:
@@ -98,9 +100,16 @@ def _as_count(value, label: str) -> int:
     raise ValueError(f"{label}得是个数")
 
 
-def save_prefs(*, rounds_per_team, available_teams,
+def save_prefs(*, rounds_per_team=None, available_teams=None, resource_focus=None,
                path: Path = PREFS_PATH) -> dict:
     """校验落盘（原子替换 + 备份上一版）；参数不合法抛 ValueError。"""
+    previous = load_prefs(path)
+    if rounds_per_team is None:
+        rounds_per_team = previous["rounds_per_team"]
+    if available_teams is None:
+        available_teams = previous["available_teams"]
+    if resource_focus is not None and resource_focus not in (*FOCUS_RESOURCES, ""):
+        raise ValueError("关注项不支持远征补给")
     rounds = _as_count(rounds_per_team, "每队派几次")
     if not 0 <= rounds <= MAX_ROUNDS_PER_TEAM:
         raise ValueError(f"每队派几次要在 0 到 {MAX_ROUNDS_PER_TEAM} 之间")
@@ -118,6 +127,8 @@ def save_prefs(*, rounds_per_team, available_teams,
                               "available_teams": sorted(teams)})
     path = Path(path)
     with _WRITE_LOCK:
+        prefs["resource_focus"] = (load_prefs(path)["resource_focus"]
+                                   if resource_focus is None else resource_focus)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
         temporary.write_text(json.dumps(prefs, ensure_ascii=False, indent=2)
@@ -416,6 +427,8 @@ def _reason(resource, tag, team_no, map_code, map_name, rank,
         head = f"{resource}最缺"
         if isinstance(capacity, (int, float)):
             head += f"（就剩{int(capacity)}炉）"
+    elif tag == "manual":
+        head = f"你选了优先攒{resource}"
     elif tag == "koban":
         head = f"{resource}有目标缺口"
     else:
@@ -506,6 +519,9 @@ def build_expedition_suggestions(prefs: dict, *,
             continue
 
     base_order = shortage_order(planning, len(FORGE_RESOURCES) + 1)
+    focus = prefs.get("resource_focus")
+    if focus in FOCUS_RESOURCES:
+        base_order = [(focus, "manual")] + [item for item in base_order if item[0] != focus]
     suggestions = []
     misses = []
     placed_retry_notes = []  # 班排上了但撞过拉黑组合，如实知会一声
@@ -529,7 +545,8 @@ def build_expedition_suggestions(prefs: dict, *,
                 continue
             start = next_start[team]
             shift_no = counts.get(team, 0) + r + 1  # 今天第几班（含已排的）
-            assigned = base_order[slot % len(base_order)]
+            priority_slot = 0 if focus in FOCUS_RESOURCES else slot
+            assigned = base_order[priority_slot % len(base_order)]
             placed = False
             miss = {"team": team, "shift": r + 1, "resource": "",
                     "fit": False, "level": False, "occupied": False,
@@ -537,7 +554,7 @@ def build_expedition_suggestions(prefs: dict, *,
                     "retry_resource": ""}
             for i in range(len(base_order)):
                 # 本轮资源排不出（没产图/图被占/队不够格）就顺延下一种
-                resource, tag = base_order[(slot + i) % len(base_order)]
+                resource, tag = base_order[(priority_slot + i) % len(base_order)]
                 ranked = sorted(
                     (item for item in maps.items()
                      if _per_hour(item[1], resource) > 0

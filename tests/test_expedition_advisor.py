@@ -993,3 +993,30 @@ class ExpeditionMapsDataTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedResourceFocusTests(unittest.TestCase):
+    def test_preference_preserves_focus_and_backups_then_restores_auto(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "prefs.json"
+            path.write_text(json.dumps(_prefs()), encoding="utf-8")
+            self.assertEqual(ea.load_prefs(path)["resource_focus"], "")
+            ea.save_prefs(resource_focus="小判", path=path)
+            self.assertEqual(json.loads(path.with_suffix(".json.bak").read_text())["available_teams"], [1, 4])
+            ea.save_prefs(rounds_per_team=2, available_teams=[4], path=path)
+            self.assertEqual(ea.load_prefs(path)["resource_focus"], "小判")
+            ea.save_prefs(resource_focus="", path=path)
+            self.assertEqual(ea.load_prefs(path)["rounds_per_team"], 2)
+            self.assertEqual(ea.load_prefs(path)["resource_focus"], "")
+            with self.assertRaises(ValueError):
+                ea.save_prefs(resource_focus="甲州金", path=path)
+
+    def test_manual_choice_changes_actual_recommended_map(self):
+        with tempfile.TemporaryDirectory() as folder:
+            situation = _write_situation(folder, {})
+            args = dict(planning=_planning(), maps=_MAPS, situation_path=situation, now_min=60)
+            auto = ea.build_expedition_suggestions(_prefs(available_teams=(4,)), **args)
+            manual = ea.build_expedition_suggestions({**_prefs(available_teams=(4,)), "resource_focus": "小判"}, **args)
+            self.assertEqual(auto["suggestions"][0]["resource"], "砥石")
+            self.assertEqual(manual["suggestions"][0]["resource"], "小判")
+            self.assertEqual(manual["suggestions"][0]["map_code"], "D4")

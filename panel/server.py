@@ -2290,7 +2290,8 @@ async def api_save_expedition_help_prefs(request: Request):
         prefs = expedition_advisor.save_prefs(
             rounds_per_team=body.get("rounds_per_team",
                                      body.get("teams_out")),  # 旧前端兜底
-            available_teams=body.get("available_teams"))
+            available_teams=body.get("available_teams"),
+            resource_focus=body.get("resource_focus"))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "expedition_help": prefs}

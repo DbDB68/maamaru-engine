@@ -572,8 +572,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                                     records=expedition_records)
     if expedition_help is None:
         expedition_help = expedition_advisor.load_prefs()
-    if planning is None and int(expedition_help.get("rounds_per_team")
-                                or 0) > 0:
+    if planning is None:
         planning = _load_planning_snapshot(store)
     now_min = (now - day_start) / 60
     # 每队已排班计数（在跑/待收/已点的班都算一班），引擎按每队 N 班补足；
@@ -669,6 +668,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             "rounds_per_team": int(expedition_help.get("rounds_per_team")
                                    or 0),
             "available_teams": list(expedition_help.get("available_teams") or []),
+            "resource_focus": expedition_help.get("resource_focus") or "",
+            "suggested_resource": expedition_advisor.shortage_order(planning, 1)[0][0] if expedition_advisor._planning_has_data(planning) else "",
         },
         "expedition_suggestions": advice["suggestions"],
         "expedition_advice_note": advice["note"],

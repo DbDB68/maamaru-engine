@@ -23,6 +23,19 @@ const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const dayTimeline = ref<DayTimelineData | null>(null)
 const dayTimelineRequest = ref(0)
+const focusRefresh = ref(0)
+const focusSaving = ref(false)
+async function changeResourceFocus(resource: string) {
+  focusSaving.value = true
+  try {
+    await api.setExpeditionResourceFocus(resource)
+    focusRefresh.value++
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '关注项保存失败'
+  } finally {
+    focusSaving.value = false
+  }
+}
 const loading = ref(false)
 const error = ref('')
 const timelineError = ref('')
@@ -387,8 +400,8 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @open-expedition="emit('openExpedition')" />
-    <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" @open-expedition="emit('openExpedition')" />
+    <DayTimeline :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @open-expedition="emit('openExpedition')" />
+    <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
     <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 
     <header class="planning-toolbar">

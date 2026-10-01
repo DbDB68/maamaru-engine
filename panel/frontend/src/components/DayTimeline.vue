@@ -5,7 +5,7 @@ import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, 
 import PaperCard from './PaperCard.vue'
 import { canAdoptRaidRecommendation } from './report/planningLinkModel'
 
-const props = withDefaults(defineProps<{ collapsible?: boolean; adoptRecommendationRequest?: number }>(), {
+const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
   adoptRecommendationRequest: 0,
 })
@@ -391,6 +391,8 @@ async function openRaidRecommendation() {
   document.querySelector('.tl-booking-editor')?.scrollIntoView({ behavior, block: 'start' })
   return true
 }
+
+watch(() => props.refreshRequest, () => { void load() })
 
 watch(() => props.adoptRecommendationRequest, (request, previous) => {
   if (request > previous) void openRaidRecommendation()

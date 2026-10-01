@@ -7,14 +7,14 @@ import ForgePityEstimate from './ForgePityEstimate.vue'
 const props = defineProps<{
   planning: PlanningReport
   budgets: PlanningGoalAdvice[]
+  resourceFocus?: string
+  suggestedResource?: string
+  focusSaving?: boolean
 }>()
-const emit = defineEmits<{ openExpedition: [] }>()
+const emit = defineEmits<{ openExpedition: []; changeFocus: [resource: string] }>()
 
-// 只在本次面板会话中记住玩家改选的关注项，不写入目标或排班。
-const manualFocus = ref('')
 const focusOptions = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
-const suggestion = computed(() => resourceSuggestion(props.planning))
-const focusResource = computed(() => manualFocus.value || suggestion.value?.resource || '')
+const focusResource = computed(() => resourceSuggestion({ rounds_per_team: 0, available_teams: [], resource_focus: props.resourceFocus, suggested_resource: props.suggestedResource }))
 const forgeMode = ref<'normal' | 'ten'>('normal')
 const watch = computed(() => forgeMode.value === 'ten'
   ? props.planning.resource_watch?.ten_forge
@@ -29,13 +29,13 @@ function fmt(value: number | null | undefined) {
 
 <template>
   <section class="planning-overview">
-    <div v-if="suggestion" class="planning-focus">
+    <div v-if="focusResource" class="planning-focus">
       <div>
-        <small>{{ manualFocus ? '你选的关注项' : '狐之助的小建议' }}</small>
-        <strong>优先攒：{{ focusResource }}</strong>
+        <small>{{ resourceFocus ? '你选的关注项' : '狐之助的小建议' }}</small>
+        <strong>远征优先攒：{{ focusResource }}</strong>
       </div>
       <label>换个关注项
-        <select v-model="manualFocus">
+        <select :value="resourceFocus || ''" :disabled="focusSaving" @change="emit('changeFocus', ($event.target as HTMLSelectElement).value)">
           <option value="">交给狐之助建议</option>
           <option v-for="name in focusOptions" :key="name" :value="name">{{ name }}</option>
         </select>
