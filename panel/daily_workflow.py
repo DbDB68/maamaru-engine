@@ -157,8 +157,7 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
 
     workflow.register_node({
         "type": "ledger_sync", "label": "账本同步",
-        "desc": "拉取国服客户端流量日志，解析成精确资源流水记入账房（只读、"
-                "原档阅后即焚）；目前只随一键日课殿后运行。",
+        "desc": "拉取日志，去敏记账，原始日志阅后即焚。",
         "category": "finish", "params": [], "run": daily_ledger_sync,
         "template_only": True})
 
