@@ -593,3 +593,61 @@ class AdhocDispatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_dispatch_does_not_depart_after_preset_failure(tmp_path):
+    from panel import server, expedition_advisor as ea
+    from touken import custom_formations as cf
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter(["收菜"])
+    preset = {"formation_id": "f5", "formation_signature": "sig",
+              "party": {"sum": 600, "max": 99, "names": ["药研藤四郎"]}, "record": {}}
+    def fail(*args, **kwargs):
+        yield "套预设失败"
+        return False
+    with patch.object(server, "STATUS_DIR", tmp_path), patch.object(server, "_read_expedition_records", return_value={}), \
+         patch.object(ea, "expedition_formation_options", return_value=[preset]), \
+         patch.object(cf, "apply_formation_preset_stream", side_effect=fail):
+        list(server._build_dispatch(agent, "unused", {"team_no": 5, "map_code": "B1",
+             "scheduled": True, "slot_key": "k5", "formation_id": "f5", "formation_signature": "sig"}))
+    agent.expedition_stream.assert_not_called()
+    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "failed"
+
+
+def test_dispatch_changed_preset_does_not_touch_formation(tmp_path):
+    from panel import server, expedition_advisor as ea
+    from touken import custom_formations as cf
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter([])
+    with patch.object(server, "STATUS_DIR", tmp_path), patch.object(server, "_read_expedition_records", return_value={}), \
+         patch.object(ea, "expedition_formation_options", return_value=[]), \
+         patch.object(cf, "apply_formation_preset_stream") as apply:
+        list(server._build_dispatch(agent, "unused", {"team_no": 5, "map_code": "B1",
+             "scheduled": True, "slot_key": "k5", "formation_id": "deleted", "formation_signature": "old"}))
+    apply.assert_not_called()
+    agent.expedition_stream.assert_not_called()
+    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "failed"
+
+
+def test_dispatch_applies_preset_before_departure(tmp_path):
+    from panel import server, expedition_advisor as ea
+    from touken import custom_formations as cf
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter(["collect"])
+    agent.expedition_stream.return_value = iter(["[远征] ✅ 部队5已出发"])
+    preset = {"formation_id": "f5", "formation_signature": "sig",
+              "party": {"sum": 600, "max": 99, "names": ["药研藤四郎"]}, "record": {"target_team": 5}}
+    def apply(*args):
+        yield "preset applied"
+        return True
+    with patch.object(server, "STATUS_DIR", tmp_path), patch.object(server, "_read_expedition_records", return_value={}), \
+         patch.object(ea, "expedition_formation_options", return_value=[preset]), \
+         patch.object(cf, "apply_formation_preset_stream", side_effect=apply) as applying:
+        messages = list(server._build_dispatch(agent, "unused", {"team_no": 5, "map_code": "B1",
+             "scheduled": True, "slot_key": "k5", "formation_id": "f5", "formation_signature": "sig"}))
+    assert messages == ["collect", "preset applied", "[远征] ✅ 部队5已出发"]
+    applying.assert_called_once_with(agent, preset["record"])
+    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"

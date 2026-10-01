@@ -350,7 +350,8 @@ def adhoc_due(cfg: dict, forced: dict, now: float, today: str) -> list:
             continue
         out.append({"key": key, "team_no": team_no, "map_code": map_code,
                     "late_min": int(late),
-                    "planned_at": str(record["planned_at"])})
+                    "planned_at": str(record["planned_at"]),
+                    **{key: record[key] for key in ("formation_id", "formation_name", "formation_signature") if record.get(key)}})
     return out
 
 
@@ -448,6 +449,7 @@ def _new_slot(job: dict, cfg: dict, now: float) -> dict:
         # 资本家顺延（record_completed_dispatch）需要的班次上下文
         "late_min": job.get("late_min", 0), "shift_key": job.get("shift_key"),
         "observed_at": now,
+        **{key: job[key] for key in ("formation_id", "formation_name", "formation_signature") if job.get(key)},
     }
 
 
@@ -797,7 +799,8 @@ def start_scheduler(config_path: str, emit_fn):
                 if slot is not None:
                     run_id = runner.start("dispatch", config_path, {
                         "team_no": str(slot["team_no"]), "map_code": slot["map_code"],
-                        "scheduled": True, "slot_key": slot["key"]})
+                        "scheduled": True, "slot_key": slot["key"],
+                        **{key: slot[key] for key in ("formation_id", "formation_signature") if slot.get(key)}})
                     if run_id:
                         inflight = (slot["key"], records.get(
                             str(slot["team_no"]), {}).get("dispatched_at"))

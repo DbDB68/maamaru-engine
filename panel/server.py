@@ -840,6 +840,29 @@ def _build_dispatch(agent, config_path, params):
         time.sleep(min(5, remain))
         remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
     yield from agent.collect_expedition_stream(redispatch=None)
+    if params.get("formation_id"):
+        from touken.runtime_paths import STATE_DIR
+        from .expedition_advisor import (expedition_formation_options, party_levels_from_situation,
+                                         _level_ok, _type_shortfall, load_maps)
+        from touken.custom_formations import apply_formation_preset_stream
+        candidates = expedition_formation_options(team_no, party_levels_from_situation(
+            STATE_DIR / "youzu_home_situation.json"))
+        candidate = next((item for item in candidates
+                          if item["formation_id"] == params["formation_id"]
+                          and item["formation_signature"] == params.get("formation_signature")), None)
+        meta = load_maps().get(code, {})
+        if not candidate or not _level_ok(meta, candidate["party"]) or _type_shortfall(meta, candidate["party"]) is not None:
+            detail = "预设已变更、刀剑被占用或远征条件不满足，请重新安排"
+            if scheduled:
+                _write_dispatch_result(slot_key, "failed", detail)
+            yield f"[远征] ✗ {detail}，本次不换队、不派出"
+            return
+        applied = yield from apply_formation_preset_stream(agent, candidate["record"])
+        if not applied:
+            if scheduled:
+                _write_dispatch_result(slot_key, "failed", "预设没有套好，本次不派出")
+            yield "[远征] ✗ 预设没有套好，本次不派出"
+            return
     dispatch_messages = []
     for message in agent.expedition_stream(
             era=m["era"], map_slot=m["slot"], team_no=team_no):
@@ -2279,6 +2302,8 @@ async def api_adopt_day_expedition_suggestion(request: Request):
          and int(item.get("start_min") or -1) == start_min), None)
     if not suggestion:
         raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
+    if (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
+        raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
     today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"]))
     key = adhoc_key(today, team_no, start_min)
     _, forced = load_choice_sets()
@@ -2287,6 +2312,9 @@ async def api_adopt_day_expedition_suggestion(request: Request):
     set_forced_adhoc(
         key=key, team_no=team_no, map_code=map_code, start_min=start_min,
         duration_min=int(suggestion.get("duration_min") or 0),
+        formation_id=suggestion.get("formation_id") or "",
+        formation_name=suggestion.get("formation_name") or "",
+        formation_signature=suggestion.get("formation_signature") or "",
         planned_at=time.strftime(
             "%Y-%m-%dT%H:%M:%S",
             time.localtime(timeline["day_start"] + start_min * 60)))

@@ -141,6 +141,7 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
         will_run = state not in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED)
         items.append({
             "key": key, "kind": "forced", "planned_at": planned_ts,
+            **{field: record[field] for field in ("formation_id", "formation_name") if record.get(field)},
             "time_min": int((planned_ts - day_start) // 60),
             "duration_min": duration,
             "team_no": team_no,

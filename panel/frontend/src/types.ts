@@ -1011,6 +1011,8 @@ export interface DayTimelineMarker {
 }
 
 export interface DayTimelineExpedition {
+  formation_id?: string
+  formation_name?: string
   key: string
   /** forced = 玩家点的班（含建议采纳的自描述班）；running = 远征中/待收 */
   kind: 'forced' | 'running'
@@ -1059,6 +1061,9 @@ export interface DayExpeditionHelpPrefs {
 
 /** 一条远征建议：引擎按缺口现算的班（队伍/图/时刻自描述）；点采纳 = 记 forced */
 export interface DayExpeditionSuggestion {
+  formation_signature?: string
+  formation_id?: string
+  formation_name?: string
   blocked_resource?: string | null
   restrictions?: string[]
   formation_change?: boolean

@@ -150,7 +150,7 @@ async function adoptExpeditionSuggestion(suggestion: DayExpeditionSuggestion) {
   expeditionMessage.value = ''
   try {
     await api.adoptDayExpeditionSuggestion(
-      suggestion.team_no, suggestion.map_code, suggestion.start_min)
+      suggestion.team_no, suggestion.map_code, suggestion.start_min, suggestion.formation_id, suggestion.formation_signature)
     await load()
     expeditionMessage.value = `部队${TEAM_NAMES[suggestion.team_no] ?? suggestion.team_no} ${fmtMin(suggestion.start_min)} 这班已点上，到点单独派出。`
   } catch (error) {
@@ -585,6 +585,7 @@ const expeditionBlocks = computed(() => {
     const bits = [`${fmtMin(e.time_min)} 部队${team} ${e.map_code}`]
     if (e.duration_min) bits[0] += `（${durationText(e.duration_min)}）`
     bits.push(stateLabel)
+    if (e.formation_name) bits.push(`先换「${e.formation_name}」再派出`)
     if (e.late_min && e.state === 'dispatched') bits.push(`晚${e.late_min}分钟`)
     if (e.blocked_reason) bits.push(e.blocked_reason)
     if (e.kind === 'forced' && e.will_run) bits.push('点的班，到点单独派出')
@@ -912,7 +913,7 @@ const caption = computed(() => {
         </span>
 
       </div>
-      <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}</template></p>
+      <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}<template v-if="s.formation_name">（先换「{{ s.formation_name }}」）</template></template></p>
       <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
         <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
         <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>

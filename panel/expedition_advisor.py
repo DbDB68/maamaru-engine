@@ -14,6 +14,7 @@ v2 起建议不再依赖 preset 排班投影——引擎按缺口排序直接算
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
 import threading
 from pathlib import Path
@@ -453,6 +454,84 @@ def _reason(resource, tag, team_no, map_code, map_name, rank,
     return reason
 
 
+def formation_signature(record: dict) -> str:
+    return hashlib.sha256(json.dumps(record, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
+    """只用已保存且能核清身份、等级、刀种的预设，不借其他队的刀。"""
+    from touken.custom_formations import load_formations, resolve_formation_slots, _current_candidate_pool
+    if not parties or team not in parties:
+        return []
+    other_names = {name.removesuffix("·极").strip()
+                   for number, party in parties.items() if number != team
+                   for name in party.get("names", []) if name}
+    formations = load_formations()
+    # 已采纳的其他队换队班也保留人选，避免两班同时争用同一振。
+    from .expedition_choices import load_choice_sets, adhoc_planned_date
+    from datetime import date
+    from touken import sword_db
+    _, forced = load_choice_sets()
+    by_id = {record.get("id"): record for record in formations}
+    for booking in forced.values():
+        if not isinstance(booking, dict) or booking.get("team_no") == team or adhoc_planned_date(booking) != date.today().isoformat():
+            continue
+        reserved = by_id.get(booking.get("formation_id"), {})
+        for entry in reserved.get("slots", {}).values():
+            info = sword_db.all_swords().get(entry.get("sword_catalog_id"), {})
+            name = entry.get("name_zh") or info.get("name_zh") or info.get("name") or ""
+            if name:
+                other_names.add(name.removesuffix("·极").strip())
+    options = []
+    for record in formations:
+        if record.get("target_team") != team:
+            continue
+        applied_record = record
+        if any(entry.get("selection_policy") == "locked_highest_level" for entry in record.get("slots", {}).values()):
+            pool = _current_candidate_pool()
+            if not pool.get("done"):
+                continue
+            pinned = {}
+            for key, saved in record["slots"].items():
+                if saved.get("selection_policy") != "locked_highest_level":
+                    pinned[key] = saved
+                    continue
+                matches = [entry for entry in pool.get("entries", [])
+                           if entry.get("sword_catalog_id") == saved.get("sword_catalog_id")
+                           and entry.get("form_status") == saved.get("form_status")]
+                if not matches or any(type(entry.get("level")) is not int
+                                      or entry.get("lock_status") not in ("locked", "unlocked") for entry in matches):
+                    break
+                locked = [entry for entry in matches if entry["lock_status"] == "locked"]
+                if not locked:
+                    break
+                highest = max(entry["level"] for entry in locked)
+                top = [entry for entry in locked if entry["level"] == highest]
+                if len(top) != 1:
+                    break
+                pinned[key] = {**top[0], **{field: saved[field] for field in ("troops", "horse", "charm", "treasure") if saved.get(field)}}
+            if len(pinned) != len(record["slots"]):
+                continue
+            applied_record = {**record, "slots": pinned}
+        prepared = resolve_formation_slots(applied_record)
+        if not prepared.get("ok"):
+            continue
+        entries = list(prepared["slots"].values())
+        if any(entry.get("selection_policy") == "locked_highest_level"
+               or type(entry.get("level")) is not int or entry["level"] <= 0
+               for entry in entries):
+            continue
+        party = {"sum": sum(entry["level"] for entry in entries),
+                 "max": max(entry["level"] for entry in entries), "count": len(entries),
+                 "names": [str(entry.get("name_zh") or entry.get("name") or "") for entry in entries]}
+        if not all(party_sword_types(party)) or any(
+                name.removesuffix("·极").strip() in other_names for name in party["names"]):
+            continue
+        options.append({"formation_id": record["id"], "formation_name": record["name"],
+                        "formation_signature": formation_signature(record), "party": party, "record": applied_record})
+    return options
+
+
 def build_expedition_suggestions(prefs: dict, *,
                                  planning=None, maps: dict | None = None,
                                  situation_path: Path | None = None,
@@ -527,7 +606,9 @@ def build_expedition_suggestions(prefs: dict, *,
     if focus in FOCUS_RESOURCES:
         base_order = [(focus, "manual")] + [item for item in base_order if item[0] != focus]
     suggestions = []
+    preset_options = {team: expedition_formation_options(team, party_levels) for team in teams}
     misses = []
+    reserved_names = set()
     placed_retry_notes = []  # 班排上了但撞过拉黑组合，如实知会一声
     busy: dict[int, int] = {}
     for team, until in (team_busy_until or {}).items():
@@ -572,7 +653,11 @@ def build_expedition_suggestions(prefs: dict, *,
                     continue
                 if not miss["resource"]:
                     miss["resource"] = resource
-                for map_code, meta in ranked:
+                candidates = [(code, meta, None) for code, meta in ranked]
+                candidates += [(code, meta, preset) for preset in preset_options[team] for code, meta in ranked]
+                for map_code, meta, preset in candidates:
+                    if preset and any(name.removesuffix("·极").strip() in reserved_names for name in preset["party"]["names"]):
+                        continue
                     def blocked(detail):
                         if resource == assigned[0]:
                             restrictions.append(f"{map_code}：{detail}")
@@ -594,7 +679,7 @@ def build_expedition_suggestions(prefs: dict, *,
                         if not miss["retry_resource"]:
                             miss["retry_resource"] = resource
                         continue
-                    party = (party_levels or {}).get(team)
+                    party = preset["party"] if preset else (party_levels or {}).get(team)
                     level_detail = _level_shortfall(meta, party)
                     shortfall = _type_shortfall(meta, party)
                     if level_detail:
@@ -632,7 +717,11 @@ def build_expedition_suggestions(prefs: dict, *,
                     if i:
                         reason += (f"；本轮的{assigned[0]}排不出，"
                                    f"顺延补{resource}")
+                    if preset:
+                        reserved_names.update(name.removesuffix("·极").strip() for name in preset["party"]["names"])
+                        reason += f"；先换成「{preset['formation_name']}」再派出"
                     suggestions.append({
+                        **({key: preset[key] for key in ("formation_id", "formation_name", "formation_signature")} if preset else {}),
                         "kind": "expedition",
                         "key": f"suggest:{team}:{map_code}:{start}",
                         "team_no": team,

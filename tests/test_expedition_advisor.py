@@ -1050,3 +1050,76 @@ class SharedResourceFocusTests(unittest.TestCase):
             self.assertEqual(auto["suggestions"][0]["resource"], "砥石")
             self.assertEqual(manual["suggestions"][0]["resource"], "小判")
             self.assertEqual(manual["suggestions"][0]["map_code"], "D4")
+
+
+def test_recommendation_uses_preset_only_when_current_team_cannot_go(tmp_path):
+    situation = tmp_path / "situation.json"
+    situation.write_text(json.dumps({"parties": [{"party_no": 5, "members": [
+        {"name": "小豆长光", "level": 39}]}]}), encoding="utf-8")
+    maps = {"A2": {"duration_min": 20, "冷却材": 45,
+                   "rules": {"total_level": 100, "required_types": {"短刀": 1}}}}
+    preset = {"formation_id": "f5", "formation_name": "远征五", "formation_signature": "sig",
+              "party": {"sum": 120, "max": 60, "names": ["药研藤四郎", "小豆长光"]}}
+    args = dict(planning=_planning(limiting=("冷却材",)), maps=maps,
+                situation_path=situation, now_min=60)
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions(_prefs(available_teams=(5,)), **args)
+    assert out["suggestions"][0]["formation_id"] == "f5"
+    assert "先换成「远征五」" in out["suggestions"][0]["reason"]
+    maps["A2"]["rules"] = {}
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions(_prefs(available_teams=(5,)), **args)
+    assert "formation_id" not in out["suggestions"][0]
+
+
+def test_preset_rejects_borrowing_other_teams_and_unknown_levels():
+    from touken import custom_formations as cf
+    record = {"id": "f5", "name": "远征五", "target_team": 5,
+              "slots": {"1": {"name_zh": "药研藤四郎", "level": 99}}}
+    parties = {5: {"names": ["小豆长光"]}, 1: {"names": ["药研藤四郎"]}}
+    with patch.object(cf, "load_formations", return_value=[record]), patch.object(
+            cf, "resolve_formation_slots", return_value={"ok": True, "slots": record["slots"]}):
+        assert ea.expedition_formation_options(5, parties) == []
+        parties[1]["names"] = []
+        assert ea.expedition_formation_options(5, parties)[0]["party"]["sum"] == 99
+        record["slots"]["1"].pop("level")
+        assert ea.expedition_formation_options(5, parties) == []
+
+
+def test_preset_choice_survives_persistence_and_scheduler_slot(tmp_path):
+    from panel import scheduler
+    from datetime import datetime
+    path = tmp_path / "choices.json"
+    legacy = {"version": 2, "skipped": {}, "forced": {"old": {
+        "team_no": 4, "map_code": "B1", "planned_at": 1}}}
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    today = datetime.now().date().isoformat()
+    planned = today + "T08:00:00"
+    ec.set_forced_adhoc(key=ec.adhoc_key(today, 5, 480), team_no=5, map_code="A2",
+        start_min=480, duration_min=20, planned_at=planned, path=path,
+        formation_id="f5", formation_name="远征五", formation_signature="sig")
+    _, forced = ec.load_choice_sets(path)
+    now = datetime.fromisoformat(planned).timestamp()
+    cfg = scheduler.load_config()
+    jobs = scheduler.adhoc_due(cfg, forced, now, today)
+    assert jobs[0]["formation_id"] == "f5"
+    slot = scheduler._new_slot(jobs[0], cfg, now)
+    assert slot["formation_signature"] == "sig"
+    assert forced["old"] == legacy["forced"]["old"]
+    assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8")) == legacy
+
+
+def test_ranked_saved_preset_pins_unique_locked_highest_for_expedition():
+    from touken import custom_formations as cf
+    record = {"id": "f5", "name": "远征五", "target_team": 5, "slots": {"1": {
+        "sword_catalog_id": "x", "form_status": "normal", "selection_policy": "locked_highest_level"}}}
+    entry = {"sword_catalog_id": "x", "form_status": "normal", "name_zh": "药研藤四郎", "level": 99, "lock_status": "locked"}
+    with patch.object(cf, "load_formations", return_value=[record]), patch.object(
+            cf, "_current_candidate_pool", return_value={"done": True, "entries": [entry]}), patch.object(
+            cf, "resolve_formation_slots", side_effect=lambda value: {"ok": True, "slots": value["slots"]}):
+        out = ea.expedition_formation_options(5, {5: {"names": []}})
+        assert out[0]["record"]["slots"]["1"]["level"] == 99
+        assert "selection_policy" not in out[0]["record"]["slots"]["1"]
+        assert record["slots"]["1"]["selection_policy"] == "locked_highest_level"
+        entry["lock_status"] = "unknown"
+        assert ea.expedition_formation_options(5, {5: {"names": []}}) == []
