@@ -10,7 +10,7 @@
     "build": "vue-tsc -b panel/frontend/tsconfig.app.json && vite build --config panel/frontend/vite.config.mts",
     "typecheck": "vue-tsc -b panel/frontend/tsconfig.app.json",
     "check": "pnpm run typecheck",
-    "check:py": "python -m unittest discover -s tests -p test_*.py",
+    "check:py": "python -m pytest tests -q",
     "test:front": "vitest run"
   },
   "dependencies": {

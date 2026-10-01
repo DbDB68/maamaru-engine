@@ -150,12 +150,12 @@ jobs:
           }
 
       - name: 安装构建依赖
-        run: python -m pip install . pyinstaller
+        run: python -m pip install ".[test]" pyinstaller
 
       - name: 运行完整测试
         # windows-latest 控制台是 cp1252，裸 print 中文会炸；
         # ubuntu 的 Check 流水线没这问题，这里必须显式 UTF-8
-        run: python -m unittest discover -s tests -v
+        run: python -m pytest tests -q
         env:
           PYTHONIOENCODING: utf-8
 
