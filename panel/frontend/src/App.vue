@@ -570,9 +570,9 @@ watch(tab, value => {
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
-          <button class="nav-swords" :class="{ active: tab === 'swords' || tab === 'archive' }" @click="tab = 'swords'">刀剑</button>
           <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">功能</button>
-          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">账房</button>
+          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
+          <button class="nav-swords" :class="{ active: tab === 'swords' || tab === 'archive' }" @click="tab = 'swords'">刀剑</button>
           <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">设置</button>
         </template>
       </nav>

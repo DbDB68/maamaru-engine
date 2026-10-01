@@ -822,11 +822,7 @@ const compactRows = computed(() => {
   return chosen
 })
 
-const compactHeading = computed(() => {
-  if (compactRows.value.some((row) => row.current)) return '现在与接下来'
-  if (compactRows.value.some((row) => row.minute >= nowMin.value)) return '接下来'
-  return '今天留下的记录'
-})
+const compactHeading = '近期活动'
 
 const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length + suggestionBlocks.value.length)
 const hiddenItemCount = computed(() => Math.max(0, totalItemCount.value - compactRows.value.length))
