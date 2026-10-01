@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
+import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
-import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
+import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
 const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
@@ -15,6 +15,9 @@ const runs = ref<any[]>([])
 const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
+const dayPlan = ref<DayTimeline | null>(null)
+const swordEvents = ref<any[]>([])
+const swordEventsTruncated = ref(false)
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
 const situationError = ref('')
@@ -84,12 +87,22 @@ const briefFreshness = computed(() => {
   return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前更新` : `${briefTime.value} 更新`
 })
 const caretakerBrief = computed(() => {
-  if (active.value) return { title: '本丸正在执务', detail: props.activity?.step || `${props.activity?.label || '当前任务'}正在进行，不需要你守在这里。` }
+  if (active.value) return { title: props.activity?.label || '正在执务', detail: props.activity?.step || '任务进行中' }
   const run = latestRun.value
-  if (!run) return { title: '本丸无事', detail: '暂时没有需要你处理的事情，放心按自己的步调来。' }
-  if (run.status === 'failed') return { title: '刚才执务没有顺利收工', detail: `${runTitle(run)}已经停下，具体停在哪里替您留在记录里了。` }
-  if (run.status === 'stopped') return { title: '本丸无事，这一趟已经停稳', detail: `${runTitle(run)}已按您的意思停止，本丸现在是安全的。` }
-  return { title: '本丸无事，刚刚顺利收工', detail: `${runTitle(run).replace(' · ', '跑完 ')}，带回来的家底已经替您记好了。` }
+  if (!run) return { title: '今天的收获', detail: '还没有脚本执务记录' }
+  const title = runTitle(run)
+  return { title, detail: run.status === 'failed' ? '未能完成 · 查看记录' : run.status === 'stopped' ? '已停止' : run.status === 'completed' ? '已完成' : '结果待确认' }
+})
+const todaySwords = computed(() => swordReceiptEntries(swordEvents.value))
+const todaySwordNames = computed(() => [...new Set(todaySwords.value.map(e => e.payload.name))].slice(0, 3).join('、'))
+const nextBlock = computed(() => dayPlan.value?.conductor.enabled
+  ? dayPlan.value.conductor.blocks.find(b => b.status === 'running')
+    || dayPlan.value.conductor.blocks.filter(b => b.status === 'pending').sort((a, b) => a.start_min - b.start_min)[0]
+  : null)
+function blockTime(minute: number) { return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}` }
+const activityPlan = computed(() => {
+  const activity = dayPlan.value?.activity
+  return activity && activity.name === nearestEvent.value?.name ? activity : null
 })
 const briefChanges = computed(() => {
   const deltas = latestRun.value?.attributed_resource_delta || {}
@@ -106,46 +119,14 @@ const situationMoments = computed(() => {
   const moments = [
     ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队完成时间`, time: p.finished_at!, observedAt: state.parties_observed_at })),
     ...state.kiwame_return.map((item, index) => ({ key: `return-${index}`, label: `${item.name || '刀剑'}修行归来`, time: item.finished_at, observedAt: state.kiwame_observed_at })),
-    ...(state.forge_slots || []).map(f => ({ key: `forge-${f.slot_no}`, label: `锻刀第${f.slot_no}槽出炉`, time: f.finished_at, observedAt: state.forge_observed_at })),
+    ...(state.forge_slots || []).map(f => ({ key: `forge-${f.slot_no}`, label: `第${f.slot_no}炉锻刀完成`, time: f.finished_at, observedAt: state.forge_observed_at })),
     ...(state.repair || []).filter(r => r.finished_at).map(r => ({ key: `repair-${r.slot_no}`, label: r.name ? `${r.name}手入完成` : `手入第${r.slot_no}槽完成`, time: r.finished_at!, observedAt: state.repair_observed_at ?? null })),
     ...(state.duty?.finished_at ? [{ key: 'duty', label: '内番完成', time: state.duty.finished_at, observedAt: state.duty_observed_at ?? null }] : []),
   ].map(m => ({ ...m, done: stamp(m.time) <= now.value }))
-  // 已完成的（待收）排最前，按时间倒序；没完成的按时间正序（最近要来）
+  // 时间已过的排最前，按时间倒序；没完成的按时间正序（最近要来）
   return moments.sort((a, b) => Number(b.done) - Number(a.done) || (a.done ? stamp(b.time) - stamp(a.time) : stamp(a.time) - stamp(b.time)))
 })
-const eventPointsText = computed(() => (situation.value?.event_points || []).map(p => p.points.toLocaleString()).join('、'))
-function situationResource(name: string) { return situationResources.value.find(r => r.name === name)?.value ?? '—' }
 const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
-const SITUATION_RESOURCE_ROWS: Array<[keyof NonNullable<HonmaruSituation['resources']>, string]> = [
-  ['koban', '小判'], ['charcoal', '木炭'], ['steel', '玉钢'],
-  ['coolant', '冷却材'], ['whetstone', '砥石'], ['bill', '委托符'],
-]
-const situationResources = computed(() => {
-  const resources = situation.value?.resources
-  if (!resources) return []
-  return SITUATION_RESOURCE_ROWS.map(([key, name]) => ({ name, value: resources[key].toLocaleString() }))
-})
-const injuredSummary = computed(() => {
-  const state = situation.value
-  if (!state) return []
-  const rows: Array<{ party_no: number; moderate: number; severe: number }> = []
-  for (const party of state.parties) {
-    let moderate = 0
-    let severe = 0
-    for (const member of party.members) {
-      if (member.injury === '中伤') moderate++
-      else if (member.injury === '重伤') severe++
-    }
-    if (moderate || severe) rows.push({ party_no: party.party_no, moderate, severe })
-  }
-  return rows
-})
-function injuredText(row: { party_no: number; moderate: number; severe: number }) {
-  const parts = []
-  if (row.severe) parts.push(`重伤 ${row.severe} 振`)
-  if (row.moderate) parts.push(`中伤 ${row.moderate} 振`)
-  return `第${row.party_no}部队 ${parts.join('、')}，出阵前记得手入。`
-}
 function memberTitle(member: HonmaruSituationMember) {
   const facts = []
   if (member.hp != null && member.hp_max) facts.push(`生存 ${member.hp}/${member.hp_max}`)
@@ -155,7 +136,7 @@ function memberTitle(member: HonmaruSituationMember) {
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
 function fmt(value: number | null | undefined) { return value == null ? '尚未记录' : Math.round(value).toLocaleString() }
 function resource(name: string) {
-  const value = inventory.value?.resources?.[name]
+  const value = planning.value?.current?.[name] ?? inventory.value?.resources?.[name]
   return typeof value === 'number' ? value.toLocaleString() : '未记录'
 }
 function dateLabel(date: string) { return date === today.value ? '今天' : date.replaceAll('-', '.') }
@@ -170,7 +151,11 @@ function situationTime(value: string | null) {
 async function syncSituation() {
   syncingSituation.value = true
   situationError.value = ''
-  try { situation.value = (await api.refreshHonmaruSituation()).situation }
+  try {
+    situation.value = (await api.refreshHonmaruSituation()).situation
+    loadErrors.value = await loadSummaries()
+    briefUpdatedAt.value = Date.now()
+  }
   catch (error) { situationError.value = errorMessage(error) }
   finally { syncingSituation.value = false }
 }
@@ -218,7 +203,7 @@ function eventMoment(event: EventTimelineEntry) {
   if (event.days_until_start === 1) return '明天开始'
   return event.days_until_start == null ? '即将开始' : `${event.days_until_start} 天后开始`
 }
-function eventMomentLabel(event: EventTimelineEntry) { return timeline.value?.ongoing.includes(event) ? '进度' : '日程' }
+function eventMomentLabel(event: EventTimelineEntry) { return timeline.value?.ongoing.includes(event) ? '结束' : '开始' }
 function eventBudget(event: EventTimelineEntry) {
   if (!event.budget || event.budget.koban_cost == null) return '暂未核算'
   if (event.budget.koban_cost === 0) return '无需额外小判'
@@ -227,7 +212,7 @@ function eventBudget(event: EventTimelineEntry) {
   return '正在核算'
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : '暂时没能保存，请再试一次。' }
-function openBriefReport() { latestRun.value ? emit('records') : emit('report') }
+function openBriefReport() { emit('records') }
 
 async function loadHome() {
   const data = await api.honmaruHome()
@@ -239,6 +224,13 @@ async function loadSummaries() {
   const jobs = [
     { label: '近期记录', run: async () => { runs.value = (await api.dataRuns(12)).items } },
     { label: '规划', run: async () => { planning.value = await api.planning() } },
+    { label: '今日安排', run: async () => { dayPlan.value = await api.dayTimeline() } },
+    { label: '今日刀剑收获', run: async () => {
+      const from = Date.parse(`${today.value}T00:00:00+08:00`) / 1000
+      const data = await api.dataEvents(1000, undefined, from, from + 86400)
+      swordEvents.value = data.items
+      swordEventsTruncated.value = data.has_more
+    } },
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
     { label: '家底', run: async () => { inventory.value = (await api.dashboard()).inventory } },
     { label: '游戏近况', run: async () => { situation.value = (await api.honmaruSituation()).situation } },
@@ -357,42 +349,43 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
       <section class="home-situation" aria-label="游戏里的本丸近况">
-        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>归期与部队</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
+        <header><div><p class="home-eyebrow">游戏里的本丸</p><h2>本丸近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
         <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
         <template v-else>
-          <p v-for="row in injuredSummary" :key="`injury-${row.party_no}`" class="situation-injury" :class="{ severe: row.severe > 0 }">{{ injuredText(row) }}</p>
           <div v-if="situationMoments.length" class="situation-moments">
-            <p class="situation-caption">待收与归期 <small>按游戏记录</small></p>
-            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ moment.done ? '已完成待收' : gameTime(moment.time) }}</span><small>{{ moment.done ? gameTime(moment.time) + ' · ' : '' }}{{ situationTime(moment.observedAt) }}</small></div>
+            <p class="situation-caption">最近的归期 <small>游戏时间</small></p>
+            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ moment.done ? '预计已完成' : gameTime(moment.time) }}</span><small>{{ moment.done ? gameTime(moment.time) + ' · ' : '' }}{{ situationTime(moment.observedAt) }}</small></div>
             <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
           </div>
-          <p v-else class="home-muted">最近没有待收或要到点的时间记录。</p>
-          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}<i v-if="member.injury === '中伤' || member.injury === '重伤'" class="injury-badge" :class="{ severe: member.injury === '重伤' }">{{ member.injury }}</i></span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
+          <p v-else class="home-muted">暂无锻刀、手入或归期记录。</p>
+          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name && party.party_name !== `第${party.party_no}部队` ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}</span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
-      <PaperCard v-if="active || latestRun" variant="dashboard" class="home-brief">
-        <header class="brief-meta"><span>狐之助小报 · {{ briefTime }}</span><span>{{ briefFreshness }}</span></header>
+      <PaperCard v-if="active || latestRun || todaySwords.length || nextBlock" variant="dashboard" class="home-brief">
+        <header class="brief-meta"><span>狐之助小报</span><span>{{ briefFreshness }}</span></header>
         <h2>{{ caretakerBrief.title }}</h2>
-        <p class="brief-detail">{{ caretakerBrief.detail }}</p>
+        <p class="brief-detail">{{ caretakerBrief.detail }}<small v-if="!active && latestRun"> · {{ eventTime(Number(latestRun.ended_at || latestRun.started_at)) }}</small></p>
+        <p v-if="todaySwords.length" class="home-daily-fact">今天收获{{ swordEventsTruncated ? '至少' : '' }} {{ todaySwords.length }} 振刀剑<br><small>{{ todaySwordNames }}{{ new Set(todaySwords.map(e => e.payload.name)).size > 3 ? '等' : '' }}</small></p>
+        <p v-if="nextBlock" class="home-daily-fact">{{ nextBlock.status === 'running' ? '正在跑' : blockTime(nextBlock.start_min) + ' 接下来' }} · {{ nextBlock.label }}</p>
         <div v-if="briefChanges.length" class="brief-changes" aria-label="这一趟的家底变化"><span v-for="item in briefChanges" :key="item.name"><b>{{ item.name }}</b> {{ item.value }}</span></div>
-        <button type="button" class="home-text-button" @click="openBriefReport">{{ latestRun ? '看看这一趟的记录' : '去看看本丸记录' }} →</button>
+        <button type="button" class="home-text-button" @click="openBriefReport">查看账房记录 →</button>
       </PaperCard>
       <section class="home-planning-card home-finances">
         <p class="home-eyebrow">博多账房</p>
-        <h2><span class="hakata-mark" aria-hidden="true">博</span> 家底与安排</h2>
+        <h2>小判与锻刀</h2>
         <p class="finance-lead">{{ kobanWatch?.available == null ? '最近的小判记录' : '可安排的小判' }} <strong>{{ fmt(kobanWatch?.available ?? recentKoban) }}</strong></p>
-        <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `现有 ${fmt(kobanWatch.current)}，已留 ${fmt(kobanWatch.reserved)}；近 ${kobanWatch.spending_days || 14} 天支出 ${fmt(kobanWatch.confirmed_spending)}。` }}</p>
+        <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `账本 ${fmt(kobanWatch.current)} · 预留 ${fmt(kobanWatch.reserved)}` }}</p>
         <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
-        <p v-if="situationResources.length" class="finance-game-reading">游戏读数：小判 {{ situationResource('小判') }} · 委托符 {{ situationResource('委托符') }} <small>{{ situationTime(situation?.resources_observed_at ?? null) }}</small></p>
-        <details class="finance-details"><summary>查看家底明细</summary><template v-if="situationResources.length"><p class="finance-details-caption">游戏日志读数 · {{ situationTime(situation?.resources_observed_at ?? null) }}</p><dl><div v-for="item in situationResources" :key="item.name"><dt>{{ item.name }}</dt><dd>{{ item.value }}</dd></div></dl></template><p class="finance-details-caption">面板盘点读数{{ inventory?.captured_at ? ` · ${gameTime(inventory.captured_at)}` : '' }}</p><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
+        <p v-if="kobanWatch?.budgets?.some(b => b.amount)" class="planning-note">预留给 {{ kobanWatch.budgets.filter(b => b.amount).map(b => `${b.event} ${fmt(b.amount)}`).join(' · ') }}</p>
+        <details class="finance-details"><summary>查看家底明细</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
         <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
       </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
-          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div><div v-if="eventPointsText"><dt>当前点数</dt><dd>{{ eventPointsText }} <small class="event-points-time">{{ situationTime(situation?.event_points_observed_at ?? null) }}</small></dd></div></dl>
+          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div><div v-if="nearestEvent.budget?.tama_current != null"><dt>{{ nearestEvent.budget.currency || '活动点数' }}</dt><dd>{{ fmt(nearestEvent.budget.tama_current) }}{{ nearestEvent.budget.tama_target != null ? ` / ${fmt(nearestEvent.budget.tama_target)}` : '' }}</dd></div><div v-if="activityPlan"><dt>今天完成</dt><dd>{{ activityPlan.completed_today }} 圈</dd></div><div v-if="activityPlan"><dt>接下来建议</dt><dd>{{ activityPlan.target_runs }} 圈</dd></div></dl>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
@@ -507,22 +500,17 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .situation-row { display: grid; gap: 3px; margin-top: 8px; font-size: 11px; }
 .situation-row span, .situation-row small { color: var(--ink-dim); }
 .situation-row strong { font-weight: 500; overflow-wrap: anywhere; }
-.situation-injury { margin: 0 0 10px; padding: 7px 10px; border-left: 3px solid #c99430; background: #f6ecd8; color: #7a5a17; font-size: 11px; line-height: 1.6; }
-.situation-injury.severe { border-color: #a03f32; background: #f4e0da; color: #8c352a; }
 .situation-members { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .situation-member small { color: var(--ink-dim); font-weight: 400; }
-.injury-badge { margin-left: 3px; padding: 0 4px; border-radius: 3px; background: #f3e3c2; color: #8a621b; font-size: 9px; font-style: normal; }
-.injury-badge.severe { background: #f2d7cf; color: #a03f32; }
 .situation-moment .moment-done { color: #315f42; font-weight: 600; }
-.finance-game-reading { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--paper-line); color: #796e5f; font-size: 11px; line-height: 1.6; }
-.finance-game-reading small { color: var(--ink-dim); font-size: 10px; margin-left: 4px; }
 .finance-details-caption { margin: 10px 0 0; color: var(--ink-dim); font-size: 10px; }
-.event-points-time { color: var(--ink-dim); font-size: 10px; font-weight: 400; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
 .home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
 .home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
 .brief-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: #806748; font-size: 10px; }
 .home-brief h2 { color: #173d6e; font-weight: 500; }
+.home-daily-fact { margin-top: 10px !important; font-size: 12px; line-height: 1.6; }
+.home-daily-fact small { color: var(--ink-dim); overflow-wrap: anywhere; }
 .brief-detail { color: #173d6e; font-size: 12px; line-height: 1.65; }
 .brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: linear-gradient(105deg, #edf0e7d9, #dce4dbb8 52%, #f4f3e9c7); border-block: 1px solid #ffffff75; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 10px; }
 .brief-changes span { white-space: nowrap; }
