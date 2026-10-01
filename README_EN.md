@@ -10,7 +10,7 @@
 
 I have played Touken Ranbu for nine years, and I still want to keep playing. I just no longer want to click through every repetitive task myself—or maintain an Excel sheet by hand to work out where my resources came from and where they went. That is why I built Maamaru: a steward that looks after my Honmaru when I need it and becomes a quiet, standalone ledger when I do not want it connected to the game.
 
-**[Download the latest release](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v0.8.0 (Chinese)](docs/releases/v0.8.0.md) · [Report an issue](https://github.com/DbDB68/maamaru-engine/issues)
+**[Download the latest release](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.0.0 (Chinese)](docs/releases/v1.0.0.md) · [Report an issue](https://github.com/DbDB68/maamaru-engine/issues)
 
 > [!IMPORTANT]
 > Maamaru currently supports the **Simplified Chinese client and the China server only**. The app itself is also currently in Simplified Chinese. This English README is here so that international players and developers can understand the project.
@@ -125,7 +125,7 @@ Download a package from [GitHub Releases](https://github.com/DbDB68/maamaru-engi
 
 ## What's Next
 
-v0.8.0 brought team presets into actual tasks and completed the Regiment Battle seaside run. The next priority is real-device feedback about stalls, recognition mistakes, mismatched records, and changes that are hard to correct—especially while checking preset teams and equipment. Desktop–Android ledger sync remains a request to evaluate against actual use.
+v1.0.0 connects the honmaru journal, game sword archive, resource ledger, and planning. The next priority is real-device feedback about stalls, recognition mistakes, mismatched records, and changes that are hard to correct—especially while checking preset teams and equipment. Desktop–Android ledger sync remains a request to evaluate against actual use.
 
 ## Reporting a Problem
 

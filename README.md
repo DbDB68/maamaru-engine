@@ -10,7 +10,7 @@
 
 我玩刀剑乱舞九年了，现在还是想玩，只是不想再亲自点完每一轮重复操作，也不想继续手拉 Excel 才知道资源从哪来、花到哪去。所以我做了まあ丸：需要时替我照看本丸，不连接游戏时也能安静地做一间账房。
 
-**[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v0.8.0 更新内容](docs/releases/v0.8.0.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
+**[下载最新版](https://github.com/DbDB68/maamaru-engine/releases/latest)** · **[使用说明](docs/user-manual.md)** · [v1.0.0 更新内容](docs/releases/v1.0.0.md) · [提交问题](https://github.com/DbDB68/maamaru-engine/issues)
 
 ## 欢迎回到我的本丸
 
@@ -121,7 +121,7 @@ Android APK 是这间账房的离线试玩版：可以记资源、家底、活�
 
 ## 接下来
 
-v0.8.0 已让部队预设接入实际任务，也补齐了联队战海边之阵。接下来先盯住真机使用中出现的卡住、认错、记录对不上和不好纠正，尤其是预设编队与换装的验收。Android 与电脑账房的数据联动仍待观察实际使用需求。
+v1.0.0 已把本丸动态、游戏刀账、资源账房与规划连接起来。接下来先盯住真机使用中出现的卡住、认错、记录对不上和不好纠正，尤其是预设编队与换装的验收。Android 与电脑账房的数据联动仍待观察实际使用需求。
 
 ## 问题反馈
 
