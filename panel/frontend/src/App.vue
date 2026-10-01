@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { activityTitle } from './components/report/reportModel'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
 import TaskForm from './components/TaskForm.vue'
@@ -99,7 +100,7 @@ const clock = ref(Date.now())
 const logRunning = computed(() => running.value || !!dashboardRun.value?.active)
 const logTaskLabel = computed(() => running.value
   ? (current.value === 'workflow' ? runningWorkflow.value?.name || '工作流' : scripts.value[current.value || '']?.label || '任务')
-  : dashboardRun.value?.active ? dashboardRun.value.label || '任务' : '')
+  : dashboardRun.value?.active ? activityTitle(dashboardRun.value) : '')
 
 const taskIcons: Record<string, string> = {
   // 活动任务也必须使用自己的素材，不能临时借用通用出阵图标后一直漏接。
@@ -300,7 +301,7 @@ const stageFlavor = computed(() => ledgerMode.value ? '今天只算账' : dashbo
 const stageSub = computed(() => {
   if (ledgerMode.value) return '不连接游戏 · 手动记录与规划'
   if (!dashboardRun.value?.active) return '庭院无事'
-  const label = dashboardRun.value.label || scripts.value[current.value || '']?.label || '本丸任务'
+  const label = activityTitle(dashboardRun.value)
   const started = Number(dashboardRun.value.started || 0)
   if (!started) return label
   const elapsed = Math.max(0, Math.floor(clock.value / 1000 - started))

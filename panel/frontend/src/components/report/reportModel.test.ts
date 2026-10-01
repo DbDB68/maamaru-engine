@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { LedgerAttribution } from '../../types'
-import { categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, swordReceiptEntries } from './reportModel'
+import { activityTitle, activityStep, categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, swordReceiptEntries } from './reportModel'
+
+it('运行状态翻译内部名称并保留玩家命名', () => {
+  expect(activityTitle({ label: 'workflow' })).toBe('自定义工作流')
+  expect(activityTitle({ label: '活动+异去' })).toBe('活动+异去')
+  expect(activityStep({ step: 'raid:hailian' })).toBe('联队战')
+  expect(activityStep({ step: 'future_internal_step' })).toBe('任务进行中')
+  expect(activityStep({ step: '正在补充刀装' })).toBe('正在补充刀装')
+})
 
 it('收件箱记录按振展开，同一已知掉落实例不重复计数', () => {
   const events = [

@@ -5,7 +5,7 @@ import { buildJournalPosts } from '../honmaruJournal'
 import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
-import { eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
+import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
 const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
@@ -57,6 +57,8 @@ const daysTogether = computed(() => {
 })
 const welcome = computed(() => profile.value.saniwa_name ? `${profile.value.saniwa_name}，欢迎回来。` : '欢迎回到本丸。')
 const active = computed(() => props.busy || props.activity?.active)
+const currentActivityTitle = computed(() => activityTitle(props.activity))
+const currentActivityStep = computed(() => activityStep(props.activity))
 const homeName = computed(() => profile.value.honmaru_name || '我的本丸')
 const entries = computed(() => {
   const personal = notes.value.map(note => ({ key: `note-${note.id}`, ts: note.created_at, note, run: null as any, post: null as JournalPost | null }))
@@ -93,7 +95,7 @@ const briefFreshness = computed(() => {
   return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前更新` : `${briefTime.value} 更新`
 })
 const caretakerBrief = computed(() => {
-  if (active.value) return { title: props.activity?.label || '正在执务', detail: props.activity?.step || '任务进行中' }
+  if (active.value) return { title: currentActivityTitle.value, detail: currentActivityStep.value || '任务进行中' }
   const run = latestRun.value
   if (!run) return { title: '今天的收获', detail: '还没有脚本执务记录' }
   const title = runTitle(run)
@@ -339,7 +341,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
-      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? (activity?.label || '本丸正在执务') : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && activity?.step">{{ activity.step }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
+      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">

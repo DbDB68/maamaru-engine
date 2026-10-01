@@ -99,6 +99,20 @@ export const scriptNames: Record<string, string> = {
 
 // ---- 每轮任务（run）展示助手 ----
 
+export function activityTitle(activity: any): string {
+  const label = String(activity?.label || activity?.script || '')
+  return scriptNames[label] || label || '本丸正在执务'
+}
+
+export function activityStep(activity: any): string {
+  const step = String(activity?.step || '').trim()
+  if (!step) return ''
+  // 步骤中的玩法后缀用于执行，不是面向玩家的标题。
+  const name = scriptNames[step.split(':')[0] || '']
+  if (name) return name
+  return /^[a-zA-Z0-9_:.-]+$/.test(step) ? '任务进行中' : step
+}
+
 export function runElapsedSeconds(run: any): number | null {
   const precise = Number(run.play_duration_seconds)
   if (Number.isFinite(precise) && precise >= 0) return precise
