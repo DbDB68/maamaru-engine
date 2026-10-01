@@ -144,6 +144,8 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
                 save_observations(events, STATUS_DIR / FILENAME)
                 result = youzu_log.write_ledger(TelemetryStore(),
                                                  youzu_log.build_ledger(events))
+                from touken.sword_receipts import sync_receipts
+                sync_receipts(events)
                 youzu_log.save_home_situation(
                     events, STATUS_DIR / "youzu_home_situation.json")
             finally:

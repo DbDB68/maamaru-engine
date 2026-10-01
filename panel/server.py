@@ -363,6 +363,20 @@ def _wrap_inventory(tag: str, runner, inventory=False):
                            "去看看")
             except Exception as exc:
                 yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
+            if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札"}:
+                try:
+                    from touken import youzu_log
+                    from touken.sword_receipts import sync_receipts
+                    path = youzu_log.pull_log(agent.maa.adb_path,
+                                              agent.maa.adb_address, dest_dir=DEBUG_DIR)
+                    try:
+                        result = sync_receipts(youzu_log.parse_events(path))
+                    finally:
+                        path.unlink(missing_ok=True)
+                    if result["written"] or result["reconciled"]:
+                        yield f"[{tag}] 锻刀和掉落记录已同步到账房"
+                except Exception:
+                    yield f"[{tag}] ⚠️ 刀剑进账同步失败，可收工后再同步近况"
     return _fn
 
 
@@ -2893,6 +2907,8 @@ def api_refresh_home_situation():
             dest_dir=DEBUG_DIR)
         try:
             events = youzu_log.parse_events(path)
+            from touken.sword_receipts import sync_receipts
+            sync_receipts(events)
             from .expedition_observation import FILENAME, save_observations
             save_observations(events, STATUS_DIR / FILENAME)
             situation = youzu_log.save_home_situation(

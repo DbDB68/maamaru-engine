@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { LedgerAttribution } from '../../types'
-import { categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts } from './reportModel'
+import { categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, swordReceiptEntries } from './reportModel'
+
+it('counts every sword in a batch including duplicate names, alongside battle drops', () => {
+  const batch = { event_type: 'forge.collected', payload: { swords: Array.from({ length: 10 }, (_, i) => ({ name: '堀川国广', serial_id: i + 1 })) } }
+  const entries = swordReceiptEntries([batch, { event_type: 'sword.obtained', payload: { name: '宗三左文字' } }, { event_type: 'forge.started', payload: { name: '不应计入' } }])
+  expect(entries).toHaveLength(11)
+  expect(entries.filter(event => event.payload.name === '堀川国广')).toHaveLength(10)
+})
 
 const receipt = (resource: string, delta: number, eventId: number): LedgerAttribution => ({
   id: `a${eventId}`, event_id: eventId, ts: 1790733600, resource, delta,

@@ -192,7 +192,17 @@ export function sumByCategory(attributions: LedgerAttribution[]): Record<string,
 }
 
 // 刀剑进账来源的展示名
+export function swordReceiptEntries(events: any[]): any[] {
+  return events.flatMap(event => Array.isArray(event.payload?.swords)
+    ? event.payload.swords.map((sword: any) => ({ ...event, payload: { ...event.payload, ...sword } }))
+    : [event]).filter(event =>
+    ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
+    && event.payload?.name)
+}
+
 export function obtainSourceLabel(source: string | undefined): string {
+  if (source === 'battle.drop') return '战斗掉落'
+  if (source === 'raid.drop') return '联队战掉落'
   if (source === 'sortie.drop') return '出阵掉落'
   if (source === 'osaka.drop') return '大阪城挖地'
   if (source === 'forge') return '锻刀'

@@ -1124,8 +1124,11 @@ def main(argv=None):
     if args.write_ledger:
         from .telemetry import TelemetryStore
         result = write_ledger(TelemetryStore(), build_ledger(events))
+        from .sword_receipts import sync_receipts
+        swords = sync_receipts(events)
         print(f"\n[账房] 入库：观察 {result['observations_written']} 条，"
-              f"收支 {result['changes_written']} 条")
+              f"收支 {result['changes_written']} 条，"
+              f"刀剑领取 {swords['written']} 条、补全 {swords['reconciled']} 条")
     return 0
 
 

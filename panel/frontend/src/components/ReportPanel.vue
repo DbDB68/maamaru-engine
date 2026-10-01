@@ -8,7 +8,7 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories } from './report/reportModel'
+import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{
@@ -256,10 +256,7 @@ const anomalyInsight = computed<ReportInsight | null>(() => {
   }
 })
 
-const swordObtainedEvents = computed(() => events.value.filter(event => (
-  ['sword.obtained', 'forge.collected', 'pumpkin.sword_obtained'].includes(event.event_type)
-  && event.payload?.name
-)))
+const swordObtainedEvents = computed(() => swordReceiptEntries(events.value))
 // 刀剑明细仍归入“全部记录”；心愿命中只额外点名，不重新铺完整刀名列表。
 const swordDropTotal = computed(() => swordObtainedEvents.value.length)
 const wishlistHits = computed(() => {

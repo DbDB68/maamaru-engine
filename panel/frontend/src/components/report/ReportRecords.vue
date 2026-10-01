@@ -110,7 +110,9 @@ function eventDetail(item: any) {
   if (item.event_type === 'repair.session_completed') return p.repaired != null ? `完成 ${p.repaired} 振` : '本轮手入结束'
   if (item.event_type === 'sword.obtained') {
     const src = obtainSourceLabel(p.source)
-    return `【${p.name || '认不出是谁'}】${src ? ` · ${src}` : ''}`
+    const where = p.chapter && p.map_no ? ` · ${p.chapter}-${p.map_no}` : ''
+    const node = p.square_id != null ? ` · 节点 ${p.square_id}` : ''
+    return `【${p.name || '认不出是谁'}】${src ? ` · ${src}` : ''}${where}${node}${p.evidence_source === 'youzu_log' ? ' · 游戏记录' : ''}`
   }
   if (item.event_type === 'naihanka.gains') {
     const gains = p.gains || []
@@ -146,7 +148,12 @@ function activityTitle(item: any) {
   if (item.event_type === 'hanafuda.run_completed') return `秘宝之里完成 ${count} 圈`
   if (item.event_type === 'raid.round_completed') return `联队战完成 ${count} 圈`
   if (item.event_type === 'practice.result') return `完成演练 ${count} 场`
-  if (item.event_type === 'forge.collected') return `领取锻刀结果 ${count} 次`
+  if (item.event_type === 'forge.collected') {
+    const entries = item.items || [item]
+    if (entries.every((entry: any) => Array.isArray(entry.payload?.swords)))
+      return `锻刀领取 ${entries.reduce((sum: number, entry: any) => sum + entry.payload.swords.length, 0)} 振`
+    return `领取锻刀结果 ${count} 次`
+  }
   if (item.event_type === 'forge.started') return `开始锻刀 ${count} 炉`
   if (item.event_type === 'expedition.dispatched') return `派遣远征 ${count} 队`
   if (item.event_type === 'expedition.settled') return `领取远征奖励 ${count} 份`
@@ -186,8 +193,11 @@ function activityDetail(item: any) {
     return `${wins} 胜${losses ? ` · ${losses} 负` : ''} · ${items.map((entry: any) => entry.payload?.result).filter(Boolean).join(' / ')}`
   }
   if (item.event_type === 'forge.collected') {
-    const names = items.map((entry: any) => entry.payload?.name).filter(Boolean)
-    return names.length ? names.map((name: string) => `【${name}】`).join('、') : `共 ${items.length} 炉（没认出是谁）`
+    const names = items.flatMap((entry: any) => Array.isArray(entry.payload?.swords)
+      ? entry.payload.swords.map((sword: any) => sword.name) : [entry.payload?.name]).filter(Boolean)
+    const unique = [...new Set(names)]
+    return names.length ? unique.slice(0, 3).map(name => `【${name}】`).join('、')
+      + (unique.length > 3 ? `等 ${unique.length} 种` : '') : `共 ${items.length} 炉（没认出是谁）`
   }
   if (item.event_type === 'forge.started') {
     const durations = items.map((entry: any) => entry.payload?.duration).filter(Boolean)
@@ -196,7 +206,7 @@ function activityDetail(item: any) {
   if (item.event_type === 'expedition.dispatched') return items.map((entry: any) => `部队${entry.payload?.team_no ?? '？'} ${entry.payload?.map_name || entry.payload?.map_code || ''}`).join(' · ')
   if (item.event_type === 'expedition.settled') return items.map((entry: any) => entry.payload?.map_name || entry.payload?.header).filter(Boolean).join(' · ') || '奖励已领取'
   if (item.event_type === 'task_rewards.claimed' || item.event_type === 'task_rewards.none') return items.map((entry: any) => entry.payload?.tab || '当前页').join(' / ')
-  if (item.event_type === 'sword.obtained') return items.map((entry: any) => `【${entry.payload?.name || '认不出是谁'}】`).join('、')
+  if (item.event_type === 'sword.obtained') return items.map((entry: any) => eventDetail(entry)).join('、')
   return eventDetail(item)
 }
 function instanceDetail(item: any) {
@@ -207,6 +217,7 @@ function instanceDetail(item: any) {
   if (item.event_type === 'pumpkin.sortie_completed' && p.sequence != null) return `第 ${p.sequence} 次出阵`
   if (item.event_type === 'forge.collected') {
     const parts = []
+    if (Array.isArray(p.swords)) return `炉位 ${p.slot || '？'} · ${p.swords.length} 振 · ${p.swords.map((sword: any) => sword.name).join('、')} · 游戏记录`
     if (p.name) parts.push(`【${p.name}】`)
     if (p.duration) parts.push(`${p.duration} 炉`)
     return parts.length ? parts.join(' · ') : '没认出是谁'
