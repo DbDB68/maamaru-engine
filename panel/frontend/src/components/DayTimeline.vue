@@ -676,7 +676,10 @@ const runBlocks = computed(() => {
 const suggestionBlocks = computed(() => {
   const suggestions = data.value?.suggestions
   if (!suggestions) return []
-  return suggestions.map((s, i) => {
+  // 已排联队战就展示正式安排；改过时间的安排也属于已采纳。
+  const hasRaid = (editing.value ? draft.value : data.value?.booking?.blocks || [])
+    .some(row => row.kind === 'raid')
+  return suggestions.filter(s => s.runs == null || !hasRaid).map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
     const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
     const detail = `${s.runs != null ? `${s.runs} 圈 · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
