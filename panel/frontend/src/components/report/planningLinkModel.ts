@@ -1,5 +1,10 @@
 import type { DayTimeline } from '../../types'
 
+/** New work starts no earlier than now or the previous block's estimated end. */
+export function nextScheduledStart(nowMin: number, previousEndMin: number): number {
+  return Math.min(1439, Math.max(Math.ceil(nowMin), previousEndMin))
+}
+
 export interface RaidDayRecommendation {
   available: boolean
   runs: number

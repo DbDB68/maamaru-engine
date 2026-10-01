@@ -217,7 +217,10 @@ class SakuraMixin:
         cy_top = rows[1][0] - _FATIGUE_TO_ROW_CY
         name_tokens = self.maa.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
         name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
-        name = sword_db.display_name(name_raw)
+        found_name = sword_db.find_by_name(name_raw, fuzzy=False)
+        recognized_name = (found_name[1].get("name_zh") or found_name[1]["name"]
+                           if found_name else None)
+        name = recognized_name or f"{low_slot}号位"
         yield f"[换队长] {name} 疲劳 {low} 全队最低，拖去队长位（原队长 {captain}/100）"
 
         # adb input swipe 匀速插值：拖远了速度跟着变快，容易被游戏当成
@@ -240,9 +243,11 @@ class SakuraMixin:
                 cap_fy = after[1][0]
                 cap_tokens = self.maa.ocr_all(
                     roi_4to4(100, cap_fy - 32, 265, cap_fy - 4))
-                cap_name = sword_db.display_name(
-                    max((t for t, _ in cap_tokens), key=len, default=""))
-                if cap_name and cap_name == name:
+                cap_found = sword_db.find_by_name(
+                    max((t for t, _ in cap_tokens), key=len, default=""), fuzzy=False)
+                cap_name = (cap_found[1].get("name_zh") or cap_found[1]["name"]
+                            if cap_found else None)
+                if recognized_name and cap_name == recognized_name:
                     yield (f"[换队长] ✓ 换好了（疲劳复读 {after_values.get(1)} "
                            f"对不上 {low}，但队长位已是 {name}），去吃疲劳加成吧")
                     return

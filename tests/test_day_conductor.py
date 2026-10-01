@@ -94,6 +94,47 @@ class DayConductorTests(unittest.TestCase):
         self.tick(DAY + 600 * 60 + 15)
         self.assertEqual(len(self.runner.calls), 1)
 
+    def test_adding_workflow_keeps_finished_raid_and_only_starts_new_workflow(self):
+        self.arm()
+        self.tick(DAY + 600 * 60)
+        self.runner.is_running = False
+        self.tick(DAY + 660 * 60)
+        finished = dc.load_state(self.state_path)["blocks"][0]
+        plan = save_plan(DAY, DAY + 24 * 3600,
+                         [*self.plan["blocks"], {"start_min": 670, "kind": "workflow",
+                                                "workflow_id": "wf1"}], self.plan_path)
+        with patch.object(dc.workflow, "find_preset", return_value=WF_PRESET):
+            state = dc.arm(plan, timeline(), dc.BUILTIN_ID, {}, self.state_path)
+            self.assertEqual(state["blocks"][0], finished)
+            self.tick(DAY + 670 * 60)
+        self.assertEqual(len(self.runner.calls), 2)
+        params = self.runner.calls[-1][2]
+        self.assertEqual(params, {"workflow_id": "wf1"})
+        self.assertNotIn("scheduled_raid_runs", params)
+
+    def test_rearm_preserves_interrupted_run_even_when_settings_change(self):
+        self.arm()
+        state = dc.load_state(self.state_path)
+        state["blocks"][0].update(status="interrupted", run_id="stopped-run",
+                                   reason="手动停止", finished_at=DAY + 601 * 60)
+        dc._save(state, self.state_path)
+        rearmed = dc.arm(self.plan, timeline(), dc.BUILTIN_ID,
+                         {"rotate_captain": True}, self.state_path)
+        self.assertEqual(rearmed["blocks"][0], state["blocks"][0])
+        self.tick(DAY + 610 * 60)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_changed_block_is_new_authorization_and_next_day_is_not_reused(self):
+        self.arm()
+        state = dc.load_state(self.state_path)
+        state["blocks"][0].update(status="ended", run_id="finished-run")
+        dc._save(state, self.state_path)
+        changed = {**self.plan, "blocks": [{"start_min": 670, "kind": "raid", "runs": 8}]}
+        self.assertEqual(dc.arm(changed, timeline(), dc.BUILTIN_ID, {},
+                               self.state_path)["blocks"][0]["status"], "pending")
+        dc._save({**state, "day_start": DAY - 86400}, self.state_path)
+        self.assertEqual(self.arm()["blocks"][0]["status"], "pending")
+
     def test_busy_at_due_stays_pending_then_starts_when_free(self):
         # 新语义：到点时 runner 忙，块保持 pending 排队等——60 秒 missed 枪毙已删除；
         # runner 空出来就开工。错过不补跑只在换日结算。

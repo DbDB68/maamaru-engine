@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
-import { canAdoptRaidRecommendation } from './report/planningLinkModel'
+import { canAdoptRaidRecommendation, nextScheduledStart } from './report/planningLinkModel'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
@@ -426,13 +426,14 @@ function normalizeRow(row: DraftRow) {
 
 function addBlock(kind: 'raid' | 'workflow') {
   if (draft.value.length >= MAX_BLOCKS) return
+  syncSmoothClock()
   const last = draft.value[draft.value.length - 1]
   const start = parseTime(last?.time || '') ?? Math.ceil(nowMin.value)
   const pace = data.value?.activity?.seconds_per_loop || 0
   const lastDuration = last?.kind === 'raid' && pace
     ? Math.ceil((last?.runs || 1) * pace / 60)
     : GENERIC_BLOCK_MIN
-  draft.value.push({ time: fmtMin(Math.min(DAY - 1, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '' })
+  draft.value.push({ time: fmtMin(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '' })
 }
 
 const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
@@ -990,7 +991,7 @@ const caption = computed(() => {
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
-          <p v-if="draftHasRaid" class="tl-booking-message">手形不足时自动补充（消耗小判）。</p>
+          <p v-if="draftHasRaid" class="tl-booking-message">当期活动手形不足自动补充（仅联队战，消耗小判）。</p>
           <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
             <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 定时启动任务流</button>
           </div>

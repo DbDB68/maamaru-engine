@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { DayTimeline } from '../../types'
-import { canAdoptRaidRecommendation, raidDayRecommendation } from './planningLinkModel'
+import { canAdoptRaidRecommendation, nextScheduledStart, raidDayRecommendation } from './planningLinkModel'
+
+describe('新增定时任务', () => {
+  it('上一段21:57结束、现在22:07时，不再回到过去', () => {
+    expect(nextScheduledStart(22 * 60 + 7, 21 * 60 + 57)).toBe(22 * 60 + 7)
+  })
+  it('已有未来安排时接在它之后，秒数向下一分钟取整', () => {
+    expect(nextScheduledStart(22 * 60 + 7.5, 23 * 60)).toBe(23 * 60)
+    expect(nextScheduledStart(22 * 60 + 7.5, 21 * 60 + 57)).toBe(22 * 60 + 8)
+  })
+})
 
 function day(overrides: Partial<DayTimeline> = {}): DayTimeline {
   return {

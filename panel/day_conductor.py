@@ -247,6 +247,19 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
             else:
                 blocks.append({"start_min": block["start_min"], "kind": "daily",
                                "label": "一键日课", "status": "pending"})
+        # 编辑安排不能把已执行的同一段重新排队。身份由时间与内容决定，
+        # 与整份计划的签名、数组下标和当前玩法设置无关。
+        if old and old.get("day_start") == plan["day_start"]:
+            previous = list(old["blocks"])
+            for block in blocks:
+                identity = ("kind", "start_min", "runs", "workflow_id")
+                matched = next((item for item in previous
+                                if all(item.get(key) == block.get(key)
+                                       for key in identity)), None)
+                if matched:
+                    previous.remove(matched)
+                    if matched.get("status") in {"ended", "interrupted", "missed"}:
+                        block.update(matched)
         state = {"version": 2, "enabled": True,
                  "day_start": plan["day_start"],
                  "plan_signature": _plan_signature(plan),

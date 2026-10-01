@@ -88,6 +88,19 @@ class RotateCaptainTests(unittest.TestCase):
         self.assertTrue(any("小狐丸" in m and "上任队长" in m for m in messages))
         self.assertTrue(any("全队疲劳" in m for m in messages))
 
+    def test_unrecognized_name_uses_slot_in_logs(self):
+        maa = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "3KK"})
+        messages = _rotate(maa)
+        self.assertTrue(any("4号位 上任队长" in m for m in messages))
+        self.assertFalse(any("3KK" in m for m in messages))
+
+    def test_same_garbage_name_cannot_confirm_swallowed_drag(self):
+        maa = Maa(dict(FULL), after_rows=dict(FULL),
+                  names={4: "3KK"}, after_names={1: "3KK", 4: "3KK"})
+        messages = _rotate(maa)
+        self.assertFalse(any("上任队长" in m for m in messages))
+        self.assertTrue(any("拖动可能没生效" in m for m in messages))
+
     def test_captain_already_lowest_does_nothing(self):
         maa = Maa({**FULL, 1: 20})
         messages = _rotate(maa)
