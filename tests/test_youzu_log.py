@@ -801,3 +801,48 @@ def test_combined_injury_takes_conservative(tmp_path, monkeypatch):
     injury, detail = h._combined_injury_status({}, 1, {})
     assert injury == "重伤"
     assert detail == "全员满血"
+
+
+def test_noise_request_cannot_own_direct_receipt(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {"currency": {"money": "1000"}}),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/party/setsword", ""),
+        _c2s("2026-09-28 13:01:01", "POST", "https://example.test/sally/parallelpastrecovercost", ""),
+        _s2c("2026-09-28 13:01:02", "https://example.test/sally/parallelpastrecovercost", {"currency": {"money": "500"}}),
+    ]), encoding="utf-8")
+    change = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"][0]
+    assert change["source_endpoint"] == "/sally/parallelpastrecovercost"
+    assert change["via"] == ["异去恢复探索次数"]
+
+
+def test_sparse_resource_reads_preserve_all_intervening_actions(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {"currency": {"money": "1000"}, "resource": {"charcoal": 100}}),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/artifact/buybindingagent", ""),
+        _s2c("2026-09-28 13:01:01", "https://example.test/artifact/buybindingagent", {"resource": {"charcoal": 100}}),
+        _c2s("2026-09-28 13:02:00", "POST", "https://example.test/sally/parallelpastrecovercost", ""),
+        _s2c("2026-09-28 13:02:01", "https://example.test/sally/parallelpastrecovercost", {"currency": {"money": "500"}}),
+    ]), encoding="utf-8")
+    change = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"][0]
+    assert change["source_endpoint"] is None
+    assert change["attribution"] == "inferred"
+    assert change["candidate_endpoints"] == ["/artifact/buybindingagent", "/sally/parallelpastrecovercost"]
+
+
+def test_reward_without_balance_is_still_an_exact_receipt(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text(_s2c("2026-09-28 13:00:00", "https://example.test/mission/rewards",
+        {"item": [{"item_type": 4, "item_num": 250}]}), encoding="utf-8")
+    change = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"][0]
+    assert change["delta"] == {"小判": 250}
+    assert change["source_endpoint"] == "/mission/rewards"
+    assert change["before"]["小判"] is None
+
+
+def test_legacy_conflicting_signin_label_is_not_reassigned_as_fact():
+    source, label = youzu_log.translate_ledger_source(
+        "youzu_log.sally/parallelpastsally", "签到 三所物·狮子碎片 +1")
+    assert source == "unknown.youzu_log"
+    assert label == "来源待确认"

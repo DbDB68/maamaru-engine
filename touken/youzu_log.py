@@ -598,7 +598,79 @@ _ENDPOINT_LABEL = {
     "/composition/compose": "合成", "/composition/union": "习合",
     "/duty/complete": "内番完成", "/home/back": "修行归来",
     "/monthcard/salary": "月卡俸禄", "/sign/info": "签到",
+    "/sally/parallelpastsally": "异去出阵",
+    "/sally/parallelpastrecovercost": "异去恢复探索次数",
+    "/artifact/buybindingagent": "购买碎片结合剂",
 }
+
+_LEDGER_READ_ENDPOINTS = {
+    "/home", "/home/info", "/home/situation", "/home/get_all_activity",
+    "/home/number_info", "/home/notice", "/home/test", "/party/list",
+    "/mission/index", "/sally", "/push", "/keepalive", "/rolling/index",
+    "/enter", "/platformmobile/login", "/login/start", "/treasurebox/check_open",
+    "/party/setsword",
+}
+
+
+def ledger_change_source(endpoint: str | None, requests: list[dict],
+                         detail: str | None = None) -> dict:
+    """余额准确不代表来源明确；多个动作间的净差不能归给第一个请求。"""
+    actions = list(dict.fromkeys(r["endpoint"] for r in requests
+                                if r.get("endpoint") not in _LEDGER_READ_ENDPOINTS))
+    if endpoint in _ENDPOINT_LABEL and endpoint not in actions:
+        actions.append(endpoint)
+    if len(actions) == 1 and actions[0] in _ENDPOINT_LABEL:
+        action = actions[0]
+        return {"source_endpoint": action, "attribution": "confirmed",
+                "via": [detail if action == endpoint and detail else _ENDPOINT_LABEL[action]]}
+    return {"source_endpoint": None, "attribution": "inferred",
+            "via": [actions[0].lstrip("/")] if len(actions) == 1 else ["来源待确认"],
+            "candidate_endpoints": actions}
+
+
+_LEDGER_ENDPOINT_CATEGORIES = {
+    "conquest": "expedition", "forge": "forge", "repair": "repair",
+    "mission/rewards": "task_rewards", "receive/get": "inbox",
+    "sally/parallelpastsally": "yosari", "sally/parallelpastrecovercost": "yosari",
+    "artifact/buybindingagent": "artifact", "monthcard/salary": "salary",
+    "sign/info": "signin", "composition/compose": "composition",
+    "composition/union": "union", "duty/complete": "duty", "home/back": "training",
+}
+
+
+def translate_ledger_source(source: str, note: str) -> tuple[str, str]:
+    """翻译游戏记录；旧记录按已保存的动作细节修正分类，不改原始数据库。"""
+    endpoint = source.removeprefix("youzu_log.")
+    if note.startswith("签到 ") and re.search(r" -\d+$", note):
+        return "unknown.youzu_log", "来源待确认"
+    if note.startswith("来源待确认"):
+        return "unknown.youzu_log", "来源待确认"
+    # 老写入器误取了第一条翻页请求，但动作标签仍然保留在 note 中。
+    labels = {label: path.lstrip("/") for path, label in _ENDPOINT_LABEL.items()}
+    if note.startswith("远征完成·"):
+        endpoint = "conquest/complete"
+    else:
+        candidates = {path for label, path in labels.items() if note.startswith(label + " ")}
+        if len(candidates) == 1:
+            candidate = candidates.pop()
+            original_category = (_LEDGER_ENDPOINT_CATEGORIES.get(endpoint)
+                                 or _LEDGER_ENDPOINT_CATEGORIES.get(endpoint.split("/")[0]))
+            candidate_category = (_LEDGER_ENDPOINT_CATEGORIES.get(candidate)
+                                  or _LEDGER_ENDPOINT_CATEGORIES.get(candidate.split("/")[0]))
+            if original_category and candidate_category != original_category:
+                return "unknown.youzu_log", "来源待确认"
+            endpoint = candidate
+        elif "、" in note.split(" ")[0]:
+            return "unknown.youzu_log", "来源待确认"
+    category = _LEDGER_ENDPOINT_CATEGORIES.get(endpoint)
+    if not category:
+        category = _LEDGER_ENDPOINT_CATEGORIES.get(endpoint.split("/")[0])
+    label = _ENDPOINT_LABEL.get("/" + endpoint)
+    if label and note.startswith(endpoint + " "):
+        note = label + note[len(endpoint):]
+    if not category:
+        return "unknown.youzu_log", "来源待确认" if not note.startswith("来源待确认") else note
+    return f"{category}.youzu_log.{endpoint}", note
 
 _PARTY_NO_CN = {1: "一队", 2: "二队", 3: "三队", 4: "四队", 5: "五队"}
 
@@ -743,7 +815,7 @@ def build_ledger(events: list[dict]) -> dict:
 
     原理：每个带资源块的响应是一次精确读数；相邻读数间同一资源的差值，
     归因给夹在中间的那些 C->S 请求的玩法。全部来自服务器响应原文，
-    confidence 天然是 confirmed（不是 OCR 猜的）。
+    余额来自原文；只有动作明确时确认来源，混合净差保留待确认。
 
     注意响应是稀疏的（比如 /sally 的 currency 只带 money）：差值只在
     「这次读到了、以前也读到过」的资源上计算，缺键不等于归零。
@@ -751,18 +823,25 @@ def build_ledger(events: list[dict]) -> dict:
     observations: list[dict] = []
     changes: list[dict] = []
     last_known: dict[str, int] = {}
-    pending_requests: list[dict] = []  # 两次读数之间发生的 C->S
+    pending_requests: list[dict] = []  # 当前响应前的请求
+    resource_requests: dict[str, list[dict]] = {}
 
     for ev in events:
         if ev["direction"] == "C->S":
             if ev["endpoint"] and ev["endpoint"] not in ("/keepalive",):
                 pending_requests.append(ev)
+                for requests in resource_requests.values():
+                    requests.append(ev)
             continue
         if ev["direction"] != "S->C":
             continue
-        reading = _reading_from_payload(ev.get("payload"))
-        if not reading:
+        if (ev.get("status", 200) != 200 or not isinstance(ev.get("payload"), dict)
+                or str(ev["payload"].get("status", 0)) != "0"):
+            for requests in [pending_requests, *resource_requests.values()]:
+                requests[:] = [r for r in requests if r["endpoint"] != ev["endpoint"]]
             continue
+        reading = _reading_from_payload(ev.get("payload"))
+        reading = reading or {}
         ts = _event_epoch(ev)
 
         # 远征细分标签：complete 响应原文自带 party_no+field_id；start 的
@@ -789,28 +868,18 @@ def build_ledger(events: list[dict]) -> dict:
         if changed:
             observations.append({"ts": ts, "endpoint": ev["endpoint"],
                                  "reading": dict(last_known)})
-        if delta:
-            # 归因降噪：pending 里只要有一个「已知动作」端点，就只报它们——
-            # 启动/翻页时的一串轮询请求（home/info、push、rolling 之类）
-            # 会把归因列表冲成流水账。全都认不出时才全列出来留证。
-            labeled = [r for r in pending_requests
-                       if r["endpoint"] in _ENDPOINT_LABEL]
-            culprits = []
-            for req in (labeled or pending_requests):
-                label = _ENDPOINT_LABEL.get(req["endpoint"],
-                                            req["endpoint"].lstrip("/"))
-                if label not in culprits:
-                    culprits.append(label)
-            if detail:
-                culprits = [detail]
-            changes.append({
-                "ts": ts,
-                "delta": delta,
-                "before": before,
-                "after": after,
-                "via": culprits or ["(无请求，自然恢复?)"],
-                "via_endpoints": [r["endpoint"] for r in pending_requests],
-            })
+        grouped = {}
+        for name, amount in delta.items():
+            meta = ledger_change_source(ev["endpoint"], resource_requests.get(name, []), detail)
+            key = (meta["source_endpoint"], tuple(meta["via"]), meta["attribution"])
+            ch = grouped.setdefault(key, {"ts": ts, "delta": {}, "before": {},
+                "after": {}, "via_endpoints": [r["endpoint"] for r in resource_requests.get(name, [])], **meta})
+            ch["delta"][name] = amount
+            ch["before"][name] = before[name]
+            ch["after"][name] = after[name]
+        changes.extend(grouped.values())
+        for name in reading:
+            resource_requests[name] = []
 
         # 小判（currency.money）在不少动作响应里没有容器：complete 没有
         # currency 块，mission/rewards 也没有——小判只列在奖励清单里
@@ -827,6 +896,7 @@ def build_ledger(events: list[dict]) -> dict:
             changes.append({
                 "ts": ts,
                 "delta": {"小判": koban},
+                "source_endpoint": ev["endpoint"], "attribution": "confirmed",
                 "before": {"小判": before_k},
                 "after": {"小判": after_k},
                 "via": [detail or _ENDPOINT_LABEL.get(
@@ -848,6 +918,7 @@ def build_ledger(events: list[dict]) -> dict:
                 changes.append({
                     "ts": ts,
                     "delta": {"审神者经验": user_exp},
+                    "source_endpoint": ev["endpoint"], "attribution": "confirmed",
                     "before": {"审神者经验": (exp_after - user_exp)
                                if exp_after is not None else None},
                     "after": {"审神者经验": exp_after},
@@ -863,6 +934,7 @@ def build_ledger(events: list[dict]) -> dict:
                 changes.append({
                     "ts": ts,
                     "delta": {"刀剑经验": sword_exp},
+                    "source_endpoint": ev["endpoint"], "attribution": "confirmed",
                     "before": {}, "after": {},
                     "via": [detail or "远征完成"],
                     "via_endpoints": [r["endpoint"]
@@ -901,7 +973,7 @@ def write_ledger(store, ledger: dict,
     - 余额观察 → inventory.captured（source=youzu_log，账房观察链，
       不会混进手动家底列表——那边只认 manual_entry/manual_import）
     - 收支 → 每资源一条 resource.change（before/after/delta/source/note
-      全是服务器原文，attribution=confirmed）
+      数量来自服务器原文；动作明确才确认来源）
     - 幂等：状态文件记 last_ts，已写过的部分重拉不重记
       （日志每局重写，跨局的时间戳天然递增，不会撞车）
     """
@@ -941,9 +1013,10 @@ def write_ledger(store, ledger: dict,
             payload = {
                 "resource": name, "delta": delta,
                 "before": ch["before"].get(name), "after": ch["after"].get(name),
-                "source": f"youzu_log.{(ch['via_endpoints'] or ['?'])[0].lstrip('/')}",
+                "source": f"youzu_log.{(ch.get('source_endpoint') or 'unknown').lstrip('/')}",
+                "candidate_endpoints": ch.get("candidate_endpoints", []),
                 "note": f"{via} {name} {delta:+d}",
-                "attribution": "confirmed",
+                "attribution": ch.get("attribution", "inferred"),
             }
             conn.execute(
                 "INSERT INTO events(ts, run_id, script, event_type, payload) "

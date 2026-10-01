@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { HumanReport, InventoryGap, LedgerAttribution, ManualSession } from '../../types'
-import { categoryLabel, dayLabel, eventTime, scriptNames, signed } from './reportModel'
+import { categoryLabel, dayLabel, eventTime, recordOrigin, scriptNames, signed } from './reportModel'
 
 const props = defineProps<{
   date: string
@@ -25,7 +25,7 @@ const groupedAttributions = computed(() => {
   const groups: { ts: number; tsEnd: number; label: string; source: string; script: string; delta: number; count: number }[] = []
   for (const item of sortedAttributions.value) {
     const label = item.label || categoryLabel(item.source)
-    const script = item.script || ''
+    const script = recordOrigin(item)
     const delta = Number(item.delta || 0)
     const last = groups[groups.length - 1]
     if (last && last.label === label && last.script === script && last.delta === delta) {
@@ -120,7 +120,7 @@ function recordDateLabel(date: string): string {
     <ul v-if="groupedAttributions.length" class="day-detail-attributions">
       <li v-for="group in groupedAttributions" :key="`${group.ts}:${group.label}`">
         <time>{{ eventTime(group.ts) }}<template v-if="group.count > 1"> → {{ eventTime(group.tsEnd) }}</template></time>
-        <span><b>{{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template></b><small>{{ scriptNames[group.script || ''] || group.script || 'まあ丸' }} · {{ resource }} {{ signed(group.delta) }}<template v-if="group.count > 1"> · 共 {{ signed(group.delta * group.count) }}</template></small></span>
+        <span><b>{{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template></b><small>{{ group.script }} · {{ resource }} {{ signed(group.delta) }}<template v-if="group.count > 1"> · 共 {{ signed(group.delta * group.count) }}</template></small></span>
       </li>
     </ul>
     <p v-else class="day-detail-empty">这天没有自动对上来源的{{ resource }}流水。</p>

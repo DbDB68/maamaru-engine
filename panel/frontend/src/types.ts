@@ -131,6 +131,9 @@ export type ScriptParams = Record<string, unknown>
 // ---- 本丸成绩单 /api/data/resource-ledger ----
 
 export interface LedgerAttribution {
+  raw_source?: string
+  execution_script?: string
+  evidence_ids?: number[]
   id: string
   ts: number
   resource: string
@@ -176,6 +179,7 @@ export interface ResourceLedger {
   daily_series: LedgerDay[]
   gaps: any[]
   attributions: LedgerAttribution[]
+  unresolved_changes?: LedgerAttribution[]
 }
 
 export interface HumanReport {

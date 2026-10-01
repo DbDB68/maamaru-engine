@@ -96,6 +96,7 @@ export const api = {
   }),
   revokeSwordAnnotation: (id: number) => request<{ ok: boolean }>(`/api/data/sword-archive/annotations/${id}`, { method: 'DELETE' }),
   resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
+  resourceLedgerRange: (from: number, to: number) => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}`),
   ledgerOnboarding: () => request<LedgerOnboarding>('/api/data/ledger-onboarding'),
   updateLedgerOnboarding: (action: 'start' | 'advance' | 'complete' | 'dismiss', step?: 2 | 3) => request<LedgerOnboarding & { ok: boolean }>('/api/data/ledger-onboarding', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, step }),

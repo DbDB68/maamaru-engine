@@ -13,6 +13,10 @@ export const sourceCategories: SourceCategory[] = [
   { key: 'repair', label: '手入', color: '#6a8caf' },
   { key: 'task_rewards', label: '任务报酬', color: '#9a7bb0' },
   { key: 'yosari', label: '异去', color: '#4fa3a5' },
+  { key: 'inbox', label: '收信箱', color: '#b39c67' },
+  { key: 'signin', label: '签到', color: '#b38d9e' },
+  { key: 'salary', label: '月卡俸禄', color: '#c89a45' },
+  { key: 'artifact', label: '宝物道具', color: '#957963' },
   { key: 'other', label: '其他来源', color: '#c7b299' },
   { key: 'human', label: '你补记的', color: '#a89c8d' },
   { key: 'unknown', label: '还不知道', color: '#ddd6cb' },
@@ -30,6 +34,34 @@ export function categoryOf(source: string | undefined): string {
 
 export function categoryLabel(key: string): string {
   return sourceCategories.find(item => item.key === key)?.label || key
+}
+
+export function recordOrigin(item: LedgerAttribution): string {
+  if (item.script === 'manual' || item.source.startsWith('human')) return '你补记的'
+  if (item.script === 'youzu_log') {
+    return item.execution_script ? `游戏记录 · まあ丸执行${scriptNames[item.execution_script] || ''}` : '游戏记录'
+  }
+  return `まあ丸${scriptNames[item.script || ''] ? ` · ${scriptNames[item.script || '']}` : ''}`
+}
+
+export function gameLedgerRecords(attributions: LedgerAttribution[]) {
+  const groups = new Map<string, any>()
+  const seen = new Set<string>()
+  for (const item of attributions.filter(a => a.script === 'youzu_log')) {
+    const identity = `${item.event_id || item.id}:${item.ts}:${item.resource}`
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    const label = (item.label || categoryLabel(categoryOf(item.source))).split(` ${item.resource} `)[0]
+    const key = `${item.ts}:${item.source}:${label}:${item.run_id || ''}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { id: `game-${item.event_id || item.id}`, ts: item.ts, run_id: item.run_id,
+        event_type: 'game.resource_changed', payload: { label, resources: {}, origin: recordOrigin(item) }, items: [] }
+      groups.set(key, group)
+    }
+    group.payload.resources[item.resource] = (group.payload.resources[item.resource] || 0) + item.delta
+  }
+  return [...groups.values()]
 }
 
 export function signed(value: number | null | undefined): string {
@@ -62,6 +94,7 @@ export const scriptNames: Record<string, string> = {
   expedition: '远征', practice: '演练', smith: '锻刀', repair: '手入',
   sakura: '刷花', sugar: '炼糖', rotate_captain: '换队长', scheduler: '排班',
   inbox_supplies: '收杂物箱', snapshot: '库存盘点', workflow: '自定义工作流',
+  youzu_log: '游戏记录',
 }
 
 // ---- 每轮任务（run）展示助手 ----

@@ -48,6 +48,54 @@ class ResourceLedgerTests(unittest.TestCase):
         return next((d for d in ledger["daily_series"]
                      if d["date"] == date and d["resource"] == resource), None)
 
+    def test_game_and_script_same_receipt_count_once_and_link_run(self):
+        t = sh("2026-09-30 10:00:00")
+        self._captured(t - 60, {"小判": 1000}, phase="before")
+        script_id = self._event(t, "resource.change", {"resource": "小判", "delta": -500,
+            "before": 1000, "after": 500, "source": "yosari.ticket_refill"}, script="yosari")
+        game_id = self._event(t + 1, "resource.change", {"resource": "小判", "delta": -500,
+            "before": 1000, "after": 500, "source": "youzu_log.sally/parallelpastrecovercost",
+            "note": "sally/parallelpastrecovercost 小判 -500"}, run_id=None, script="youzu_log")
+        self._captured(t + 60, {"小判": 500}, phase="after")
+        ledger = self.store.resource_ledger(t - 60, t + 60)
+        attrs = [a for a in ledger["attributions"] if a["resource"] == "小判"]
+        self.assertEqual(len(attrs), 1)
+        self.assertEqual(attrs[0]["source"], "yosari.youzu_log.sally/parallelpastrecovercost")
+        self.assertEqual(attrs[0]["run_id"], "run-1")
+        self.assertEqual(attrs[0]["evidence_ids"], [game_id, script_id])
+        self.assertFalse(any(g["reason"] == "conflicting_evidence" for g in ledger["gaps"]))
+        self.assertEqual(self._res(ledger, "小判")["unattributed_delta"], 0)
+
+    def test_game_receipt_alone_prevents_duplicate_run_net_delta(self):
+        t = sh("2026-09-30 10:00:00")
+        self._captured(t, {"木炭": 100}, phase="before")
+        self._event(t + 10, "resource.change", {"resource": "木炭", "delta": 15,
+            "before": 100, "after": 115, "source": "youzu_log.home/get_all_activity",
+            "note": "远征完成·一队·A1 维新 木炭 +15"}, run_id=None, script="youzu_log")
+        self._captured(t + 60, {"木炭": 115}, phase="after")
+        ledger = self.store.resource_ledger(t, t + 60)
+        self.assertEqual(len(ledger["attributions"]), 1)
+        self.assertEqual(ledger["attributions"][0]["source"], "expedition.youzu_log.conquest/complete")
+
+    def test_unknown_game_action_remains_unattributed(self):
+        t = sh("2026-09-30 10:00:00")
+        self._event(t, "resource.change", {"resource": "小判", "delta": -500,
+            "before": 1000, "after": 500, "source": "youzu_log.unknown",
+            "note": "来源待确认 小判 -500"}, run_id=None, script="youzu_log")
+        ledger = self.store.resource_ledger(t - 1, t + 1)
+        self.assertEqual(ledger["attributions"], [])
+        self.assertEqual(ledger["unresolved_changes"][0]["label"], "来源待确认")
+        self.assertEqual(self._res(ledger, "小判")["unattributed_delta"], -500)
+
+    def test_contradicting_balances_do_not_merge_similar_amounts(self):
+        t = sh("2026-09-30 10:00:00")
+        for stamp, before, script, source in [(t, 1000, "yosari", "yosari.ticket_refill"),
+                (t + 1, 500, "youzu_log", "youzu_log.sally/parallelpastrecovercost")]:
+            self._event(stamp, "resource.change", {"resource": "小判", "delta": -500,
+                "before": before, "after": before - 500, "source": source}, run_id=None, script=script)
+        ledger = self.store.resource_ledger(t - 1, t + 2)
+        self.assertEqual(len(ledger["attributions"]), 2)
+
     def test_koban_session_reconciles_against_captured(self):
         # 8/20 实例：captured 745056 → 挖地收场 788506（session 开工 745656）
         t0 = sh("2026-08-20 09:00:00")

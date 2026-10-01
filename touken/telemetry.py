@@ -1268,32 +1268,6 @@ class TelemetryStore:
                                         "source": event_type,
                                         "event_id": row["id"], "evidence": [row["id"]]})
 
-        # 去重：时间贴脸（5 秒内）且数值一致 = 同一观察点，合并证据 event id，
-        # 来源升到最高优先级；数值不同 = 证据冲突，各算各的观察并记冲突缺口
-        observations: dict[str, list[dict]] = {}
-        conflicts: list[tuple] = []
-        by_resource: dict[str, list[dict]] = {}
-        for entry in raw:
-            by_resource.setdefault(entry["resource"], []).append(entry)
-        for name, entries in by_resource.items():
-            entries.sort(key=lambda e: (e["ts"], e["sub"], -e["priority"], e["event_id"]))
-            merged: list[dict] = []
-            for entry in entries:
-                if merged and entry["ts"] - merged[-1]["ts"] <= _LEDGER_MERGE_SECONDS:
-                    last = merged[-1]
-                    if entry["value"] == last["value"]:
-                        last["evidence"].append(entry["event_id"])
-                        if entry["priority"] > last["priority"]:
-                            last.update(priority=entry["priority"], source=entry["source"])
-                        continue
-                    # 同事件的 before/after 本来就不同值，不算冲突；
-                    # 不同来源贴脸读数不一致才是证据冲突
-                    if entry["event_id"] != last["event_id"]:
-                        conflicts.append((name, last["ts"], entry["ts"],
-                                          last["value"], entry["value"]))
-                merged.append(entry)
-            observations[name] = merged
-
         # ── 归因：resource.change 双写去重（source_event_id 指向旧事件时跳过旧的那份）──
         shadowed = set()
         # 加速符去重：同 run 已有 repair.confirm_screen 的逐笔记账时，
@@ -1326,6 +1300,7 @@ class TelemetryStore:
             if len(event_ids) > 1 for event_id in event_ids
         }
         attributions: list[dict] = []
+        unresolved_changes: list[dict] = []
         for row in rows:
             payload = _loads(row["payload"], {})
             event_type = row["event_type"]
@@ -1355,6 +1330,16 @@ class TelemetryStore:
                             "source": str(payload.get("source") or event_type),
                             "label": str(payload.get("note") or f"{resource} {int(delta):+d}"),
                             "confidence": str(payload.get("attribution") or "confirmed")}
+                    if row["script"] == "youzu_log":
+                        from .youzu_log import translate_ledger_source
+                        original = item["source"]
+                        item["source"], item["label"] = translate_ledger_source(original, item["label"])
+                        item["raw_source"] = original
+                        if item["source"].startswith("unknown."):
+                            unresolved_changes.append({**item, "id": f"u{row['id']}",
+                                "ts": row["ts"], "script": row["script"],
+                                "run_id": row["run_id"], "event_id": row["id"], "confidence": "inferred"})
+                            item = None
             elif event_type == "ticket.refilled" and row["id"] not in shadowed:
                 # v0.4.1 的江户城已经稳定记录“补过一张”，但没把固定的
                 # 300 小判写进 payload。兼容这些旧事实，让历史统计即时补账；
@@ -1374,6 +1359,76 @@ class TelemetryStore:
                              "script": row["script"], "run_id": row["run_id"],
                              "event_id": row["id"]})
                 attributions.append(item)
+
+        # 游戏原文与脚本若记录了同一笔变化，保留原文并关联执行记录。
+        # 只合并唯一匹配：精确余额一致，或同来源且五秒内相同金额。
+        shadowed_attrs = set()
+        payload_by_id = {r["id"]: _loads(r["payload"], {}) for r in rows}
+        scripts_by_amount = {}
+        for a in attributions:
+            if a["script"] != "youzu_log":
+                scripts_by_amount.setdefault((a["resource"], a["delta"]), []).append(a)
+        matches = []
+        for game in [a for a in attributions if a["script"] == "youzu_log"]:
+            candidates = []
+            game_payload = payload_by_id.get(game["event_id"], {})
+            for script in scripts_by_amount.get((game["resource"], game["delta"]), []):
+                if script["script"] == "youzu_log" or script["event_id"] in shadowed_attrs:
+                    continue
+                if script["resource"] != game["resource"] or script["delta"] != game["delta"]:
+                    continue
+                other = payload_by_id.get(script["event_id"], {})
+                balances_match = all(isinstance(game_payload.get(key), (int, float))
+                                     and game_payload[key] == other.get(key)
+                                     for key in ("before", "after"))
+                same_source = script["source"].split(".")[0] == game["source"].split(".")[0]
+                distance = abs(script["ts"] - game["ts"])
+                has_balances = all(isinstance(p.get(key), (int, float))
+                                   for p in (game_payload, other) for key in ("before", "after"))
+                if ((balances_match and distance <= 30)
+                        or (not has_balances and same_source and distance <= 5)):
+                    candidates.append(script)
+            matches.append((game, candidates))
+        matching_games = {}
+        for game, candidates in matches:
+            for script in candidates:
+                matching_games.setdefault(script["event_id"], []).append(game)
+        for game, candidates in matches:
+            if len(candidates) == 1 and len(matching_games[candidates[0]["event_id"]]) == 1:
+                script = candidates[0]
+                shadowed_attrs.add(script["event_id"])
+                game["run_id"] = script["run_id"]
+                game["execution_script"] = script["script"]
+                game["evidence_ids"] = [game["event_id"], script["event_id"]]
+        attributions = [a for a in attributions if a["event_id"] not in shadowed_attrs]
+
+        # 去重：时间贴脸（5 秒内）且数值一致 = 同一观察点，合并证据 event id，
+        # 来源升到最高优先级；数值不同 = 证据冲突，各算各的观察并记冲突缺口
+        observations: dict[str, list[dict]] = {}
+        conflicts: list[tuple] = []
+        by_resource: dict[str, list[dict]] = {}
+        for entry in raw:
+            if entry["event_id"] in shadowed_attrs:
+                continue
+            by_resource.setdefault(entry["resource"], []).append(entry)
+        for name, entries in by_resource.items():
+            entries.sort(key=lambda e: (e["ts"], e["sub"], -e["priority"], e["event_id"]))
+            merged: list[dict] = []
+            for entry in entries:
+                if merged and entry["ts"] - merged[-1]["ts"] <= _LEDGER_MERGE_SECONDS:
+                    last = merged[-1]
+                    if entry["value"] == last["value"]:
+                        last["evidence"].append(entry["event_id"])
+                        if entry["priority"] > last["priority"]:
+                            last.update(priority=entry["priority"], source=entry["source"])
+                        continue
+                    # 同事件的 before/after 本来就不同值，不算冲突；
+                    # 不同来源贴脸读数不一致才是证据冲突
+                    if entry["event_id"] != last["event_id"]:
+                        conflicts.append((name, last["ts"], entry["ts"],
+                                          last["value"], entry["value"]))
+                merged.append(entry)
+            observations[name] = merged
 
         # ── 同 run 前后盘点残差：收杂物箱等没有逐笔记账的流程，
         # 用 run 自带的 before/after 快照净差认账（扣除该 run 已逐笔确认的部分），
@@ -1399,7 +1454,8 @@ class TelemetryStore:
             right = _loads(after_row["payload"], {}).get("resources") or {}
             run_delta: dict[str, float] = {}
             for a in attributions:
-                if a["run_id"] == run_id:
+                if (a["run_id"] == run_id or (a["script"] == "youzu_log"
+                        and before_row["ts"] <= a["ts"] <= after_row["ts"])):
                     run_delta[a["resource"]] = run_delta.get(a["resource"], 0) + a["delta"]
             for name in left.keys() & right.keys():
                 if not (isinstance(left.get(name), (int, float))
@@ -1416,6 +1472,9 @@ class TelemetryStore:
                     "confidence": "inferred",
                     "script": slot["script"], "run_id": run_id,
                     "event_id": after_row["id"]})
+
+        for index, item in enumerate(attributions, 1):
+            item["id"] = f"a{index}"
 
         # ── 缺口：跨 run 快照差值 + 人工报备 + 证据冲突 ──
         gaps: list[dict] = []
@@ -1570,6 +1629,7 @@ class TelemetryStore:
             "daily_series": daily_series,
             "gaps": gaps,
             "attributions": attributions,
+            "unresolved_changes": unresolved_changes,
         }
 
     def recent_events(self, limit: int = 100, event_type: str | None = None,

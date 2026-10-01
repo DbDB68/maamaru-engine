@@ -25,6 +25,11 @@ const currentSection = computed(() => props.pageSection || honmaruTab.value)
 const view = ref<'chart' | 'records'>(props.initialSection === 'records' ? 'records' : 'chart')
 const summary = ref<any>(null)
 const ledger = ref<ResourceLedger | null>(null)
+const recordLedger = ref<ResourceLedger | null>(null)
+const recordReceipts = computed(() => {
+  const book = recordLedger.value || ledger.value
+  return [...(book?.attributions || []), ...(book?.unresolved_changes || [])]
+})
 const planning = ref<PlanningReport | null>(null)
 const events = ref<any[]>([])
 const runs = ref<any[]>([])
@@ -668,10 +673,12 @@ async function loadRecordDay(date: string) {
   recordLoading.value = true
   try {
     const [start, end] = dayRange(date)
-    const [nextEvents, nextRuns] = await Promise.all([
+    const [nextEvents, nextRuns, nextLedger] = await Promise.all([
       api.dataEvents(1000, undefined, start, end),
       api.dataRuns(100, undefined, start, end),
+      api.resourceLedgerRange(start, end),
     ])
+    if (recordDate.value === date) recordLedger.value = nextLedger
     mergeEvents(nextEvents.items)
     mergeRuns(nextRuns.items)
     recordHasMoreEvents.value = nextEvents.has_more
@@ -1322,7 +1329,7 @@ onMounted(async () => {
         </section>
       </template>
 
-      <ReportRecords v-if="view === 'records'" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      <ReportRecords v-if="view === 'records'" :attributions="recordReceipts" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 
       <template v-else>

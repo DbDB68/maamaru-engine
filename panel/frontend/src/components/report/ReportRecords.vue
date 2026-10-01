@@ -3,11 +3,13 @@ import { computed, ref, watch } from 'vue'
 import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
-import type { ManualSession } from '../../types'
+import type { LedgerAttribution, ManualSession } from '../../types'
+import { gameLedgerRecords, signed } from './reportModel'
 import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runStatusLabel, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
   events: any[]
+  attributions?: LedgerAttribution[]
   runs: any[]
   manualSessions: ManualSession[]
   selectedDate: string
@@ -135,6 +137,7 @@ function eventDetail(item: any) {
   return '本丸记录'
 }
 function activityTitle(item: any) {
+  if (item.event_type === 'game.resource_changed') return item.payload.label
   const count = item.items?.length || 1
   if (item.event_type === 'sortie.completed') return `完成出阵 ${count} 次`
   if (item.event_type === 'sortie.retreated_before_boss') return `王点前撤退 ${count} 次`
@@ -160,6 +163,7 @@ function activityTitle(item: any) {
   return eventTitle(item)
 }
 function activityDetail(item: any) {
+  if (item.event_type === 'game.resource_changed') return `${item.payload.origin} · ${Object.entries(item.payload.resources).map(([name, delta]) => `${name} ${signed(Number(delta))}`).join(' · ')}`
   const items = item.items || [item], p = item.payload || {}
   if (item.event_type === 'sortie.completed') return `${p.mode === 'yosari' ? '异去' : '合战场'} ${p.chapter}-${p.map_no} · 共 ${items.length} 圈`
   if (item.event_type === 'sortie.retreated_before_boss') return `合战场 ${p.chapter}-${p.map_no} · 均在王点前返回`
@@ -331,6 +335,7 @@ const allRecords = computed(() => {
   return [
     ...props.runs.map(run => ({ kind: 'run' as const, ts: Number(run.started_at), run })),
     ...props.manualSessions.map(session => ({ kind: 'manual' as const, ts: Number(session.started_at), session })),
+    ...gameLedgerRecords(props.attributions || []).map(item => ({ kind: 'activity' as const, ts: Number(item.ts), item })),
     ...groupedActivityEvents.value
       .filter(item => {
         if (!item.run_id) return true
