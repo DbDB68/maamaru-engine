@@ -288,14 +288,62 @@ class DayConductorTests(unittest.TestCase):
                 dc.disarm(self.state_path)
         self.assertEqual(self.state_path.read_text(encoding="utf-8"), before)
 
-    def test_only_single_raid_step_can_be_scheduled(self):
+    def test_mixed_flow_keeps_other_steps_and_requires_one_raid(self):
         with patch.object(dc.workflow, "find_preset", return_value={
             "id": "mixed", "name": "混合", "after": "none", "daily_mode": False,
             "nodes": [{"type": "raid", "params": {}},
                       {"type": "wait_until", "params": {"time": "04:05"}}],
         }):
-            with self.assertRaisesRegex(ValueError, "单个联队战"):
-                dc.workflow_spec("mixed", {})
+            spec = dc.workflow_spec("mixed", {})
+            self.assertEqual([node["type"] for node in spec["nodes"]], ["raid", "wait_until"])
+            self.assertEqual(spec["raid_index"], 0)
+        for nodes in ([{"type": "signin", "params": {}}],
+                      [{"type": "raid", "params": {}}, {"type": "raid", "params": {}}],
+                      [{"type": "raid", "params": {}, "on_error": "continue"}]):
+            with patch.object(dc.workflow, "find_preset", return_value={"name": "mixed", "nodes": nodes}):
+                with self.assertRaisesRegex(ValueError, "一个联队战"):
+                    dc.workflow_spec("mixed", {})
+
+    def test_recommendation_overrides_only_raid_in_full_flow(self):
+        preset = {"id": "full", "name": "整套", "after": "shutdown", "daily_mode": False,
+                  "nodes": [{"type": "boot_emulator", "params": {}, "on_error": "stop"},
+                            {"type": "login", "params": {}, "on_error": "stop"},
+                            {"type": "yosari", "params": {"runs": 3}, "on_error": "continue"},
+                            {"type": "raid", "params": {"rounds": 99, "team_no": "4"}, "on_error": "stop"},
+                            {"type": "snapshot", "params": {}, "on_error": "continue"}]}
+        before = json.dumps(preset, sort_keys=True)
+        with patch.object(dc.workflow, "find_preset", return_value=preset), \
+             patch.object(server, "_load_panel_settings", return_value={"params": {}}), \
+             patch.object(server._workflow, "run_workflow", side_effect=lambda *a, **k: iter(["ok"])) as run:
+            signature = dc.workflow_spec("full", {})["signature"]
+            self.assertEqual(list(server._build_workflow("cfg", {
+                "workflow_id": "full", "scheduled_raid_runs": 8,
+                "scheduled_workflow_signature": signature})), ["ok"])
+            plan = run.call_args.args[1]
+            self.assertEqual([node["type"] for node in plan],
+                             ["boot_emulator", "login", "yosari", "raid", "snapshot"])
+            self.assertEqual(plan[2]["params"], {"runs": 3})
+            self.assertEqual(plan[3]["params"]["rounds"], 8)
+            self.assertEqual(plan[3]["params"]["team_no"], "4")
+            self.assertEqual(run.call_args.kwargs["after"], "shutdown")
+            self.assertEqual(json.dumps(preset, sort_keys=True), before)
+            preset["nodes"][2]["params"]["runs"] = 4
+            run.reset_mock()
+            with self.assertRaises(FlowAborted):
+                list(server._build_workflow("cfg", {"workflow_id": "full", "scheduled_raid_runs": 8,
+                    "scheduled_workflow_signature": signature}))
+            run.assert_not_called()
+
+    def test_full_flow_signature_covers_after_and_daily_mode(self):
+        preset = {"name": "整套", "nodes": [{"type": "signin", "params": {}},
+                                               {"type": "raid", "params": {}}]}
+        with patch.object(dc.workflow, "find_preset", return_value=preset):
+            signature = dc.workflow_spec("full", {})["signature"]
+            preset["after"] = "shutdown"
+            self.assertNotEqual(dc.workflow_spec("full", {})["signature"], signature)
+            preset["after"] = "none"
+            preset["daily_mode"] = True
+            self.assertNotEqual(dc.workflow_spec("full", {})["signature"], signature)
 
     def test_worker_uses_booked_runs_without_changing_saved_settings(self):
         settings = {"team_no": "3", "rounds": 99, "auto_refill": True}

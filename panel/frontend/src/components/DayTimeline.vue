@@ -1000,12 +1000,13 @@ const caption = computed(() => {
           </div>
           <button v-if="draft.length < MAX_BLOCKS" type="button" class="tl-booking-link" @click="addBlock">＋ 再加一段</button>
           <div v-if="draftHasRaid" class="tl-booking-raidwf">
-            <label>联队战任务流
+            <label>推荐圈数怎么跑
               <select v-model="conductorChoice">
                 <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
               </select>
             </label>
-            <small>联队战段都用这份任务流开工，只接单个联队战步骤的任务流。</small>
+            <small>默认只刷联队战；也可选整套任务流。本次圈数自动带入其中的联队战，其他步骤照常跑，保存的任务流不改。每个联队战时段都会跑一遍所选流程。</small>
+            <small v-if="conductorChoice !== 'builtin-scheduled-raid'">预计收工时间只算联队战，其他步骤另需时间；前一段没结束，后一段排队等。</small>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">

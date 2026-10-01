@@ -125,10 +125,8 @@ def _eligible(preset: dict) -> bool:
         nodes = workflow.normalize_nodes(preset.get("nodes"))
     except workflow.WorkflowError:
         return False
-    return (len(nodes) == 1 and nodes[0]["type"] == "raid"
-            and nodes[0]["on_error"] == "stop"
-            and preset.get("after", "none") == "none"
-            and not preset.get("daily_mode", False))
+    raids = [node for node in nodes if node["type"] == "raid"]
+    return len(raids) == 1 and raids[0]["on_error"] == "stop"
 
 
 def options() -> list[dict]:
@@ -139,8 +137,10 @@ def options() -> list[dict]:
 def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     preset = _preset(workflow_id)
     if not _eligible(preset):
-        raise ValueError("定时安排目前只支持单个联队战步骤、翻车即停的任务流")
-    source_node = workflow.normalize_nodes(preset["nodes"])[0]
+        raise ValueError("请选择包含一个联队战步骤、且联队战翻车即停的任务流")
+    source_nodes = workflow.normalize_nodes(preset["nodes"])
+    raid_index = next(i for i, node in enumerate(source_nodes) if node["type"] == "raid")
+    source_node = source_nodes[raid_index]
     saved = raid_settings if isinstance(raid_settings, dict) else {}
     effective = {**saved, **source_node["params"]}
     node = {**source_node, "params": effective}
@@ -157,9 +157,17 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     if team_no not in (1, 2, 3, 4, 5):
         raise ValueError("这份任务流的出阵部队还没认清，请先检查联队战设置")
     signature_payload = {"raid_settings": saved, "team_no": team_no}
-    source_signature = _digest({**signature_payload, "nodes": [source_node]})
-    effective_signature = _digest({**signature_payload, "nodes": [node]})
-    return {"name": preset["name"], "team_no": team_no, "nodes": [node],
+    after = workflow.normalize_after(preset.get("after", "none"))
+    daily_mode = bool(preset.get("daily_mode", False))
+    # 保留旧单步骤签名；整套任务流则同时核对其余步骤及下班安排。
+    if len(source_nodes) != 1 or after != "none" or daily_mode:
+        signature_payload.update(after=after, daily_mode=daily_mode)
+    nodes = [dict(item) for item in source_nodes]
+    nodes[raid_index] = node
+    source_signature = _digest({**signature_payload, "nodes": source_nodes})
+    effective_signature = _digest({**signature_payload, "nodes": nodes})
+    return {"name": preset["name"], "team_no": team_no, "nodes": nodes,
+            "raid_index": raid_index, "after": after, "daily_mode": daily_mode,
             "signature": source_signature,
             "compatible_signatures": {source_signature, effective_signature}}
 

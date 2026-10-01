@@ -1391,7 +1391,8 @@ def _build_workflow(config_path, params):
                                              .get("raid", {}) or {}))
             if params.get("scheduled_workflow_signature") not in spec["compatible_signatures"]:
                 raise ValueError("任务流或联队战设置已变化")
-            preset = {"nodes": spec["nodes"], "after": "none", "daily_mode": False}
+            preset = {"nodes": spec["nodes"], "after": spec["after"],
+                      "daily_mode": spec["daily_mode"]}
         except ValueError as exc:
             yield f"[工作流] ✗ {exc}，本段不启动"
             raise FlowAborted(str(exc)) from exc
@@ -1406,13 +1407,18 @@ def _build_workflow(config_path, params):
         yield f"[工作流] 预设校验翻车: {exc}"
         return
     if scheduled_runs is not None:
-        plan[0]["params"] = {**plan[0]["params"], "rounds": scheduled_runs}
-        # 授权签名仍核对原联队战设置；冷启动前置步骤不改玩家保存的任务流。
-        plan = [
-            {"type": "boot_emulator", "params": {}, "on_error": "stop"},
-            {"type": "login", "params": {}, "on_error": "stop"},
-            *plan,
-        ]
+        raid_index = spec["raid_index"]
+        plan[raid_index]["params"] = {**plan[raid_index]["params"], "rounds": scheduled_runs}
+        # 推荐圈数只覆盖本次联队战；原有前后步骤、参数及下班安排照常执行。
+        if plan[0]["type"] != "boot_emulator":
+            plan.insert(0, {"type": "boot_emulator", "params": {}, "on_error": "stop"})
+        raid_index = next(i for i, node in enumerate(plan) if node["type"] == "raid")
+        if not any(node["type"] == "login" for node in plan[:raid_index]):
+            plan.insert(1, {"type": "login", "params": {}, "on_error": "stop"})
+        else:
+            for node in plan[:raid_index]:
+                if node["type"] == "login":
+                    node["on_error"] = "stop"
     completed = yield from _workflow.run_workflow(
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
