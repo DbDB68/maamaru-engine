@@ -118,3 +118,23 @@ def find_by_id(id_num: int) -> Optional[tuple]:
         if sid.startswith(prefix):
             return sid, info
     return None
+
+
+def find_game_sword(id_num: int):
+    """游戏刀帐番号 → 现有目录及形态；源氏兄弟的特阶段不等于极。
+
+    111/115 已与国服所持 JSON、既有同振显现日期/等级及头像极证据核对。
+    阶段番号对照：https://wikiwiki.jp/toulove/刀剣男士%20極/テーブル/極
+    """
+    stages = {108: (107, "normal"), 109: (107, "normal"), 110: (107, "normal"),
+              111: (107, "kiwame"), 113: (112, "normal"), 114: (112, "normal"),
+              115: (112, "kiwame")}
+    if id_num in stages:
+        base, form = stages[id_num]
+        found = find_by_id(base)
+        return (*found, form) if found else None
+    found = find_by_id(id_num)
+    if found:
+        return (*found, "normal")
+    found = find_by_id(id_num - 1) if id_num > 1 else None
+    return (*found, "kiwame") if found else None

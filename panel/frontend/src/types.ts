@@ -601,7 +601,7 @@ export interface FormationCandidate {
   page_no: number | null
   unknown_fields: string[]
   observed_at: number | null
-  source_snapshot_id: number
+  source_snapshot_id: number | null
 }
 
 export interface FormationCandidatePool {
@@ -709,6 +709,14 @@ export type SwordMachineFormStatus = SwordFormStatus | null
 
 export interface SwordArchiveEntry {
   observation_id: string
+  serial_id?: number | null
+  data_source?: 'youzu_log' | 'ocr'
+  observed_at?: number | null
+  survival?: number | null
+  survival_max?: number | null
+  fatigue?: number | null
+  locked?: boolean | null
+  stats?: Record<string, number | null>
   sword_catalog_id: string | null
   name_zh: string | null
   sword_type: string | null
@@ -748,6 +756,7 @@ export interface SwordArchiveSummary {
 
 export interface SwordArchiveResponse {
   done: boolean
+  data_source?: 'youzu_log' | 'ocr'
   reason: string | null
   observed_at: number | null
   snapshot_id: number | null

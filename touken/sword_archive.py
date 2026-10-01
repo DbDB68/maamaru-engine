@@ -72,7 +72,8 @@ def _catalog_display_name(sword_catalog_id) -> str:
 
 def _catalog_type(sword_catalog_id):
     found = _catalog_info(sword_catalog_id)
-    return found[1].get("type") if found else None
+    value = found[1].get("type") if found else None
+    return {"脇差": "胁差", "槍": "枪", "剣": "剑"}.get(value, value)
 
 
 def _parse_manifest_day(value) -> date | None:
@@ -182,6 +183,13 @@ def build_sword_archive(store) -> dict:
                 reasons.append("duplicate_fingerprint")
         out_entries.append({
             "observation_id": entry.get("observation_id"),
+            "serial_id": entry.get("serial_id"),
+            "data_source": entry.get("data_source") or "ocr",
+            "observed_at": entry.get("observed_at"),
+            "survival": entry.get("survival"), "survival_max": entry.get("survival_max"),
+            "fatigue": entry.get("fatigue"), "locked": entry.get("locked"),
+            "stats": entry.get("stats") or {},
+            "equipment_serials": entry.get("equipment_serials") or {},
             "sword_catalog_id": entry.get("sword_catalog_id"),
             "name_zh": entry.get("name_zh"),
             "sword_type": _catalog_type(entry.get("sword_catalog_id")),
@@ -234,6 +242,7 @@ def build_sword_archive(store) -> dict:
     return {"done": True, "reason": None,
             "observed_at": pool.get("observed_at"),
             "snapshot_id": (pool.get("source") or {}).get("snapshot_id"),
+            "data_source": (pool.get("source") or {}).get("kind") or "ocr",
             "summary": summary, "entries": out_entries, "attention": attention}
 
 

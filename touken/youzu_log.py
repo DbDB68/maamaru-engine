@@ -169,6 +169,13 @@ def _sword_name(sword_id, db) -> str:
     （国服的 evol_num 字段不是极化标记，实测极化刀它也是 0，别踩。）"""
     sid = _int(sword_id)
     try:
+        if hasattr(db, "find_game_sword"):
+            found_game = db.find_game_sword(sid)
+            if found_game:
+                _, info, form = found_game
+                base = info.get("name_zh") or info.get("name") or f"刀帐{sid}"
+                return base + ("·极" if form == "kiwame" else "")
+            return f"刀帐{sid}"
         found = db.find_by_id(sid)
         if not found and sid > 1:
             prev = db.find_by_id(sid - 1)

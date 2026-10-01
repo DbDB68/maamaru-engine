@@ -148,6 +148,8 @@ def test_empty_home_situation_preserves_previous_record(tmp_path):
 
 def test_home_situation_api_refresh_uses_private_state_and_burns_log(tmp_path):
     from panel import server
+    from touken.telemetry import TelemetryStore
+    test_store = TelemetryStore(tmp_path / "telemetry.db")
     raw = tmp_path / "pulled.log"
     raw.write_text(SAMPLE, encoding="utf-8")
     config = tmp_path / "touken.json"
@@ -156,6 +158,7 @@ def test_home_situation_api_refresh_uses_private_state_and_burns_log(tmp_path):
     with patch.object(server, "STATUS_DIR", tmp_path / "state"), \
          patch.object(server, "DEBUG_DIR", tmp_path / "debug"), \
          patch.object(server, "_CONFIG_PATH", config), \
+         patch("touken.telemetry.TelemetryStore", return_value=test_store), \
          patch.object(youzu_log, "pull_log", return_value=raw) as pull:
         client = TestClient(server.app)
         assert client.get("/api/honmaru-home/situation").json() == {"situation": None}

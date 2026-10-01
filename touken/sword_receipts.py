@@ -156,4 +156,7 @@ def sync_receipts(events, store=None):
     if store is None:
         from .telemetry import TelemetryStore
         store = TelemetryStore()
-    return write_receipts(store, build_receipts(events))
+    result = write_receipts(store, build_receipts(events))
+    from .game_sword_archive import sync_archive
+    sync_archive(events, store)
+    return result

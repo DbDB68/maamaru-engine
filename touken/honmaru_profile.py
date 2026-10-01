@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """当前本丸共用档案 · 第一版事实层（只读生成，无 UI、无自动决策）。
 
-输入（全在 telemetry 库，不另造事实库）：
+输入：
+  - 游戏所持刀剑档案：/party/list 完整名单 + serial_id 锚定的局部更新；
   - sword_snapshots / sword_snapshot_rows：所持刀剑盘点（source=owned_inventory）
     与刀帐图鉴扫描（source=album），带 completeness 对账状态；
   - team_roster.observed 事件：五队六槽的编队即时状态。
@@ -14,7 +15,8 @@
 铁律：
   - 一振一行，同名多振保留，绝不按名字或 sword_catalog_id 去重；
   - sword_catalog_id 只是刀种目录，不是本丸实例 ID；observation_id =
-    "{snapshot_id}:{row_id}" 只在该快照内有效，跨快照不伪造永久身份；
+    OCR 的 "{snapshot_id}:{row_id}" 只在该快照内有效；游戏观察用
+    "youzu:{serial_id}"，仅在客户端真的给出独立编号时保留跨次身份；
   - 同名多振或字段不足时输出 ambiguous/unknown + 候选集合，绝不拿
     第一把同名刀顶替；
   - unknown_fields / 识别状态 / 观测时间 / 来源全部保留，让未来规划器
@@ -46,6 +48,11 @@ def build_candidate_pool(store) -> dict:
     """
     chosen = store.latest_sword_snapshot(source="owned_inventory",
                                          completeness="complete")
+    from .game_sword_archive import candidate_pool
+    game_pool = candidate_pool(store) if hasattr(store, "db_path") else None
+    if game_pool and (not chosen or game_pool["observed_at"] >= (chosen.get("captured_at") or 0)):
+        _apply_human_confirmations(game_pool["entries"], _human_annotations(store))
+        return game_pool
     recent = store.recent_sword_snapshots(limit=200)
     if chosen:
         skipped = [{"snapshot_id": s["id"], "captured_at": s.get("captured_at"),
@@ -359,6 +366,9 @@ def _annotate_form_conclusions(entries: list[dict], roster: dict,
                 continue
             entry = by_oid.get(slot.get("observation_id"))
             if entry is None:
+                continue
+            if entry.get("data_source") == "youzu_log":
+                # 游戏编号已经锚定具体实例，旧编队 OCR 不改判这一条事实。
                 continue
             ks = (slot.get("observed") or {}).get("kiwame_status")
             if ks not in ("kiwame", "normal"):

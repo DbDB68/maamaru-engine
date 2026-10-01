@@ -44,6 +44,7 @@ const data = ref<SwordArchiveResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
 const saving = ref(false)
+const syncing = ref(false)
 const query = ref('')
 const swordType = ref<string>(ARCHIVE_ALL_TYPES)
 const archiveView = ref<'attention' | 'watch' | 'keeper' | 'favorite' | 'all'>('attention')
@@ -99,7 +100,7 @@ const attentionGroups = computed(() => groupAttentionItems(attention.value))
 interface RowSource { kind: 'machine' | 'human' | 'overridden'; text: string; origin: string | null }
 function rowSourceOf(entry: SwordArchiveEntry): RowSource {
   const source = archiveFormSource(entry)
-  if (source.kind === 'machine') return { kind: 'machine', text: '盘点识别', origin: null }
+  if (source.kind === 'machine') return { kind: 'machine', text: entry.data_source === 'youzu_log' ? '游戏记录' : '盘点识别', origin: null }
   if (source.kind === 'human') return { kind: 'human', text: '你确认过', origin: null }
   return { kind: 'overridden', text: '你改判的', origin: `原识别：${source.machineText}` }
 }
@@ -122,6 +123,7 @@ const overviewSubtitle = computed(() => {
   if (!data.value) return '整本刀帐 + 你亲手记下的标注'
   const parts = [`档案时间 ${data.value.observed_at ? fmtTime(data.value.observed_at) : '—'}`]
   if (data.value.snapshot_id != null) parts.push(`第 ${data.value.snapshot_id} 号盘点`)
+  if (data.value.data_source === 'youzu_log') parts.push('游戏所持名单')
   return parts.join(' · ')
 })
 
@@ -152,6 +154,19 @@ async function load() {
     error.value = cause instanceof Error ? cause.message : '刀帐档案没有翻开'
   } finally {
     loading.value = false
+  }
+}
+
+async function syncGame() {
+  syncing.value = true
+  error.value = ''
+  try {
+    await api.refreshHonmaruSituation()
+    await load()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '没能读到游戏名单'
+  } finally {
+    syncing.value = false
   }
 }
 
@@ -237,7 +252,7 @@ async function confirmLevel(item: SwordArchiveAttentionItem) {
 }
 
 onMounted(load)
-watch(inventoryRunning, (isRunning, wasRunning) => {
+watch(() => props.running, (isRunning, wasRunning) => {
   if (wasRunning && !isRunning) load()
 })
 </script>
@@ -248,8 +263,9 @@ watch(inventoryRunning, (isRunning, wasRunning) => {
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
           <div class="archive-header-actions">
+            <button type="button" class="primary" :disabled="syncing || inventoryBusy" @click="syncGame">{{ syncing ? '正在同步……' : '同步游戏' }}</button>
             <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在翻档……' : '刷新档案' }}</button>
-            <button type="button" class="primary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : ''" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
+            <button type="button" class="secondary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : ''" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
           </div>
         </template>
       </PanelHeader>
@@ -260,7 +276,7 @@ watch(inventoryRunning, (isRunning, wasRunning) => {
         <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
       <p v-if="!done && data" class="archive-notice">
-        这份档案还不可信{{ data.reason ? `：${data.reason}` : '' }}。先去「功能 → 玩法设置 → 后勤配置 → 刀帐盘点」跑一次完整盘点，认清了再来对档案。
+        {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“同步游戏”，也可用刀帐盘点。
       </p>
     </PaperCard>
 
@@ -300,6 +316,7 @@ watch(inventoryRunning, (isRunning, wasRunning) => {
                 <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
               </div>
               <div v-if="expandedEntryId === entry.observation_id" class="archive-entry-actions">
+                <span v-if="entry.data_source === 'youzu_log'">生存 {{ entry.survival ?? '—' }}/{{ entry.survival_max ?? '—' }} · 疲劳 {{ entry.fatigue ?? '—' }} · {{ entry.locked == null ? '保护状态未知' : entry.locked ? '已保护' : '未保护' }}</span>
                 <span class="archive-form-confirm" role="group" aria-label="改判形态">
                   <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'kiwame')">是极</button>
                   <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'normal')">是普通</button>
