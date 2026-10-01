@@ -992,7 +992,6 @@ const caption = computed(() => {
           </div>
           <p v-if="draftHasRaid" class="tl-booking-message">手形不足时自动补充（消耗小判）。</p>
           <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
-            <button v-if="raidKindAvailable" type="button" class="tl-booking-link" @click="addBlock('raid')">＋ 联队战</button>
             <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 定时启动任务流</button>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
