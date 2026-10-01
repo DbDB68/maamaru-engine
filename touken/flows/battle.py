@@ -296,7 +296,7 @@ class BattleMixin:
         - 花札滑条式：补充 → 数量页确认 → 小判消耗确认 → 结果提示确认
           （不配 recover_button；三连确认是同一张图，见到就点、消失
           为止，最多 3 次防死循环。数量页默认补 1 个，可配
-          quantity_ocr 复核数量，读出来不是 1 就停手不点）。"""
+          quantity_ocr 复核数量，读不清或不是 1 就停手不点）。"""
         self._recover_ok = False
         rec_cfg = cfg["ticket_recover"]
 
@@ -323,7 +323,10 @@ class BattleMixin:
         if qty_roi_raw:
             self.maa.screenshot(force=True)
             qty = self._ocr_refill_quantity(roi_4to4(*qty_roi_raw))
-            if qty is not None and qty != 1:
+            if qty is None:
+                yield f"{tag} 补充数量没读清，停手没点确认"
+                return
+            if qty != 1:
                 yield (f"{tag} 补充数量读出来是 {qty} 不是 1，"
                        "停手没点确认，你去看一眼补充页")
                 return
@@ -352,7 +355,7 @@ class BattleMixin:
         yield f"{tag} 手形补充完成"
 
     def _ocr_refill_quantity(self, roi) -> int | None:
-        """读补充页数量框里的数字；读不出返回 None（不挡路）。"""
+        """读补充页数量框里的数字；读不出返回 None，由调用方停止付款。"""
         try:
             tokens = self.maa.ocr_all(roi)
             digits = "".join(

@@ -7,12 +7,39 @@ import unittest
 from pathlib import Path
 
 from touken.runtime_paths import _fill_missing_config_keys
+from touken.flows.raid import _departure_config
 
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "touken_config.example.json"
 
 
 class RaidConfigMigrationTests(unittest.TestCase):
+    def test_hailian_uses_shared_slider_refill_without_changing_old_config(self):
+        config = json.loads(EXAMPLE.read_text(encoding="utf-8-sig"))
+        raid = config["raid"]
+        before = json.loads(json.dumps(raid))
+        departure = _departure_config(raid, "hailian", config)
+        self.assertEqual(departure["ticket_recover"], config["hanafuda"]["ticket_recover"])
+        self.assertNotIn("recover_button", departure["ticket_recover"])
+        self.assertEqual(departure["confirm_button"], raid["confirm_button_hailian"])
+        self.assertEqual(raid, before)
+        self.assertEqual(_departure_config(raid, "lulian", config)["ticket_recover"],
+                         raid["ticket_recover"])
+
+    def test_existing_install_keeps_old_raid_keys_but_uses_shared_refill(self):
+        template = json.loads(EXAMPLE.read_text(encoding="utf-8-sig"))
+        old = json.loads(json.dumps(template))
+        old["hanafuda"].pop("ticket_recover")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "touken_config.json"
+            target.write_text(json.dumps(old), encoding="utf-8")
+            _fill_missing_config_keys(EXAMPLE, target, Path(tmp) / "backups")
+            merged = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(merged["raid"], old["raid"])
+            self.assertNotIn("recover_button", _departure_config(
+                merged["raid"], "hailian", merged)["ticket_recover"])
+            self.assertEqual(len(list((Path(tmp) / "backups").glob("*.json"))), 1)
+
     def test_old_raid_config_gets_new_fields_with_backup(self):
         template = json.loads(EXAMPLE.read_text(encoding="utf-8-sig"))
         old = json.loads(json.dumps(template))

@@ -15,8 +15,7 @@
 安全说明：
   - 联队战每场血量重置，无碎刀风险
   - 刀装未满警告（继续出阵/整备刀装弹窗）按教材规矩：停下上报，不擅自动
-  - 手形不足自动补充（补充→恢复1个→确定）：补充.png 没截到，
-    暂用 OCR 识别"补充"二字，标记【未实测】，等真没票了再验证
+  - 海联补手形复用秘宝之里的数量滑条与确认链；陆联保留旧补票界面
   - 三倍鱼笼是甲州金道具：持有数 OCR 读出来 >0 才勾，读不出/为 0 绝不点
   - 自动行军委托挂不上（对话框没开或没验到勾选）就回退手动打法，
     绝不在原地卡死
@@ -39,6 +38,16 @@ def _ocr_int(maa, roi_raw) -> int | None:
         return int(numbers[0]) if len(numbers) == 1 else None
     except Exception:
         return None
+
+
+def _departure_config(cfg: dict, variant: str, config: dict) -> dict:
+    departure = dict(cfg)
+    if variant == "hailian":
+        departure["confirm_ui"] = cfg.get("confirm_ui_hailian", {})
+        departure["confirm_button"] = cfg.get("confirm_button_hailian", {})
+        # 海联数量滑条与秘宝之里共用，不能再找陆联的“恢复一个”。
+        departure["ticket_recover"] = config.get("hanafuda", {}).get("ticket_recover", {})
+    return departure
 
 
 class RaidMixin:
@@ -180,15 +189,15 @@ class RaidMixin:
 
             # 3.3 统一出阵链：选队、伤势、刀装、补票和重伤拦截都在这里。
             # 海联使用自己的确认标题和按钮；标题认错时安全链不会放行。
-            departure_cfg = dict(cfg)
+            departure_cfg = _departure_config(cfg, entered, self.config)
             if entered == "hailian":
                 if (not cfg.get("confirm_ui_hailian", {}).get("ocr")
                         or not cfg.get("confirm_button_hailian", {}).get("template")):
                     yield "[RAID] 海联确认弹窗配置不全，本次不出阵"
                     return
-                departure_cfg["confirm_ui"] = cfg.get("confirm_ui_hailian", {})
-                departure_cfg["confirm_button"] = cfg.get(
-                    "confirm_button_hailian", {})
+                if not departure_cfg["ticket_recover"]:
+                    yield "[RAID] 海联补票配置缺失，本次不出阵，请重启程序补齐配置"
+                    return
             delegated = {"enabled": False}
 
             def prepare_team():

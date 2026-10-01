@@ -628,7 +628,7 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(flow.maa.clicks, [refill])
         self.assertTrue(any("不是 1" in m for m in messages))
 
-    def test_slider_refill_proceeds_when_quantity_unreadable(self):
+    def test_slider_refill_stops_before_payment_when_quantity_unreadable(self):
         refill = Point(100, 100)
         flow = Flow(self._SliderMaa(
             templates={"补充.png": refill},
@@ -636,16 +636,15 @@ class BattleComponentTests(unittest.TestCase):
         ))
         with patch("touken.flows.battle.time.sleep"):
             list(flow._recover_ticket_stream(self._SLIDER_CFG, tag="[花札]"))
-        self.assertTrue(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill, Point(300, 300),
-                                           Point(300, 300)])
+        self.assertFalse(flow._recover_ok)
+        self.assertEqual(flow.maa.clicks, [refill])
 
     def test_slider_refill_stops_looping_when_confirm_never_leaves(self):
         refill = Point(100, 100)
         flow = Flow(self._SliderMaa(
             confirm_left=99,
             templates={"补充.png": refill},
-            ocr_tokens=[[]],
+            ocr_tokens=[[("1", None)]],
         ))
         with patch("touken.flows.battle.time.sleep"):
             messages = list(flow._recover_ticket_stream(
