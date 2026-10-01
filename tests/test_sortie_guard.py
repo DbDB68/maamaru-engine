@@ -59,6 +59,9 @@ class _Host(SortieMixin):
     def _save_team_record(self, cfg, record_no=1):
         return True
 
+    def _disable_auto_march(self):
+        return True
+
     def _enable_auto_march(self):
         self.march_calls += 1
         return True
@@ -81,6 +84,24 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
         self.assertTrue(any("二选一" in msg for msg in logs))
         self.assertEqual(host.march_calls, 0)
+
+    def test_manual_march_checks_game_switch_before_departure(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._disable_auto_march = Mock(return_value=True)
+        host._click_depart = Mock(return_value=False)
+        _run(host, auto_march=False)
+        host._disable_auto_march.assert_called_once()
+        host._click_depart.assert_called_once()
+
+    def test_unconfirmed_switch_blocks_departure(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._disable_auto_march = Mock(return_value=False)
+        host._click_depart = Mock(return_value=False)
+        logs = _run(host, auto_march=False)
+        host._click_depart.assert_not_called()
+        self.assertTrue(any("自动行军已关闭" in msg for msg in logs))
 
     def test_without_retreat_delegates_normally(self):
         host = _Host()

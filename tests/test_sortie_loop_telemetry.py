@@ -113,6 +113,9 @@ class _LoopHost(SortieMixin):
     def _injury_reaches_threshold(self, injury, threshold):
         return True
 
+    def _disable_auto_march(self):
+        return True
+
     def _enable_auto_march(self):
         return True
 

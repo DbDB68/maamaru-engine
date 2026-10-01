@@ -386,13 +386,16 @@ class SortieMixin:
                     yield "[出阵] ⚠️ 没能安全保存记录一，已停止；请查看是否有确认弹窗未处理"
                     return
 
-            # ========== 6. 可选：委托自动行军 ==========
+            # ========== 6. 同步游戏自动行军开关 ==========
             delegated_march = False
             if auto_march:
                 delegated_march = self._enable_auto_march()
                 time.sleep(0.5)
                 if not delegated_march:
                     yield "[出阵] ⚠️ 游戏自动行军没有挂成功，降级为脚本手动行军"
+            if not delegated_march and not self._disable_auto_march():
+                yield "[出阵] ⚠️ 没能确认游戏自动行军已关闭，停止出阵"
+                return
 
             # ========== 7. 即刻出阵 → 刀装恢复分支 ==========
             equip_retries = 0
@@ -424,6 +427,9 @@ class SortieMixin:
                         return
                     if auto_march:
                         delegated_march = self._enable_auto_march()
+                    if not delegated_march and not self._disable_auto_march():
+                        yield "[出阵] ⚠️ 恢复刀装后没能确认自动行军已关闭，停止出阵"
+                        return
                     continue
 
                 # 未开启自动补充时保持原安全行为：点整备刀装退出，不碰继续出阵。

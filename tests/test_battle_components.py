@@ -900,7 +900,8 @@ class _SafeDepartHost(BattleMixin):
     def __init__(self, injury=None, deny=False, cancel=None, maa=None):
         from types import SimpleNamespace
         self.maa = maa or SimpleNamespace(screenshot=lambda force=False: None)
-        self.config = {"team_select": {"teams": {"3": [394, 91]}}}
+        self.config = {"team_select": {"teams": {"3": [394, 91]}},
+                       "injury_check": {"use_youzu_log": False}}
         self._injury = injury
         self._deny = deny
         self._cancel = cancel
@@ -1435,3 +1436,45 @@ class RaidRoundEndVariantTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DisableAutoMarchTests(unittest.TestCase):
+    def host(self, delegated, opened=True, cancel=True, final=False):
+        host = BattleMixin()
+        host.config = {'team_select': {'auto_march': {
+            'check_delegated': {'template': 'checked', 'roi': [1100, 340, 1279, 430]},
+            'enable_button': {'template': 'button'},
+            'delegate_button': {'template': 'delegate'}, 'close_window': [1038, 47]}}}
+        host.maa = Mock()
+        host.maa.exists.side_effect = [delegated, final]
+        host.maa.template_match.side_effect = lambda tpl: opened if tpl == 'delegate' else True
+        host.maa.ocr.return_value = Point(400, 300) if cancel else None
+        host._click_template_config = Mock(return_value=True)
+        host._click_point = Mock()
+        return host
+
+    @patch('touken.flows.battle.time.sleep')
+    def test_already_off_does_not_toggle(self, sleep):
+        host = self.host(False)
+        self.assertTrue(host._disable_auto_march())
+        host._click_template_config.assert_not_called()
+
+    @patch('touken.flows.battle.time.sleep')
+    def test_on_is_cancelled_and_verified(self, sleep):
+        host = self.host(True)
+        self.assertTrue(host._disable_auto_march())
+        host.maa.ocr.assert_called_once()
+        self.assertEqual(host.maa.ocr.call_args.kwargs['match_mode'], 'exact')
+        host.maa.click.assert_called_once_with(Point(400, 300))
+        host._click_point.assert_called_once_with([1038, 47])
+
+    @patch('touken.flows.battle.time.sleep')
+    def test_missing_popup_never_closes_team_panel(self, sleep):
+        host = self.host(True, opened=False)
+        self.assertFalse(host._disable_auto_march())
+        host.maa.click.assert_not_called()
+        host._click_point.assert_not_called()
+
+    @patch('touken.flows.battle.time.sleep')
+    def test_missing_cancel_or_still_on_is_failure(self, sleep):
+        self.assertFalse(self.host(True, cancel=False)._disable_auto_march())
+        self.assertFalse(self.host(True, final=True)._disable_auto_march())

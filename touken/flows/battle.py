@@ -931,6 +931,40 @@ class BattleMixin:
         print(f"[AUTO_MARCH] 委托{'成功' if ok else '失败（标记没出现）'}")
         return ok
 
+    def _disable_auto_march(self) -> bool:
+        """清除游戏记住的委托状态；弹窗未确认时绝不盲点关闭。"""
+        cfg = self.config["team_select"]["auto_march"]
+        check = cfg["check_delegated"]
+        roi = roi_4to4(*check["roi"])
+        self.maa.screenshot(force=True)
+        if not self.maa.exists(check["template"], roi):
+            return True
+        if not self._click_template_config(cfg["enable_button"]):
+            return False
+        opened = False
+        for _ in range(10):
+            time.sleep(0.5)
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["delegate_button"]["template"]):
+                opened = True
+                break
+        if not opened:
+            return False
+        # “不委托”与“委托”是两个单选项，必须命中完整文字。
+        point = self.maa.ocr("不委托", roi_4to4(200, 100, 1100, 650),
+                             match_mode="exact")
+        if not point:
+            self._click_point(cfg["close_window"])
+            return False
+        self.maa.click(point)
+        time.sleep(0.5)
+        self._click_point(cfg["close_window"])
+        time.sleep(1.0)
+        self.maa.screenshot(force=True)
+        # 既要回到部队选择页，也要看到委托标记消失。
+        return bool(self.maa.template_match(cfg["enable_button"]["template"])
+                    and not self.maa.exists(check["template"], roi))
+
     # ==================== 阵形选择 ====================
 
     @staticmethod

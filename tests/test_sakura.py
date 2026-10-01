@@ -169,6 +169,7 @@ class SortieRotateHookTests(unittest.TestCase):
         from touken.flows.sortie import SortieMixin
 
         host = SortieMixin()
+        host._disable_auto_march = lambda: True
         host.maa = self.Maa()
         host.config = {
             "sortie": {"decide_button": {"template": "decide.png"},
