@@ -342,7 +342,7 @@ function recommendedBlocks(): DayScheduleBlock[] {
 function defaultDraftRow(): DraftRow {
   return {
     time: fmtMin(Math.min(DAY - 1, Math.ceil(nowMin.value))),
-    kind: raidKindAvailable.value ? 'raid' : 'daily',
+    kind: raidKindAvailable.value ? 'raid' : 'workflow',
     runs: 1,
     workflow_id: '',
   }
@@ -353,6 +353,14 @@ function editPlan() {
   draft.value = blocks.length ? blocks.map(toDraftRow) : [defaultDraftRow()]
   planMessage.value = ''
   void loadWorkflowPresets()
+  editing.value = true
+}
+
+async function addTimedWorkflow() {
+  await loadWorkflowPresets()
+  draft.value = (data.value?.booking?.blocks || []).map(toDraftRow)
+  addBlock('workflow')
+  planMessage.value = ''
   editing.value = true
 }
 
@@ -416,7 +424,7 @@ function normalizeRow(row: DraftRow) {
   if (row.kind === 'workflow' && !row.workflow_id) row.workflow_id = workflowPresets.value[0]?.id || ''
 }
 
-function addBlock() {
+function addBlock(kind: 'raid' | 'workflow') {
   if (draft.value.length >= MAX_BLOCKS) return
   const last = draft.value[draft.value.length - 1]
   const start = parseTime(last?.time || '') ?? Math.ceil(nowMin.value)
@@ -424,9 +432,7 @@ function addBlock() {
   const lastDuration = last?.kind === 'raid' && pace
     ? Math.ceil((last?.runs || 1) * pace / 60)
     : GENERIC_BLOCK_MIN
-  const kind: ScheduleBlockKind = last?.kind === 'workflow' ? 'workflow'
-    : raidKindAvailable.value ? 'raid' : 'daily'
-  draft.value.push({ time: fmtMin(Math.min(DAY - 1, start + lastDuration)), kind, runs: 1, workflow_id: '' })
+  draft.value.push({ time: fmtMin(Math.min(DAY - 1, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '' })
 }
 
 const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
@@ -505,7 +511,7 @@ function rowEndText(row: DraftRow): string {
 
 async function persistSchedule(blocks: DayScheduleBlock[], message: string) {
   const result = await api.saveDaySchedule(
-    blocks, blocks.some(block => block.kind === 'raid') ? conductorChoice.value : undefined)
+    blocks, blocks.some(block => block.kind === 'raid') ? 'builtin-scheduled-raid' : undefined)
   if (data.value) {
     data.value.conductor = result.conductor
     data.value.booking = result.booking
@@ -955,11 +961,12 @@ const caption = computed(() => {
             <strong>今日安排</strong>
             <small v-if="data.booking">{{ bookingSummary }}</small>
             <small v-else-if="data.activity">推荐的空窗可以直接采用，也可以自己挑时间和活</small>
-            <small v-else>排了就跑：联队战、任务流、一键日课，到点自动开工</small>
+            <small v-else>添加联队战或定时任务流</small>
           </div>
           <div class="tl-booking-actions">
-            <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="fillRecommended">按推荐安排</button>
-            <button v-if="!editing" type="button" :disabled="saving" @click="highlightIndex = -1; editPlan()">{{ data.booking ? '改安排' : '自己定时间' }}</button>
+            <button v-if="recommendedBlocks().length && !editing" type="button" :disabled="saving" @click="fillRecommended">安排 {{ recommendedBlocks().reduce((sum, block) => sum + (block.runs || 0), 0) }} 圈联队战</button>
+            <button v-if="!editing" type="button" :disabled="saving" @click="highlightIndex = -1; editPlan()">{{ data.booking ? '改安排' : '添加安排' }}</button>
+            <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 定时启动任务流</button>
             <button v-if="data.conductor.enabled && !editing" type="button" :disabled="conductorBusy" @click="stopConductor">{{ conductorBusy ? '正在停用…' : '停用自动开工' }}</button>
           </div>
         </div>
@@ -975,13 +982,7 @@ const caption = computed(() => {
         <div v-if="editing" class="tl-booking-editor">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
             <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
-            <label>类型
-              <select v-model="row.kind" @change="normalizeRow(row)">
-                <option v-if="raidKindAvailable" value="raid">联队战（推荐或自定圈数）</option>
-                <option value="workflow">任务流（按保存设置）</option>
-                <option value="daily">一键日课</option>
-              </select>
-            </label>
+            <span>{{ row.kind === 'raid' ? '联队战' : row.kind === 'workflow' ? '定时任务流' : '一键日课（旧安排）' }}</span>
             <label v-if="row.kind === 'raid'">圈数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
             <label v-if="row.kind === 'workflow'">任务流
               <select v-model="row.workflow_id">
@@ -993,16 +994,10 @@ const caption = computed(() => {
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button v-if="draft.length > 1" type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
-          <p v-if="draft.some(row => row.kind === 'workflow')" class="tl-booking-message">按任务流保存的圈数运行；用推荐圈数请选「联队战」。</p>
-          <button v-if="draft.length < MAX_BLOCKS" type="button" class="tl-booking-link" @click="addBlock">＋ 再加一段</button>
-          <div v-if="draftHasRaid" class="tl-booking-raidwf">
-            <label>这些圈数怎么跑
-              <select v-model="conductorChoice">
-                <option v-for="option in data.conductor.options" :key="option.id" :value="option.id">{{ option.name }}</option>
-              </select>
-            </label>
-            <small>选整套流程时，仅替换本次联队战圈数；每段跑一遍整套。</small>
-            <small v-if="conductorChoice !== 'builtin-scheduled-raid'">收工时间仅估算联队战，其他步骤另计。</small>
+          <p v-if="draftHasRaid" class="tl-booking-message">手形不足时自动补充（消耗小判）。</p>
+          <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
+            <button v-if="raidKindAvailable" type="button" class="tl-booking-link" @click="addBlock('raid')">＋ 联队战</button>
+            <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 定时启动任务流</button>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">

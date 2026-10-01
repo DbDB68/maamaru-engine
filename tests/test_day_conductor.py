@@ -387,7 +387,7 @@ class DayConductorTests(unittest.TestCase):
         # 两版面板分别签预设原文/补入设置后的节点；两者都是同一份授权。
         settings = {"team_no": "3", "rounds": 99, "auto_refill": True}
         old_panel_signature = (
-            "19351240c87bc5765d39bc48aceec8bd35f2f00fc61bc9dbf57f005ba74fb315")
+            "70c79a20a34a1f93ff96673d53d559cd252d167bbb75e6d6f0ab694ddc07a4b1")
         running_panel_signature = (
             "30d8f7bae3f19f1c9ca0887a6bf1c1ae570f5e5246a156ec278fbd497c56f884")
         self.assertEqual(dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"],
@@ -523,3 +523,10 @@ class ScheduleEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_builtin_scheduled_raid_refills_tickets_without_changing_saved_settings():
+    settings = {"team_no": "3", "auto_refill": False}
+    spec = dc.workflow_spec(dc.BUILTIN_ID, settings)
+    assert spec["nodes"][0]["params"]["auto_refill"] is True
+    assert settings["auto_refill"] is False

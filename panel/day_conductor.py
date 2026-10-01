@@ -112,7 +112,7 @@ def _plan_signature(plan: dict) -> str:
 def _preset(workflow_id: str) -> dict:
     if workflow_id == BUILTIN_ID:
         return {"id": BUILTIN_ID, "name": "按联队战设置开工",
-                "nodes": [{"type": "raid", "params": {}, "on_error": "stop"}],
+                "nodes": [{"type": "raid", "params": {"auto_refill": True}, "on_error": "stop"}],
                 "after": "none", "daily_mode": False}
     preset = workflow.find_preset(workflow_id)
     if not preset:
