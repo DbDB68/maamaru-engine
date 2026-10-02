@@ -1173,7 +1173,7 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
           </ol>
           <div v-if="ledgerOnboarding.step === 1 && !props.ledgerMode" class="ledger-onboarding-copy">
             <div><b>让まあ丸先认识你的本丸</b><p>打开模拟器并进入游戏本丸，再点「读取游戏家底」。会读取游戏记录，并翻到锻刀、所持道具画面盘点资源；不会锻刀、出阵或花资源。读不到时可以重试，也可以手动记下家底。</p></div>
-            <div class="ledger-onboarding-actions"><button type="button" class="primary" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
           </div>
           <div v-else-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">
             <div><b>先抄一次现在的家底</b><p>打开游戏看一眼资源数字；不确定的项目可以留空，以后随时能改。</p></div>
@@ -1190,8 +1190,8 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
         </section>
 
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
-          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></div></header>
-          <p v-if="!props.ledgerMode" class="inventory-notice" role="status">{{ gameInventoryNotice || '打开模拟器并进入游戏本丸，点一次就能读取记录和盘点资源；不用先跑日课。' }}</p>
+          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></div></header>
+          <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small>
