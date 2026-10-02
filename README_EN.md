@@ -14,9 +14,9 @@ Maamaru supports the **Simplified Chinese client on the China server**. The app 
 
 ## From today's plan to a new page in your Honmaru
 
-An empty ledger is fine. Enter the Honmaru in the game and choose Read Game Balances (读取游戏家底) in the warehouse. Then pick one routine task, check the team, spending permissions, and stop conditions, and try a short supervised run. As records accumulate, use your balances and measured run times to plan budgets and schedules.
+To hand over repetitive work, pick a task, check the team, spending permissions, and stop conditions, and try a short supervised run. When you want balances, bookkeeping, or a budget, choose Read Game Balances (读取游戏家底) in the warehouse. As run-time and yield records accumulate, use them to plan work and schedules.
 
-**Read balances → Try a short run → Record results → Plan from records → Honmaru journal**
+**Start with a task, or read your balances to begin bookkeeping. Use what you need.**
 
 **1. Return to My Honmaru**
 
@@ -86,10 +86,17 @@ Switch between washi-paper and pixel themes whenever you like. Kogitsunemaru and
 
 ## First-time setup
 
-1. Choose **Start Maamaru** in the launcher, open the emulator, and enter the game's Honmaru.
-2. Open the warehouse and click **Read Game Balances (读取游戏家底)**. Maamaru reads game records, then checks the forging and inventory screens for resources, koban, and tokens. It does not run daily tasks, forge, or depart. Each reading method reports its result; retry if either is incomplete.
-3. Old-ledger import and goals are optional. Pick a task at the task desk, check the team and spending settings, and try a short supervised run before reviewing the report.
-4. Use planning advice and schedules as run-time and yield records accumulate.
+Choose **Start Maamaru** in the launcher, open the emulator, and enter the game's Honmaru. Then choose the path that suits you:
+
+**Just run a task**
+
+Pick a standalone task at the task desk, check the team, spending permissions, and stop conditions, and try a short supervised run. You can start directly without using the ledger, reading balances, or making a plan. Save a workflow when you want to combine several tasks.
+
+**Review balances, keep records, or plan work**
+
+Open the warehouse and click **Read Game Balances (读取游戏家底)**. Maamaru reads game records, then checks the forging and inventory screens for resources, koban, and tokens. It does not run daily tasks, forge, or depart. Each reading method reports its result; retry if either is incomplete.
+
+Old-ledger import and goals are optional. Current balances support budgeting; run times and yields need task or manual activity records. Use the corresponding planning advice and schedules as those records accumulate.
 
 **Open Ledger Only** does not connect to the game. Enter or import balances manually in that mode.
 
