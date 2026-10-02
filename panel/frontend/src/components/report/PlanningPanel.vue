@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
-import type { ActivityPace, DayTimeline as DayTimelineData, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport } from '../../types'
+import type { ActivityPace, DayTimeline as DayTimelineData, EventAbacus, EventTimelineReport, ManualSession, PlanningGoalAdvice, PlanningReport, ScriptParams } from '../../types'
 import { resourceNames } from './reportModel'
 // 氪金货币不立目标，下拉选项里拿掉甲州金；账本展示那边 resourceNames 照旧
 const goalResources = resourceNames.filter(name => name !== '甲州金')
@@ -15,6 +15,7 @@ import PlanningOverview from './PlanningOverview.vue'
 import DayTimeline from '../DayTimeline.vue'
 
 const emit = defineEmits<{
+  gameplaySettingsSaved: [script: string, params: ScriptParams]
   goalSaved: []
   openExpedition: []
   openActivity: [script: 'hanafuda' | 'raid', loops: number]
@@ -413,7 +414,7 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @open-expedition="emit('openExpedition')" />
+    <DayTimeline :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
     <GameplayPlanner @goal-saved="gameplayGoalSaved" />
 

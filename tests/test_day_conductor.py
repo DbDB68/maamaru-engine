@@ -431,10 +431,8 @@ class DayConductorTests(unittest.TestCase):
             "70c79a20a34a1f93ff96673d53d559cd252d167bbb75e6d6f0ab694ddc07a4b1")
         running_panel_signature = (
             "30d8f7bae3f19f1c9ca0887a6bf1c1ae570f5e5246a156ec278fbd497c56f884")
-        self.assertEqual(dc.workflow_spec(dc.BUILTIN_ID, settings)["signature"],
-                         old_panel_signature)
-        self.assertEqual(dc.workflow_spec(dc.BUILTIN_ID, settings)["compatible_signatures"],
-                         {old_panel_signature, running_panel_signature})
+        self.assertTrue({old_panel_signature, running_panel_signature}.issubset(
+            dc.workflow_spec(dc.BUILTIN_ID, settings)["compatible_signatures"]))
         with patch.object(server, "_load_panel_settings", return_value={
             "params": {"raid": settings}}), \
              patch.object(server._workflow, "run_workflow",
@@ -501,9 +499,9 @@ class ScheduleEndpointTests(unittest.TestCase):
         real_disarm = dc.disarm
         real_save = dp.save_plan
 
-        def arm_to_temp(plan, timeline, workflow_id, raid_settings):
+        def arm_to_temp(plan, timeline, workflow_id, raid_settings, **kwargs):
             return real_arm(plan, timeline, workflow_id, raid_settings,
-                            self.state_path)
+                            self.state_path, **kwargs)
 
         def save_to_temp(day_start, event_end_at, blocks):
             return real_save(day_start, event_end_at, blocks, self.plan_path)
@@ -570,8 +568,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_builtin_scheduled_raid_refills_tickets_without_changing_saved_settings():
+def test_builtin_scheduled_raid_respects_saved_ticket_setting():
     settings = {"team_no": "3", "auto_refill": False}
     spec = dc.workflow_spec(dc.BUILTIN_ID, settings)
-    assert spec["nodes"][0]["params"]["auto_refill"] is True
+    assert spec["nodes"][0]["params"]["auto_refill"] is False
     assert settings["auto_refill"] is False

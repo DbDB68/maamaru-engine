@@ -1481,6 +1481,38 @@ def _build_workflow(config_path, params):
         raise FlowAborted("今日安排的联队战步骤未完成")
 
 
+def _build_scheduled_gameplay(config_path, params):
+    from touken.flow_control import FlowAborted
+    from .scheduled_gameplay import catalog, issues, spec
+    try:
+        runs = params.get("runs")
+        if type(runs) is not int or not 1 <= runs <= 99:
+            raise ValueError("今日安排的次数无效")
+        current = spec(params.get("script"))
+        if current["signature"] != params.get("gameplay_signature"):
+            raise ValueError("玩法设置或预设编队已变化")
+        now = time.time()
+        problems = issues({**params, "start_min": 0}, {
+            "day_start": now, "now": now, "gameplay_options": catalog(now)})
+        if problems:
+            raise ValueError("；".join(problems))
+    except ValueError as exc:
+        yield f"[时间表] ✗ {exc}，本段不启动"
+        raise FlowAborted(str(exc)) from exc
+    nodes = [{"type": "boot_emulator", "params": {}, "on_error": "stop"},
+             {"type": "login", "params": {}, "on_error": "stop"},
+             {"type": params["script"], "params": {**current["params"], "runs": runs},
+              "on_error": "stop"}]
+    completed = yield from _workflow.run_workflow(
+        config_path, nodes, make_agent=_make_agent, after="none", daily_mode=False)
+    if completed is False:
+        raise FlowAborted("今日安排的玩法未完成")
+
+
+register_script("scheduled_gameplay", "时间表玩法", "按已保存的玩法设置开工",
+                _build_scheduled_gameplay, hidden=True)
+
+
 register_script("workflow", "自定义工作流",
                 "把任务积木自由排序拼成流水线，一键运行",
                 _build_workflow, hidden=True)
@@ -2206,6 +2238,8 @@ def _day_timeline_payload():
         active=active,
         hanafuda_team_no=hanafuda_team_no,
         raid_team_no=raid_team_no)
+    from .scheduled_gameplay import catalog
+    timeline["gameplay_options"] = catalog(timeline["now"])
     plan = load_plan()
     if plan and plan.get("day_start") == timeline["day_start"]:
         timeline["booking"] = {**plan, "issues": review_plan(plan, timeline)}
@@ -2402,13 +2436,13 @@ async def api_save_day_schedule(request: Request):
     if issues:
         raise HTTPException(409, "；".join(issues))
     plan["blocks"] = _clean_schedule_blocks(blocks)
-    saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
     workflow_id = body.get("raid_workflow_id")
+    workflow_id = workflow_id if isinstance(workflow_id, str) and workflow_id else BUILTIN_ID
+    raid_settings = (_load_panel_settings().get("params", {}).get("raid", {}) or {})
     try:
-        arm(saved, timeline,
-            workflow_id if isinstance(workflow_id, str) and workflow_id
-            else BUILTIN_ID,
-            (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+        arm(plan, timeline, workflow_id, raid_settings, persist=False)
+        saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
+        arm(saved, timeline, workflow_id, raid_settings)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     timeline = _day_timeline_payload()
@@ -2423,6 +2457,9 @@ def _clean_schedule_blocks(blocks) -> list[dict]:
         if kind == "raid":
             clean.append({"start_min": int(block["start_min"]), "kind": "raid",
                           "runs": int(block["runs"])})
+        elif kind == "activity":
+            clean.append({key: block[key] for key in
+                          ("start_min", "kind", "runs", "script", "event_key")})
         elif kind == "workflow":
             clean.append({"start_min": int(block["start_min"]),
                           "kind": "workflow",
@@ -3662,7 +3699,36 @@ def _load_panel_settings() -> dict:
 def _save_panel_settings(data: dict):
     _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     data["_saved_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    _SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = _SETTINGS_FILE.with_suffix(_SETTINGS_FILE.suffix + ".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(_SETTINGS_FILE)
+
+
+@app.get("/api/gameplay-settings/{script}")
+async def api_gameplay_settings(script: str):
+    from .scheduled_gameplay import SCRIPTS
+    if script not in SCRIPTS:
+        raise HTTPException(404, "没有这个玩法")
+    info = _scripts_with_preset_options(list_scripts())[script]
+    params = {field["key"]: field.get("default", "") for field in info["params"]}
+    params.update(_load_panel_settings().get("params", {}).get(script, {}) or {})
+    return {"info": info, "params": params}
+
+
+@app.put("/api/gameplay-settings/{script}")
+async def api_save_gameplay_settings(script: str, request: Request):
+    from .scheduled_gameplay import SCRIPTS, COUNT_KEYS
+    if script not in SCRIPTS:
+        raise HTTPException(404, "没有这个玩法")
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("params"), dict):
+        raise HTTPException(400, "玩法设置格式不正确")
+    allowed = {field["key"] for field in _SCRIPTS[script]["params"]} - COUNT_KEYS
+    existing = _load_panel_settings()
+    params = existing.setdefault("params", {}).setdefault(script, {})
+    params.update({key: value for key, value in body["params"].items() if key in allowed})
+    _save_panel_settings(existing)
+    return {"params": params}
 
 
 @app.get("/api/saved-settings")

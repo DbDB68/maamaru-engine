@@ -1,6 +1,6 @@
 """今天的时段表大总管：在任务流外守时，到点启动已授权的时段块。
 
-块 kind：raid（联队战 N 圈）/ workflow（自定义任务流）/ daily（一键日课）。
+块 kind：activity（单玩法 N 次）/ raid（旧联队战 N 圈）/ workflow（自定义任务流）/ daily（一键日课）。
 到点时 runner 忙就保持 pending 排队等；只有换日才把没排上的块标 missed，
 错过不补跑。
 """
@@ -25,7 +25,7 @@ STATE_PATH = STATE_DIR / "day_conductor.json"
 BUILTIN_ID = "builtin-scheduled-raid"
 _BLOCK_STATUSES = {"pending", "running", "ended",
                    "interrupted", "missed", "blocked"}
-_BLOCK_KINDS = {"raid", "workflow", "daily"}
+_BLOCK_KINDS = {"raid", "activity", "workflow", "daily"}
 _LOCK = threading.RLock()
 
 
@@ -61,6 +61,11 @@ def _valid_v2_block(block) -> bool:
             or block.get("status") not in _BLOCK_STATUSES):
         return False
     if block["kind"] == "raid" and type(block.get("runs")) is not int:
+        return False
+    if block["kind"] == "activity" and (
+            type(block.get("runs")) is not int
+            or not isinstance(block.get("script"), str)
+            or not isinstance(block.get("event_key"), str)):
         return False
     if block["kind"] == "workflow" and not isinstance(block.get("workflow_id"), str):
         return False
@@ -112,7 +117,7 @@ def _plan_signature(plan: dict) -> str:
 def _preset(workflow_id: str) -> dict:
     if workflow_id == BUILTIN_ID:
         return {"id": BUILTIN_ID, "name": "按联队战设置开工",
-                "nodes": [{"type": "raid", "params": {"auto_refill": True}, "on_error": "stop"}],
+                "nodes": [{"type": "raid", "params": {}, "on_error": "stop"}],
                 "after": "none", "daily_mode": False}
     preset = workflow.find_preset(workflow_id)
     if not preset:
@@ -166,10 +171,15 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     nodes[raid_index] = node
     source_signature = _digest({**signature_payload, "nodes": source_nodes})
     effective_signature = _digest({**signature_payload, "nodes": nodes})
+    compatible = {source_signature, effective_signature}
+    # 旧面板强制补充手形的签名，仅在玩家本就明确开启补充时兼容。
+    if workflow_id == BUILTIN_ID and saved.get("auto_refill") is True:
+        legacy_nodes = [{**source_node, "params": {"auto_refill": True}}]
+        compatible.add(_digest({**signature_payload, "nodes": legacy_nodes}))
     return {"name": preset["name"], "team_no": team_no, "nodes": nodes,
             "raid_index": raid_index, "after": after, "daily_mode": daily_mode,
             "signature": source_signature,
-            "compatible_signatures": {source_signature, effective_signature}}
+            "compatible_signatures": compatible}
 
 
 def _for_team(timeline: dict, team_no: int) -> dict:
@@ -205,7 +215,7 @@ def _block_issues(block: dict, timeline: dict) -> list[str]:
 
 
 def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
-        path: Path = STATE_PATH) -> dict:
+        path: Path = STATE_PATH, *, persist: bool = True) -> dict:
     with _LOCK:
         old = load_state(path)
         if old and any(b.get("status") == "running" for b in old["blocks"]):
@@ -229,6 +239,12 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
                     "status": "pending",
                     "workflow_signature": raid_spec["signature"],
                 })
+            elif kind == "activity":
+                from .scheduled_gameplay import spec
+                current = spec(block["script"])
+                blocks.append({**block, "status": "pending",
+                               "label": f"{current['label']} {block['runs']} 次",
+                               "gameplay_signature": current["signature"]})
             elif kind == "workflow":
                 preset = workflow.find_preset(block["workflow_id"])
                 if not preset:
@@ -252,7 +268,7 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
         if old and old.get("day_start") == plan["day_start"]:
             previous = list(old["blocks"])
             for block in blocks:
-                identity = ("kind", "start_min", "runs", "workflow_id")
+                identity = ("kind", "start_min", "runs", "workflow_id", "script", "event_key")
                 matched = next((item for item in previous
                                 if all(item.get(key) == block.get(key)
                                        for key in identity)), None)
@@ -267,7 +283,8 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
         if raid_spec:
             state["workflow_id"] = workflow_id
             state["workflow_name"] = raid_spec["name"]
-        _save(state, path)
+        if persist:
+            _save(state, path)
         return state
 
 
@@ -314,6 +331,10 @@ def projection(plan: dict | None, timeline: dict, raid_settings: dict,
             for block in raid_blocks:
                 if block.get("status") == "pending":
                     result["issues"].extend(_block_issues(block, adjusted))
+    from .scheduled_gameplay import issues as gameplay_issues
+    for block in state["blocks"]:
+        if block.get("kind") == "activity" and block.get("status") == "pending":
+            result["issues"].extend(gameplay_issues(block, timeline, check_settings=True))
     return result
 
 
@@ -353,6 +374,22 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             return False
         block.update(status="running", run_id=run_id, started_at=now)
         emit_fn("conductor", f"[大总管] 联队战开工，安排 {block['runs']} 圈")
+        return True
+    if kind == "activity":
+        from .scheduled_gameplay import issues as gameplay_issues
+        problems = gameplay_issues(block, timeline_fn(), check_settings=True)
+        if problems:
+            block.update(status="blocked", reason="；".join(problems))
+            emit_fn("conductor", f"[大总管] 本段没有开工：{block['reason']}")
+            return False
+        run_id = runner.start("scheduled_gameplay", config_path, {
+            "script": block["script"], "runs": block["runs"],
+            "event_key": block["event_key"], "gameplay_signature": block["gameplay_signature"],
+        })
+        if not run_id:
+            return False
+        block.update(status="running", run_id=run_id, started_at=now)
+        emit_fn("conductor", f"[大总管] {block['label']} 开工")
         return True
     if kind == "workflow":
         preset = workflow.find_preset(block.get("workflow_id") or "")

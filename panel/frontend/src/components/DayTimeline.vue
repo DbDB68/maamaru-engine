@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
-import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, WorkflowPreset } from '../types'
+import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 import { canAdoptRaidRecommendation, nextScheduledStart } from './report/planningLinkModel'
 
@@ -9,7 +10,7 @@ const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?:
   collapsible: false,
   adoptRecommendationRequest: 0,
 })
-const emit = defineEmits<{ openExpedition: []; timelineUpdated: [timeline: DayTimeline | null] }>()
+const emit = defineEmits<{ openExpedition: []; timelineUpdated: [timeline: DayTimeline | null]; gameplaySettingsSaved: [script: string, params: ScriptParams] }>()
 
 const DAY = 1440
 // workflow/daily 没有可靠时长，预计收工按 30 分钟估算（与后端口径一致）
@@ -29,8 +30,20 @@ const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
-interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string }
+interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
+const gameplayDialog = ref<InstanceType<typeof GameplaySettingsDialog>>()
+const gameplayOptions = computed(() => data.value?.gameplay_options || [])
+const firstGameplay = computed(() => gameplayOptions.value.find(option => option.available))
+function gameplayLabel(script?: string) { return gameplayOptions.value.find(option => option.script === script)?.label || script || '玩法' }
+function chooseGameplay(row: DraftRow) {
+  row.kind = 'activity'
+  row.event_key = gameplayOptions.value.find(option => option.script === row.script)?.event_key || ''
+}
+function gameplaySaved(script: string, params: ScriptParams) {
+  emit('gameplaySettingsSaved', script, params)
+  void load()
+}
 /** 运行图气泡点开「改参数」时要高亮的草稿行；-1 = 不高亮 */
 const highlightIndex = ref(-1)
 /** 运行图块气泡：块在 booking.blocks 里的下标 + 所在泳道 + 块左缘（%） */
@@ -278,6 +291,7 @@ function presetName(id?: string): string {
 
 function blockLabel(block: DayScheduleBlock): string {
   if (block.kind === 'raid') return `联队战 ${block.runs ?? '?'} 圈`
+  if (block.kind === 'activity') return `${gameplayLabel(block.script)} ${block.runs ?? '?'} 次`
   if (block.kind === 'workflow') return presetName(block.workflow_id) || '任务流'
   return '一键日课'
 }
@@ -289,13 +303,14 @@ function blockEndMin(block: DayScheduleBlock): number | null {
     if (!activity || activity.name !== '联队战') return null
     return block.start_min + Math.ceil((block.runs ?? 1) * activity.seconds_per_loop / 60)
   }
+  if (block.kind === 'activity') return null
   return block.start_min + GENERIC_BLOCK_MIN
 }
 
 function conductorBlockFor(block: DayScheduleBlock): DayConductorBlock | undefined {
   if (!data.value?.conductor.enabled) return undefined
   return data.value.conductor.blocks.find(
-    candidate => candidate.start_min === block.start_min && candidate.kind === block.kind)
+    candidate => candidate.start_min === block.start_min && candidate.kind === block.kind && candidate.script === block.script)
 }
 
 const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, string>> = {
@@ -330,7 +345,7 @@ function blockStatusClass(block: DayConductorBlock): string {
 }
 
 function toDraftRow(block: DayScheduleBlock): DraftRow {
-  return { time: fmtMin(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '' }
+  return { time: fmtMin(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '', script: block.script || (block.kind === 'raid' ? 'raid' : ''), event_key: block.event_key || '' }
 }
 
 function recommendedBlocks(): DayScheduleBlock[] {
@@ -342,7 +357,9 @@ function recommendedBlocks(): DayScheduleBlock[] {
 function defaultDraftRow(): DraftRow {
   return {
     time: fmtMin(Math.min(DAY - 1, Math.ceil(nowMin.value))),
-    kind: raidKindAvailable.value ? 'raid' : 'workflow',
+    kind: firstGameplay.value ? 'activity' : 'workflow',
+    script: firstGameplay.value?.script || '',
+    event_key: firstGameplay.value?.event_key || '',
     runs: 1,
     workflow_id: '',
   }
@@ -424,7 +441,7 @@ function normalizeRow(row: DraftRow) {
   if (row.kind === 'workflow' && !row.workflow_id) row.workflow_id = workflowPresets.value[0]?.id || ''
 }
 
-function addBlock(kind: 'raid' | 'workflow') {
+function addBlock(kind: 'raid' | 'activity' | 'workflow') {
   if (draft.value.length >= MAX_BLOCKS) return
   syncSmoothClock()
   const last = draft.value[draft.value.length - 1]
@@ -433,7 +450,7 @@ function addBlock(kind: 'raid' | 'workflow') {
   const lastDuration = last?.kind === 'raid' && pace
     ? Math.ceil((last?.runs || 1) * pace / 60)
     : GENERIC_BLOCK_MIN
-  draft.value.push({ time: fmtMin(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '' })
+  draft.value.push({ time: fmtMin(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '', script: firstGameplay.value?.script || '', event_key: firstGameplay.value?.event_key || '' })
 }
 
 const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
@@ -474,6 +491,21 @@ const preview = computed(() => {
       if (end > deadline) issues.push(`第${index + 1}段赶不上今天收摊`)
       const collision = activity?.occupied.find(item => start < item.end_min && end > item.start_min)
       if (collision) issues.push(`第${index + 1}段会撞上${collision.label}`)
+    } else if (row.kind === 'activity') {
+      const option = gameplayOptions.value.find(item => item.script === row.script)
+      if (!option?.available || option.event_key !== row.event_key) {
+        issues.push(`第${index + 1}段玩法未开放或已换期，请重新选择`)
+        continue
+      }
+      if (!Number.isInteger(row.runs) || row.runs < 1 || row.runs > 99) {
+        issues.push(`第${index + 1}段次数要填 1–99`)
+        continue
+      }
+      if (option.end_at && Math.max((data.value?.day_start || 0) + start * 60, data.value?.now || 0) >= option.end_at) {
+        issues.push(`第${index + 1}段开工时活动已结束`)
+      }
+      blocks.push({ start_min: start, kind: 'activity', script: row.script, event_key: row.event_key, runs: row.runs })
+      spans.push([start, start + GENERIC_BLOCK_MIN])
     } else if (row.kind === 'workflow') {
       if (!row.workflow_id) {
         issues.push(`第${index + 1}段选一个任务流`)
@@ -507,6 +539,7 @@ function rowEndText(row: DraftRow): string {
     if (!activity || activity.name !== '联队战') return ''
     return fmtMin(start + Math.ceil(Number(row.runs || 0) * activity.seconds_per_loop / 60))
   }
+  if (row.kind === 'activity') return ''
   return fmtMin(start + GENERIC_BLOCK_MIN)
 }
 
@@ -679,7 +712,7 @@ const suggestionBlocks = computed(() => {
   if (!suggestions) return []
   // 已排联队战就展示正式安排；改过时间的安排也属于已采纳。
   const hasRaid = (editing.value ? draft.value : data.value?.booking?.blocks || [])
-    .some(row => row.kind === 'raid')
+    .some(row => row.kind === 'raid' || (row.kind === 'activity' && row.script === 'raid'))
   return suggestions.filter(s => s.runs == null || !hasRaid).map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
     const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
@@ -743,7 +776,7 @@ const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
       width: Math.max(pct(Math.max(end - block.start_min, 4)), 0.7),
       cls: cblock ? blockStatusClass(cblock) : stale ? 'is-stale' : block.kind === 'daily' ? 'tlx-daily' : 'tlx-task',
       title: `${fmtMin(block.start_min)} ${blockLabel(block)}${cblock ? ` · ${blockStatusText(cblock)}` : ' · 点我改参数/移出'}`,
-      text: block.kind === 'raid' ? `${block.runs} 圈` : block.kind === 'daily' ? '日课' : '任务流',
+      text: block.kind === 'raid' ? `${block.runs} 圈` : block.kind === 'activity' ? `${gameplayLabel(block.script)} ${block.runs} 次` : block.kind === 'daily' ? '日课' : '任务流',
     }
   })
 })
@@ -811,7 +844,17 @@ const compactRows = computed(() => {
     current: false,
     enabled: true,
   }))
-  const rows = [...expeditions, ...runs, ...suggestions]
+  const planned = scheduleBlocks.value.map(b => ({
+    key: b.key,
+    minute: b.block.start_min,
+    time: fmtMin(b.block.start_min),
+    title: blockLabel(b.block),
+    detail: conductorBlockFor(b.block) ? blockStatusText(conductorBlockFor(b.block)!) : '已安排',
+    tone: b.cls,
+    current: false,
+    enabled: true,
+  }))
+  const rows = [...expeditions, ...runs, ...suggestions, ...planned]
   const current = rows.filter((row) => row.current)
   const futureEnabled = rows
     .filter((row) => !row.current && row.minute >= nowMin.value && row.enabled)
@@ -829,7 +872,7 @@ const compactRows = computed(() => {
 
 const compactHeading = '近期活动'
 
-const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length + suggestionBlocks.value.length)
+const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length + suggestionBlocks.value.length + scheduleBlocks.value.length)
 const hiddenItemCount = computed(() => Math.max(0, totalItemCount.value - compactRows.value.length))
 const showDetails = computed(() => !props.collapsible || expanded.value)
 
@@ -935,6 +978,7 @@ const caption = computed(() => {
           <span class="tl-mini-reset" :style="{ left: pct(240) + '%' }" title="04:00 日课刷新"></span>
           <span class="tl-mini-now" :style="{ left: pct(smoothNowMin) + '%' }" title="现在"></span>
           <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in scheduleBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in suggestionShadows" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="s in expeditionSuggestionBlocks" :key="`mini-suggest-${s.key}`" class="tl-mini-block is-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title"></span>
@@ -961,9 +1005,10 @@ const caption = computed(() => {
             <strong>今日安排</strong>
             <small v-if="data.booking">{{ bookingSummary }}</small>
             <small v-else-if="data.activity">推荐的空窗可以直接采用，也可以自己挑时间和活</small>
-            <small v-else>添加联队战或定时任务流</small>
+            <small v-else>选择玩法或定时任务流</small>
           </div>
           <div class="tl-booking-actions">
+            <button v-if="!editing" type="button" :disabled="saving || !firstGameplay" @click="editPlan">＋ 安排玩法</button>
             <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 定时启动任务流</button>
           </div>
         </div>
@@ -979,20 +1024,28 @@ const caption = computed(() => {
         <div v-if="editing" class="tl-booking-editor">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
             <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
-            <span>{{ row.kind === 'raid' ? '联队战' : row.kind === 'workflow' ? '定时任务流' : '一键日课（旧安排）' }}</span>
-            <label v-if="row.kind === 'raid'">圈数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
+            <label v-if="row.kind === 'raid' || row.kind === 'activity'">玩法
+              <select v-model="row.script" @change="chooseGameplay(row)">
+                <option v-for="option in gameplayOptions" :key="option.script" :value="option.script" :disabled="!option.available">{{ option.label }}{{ option.available ? '' : '（未开放）' }}</option>
+              </select>
+            </label>
+            <span v-else>{{ row.kind === 'workflow' ? '定时任务流' : '一键日课（旧安排）' }}</span>
+            <label v-if="row.kind === 'raid' || row.kind === 'activity'">次数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
             <label v-if="row.kind === 'workflow'">任务流
               <select v-model="row.workflow_id">
                 <option value="" disabled>选一份任务流</option>
                 <option v-for="preset in workflowPresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
               </select>
             </label>
+            <button v-if="row.kind === 'raid' || row.kind === 'activity'" type="button" class="tl-booking-link" @click="gameplayDialog?.open(row.script)">玩法设置</button>
+            <span v-if="row.kind === 'activity'">暂无圈速，暂留 30 分钟；前段收工后再开工</span>
             <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
           </div>
-          <p v-if="draftHasRaid" class="tl-booking-message">当期活动手形不足自动补充（仅联队战，消耗小判）。</p>
+          <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队、换队长和补充手形等使用已保存的玩法设置；次数以本段安排为准。</p>
           <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
+            <button type="button" class="tl-booking-link" :disabled="!firstGameplay" @click="addBlock('activity')">＋ 安排玩法</button>
             <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 定时启动任务流</button>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
@@ -1008,4 +1061,5 @@ const caption = computed(() => {
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
   </PaperCard>
+  <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
 </template>

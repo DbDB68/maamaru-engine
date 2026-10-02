@@ -1086,14 +1086,16 @@ export interface DayExpeditionSuggestion {
   reason: string
 }
 
-export type ScheduleBlockKind = 'raid' | 'workflow' | 'daily'
+export type ScheduleBlockKind = 'raid' | 'activity' | 'workflow' | 'daily'
 
-/** 计划块 v2：raid 带 runs（1–99），workflow 带 workflow_id，daily 无参数 */
+/** 计划块 v2：activity 带 script/event_key/runs，raid 保留旧安排，workflow 带 workflow_id */
 export interface DayScheduleBlock {
   start_min: number
   kind: ScheduleBlockKind
   runs?: number
   workflow_id?: string
+  script?: string
+  event_key?: string
 }
 
 export interface DayBooking {
@@ -1133,7 +1135,16 @@ export interface DayConductor {
   options: Array<{ id: string; name: string }>
 }
 
+export interface ScheduledGameplayOption {
+  script: string
+  label: string
+  available: boolean
+  event_key: string
+  end_at: number | null
+}
+
 export interface DayTimeline {
+  gameplay_options?: ScheduledGameplayOption[]
   now: number
   day_start: number
   markers: DayTimelineMarker[]

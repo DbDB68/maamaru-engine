@@ -1,8 +1,8 @@
-"""玩家选定的今日时段表：联队战、自定义任务流、一键日课都能排。
+"""玩家选定的今日时段表：单独玩法、自定义任务流、一键日课都能排。
 
 这里只记计划，不启动任务。块格式 v2：
-{start_min: int, kind: "raid"|"workflow"|"daily", runs?: int, workflow_id?: str}
-（runs 仅 raid 需要，workflow_id 仅 workflow 需要；v1 的 {start_min,runs}
+{start_min: int, kind: "raid"|"activity"|"workflow"|"daily", runs?: int, workflow_id?: str}
+（activity 带 script、event_key、runs；workflow_id 仅 workflow 需要；v1 的 {start_min,runs}
 块读入时一律视为 raid。）
 """
 
@@ -19,7 +19,7 @@ PLAN_PATH = STATE_DIR / "day_plan.json"
 PLAN_VERSION = 2
 MAX_BLOCKS = 6
 _CN_DIGITS = "零一二三四五六七八九"
-BLOCK_KINDS = ("raid", "workflow", "daily")
+BLOCK_KINDS = ("raid", "activity", "workflow", "daily")
 # workflow/daily 没有可靠时长，排计划时统一按 30 分钟估算占用。
 GENERIC_BLOCK_MINUTES = 30
 
@@ -34,6 +34,12 @@ def _normalize_block(block: dict) -> dict | None:
             return None
         return {"start_min": block["start_min"], "kind": "raid",
                 "runs": block["runs"]}
+    if kind == "activity":
+        if (type(block.get("runs")) is not int
+                or not isinstance(block.get("script"), str)
+                or not isinstance(block.get("event_key"), str)):
+            return None
+        return {key: block[key] for key in ("start_min", "kind", "runs", "script", "event_key")}
     if kind == "workflow":
         if not isinstance(block.get("workflow_id"), str) or not block["workflow_id"]:
             return None
@@ -131,6 +137,13 @@ def review_plan(plan: dict, timeline: dict) -> list[str]:
                 if start < occupied["end_min"] and end > occupied["start_min"]:
                     issues.append(f"第{i}段会撞上{occupied['label']}")
                     break
+        elif kind == "activity":
+            from .scheduled_gameplay import issues as gameplay_issues
+            if type(block.get("runs")) is not int or not 1 <= block["runs"] <= 99:
+                issues.append(f"第{i}段次数要填 1–99")
+                continue
+            issues.extend(f"第{i}段：{issue}" for issue in gameplay_issues(block, timeline))
+            end = start + GENERIC_BLOCK_MINUTES
         elif kind == "workflow":
             if (not isinstance(block.get("workflow_id"), str)
                     or not block["workflow_id"]):

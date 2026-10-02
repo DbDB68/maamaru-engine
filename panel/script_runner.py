@@ -134,6 +134,9 @@ class ScriptRunner:
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
                 from touken.telemetry import get_telemetry_store
                 workflow_label = (self._current_workflow or {}).get("name") or None
+                if script_name == "scheduled_gameplay":
+                    gameplay = _SCRIPTS.get((params or {}).get("script"), {})
+                    workflow_label = f"今日{gameplay.get('label', '玩法')} · {(params or {}).get('runs', '?')} 次"
                 get_telemetry_store().start_run(
                     run_id, script_name, self._current_started, label=workflow_label)
             except Exception as exc:
