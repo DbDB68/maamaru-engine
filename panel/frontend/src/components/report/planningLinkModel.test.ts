@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DayTimeline } from '../../types'
-import { canAdoptRaidRecommendation, nextScheduledStart, raidDayRecommendation } from './planningLinkModel'
+import { canAdoptRaidRecommendation, nextScheduledStart, raidDayRecommendation, scheduleMinute } from './planningLinkModel'
 
 describe('新增定时任务', () => {
   it('上一段21:57结束、现在22:07时，不再回到过去', () => {
@@ -51,5 +51,18 @@ describe('联队战时间表入口', () => {
     expect(canAdoptRaidRecommendation(true, true, false)).toBe(false)
     expect(canAdoptRaidRecommendation(true, false, true)).toBe(false)
     expect(canAdoptRaidRecommendation(true, false, false)).toBe(true)
+  })
+})
+
+describe('跨夜安排', () => {
+  it('零点与03:59是次日，04:00是当天', () => {
+    expect(scheduleMinute('00:00')).toBe(1440)
+    expect(scheduleMinute('03:59')).toBe(1679)
+    expect(scheduleMinute('04:00')).toBe(240)
+    expect(scheduleMinute('24:00')).toBeNull()
+  })
+  it('新增任务能接在跨夜的上一段后面', () => {
+    expect(nextScheduledStart(1430, 1450)).toBe(1450)
+    expect(nextScheduledStart(1678, 1700)).toBe(1679)
   })
 })

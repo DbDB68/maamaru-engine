@@ -2345,12 +2345,12 @@ async def api_adopt_day_expedition_suggestion(request: Request):
         (item for item in timeline.get("expedition_suggestions") or []
          if item.get("team_no") == team_no
          and item.get("map_code") == map_code
-         and int(item.get("start_min") or -1) == start_min), None)
+         and item.get("start_min") == start_min), None)
     if not suggestion:
         raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
     if (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
         raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
-    today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"]))
+    today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"] + start_min * 60))
     key = adhoc_key(today, team_no, start_min)
     _, forced = load_choice_sets()
     if key in forced:

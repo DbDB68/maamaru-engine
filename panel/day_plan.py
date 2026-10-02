@@ -113,7 +113,7 @@ def review_plan(plan: dict, timeline: dict) -> list[str]:
     if raid_blocks and activity.get("name") == "联队战":
         if pace <= 0:
             return issues + ["还没有可靠的本期圈速"]
-        deadline = min(1440, math.floor(
+        deadline = min(1680, math.floor(
             (activity["event_end_at"] - timeline["day_start"]) / 60) - 5)
     spans = []
     total = 0
@@ -122,7 +122,7 @@ def review_plan(plan: dict, timeline: dict) -> list[str]:
             issues.append(f"第{i}段的时间或类型不正确")
             continue
         start, kind = block["start_min"], block.get("kind")
-        if kind not in BLOCK_KINDS or not 0 <= start < 1440:
+        if kind not in BLOCK_KINDS or not 0 <= start < 1680:
             issues.append(f"第{i}段需要填写今天的时间和合法的时段类型")
             continue
         if kind == "raid":

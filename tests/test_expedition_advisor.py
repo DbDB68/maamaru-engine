@@ -216,13 +216,13 @@ class SuggestionBuildTests(unittest.TestCase):
         self.assertIn("班都排上了", out["note"])
 
     def test_second_shift_that_cannot_fit_is_dropped_with_note(self):
-        """第一班排得下、第二班过 23:59 → 只出第一班，note 说实话。"""
+        """第一班能在刷新前出发，但第二班出发已过04:00。"""
         out = self._build(_prefs(rounds=2, available_teams=(1,)),
-                          now_min=1340)  # 22:25 起排：B1 到 23:55 收工
+                          now_min=1600)  # 次日 02:45 出发，归来后已过 04:00，不能再排第二班
         self.assertEqual(len(out["suggestions"]), 1)
         self.assertEqual(out["suggestions"][0]["map_code"], "B1")
         self.assertIn("部队一第二班", out["note"])
-        self.assertIn("23:59 前排不下", out["note"])
+        self.assertIn("次日 03:59 前无法出发", out["note"])
 
     def test_reason_names_shortage_map_and_rank(self):
         out = self._build(_prefs(rounds=1, available_teams=(4,)))
@@ -232,28 +232,34 @@ class SuggestionBuildTests(unittest.TestCase):
         self.assertIn("时薪正是第一", reason)
         self.assertIn("等级没核", reason)  # 没近况文件，如实标注
 
-    def test_second_best_map_when_best_cannot_fit_today(self):
-        """晚段最优图（4 小时的 D4）排不下时回退次优图 B1。"""
+    def test_best_map_can_return_after_midnight(self):
+        """晚段最优图可以跨夜归来，不必降为短图。"""
         planning = _planning(limiting=(), koban_available=-50)
         out = self._build(_prefs(rounds=1, available_teams=(1,)),
                           planning=planning, now_min=1200)  # 20:05 起排
         suggestion = out["suggestions"][0]
-        self.assertEqual(suggestion["map_code"], "B1")
-        self.assertIn("时薪第2", suggestion["reason"])
+        self.assertEqual(suggestion["map_code"], "D4")
+        self.assertIn("时薪正是第一", suggestion["reason"])
 
-    def test_late_evening_falls_back_to_short_map(self):
-        """晚段长图排不下 → 顺延能塞进今天的短图，reason 写清楚顺延。"""
+    def test_late_evening_keeps_best_map_across_midnight(self):
+        """晚段仍选对口图，允许跨夜归来。"""
         out = self._build(_prefs(rounds=1, available_teams=(1,)),
                           now_min=23 * 60)  # 23:05 起排，B1/A2 装不下，A1 行
         suggestion = out["suggestions"][0]
-        self.assertEqual(suggestion["map_code"], "A1")
-        self.assertIn("顺延补木炭", suggestion["reason"])
+        self.assertEqual(suggestion["map_code"], "B1")
+        self.assertGreater(suggestion["start_min"] + suggestion["duration_min"], 1440)
+
+    def test_0359_departure_can_return_after_reset(self):
+        out = self._build(_prefs(rounds=1, available_teams=(1,)), now_min=1674)
+        suggestion = out["suggestions"][0]
+        self.assertEqual(suggestion["start_min"], 1679)
+        self.assertGreater(suggestion["start_min"] + suggestion["duration_min"], 1680)
 
     def test_past_day_end_gives_no_suggestion_with_honest_note(self):
         out = self._build(_prefs(rounds=1, available_teams=(1,)),
-                          now_min=1410)  # 23:35 起排，最短的 A1 也装不下
+                          now_min=1675)  # 五分钟准备后已到次日 04:00
         self.assertEqual(out["suggestions"], [])
-        self.assertIn("23:59 前排不下", out["note"])
+        self.assertIn("次日 03:59 前无法出发", out["note"])
 
     def test_level_gate_falls_back_to_lower_map(self):
         """D4 要等级合计 100，队伍只有 50 → 回退到门槛 20 的 B1。"""
@@ -902,6 +908,20 @@ class AdoptEndpointTests(unittest.TestCase):
         # 响应带新鲜的泳道/建议，前端不用再多拉一次
         self.assertIn("expeditions", response.json())
         self.assertIn("expedition_suggestions", response.json())
+
+    def test_midnight_and_next_morning_adoption_have_actual_departure_date(self):
+        for minute in (0, 1440, 1679):
+            with self.subTest(minute=minute):
+                self.suggestion["start_min"] = minute
+                response = self._put({"team_no": 4, "map_code": "B1", "start_min": minute})
+                self.assertEqual(response.status_code, 200)
+                _, forced = ec.load_choice_sets(self.path)
+                due = self.day_start + minute * 60
+                date = time.strftime("%Y-%m-%d", time.localtime(due))
+                record = forced[ec.adhoc_key(date, 4, minute)]
+                self.assertEqual(record["planned_at"], time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(due)))
+                jobs = scheduler.adhoc_due(scheduler.load_config(), forced, due, date)
+                self.assertTrue(any(job["key"] == ec.adhoc_key(date, 4, minute) for job in jobs))
 
     def test_duplicate_adopt_rejected(self):
         first = self._put({"team_no": 4, "map_code": "B1", "start_min": 600})

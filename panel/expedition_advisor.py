@@ -420,7 +420,7 @@ def _level_ok(meta, party) -> bool:
 # ── 建议生成 v2：引擎现算班，不依赖排班投影 ──
 
 SUGGEST_LEAD_MIN = 5          # 建议从 now+5 分钟起排
-DAY_END_MIN = 23 * 60 + 59    # 当天 23:59 前排得下才给这班建议
+DAY_END_MIN = 28 * 60 - 1    # 次日 03:59 前出发；归来允许跨日
 COLLECT_BUFFER_MIN = 10       # 同队连班之间的收菜缓冲
 
 
@@ -544,7 +544,7 @@ def build_expedition_suggestions(prefs: dict, *,
 
     - 班次轮转：各队第 1 班依次取缺口榜第 1、2… 种资源的对口图，
       第 2 班接着往后排；榜轮完从头再轮（越缺的资源出现越勤）。
-    - 图：该资源时薪从高到低试，23:59 前排不下就换次优图；
+    - 图：该资源时薪从高到低试，次日 03:59 前能出发即可，归来可跨日；
       occupied_maps（未完结班占图）不入选，本批建议内部也一图一班
       （游戏机制一张图同时只能一队在跑）。
     - 队：滤图的等级条件（total_level/level_req）和刀种条件
@@ -668,7 +668,7 @@ def build_expedition_suggestions(prefs: dict, *,
                         blocked(f"已安排部队{TEAM_NAMES.get(owner, owner)}" if owner else "已有远征安排")
                         continue
                     duration = int(meta.get("duration_min") or 0)
-                    if start + duration > DAY_END_MIN:
+                    if start > DAY_END_MIN:
                         miss["fit"] = True
                         blocked("今天剩余时间排不下")
                         continue
@@ -770,7 +770,7 @@ def build_expedition_suggestions(prefs: dict, *,
         if miss["type"]:
             frags.append(f"刀种门槛卡住：{miss['detail']}")
         if miss["fit"]:
-            frags.append("对口图 23:59 前排不下，今天塞不进这班了")
+            frags.append("对口图次日 03:59 前无法出发，今天塞不进这班了")
         if miss["level"]:
             frags.append("这队等级都不够对口图")
         if frags:

@@ -200,7 +200,7 @@ def _block_issues(block: dict, timeline: dict) -> list[str]:
         return ["还没有可靠的本期圈速"]
     start, runs = block["start_min"], block["runs"]
     end = start + math.ceil(runs * pace / 60)
-    deadline = min(1440, math.floor(
+    deadline = min(day_timeline.DAY_MINUTES, math.floor(
         (activity["event_end_at"] - timeline["day_start"]) / 60) - 5)
     issues = []
     if end > deadline:
@@ -463,7 +463,7 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
             state["enabled"] = False
             changed = True
             emit_fn("conductor", "[大总管] 今日安排变了或已经换日，自动开工已停用")
-        elif not state["day_start"] <= now < state["day_start"] + 86400:
+        elif not state["day_start"] <= now < state["day_start"] + day_timeline.DAY_MINUTES * 60:
             # 换日：仍排队的块统一标 missed，错过不补跑。
             for block in state["blocks"]:
                 if block.get("status") == "pending":

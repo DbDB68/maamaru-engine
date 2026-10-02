@@ -15,11 +15,11 @@ from . import scheduler
 from .expedition_choices import is_adhoc_record, load_choice_sets
 from . import expedition_advisor
 
-DAY_MINUTES = 24 * 60
+DAY_MINUTES = 28 * 60  # 白天及次日凌晨，04:00 换日
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 # 建议层的避让口径
-DAILY_RESET_WINDOW = (3 * 60 + 50, 4 * 60 + 10)  # 03:50–04:10 领旧日课+重登
+DAILY_RESET_WINDOW = (27 * 60 + 50, 28 * 60 + 10)  # 03:50–04:10 领旧日课+重登
 ACTION_WINDOW_BEFORE_MIN = 2   # 班次计划时刻前 2 分钟起占画面（派遣/收菜动作）
 ACTION_WINDOW_AFTER_MIN = 5
 MIN_SUGGESTION_MIN = 30        # 一圈约 7 分钟，不足 30 分钟的碎片不建议
@@ -35,9 +35,12 @@ _RUN_TONES = {
 
 
 def _day_window(now: float) -> tuple[float, float]:
-    day_start = datetime.fromtimestamp(now).replace(
-        hour=0, minute=0, second=0, microsecond=0).timestamp()
-    return day_start, day_start + 86400
+    local = datetime.fromtimestamp(now)
+    anchor = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if local.hour < 4:
+        anchor -= timedelta(days=1)
+    day_start = anchor.timestamp()
+    return day_start, day_start + DAY_MINUTES * 60
 
 
 # 建议引擎的家底报告（resource_watch / koban_watch）：30 秒轮询的时间表
@@ -115,7 +118,7 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
         planned_ts = _planned_ts_of(record)
         if planned_ts is None or map_code == "":
             continue
-        if not day_start <= planned_ts < day_start + 86400:
+        if not day_start <= planned_ts < day_start + DAY_MINUTES * 60:
             continue
         slot = slots.get(key)
         if slot:
@@ -166,7 +169,7 @@ def _running_expedition_items(records: dict, now: float, day_start: float,
                               durations: dict) -> list[dict]:
     """远征中/待收：来自 expeditions.json 派遣记录（收菜后销账）。"""
     items = []
-    day_end = day_start + 86400
+    day_end = day_start + DAY_MINUTES * 60
     for team_str, record in (records or {}).items():
         if not isinstance(record, dict):
             continue
@@ -372,7 +375,7 @@ def _daily_quota_seconds(plan: dict, remaining_today: float) -> int | None:
 
 def suggest_windows(now_min: float, occupied: list[dict],
                     needed_seconds: int) -> tuple[list[dict], int]:
-    """从 now_min 向 24:00 贪心填空闲段，返回 (建议块, 排不下的秒数)。
+    """从 now_min 向次日 04:00 贪心填空闲段，返回 (建议块, 排不下的秒数)。
 
     occupied: [{start_min, end_min, label}]，会被裁剪合并。
     规则：最多 2 块；不足 30 分钟的碎片不出块（除非这一块正好填满需求）；
@@ -408,7 +411,7 @@ def suggest_windows(now_min: float, occupied: list[dict],
         blocks.append({
             "start_min": free_start,
             "duration_min": piece // 60,
-            "note": f"避开{label}" if label else "",
+            "note": f"避开{label}" if label and piece == cap else "",
         })
         remaining -= piece
 
@@ -662,7 +665,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     return {
         "now": now,
         "day_start": day_start,
-        "markers": [{"time_min": 240, "label": "日课刷新", "kind": "daily_reset"}],
+        "markers": [{"time_min": DAY_MINUTES, "label": "日课刷新", "kind": "daily_reset"}],
         "expeditions": expeditions,
         "expedition_schedule_enabled": bool(cfg.get("automation", {}).get("enabled")),
         "expedition_help": {

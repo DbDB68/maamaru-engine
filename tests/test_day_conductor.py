@@ -225,10 +225,27 @@ class DayConductorTests(unittest.TestCase):
         self.assertTrue(self.runner.is_running)
         self.assertEqual(len(self.runner.calls), 1)
 
+    def test_midnight_and_0359_tasks_start_before_rollover(self):
+        for minute in (1440, 1679):
+            with self.subTest(minute=minute):
+                self.runner = FakeRunner()
+                self.state_path = Path(self.folder.name) / f"conductor-{minute}.json"
+                plan = save_plan(DAY, None, [{"start_min": minute,
+                    "kind": "workflow", "workflow_id": "wf1"}], self.plan_path)
+                with patch.object(dc.workflow, "find_preset", return_value=WF_PRESET):
+                    dc.arm(plan, timeline(activity=False), dc.BUILTIN_ID, {}, self.state_path)
+                    self.tick(DAY + minute * 60)
+                self.assertEqual(len(self.runner.calls), 1)
+                self.assertTrue(dc.load_state(self.state_path)["enabled"])
+                self.tick(DAY + 28 * 3600)
+                self.assertTrue(self.runner.is_running)
+                self.assertEqual(len(self.runner.calls), 1)
+                self.assertEqual(dc.load_state(self.state_path)["blocks"][0]["status"], "running")
+
     def test_rollover_marks_pending_blocks_missed(self):
         # missed 的唯一出口：换日时仍 pending 的块，标 missed 并停用。
         self.arm()
-        self.tick(DAY + 86400 + 1)
+        self.tick(DAY + 28 * 3600)
         state = dc.load_state(self.state_path)
         self.assertFalse(state["enabled"])
         self.assertEqual(state["blocks"][0]["status"], "missed")

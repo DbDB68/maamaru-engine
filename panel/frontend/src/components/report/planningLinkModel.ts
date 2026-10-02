@@ -2,7 +2,7 @@ import type { DayTimeline } from '../../types'
 
 /** New work starts no earlier than now or the previous block's estimated end. */
 export function nextScheduledStart(nowMin: number, previousEndMin: number): number {
-  return Math.min(1439, Math.max(Math.ceil(nowMin), previousEndMin))
+  return Math.min(1679, Math.max(Math.ceil(nowMin), previousEndMin))
 }
 
 export interface RaidDayRecommendation {
@@ -37,4 +37,11 @@ export function raidDayRecommendation(day: DayTimeline | null | undefined, isRai
 
 export function canAdoptRaidRecommendation(hasRecommendation: boolean, editing: boolean, hasSavedBlocks: boolean): boolean {
   return hasRecommendation && !editing && !hasSavedBlocks
+}
+
+/** Clock inputs before 04:00 belong to the following morning. */
+export function scheduleMinute(value: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(value)) return null
+  const [hour, minute] = value.split(':').map(Number)
+  return hour < 24 && minute < 60 ? hour * 60 + minute + (hour < 4 ? 1440 : 0) : null
 }

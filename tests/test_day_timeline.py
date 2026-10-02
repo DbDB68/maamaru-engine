@@ -327,7 +327,7 @@ class DayTimelineMiscTests(unittest.TestCase):
             out = dtl.build_day_timeline(
                 _today_at(9, 0), cfg={}, store=self.store, script_labels={})
         marker = next(m for m in out["markers"] if m["kind"] == "daily_reset")
-        self.assertEqual(marker["time_min"], 240)
+        self.assertEqual(marker["time_min"], 1680)
         self.assertEqual(marker["label"], "日课刷新")
 
     def test_hint_none_when_advisor_blows_up(self):
@@ -394,7 +394,7 @@ class DayTimelineSuggestWindowsTests(unittest.TestCase):
 
     def test_fragment_shorter_than_30min_skipped(self):
         occupied = [{"start_min": 480, "end_min": 605, "label": "a"},
-                    {"start_min": 630, "end_min": 1440, "label": "b"}]
+                    {"start_min": 630, "end_min": 1680, "label": "b"}]
         blocks, shortfall = dtl.suggest_windows(480, occupied, 3600)
         self.assertEqual(blocks, [])
         self.assertEqual(shortfall, 3600)
@@ -409,7 +409,7 @@ class DayTimelineSuggestWindowsTests(unittest.TestCase):
         self.assertGreater(shortfall, 0)
 
     def test_shortfall_honest_when_no_room(self):
-        blocks, shortfall = dtl.suggest_windows(23 * 60, [], 2 * 3600)
+        blocks, shortfall = dtl.suggest_windows(27 * 60, [], 2 * 3600)
         self.assertEqual(len(blocks), 1)
         self.assertEqual(shortfall, 3600)
 
@@ -427,7 +427,7 @@ class DayTimelineSuggestWindowsTests(unittest.TestCase):
         self.assertEqual(missing, 0)
 
     def test_raid_windows_report_rounds_that_cannot_fit(self):
-        occupied = [{"start_min": 535, "end_min": 1440,
+        occupied = [{"start_min": 535, "end_min": 1680,
                      "label": "活动收摊"}]
         blocks, missing = dtl.suggest_round_windows(480, occupied, 10, 420)
         self.assertEqual(blocks[0]["runs"], 7)
@@ -491,8 +491,9 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
     def test_skips_daily_reset_window(self):
         plan = self._plan(3600, 86400)
         out = self._build(_today_at(3, 30), _cfg([]), plan)
-        # 03:30→03:50 只有 20 分钟碎片，跳过；建议从 04:10 开始
-        self.assertEqual(out["suggestions"][0]["start_min"], 250)
+        # 次日 03:30 到刷新仅剩 20 分钟空窗，不能塞下一小时。
+        self.assertEqual(out["suggestions"], [])
+        self.assertEqual(out["shortfall_seconds"], 1800)
 
     def test_managed_hanafuda_team_blocks_whole_shift(self):
         """活动队有 forced 班要跑：它的远征时段整段避让，不只是动作窗口。"""
@@ -578,3 +579,20 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_timetable_keeps_same_anchor_through_midnight_until_four():
+    evening = _today_at(23, 59)
+    day_start, end = dtl._day_window(evening)
+    assert dtl._day_window(day_start + 86400) == (day_start, end)
+    assert dtl._day_window(day_start + 28 * 3600 - 1) == (day_start, end)
+    assert dtl._day_window(end)[0] == day_start + 86400
+
+
+def test_running_expedition_survives_four_oclock_rollover():
+    day_start, end = dtl._day_window(_today_at(23, 59))
+    records = {"4": {"map_code": "B3", "duration_min": 90,
+        "dispatched_at": datetime.fromtimestamp(end - 60).isoformat(sep=" ")}}
+    items = dtl._running_expedition_items(records, end + 60, day_start + 86400, {"B3": 90})
+    assert len(items) == 1
+    assert items[0]["state"] == "running"

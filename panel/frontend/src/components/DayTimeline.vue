@@ -4,7 +4,7 @@ import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
-import { canAdoptRaidRecommendation, nextScheduledStart } from './report/planningLinkModel'
+import { canAdoptRaidRecommendation, nextScheduledStart, scheduleMinute } from './report/planningLinkModel'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?:
 })
 const emit = defineEmits<{ openExpedition: []; timelineUpdated: [timeline: DayTimeline | null]; gameplaySettingsSaved: [script: string, params: ScriptParams] }>()
 
-const DAY = 1440
+const DAY = 1680
 // workflow/daily 没有可靠时长，预计收工按 30 分钟估算（与后端口径一致）
 const GENERIC_BLOCK_MIN = 30
 const MAX_BLOCKS = 6
@@ -203,8 +203,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', closePopoverOnEscape)
 })
 
-const TICKS = [0, 240, 480, 720, 960, 1200, 1440]
-const MINI_TICKS = [0, 360, 720, 1080, 1440]
+const TICKS = [0, 240, 480, 720, 960, 1200, 1440, 1680]
+const MINI_TICKS = [0, 480, 960, 1440, 1680]
 const COMPACT_LIMIT = 4
 
 const TEAM_NAMES: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '四', 5: '五' }
@@ -248,10 +248,14 @@ function pct(min: number): number {
   return Math.min(100, Math.max(0, (min / DAY) * 100))
 }
 
-function fmtMin(min: number): string {
-  const h = Math.floor(min / 60)
+function fmtClock(min: number): string {
+  const h = Math.floor(min / 60) % 24
   const m = Math.floor(min % 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function fmtMin(min: number): string {
+  return `${min >= 1440 ? '次日 ' : ''}${fmtClock(min)}`
 }
 
 function fmtTs(ts: number): string {
@@ -260,7 +264,7 @@ function fmtTs(ts: number): string {
 }
 
 function tickLabel(min: number): string {
-  return min === DAY ? '24:00' : `${min / 60}:00`
+  return min >= 1440 ? `次日 ${min / 60 - 24}:00` : `${min / 60}:00`
 }
 
 function durationText(min: number): string {
@@ -272,9 +276,7 @@ function durationText(min: number): string {
 }
 
 function parseTime(value: string): number | null {
-  if (!/^\d{2}:\d{2}$/.test(value)) return null
-  const [hour, minute] = value.split(':').map(Number)
-  return hour < 24 && minute < 60 ? hour * 60 + minute : null
+  return scheduleMinute(value)
 }
 
 const raidKindAvailable = computed(() => data.value?.activity?.name === '联队战')
@@ -345,7 +347,7 @@ function blockStatusClass(block: DayConductorBlock): string {
 }
 
 function toDraftRow(block: DayScheduleBlock): DraftRow {
-  return { time: fmtMin(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '', script: block.script || (block.kind === 'raid' ? 'raid' : ''), event_key: block.event_key || '' }
+  return { time: fmtClock(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '', script: block.script || (block.kind === 'raid' ? 'raid' : ''), event_key: block.event_key || '' }
 }
 
 function recommendedBlocks(): DayScheduleBlock[] {
@@ -356,7 +358,7 @@ function recommendedBlocks(): DayScheduleBlock[] {
 
 function defaultDraftRow(): DraftRow {
   return {
-    time: fmtMin(Math.min(DAY - 1, Math.ceil(nowMin.value))),
+    time: fmtClock(Math.min(DAY - 1, Math.ceil(nowMin.value))),
     kind: firstGameplay.value ? 'activity' : 'workflow',
     script: firstGameplay.value?.script || '',
     event_key: firstGameplay.value?.event_key || '',
@@ -450,7 +452,7 @@ function addBlock(kind: 'raid' | 'activity' | 'workflow') {
   const lastDuration = last?.kind === 'raid' && pace
     ? Math.ceil((last?.runs || 1) * pace / 60)
     : GENERIC_BLOCK_MIN
-  draft.value.push({ time: fmtMin(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '', script: firstGameplay.value?.script || '', event_key: firstGameplay.value?.event_key || '' })
+  draft.value.push({ time: fmtClock(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '', script: firstGameplay.value?.script || '', event_key: firstGameplay.value?.event_key || '' })
 }
 
 const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
@@ -807,7 +809,7 @@ const shortfallText = computed(() => {
   const shortfall = data.value?.shortfall_seconds
   if (!shortfall || shortfall <= 0) return ''
   const activity = data.value?.activity
-  if (activity) return `这张时间表在 24:00 前可安排 ${activity.planned_runs} / ${activity.target_runs} 圈，还差 ${activity.target_runs - activity.planned_runs} 圈排不下。`
+  if (activity) return `这张时间表在次日 04:00 前可安排 ${activity.planned_runs} / ${activity.target_runs} 圈，还差 ${activity.target_runs - activity.planned_runs} 圈排不下。`
   const covered = suggestionBlocks.value.reduce((sum, b) => sum + b.durationMin, 0)
   const lacking = Math.ceil(shortfall / 60)
   return `今天空窗只够约 ${durationText(covered)}，还差约 ${durationText(lacking)} 排不下。`
@@ -973,9 +975,9 @@ const caption = computed(() => {
           <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务<template v-if="suggestionBlocks.length"> <i class="is-suggest"></i>建议</template></span>
           <span>04:00 日课刷新</span>
         </div>
-        <div class="tl-mini-axis" aria-label="今天二十四小时概览">
+        <div class="tl-mini-axis" aria-label="今天至次日凌晨的时间概览">
           <span v-for="t in MINI_TICKS.slice(1, -1)" :key="`mini-grid-${t}`" class="tl-mini-grid" :style="{ left: pct(t) + '%' }"></span>
-          <span class="tl-mini-reset" :style="{ left: pct(240) + '%' }" title="04:00 日课刷新"></span>
+          <span class="tl-mini-reset" :style="{ left: pct(1680) + '%' }" title="04:00 日课刷新"></span>
           <span class="tl-mini-now" :style="{ left: pct(smoothNowMin) + '%' }" title="现在"></span>
           <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
           <span v-for="b in scheduleBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
@@ -984,7 +986,7 @@ const caption = computed(() => {
           <span v-for="s in expeditionSuggestionBlocks" :key="`mini-suggest-${s.key}`" class="tl-mini-block is-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title"></span>
         </div>
         <div class="tl-mini-ticks">
-          <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`">{{ t === DAY ? '24' : t / 60 }}</span>
+          <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`" :style="{ left: pct(t) + '%' }" :class="{ 'is-end': t === DAY }">{{ t >= 1440 ? `${t === 1440 ? '次日 ' : ''}${t / 60 - 24}时` : `${t / 60}时` }}</span>
         </div>
         <div v-if="compactRows.length" class="tl-agenda">
           <strong class="tl-agenda-title">{{ compactHeading }}</strong>
@@ -1014,6 +1016,7 @@ const caption = computed(() => {
         </div>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
+        <p class="tl-booking-message">00:00–03:59 为次日凌晨，04:00 换日；远征可以跨日归来。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
           <button v-for="row in bookedRows" :key="row.key" type="button" class="tl-booking-link" @click="highlightIndex = data.booking!.blocks.indexOf(row.block); editPlan()">
             {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
@@ -1063,3 +1066,13 @@ const caption = computed(() => {
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
 </template>
+
+<style scoped>
+.tl-tick { white-space: nowrap; }
+.tl-marker i { left: auto; right: 3px; }
+.tl-lane, .tl-mini-axis { overflow: hidden; }
+.tl-mini-ticks { position: relative; height: 14px; display: block; }
+.tl-mini-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.tl-mini-ticks span:first-child { transform: none; }
+.tl-mini-ticks .is-end { transform: translateX(-100%); }
+</style>
