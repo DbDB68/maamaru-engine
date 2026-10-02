@@ -235,6 +235,8 @@ def build_sword_archive(store) -> dict:
     ]
     # 旧完整名单能证明曾持有、当前完整名单已经没有：保留标注，退出待核对。
     # 没有旧名单佐证的错误指纹仍待核对；不能猜它被用于乱舞、链结或刀解。
+    current_fingerprints = {(entry.get("sword_catalog_id"), entry.get("kiwame_date"))
+                            for entry in entries}
     for ann in annotations:
         if ann.get("id") in matched_ids:
             continue
@@ -250,11 +252,19 @@ def build_sword_archive(store) -> dict:
             "reasons": ["stale_annotation"],
             "hints": [],
         }
-        if ((ann.get("serial_id") is not None and (pool.get("source") or {}).get("kind") == "youzu_log") or (ann.get("sword_catalog_id") and ann.get("kiwame_date")
-                and hasattr(store, "previously_owned_sword")
-                and store.previously_owned_sword(
-                    ann["sword_catalog_id"], ann["kiwame_date"],
-                    pool.get("observed_at") or 0))):
+        serial = ann.get("serial_id")
+        if serial is not None:
+            # OCR 没有游戏独立编号，未匹配不代表这振已经离开本丸。
+            absent = ((pool.get("source") or {}).get("kind") == "youzu_log"
+                      or str(serial) in departures)
+        else:
+            absent = (ann.get("sword_catalog_id") and ann.get("kiwame_date")
+                      and (ann["sword_catalog_id"], ann["kiwame_date"]) not in current_fingerprints
+                      and hasattr(store, "previously_owned_sword")
+                      and store.previously_owned_sword(
+                          ann["sword_catalog_id"], ann["kiwame_date"],
+                          pool.get("observed_at") or 0))
+        if absent:
             historical_annotations.append(item)
         else:
             attention.append(item)

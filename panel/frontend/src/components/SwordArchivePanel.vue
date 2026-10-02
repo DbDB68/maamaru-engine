@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PaperCard from './PaperCard.vue'
 import PanelHeader from './PanelHeader.vue'
+import SwordReadActions from './SwordReadActions.vue'
 import PixelControl from './PixelControl.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import type { SwordAnnotationBody, SwordArchiveAttentionItem, SwordArchiveEntry, SwordArchiveResponse } from '../types'
@@ -44,7 +45,6 @@ const data = ref<SwordArchiveResponse | null>(null)
 const loading = ref(true)
 const error = ref('')
 const saving = ref(false)
-const syncing = ref(false)
 const query = ref('')
 const swordType = ref<string>(ARCHIVE_ALL_TYPES)
 const archiveView = ref<'attention' | 'watch' | 'keeper' | 'favorite' | 'all'>('attention')
@@ -56,11 +56,6 @@ const done = computed(() => Boolean(data.value?.done))
 const summary = computed(() => data.value?.summary || null)
 const entries = computed(() => data.value?.entries || [])
 const attention = computed(() => data.value?.attention || [])
-const inventoryRunning = computed(() => props.running && props.current === 'sword_inventory')
-const inventoryBusy = computed(() => props.running || props.stopping || props.starting)
-const inventoryButtonLabel = computed(() => props.starting
-  ? '正在启动……'
-  : inventoryRunning.value ? '正在盘点……' : '截图盘点（备用）')
 
 const sortedEntries = computed(() => sortArchiveEntries(entries.value))
 const ordinals = computed(() => duplicateOrdinals(entries.value))
@@ -154,19 +149,6 @@ async function load() {
     error.value = cause instanceof Error ? cause.message : '刀帐档案没有翻开'
   } finally {
     loading.value = false
-  }
-}
-
-async function syncGame() {
-  syncing.value = true
-  error.value = ''
-  try {
-    await api.refreshHonmaruSituation()
-    await load()
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '没能读到游戏名单'
-  } finally {
-    syncing.value = false
   }
 }
 
@@ -273,9 +255,6 @@ async function confirmLevel(item: SwordArchiveAttentionItem) {
 }
 
 onMounted(load)
-watch(() => props.running, (isRunning, wasRunning) => {
-  if (wasRunning && !isRunning) load()
-})
 </script>
 
 <template>
@@ -283,13 +262,8 @@ watch(() => props.running, (isRunning, wasRunning) => {
     <PaperCard variant="task" tag="section">
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
-          <div class="archive-header-actions">
-            <button type="button" class="primary" :disabled="syncing || inventoryBusy" @click="syncGame">{{ syncing ? '正在更新……' : '更新刀账' }}</button>
-            <details class="archive-more">
-              <summary>更多</summary>
-              <button type="button" class="secondary" :disabled="inventoryBusy" :title="running && !inventoryRunning ? '已有任务正在执行' : '操作游戏，逐页读取刀账'" @click="emit('runInventory')">{{ inventoryButtonLabel }}</button>
-            </details>
-          </div>
+          <SwordReadActions :running="running" :current="current" :stopping="stopping" :starting="starting"
+            @updated="load" @error="error = $event" @run-inventory="emit('runInventory')" />
         </template>
       </PanelHeader>
       <div v-if="summary" class="archive-summary">
@@ -299,7 +273,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
         <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
       <p v-if="!done && data" class="archive-notice">
-        {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“更新刀账”。
+        {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“更新刀帐”。
       </p>
     </PaperCard>
 
@@ -431,10 +405,7 @@ watch(() => props.running, (isRunning, wasRunning) => {
    内容宽悬在中间（编队页"东一块西一块"就是这么来的）。 */
 .archive-panel { display: grid; gap: 13px; align-content: start; }
 .archive-panel :deep(.task-card) { max-width: none; margin: 0; }
-.archive-more summary { cursor: pointer; color: var(--ink-dim); padding: 12px 4px; }
-.archive-more button { margin-top: 6px; }
 .archive-history summary { cursor: pointer; color: var(--ink-dim); }
-.archive-header-actions { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .archive-view-switch { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; padding: 0; }
 .archive-view-switch :deep(button) { min-width: 0; }
 .archive-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -515,9 +486,6 @@ watch(() => props.running, (isRunning, wasRunning) => {
 .archive-level-bad { color: #9f3d28; font-size: 11px; }
 
 @media (max-width: 900px) {
-  .archive-more summary { cursor: pointer; color: var(--ink-dim); padding: 12px 4px; }
-.archive-more button { margin-top: 6px; }
-.archive-header-actions { justify-content: flex-start; }
   .archive-view-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .archive-view-switch :deep(button:last-child) { grid-column: 1 / -1; }
   .archive-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

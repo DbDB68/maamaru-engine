@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
+import SwordReadActions from './SwordReadActions.vue'
 import PaperCard from './PaperCard.vue'
 import type { CustomFormation, CustomFormationSlotEntry, FormationCandidate, HonmaruFormationProfile } from '../types'
 import {
@@ -18,12 +19,13 @@ import {
 // 这里只管理「想套用什么队」的预设，不复刻游戏当前五队，也不把历史
 // 点名冒充实时编队。真正套用预设由出阵/远征/任务流在开工前统一调用。
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   running?: boolean
   current?: string | null
   stopping?: boolean
-}>(), { running: false, current: null, stopping: false })
-const emit = defineEmits<{ stop: []; notify: [message: string] }>()
+  starting?: boolean
+}>(), { running: false, current: null, stopping: false, starting: false })
+const emit = defineEmits<{ stop: []; runInventory: []; notify: [message: string] }>()
 
 const TEAM_LABELS = ['部队一', '部队二', '部队三', '部队四', '部队五']
 const MAX_PRESETS = 5 // 后端合同：预设编队最多存 5 套
@@ -83,9 +85,9 @@ const catalogMatches = computed(() => catalog.value.filter(sword =>
 
 const profileSummary = computed(() => {
   if (!profile.value) return ''
-  if (!poolDone.value) return '没有完整刀账也能编队；具体一振仍需刀账'
+  if (!poolDone.value) return '没有完整刀帐也能编队；具体一振仍需刀帐'
   const skipped = pool.value?.skipped_newer_snapshots?.length || 0
-  const base = `刀账候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
+  const base = `刀帐候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
   return skipped ? `${base} · 之后还有 ${skipped} 次盘点没认全，以这份为准` : base
 })
 
@@ -104,9 +106,9 @@ async function load() {
       api.honmaruProfile(), api.swords(),
     ])
     if (profileResult.status === 'fulfilled') profile.value = profileResult.value
-    else loadError.value = '刀账暂时没有翻开；仍可按上锁刀和等级设置预设。'
+    else loadError.value = '刀帐暂时没有翻开；仍可按上锁刀和等级设置预设。'
     if (catalogResult.status === 'fulfilled') catalog.value = catalogResult.value.swords
-    else loadError.value = '刀剑名册暂时没有翻开，请稍后重新读取。'
+    else loadError.value = '刀剑名册暂时没有翻开，请稍后更新刀帐。'
   } catch (cause) {
     loadError.value = cause instanceof Error ? cause.message : '本丸档案没有翻开'
   } finally {
@@ -372,7 +374,8 @@ onMounted(() => { load(); loadPresets() })
         variant="embedded"
       >
         <template #actions>
-          <button type="button" class="secondary" :disabled="loading" @click="load">{{ loading ? '正在读取……' : '重新读取' }}</button>
+          <SwordReadActions :running="props.running" :current="props.current" :stopping="props.stopping" :starting="props.starting"
+            @updated="load" @error="loadError = $event" @run-inventory="emit('runInventory')" />
         </template>
       </PanelHeader>
       <p class="formation-hintline">保存预设不会立刻动游戏；开工时会在名单里找上锁且等级最高的刀。</p>
@@ -431,7 +434,7 @@ onMounted(() => { load(); loadPresets() })
                 </select>
               </label>
             </div>
-            <p class="formation-hintline">按刀名选上锁最高级，或从刀账指定具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
+            <p class="formation-hintline">按刀名选上锁最高级，或从刀帐指定具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
             <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
             <ol class="formation-preset-slots">
               <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
@@ -530,7 +533,7 @@ onMounted(() => { load(); loadPresets() })
             <div v-if="pickerSlot != null" class="formation-preset-picker">
               <div class="formation-picker-modes" role="group" aria-label="选刀方式">
                 <button type="button" class="secondary" :aria-pressed="pickerMode === 'ranked'" @click="pickerMode = 'ranked'">按上锁最高级</button>
-                <button type="button" class="secondary" :aria-pressed="pickerMode === 'exact'" @click="pickerMode = 'exact'">指定刀账里的一振</button>
+                <button type="button" class="secondary" :aria-pressed="pickerMode === 'exact'" @click="pickerMode = 'exact'">指定刀帐里的一振</button>
               </div>
               <label class="formation-search">
                 <span>给 {{ pickerSlot }} 号位选刀</span>
@@ -546,7 +549,7 @@ onMounted(() => { load(); loadPresets() })
                 </section>
               </div>
               <p v-else-if="pickerMode === 'ranked'" class="formation-empty">没有找到这个刀名。</p>
-              <p v-else-if="!poolDone" class="formation-empty">指定具体一振需要完整刀账；可以切回「按上锁最高级」。</p>
+              <p v-else-if="!poolDone" class="formation-empty">指定具体一振需要完整刀帐；可以切回「按上锁最高级」。</p>
               <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
                 <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
                   <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>

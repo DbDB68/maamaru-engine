@@ -69,7 +69,7 @@ const message = ref('')
 type AppTab = 'home' | 'planning' | 'swords' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
 type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
-// 刀剑页内视图：刀账 / 部队预设（'archive' tab 保留为旧入口兼容别名）
+// 刀剑页内视图：刀帐 / 部队预设（'archive' tab 保留为旧入口兼容别名）
 const swordView = ref<'archive' | 'formation'>('archive')
 const lastWorkshopTab = ref<WorkshopTab>('office')
 const workshopActive = computed(() => ['office', 'tasks', 'workflow', 'devtools'].includes(tab.value))
@@ -595,9 +595,9 @@ watch(tab, value => {
       </div>
     </nav>
     <nav v-if="!ledgerMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
-      <div class="workshop-title"><strong>刀剑</strong><small>看看刀账，调调部队</small></div>
+      <div class="workshop-title"><strong>刀剑</strong><small>看看刀帐，调调部队</small></div>
       <div class="workshop-tabs">
-        <button type="button" :class="{ active: swordView === 'archive' }" @click="swordView = 'archive'">刀账</button>
+        <button type="button" :class="{ active: swordView === 'archive' }" @click="swordView = 'archive'">刀帐</button>
         <button type="button" :class="{ active: swordView === 'formation' }" @click="swordView = 'formation'">部队预设</button>
       </div>
     </nav>
@@ -750,7 +750,7 @@ watch(tab, value => {
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" @stop="stop" @notify="message = $event" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>

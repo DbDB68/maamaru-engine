@@ -64,6 +64,47 @@ def test_persistence_backup_idempotence_and_credentials_are_excluded(tmp_path):
     assert candidate_pool(store)["entries"][0]["level"] == 10
 
 
+def test_json_and_ocr_switch_only_complete_current_pool_without_overwriting_sources(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    sync_archive([full(sword(1))], store)
+    original = archive_path(store).read_bytes()
+    ts = candidate_pool(store)["observed_at"]
+    row = {"sword_id": "touken_003_mikazuki_munechika", "name_zh": "三日月宗近", "level": 20,
+           "kiwame_date": "2023-1-27"}
+    # 更新但不完整、或者只是图鉴扫描，不能顶掉游戏所持名单。
+    store.save_sword_snapshot([row], owned=2, missing=1, captured_at=ts + 60, source="owned_inventory")
+    store.save_sword_snapshot([row], owned=1, missing=0, captured_at=ts + 61, source="album")
+    assert build_candidate_pool(store)["source"]["kind"] == "youzu_log"
+    snapshot = store.save_sword_snapshot([row], owned=1, missing=0, captured_at=ts + 120, source="owned_inventory")
+    assert build_candidate_pool(store)["source"]["snapshot_id"] == snapshot
+    assert archive_path(store).read_bytes() == original
+    # JSON 重读旧记录不会把更新的完整截图名单冲回去。
+    sync_archive([full(sword(1))], store)
+    assert build_candidate_pool(store)["source"]["snapshot_id"] == snapshot
+    sync_archive([full(sword(1, level=30), minute=3)], store)
+    assert build_candidate_pool(store)["source"]["kind"] == "youzu_log"
+    assert build_candidate_pool(store)["entries"][0]["level"] == 30
+    assert store.sword_snapshot_detail(snapshot)["swords"][0]["level"] == 20
+
+
+def test_serial_annotation_stays_pending_after_newer_ocr_not_falsely_historical(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    catalog = "touken_003_mikazuki_munechika"
+    row = {"sword_id": catalog, "name_zh": "三日月宗近", "level": 10, "kiwame_date": "2023-1-27"}
+    store.save_sword_snapshot([row], owned=1, missing=0, captured_at=1, source="owned_inventory")
+    sync_archive([full(sword(1))], store)
+    annotation = store.save_sword_annotation(catalog, "2023-1-27", serial_id=1, watch=True)
+    ts = candidate_pool(store)["observed_at"]
+    store.save_sword_snapshot([row], owned=1, missing=0, captured_at=ts + 120, source="owned_inventory")
+    archive = build_sword_archive(store)
+    assert not archive["historical_annotations"]
+    assert any(item.get("annotation_id") == annotation["id"] for item in archive["attention"])
+    assert archive["entries"][0]["human"] is None  # 没有独立编号，不凭同名套标记。
+    assert store.sword_annotations()[0]["watch"]
+    sync_archive([full(sword(1), minute=3)], store)
+    assert build_sword_archive(store)["entries"][0]["human"]["watch"]
+
+
 def test_migration_fallback_and_manual_annotations_survive(tmp_path):
     store = TelemetryStore(tmp_path / "telemetry.db")
     catalog = "touken_003_mikazuki_munechika"
