@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger } from '../types'
 import PanelHeader from './PanelHeader.vue'
@@ -17,7 +17,7 @@ const emit = defineEmits<{
   'open-expedition': []
   'open-activity': [script: 'hanafuda' | 'raid', loops: number]
 }>()
-const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning'; pageSection?: 'report' | 'planning' }>()
+const props = defineProps<{ initialSection?: 'report' | 'records' | 'planning'; pageSection?: 'report' | 'planning'; ledgerMode?: boolean; running?: boolean }>()
 
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>(props.initialSection === 'planning' ? 'planning' : 'report')
@@ -75,6 +75,58 @@ const acceptLedgerConflicts = ref(false)
 const ledgerTransferNotice = ref('')
 const ledgerOnboarding = ref<LedgerOnboarding | null>(null)
 const ledgerOnboardingBusy = ref('')
+const gameInventoryBusy = ref(false)
+const gameInventoryNotice = ref('')
+const gameInventoryRunId = ref<string | null>(null)
+let gameInventoryTimer: ReturnType<typeof setTimeout> | undefined
+let gameInventoryDisposed = false
+
+async function checkGameInventory() {
+  if (gameInventoryDisposed) return
+  try {
+    const state = await api.scripts()
+    if (gameInventoryDisposed) return
+    if (state.running && state.current === 'game_inventory') {
+      gameInventoryRunId.value = state.run_id || gameInventoryRunId.value
+      gameInventoryBusy.value = true
+      gameInventoryNotice.value = '正在读取游戏记录并盘点画面，请暂时不要操作模拟器。'
+      gameInventoryTimer = setTimeout(checkGameInventory, 3000)
+      return
+    }
+    const { result } = await api.gameInventoryResult()
+    if (result && (!gameInventoryRunId.value || result.run_id === gameInventoryRunId.value)) {
+      const reading = result.payload
+      const count = Object.keys(reading.resources).length
+      const recordStatus = reading.records === 'ok' ? '已读取' : reading.records === 'empty' ? '没有资源读数' : '读取失败'
+      const ocrStatus = reading.ocr === 'ok' ? '已完成' : reading.ocr === 'partial' ? '部分读到' : '未完成'
+      gameInventoryNotice.value = `游戏记录：${recordStatus}；画面盘点：${ocrStatus}。确认了 ${count} 项家底${reading.records === 'ok' && reading.ocr === 'ok' ? '，可以在下方查看。' : '；没读到的项目仍保留原记录，可以重试。'}`
+    } else {
+      gameInventoryNotice.value = '本次读取没有完成结果，可能已停止；请查看执务台记录后重试。'
+    }
+    gameInventoryBusy.value = false
+    await load()
+  } catch (cause) {
+    if (gameInventoryDisposed) return
+    gameInventoryNotice.value = cause instanceof Error ? cause.message : '暂时没能取得读取进度'
+    gameInventoryTimer = setTimeout(checkGameInventory, 5000)
+  }
+}
+
+async function readGameInventory() {
+  if (gameInventoryBusy.value || props.running || props.ledgerMode) return
+  gameInventoryBusy.value = true
+  gameInventoryNotice.value = '正在准备读取，请保持游戏停在本丸。'
+  try {
+    if (ledgerOnboarding.value?.visible) ledgerOnboarding.value = await api.updateLedgerOnboarding('start')
+    const result = await api.run('game_inventory', {})
+    if (!result.ok || !result.run_id) throw new Error('读取没有启动，请确认没有其他任务正在运行。')
+    gameInventoryRunId.value = result.run_id
+    if (!gameInventoryDisposed) gameInventoryTimer = setTimeout(checkGameInventory, 3000)
+  } catch (cause) {
+    gameInventoryBusy.value = false
+    gameInventoryNotice.value = cause instanceof Error ? cause.message : '读取没有启动，请重试'
+  }
+}
 const planningPanelRef = ref<{ openCustomForm: () => Promise<void> } | null>(null)
 const swordWishlist = ref<string[]>([])
 const failedRun = ref<any | null>(null)
@@ -1079,8 +1131,16 @@ async function refreshRecords() {
 }
 onMounted(async () => {
   await load()
+  if (!props.ledgerMode) {
+    const state = await api.scripts().catch(() => null)
+    if (state?.running && state.current === 'game_inventory') {
+      gameInventoryRunId.value = state.run_id || null
+      void checkGameInventory()
+    }
+  }
   if (view.value === 'records' && recordDate.value) await loadRecordDay(recordDate.value)
 })
+onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTimer) })
 </script>
 
 <template>
@@ -1100,8 +1160,37 @@ onMounted(async () => {
       </div>
       <template v-if="currentSection === 'report'">
       <template v-if="view === 'chart'">
+        <section v-if="ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
+          <header>
+            <div><small>第一次使用 · {{ ledgerOnboarding.step }}/3</small><h3 id="ledger-onboarding-title">把账房安顿好</h3></div>
+            <button type="button" :disabled="!!ledgerOnboardingBusy || gameInventoryBusy" @click="dismissLedgerOnboarding">不需要引导</button>
+          </header>
+          <ol aria-label="首次设置进度">
+            <li :class="{ active: ledgerOnboarding.step === 1, done: ledgerOnboarding.step > 1 }"><span>1</span>{{ props.ledgerMode ? '记家底' : '读家底' }}</li>
+            <li :class="{ active: ledgerOnboarding.step === 2, done: ledgerOnboarding.step > 2 }"><span>2</span>带旧账</li>
+            <li :class="{ active: ledgerOnboarding.step === 3 }"><span>3</span>立目标</li>
+          </ol>
+          <div v-if="ledgerOnboarding.step === 1 && !props.ledgerMode" class="ledger-onboarding-copy">
+            <div><b>让まあ丸先认识你的本丸</b><p>打开模拟器并进入游戏本丸，再点「读取游戏家底」。会读取游戏记录，并翻到锻刀、所持道具画面盘点资源；不会锻刀、出阵或花资源。读不到时可以重试，也可以手动记下家底。</p></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
+          </div>
+          <div v-else-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">
+            <div><b>先抄一次现在的家底</b><p>打开游戏看一眼资源数字；不确定的项目可以留空，以后随时能改。</p></div>
+            <button type="button" class="primary" :disabled="ledgerOnboardingBusy === 'inventory'" @click="beginLedgerOnboarding">{{ ledgerOnboardingBusy === 'inventory' ? '正在准备……' : '抄下当前家底' }}</button>
+          </div>
+          <div v-else-if="ledgerOnboarding.step === 2" class="ledger-onboarding-copy">
+            <div><b>有旧表就顺手带回来</b><p>导入前只做预览，不会碰刚抄好的家底；没有旧账直接下一步。</p></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingImport">选旧账预览</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'step-3'" @click="advanceLedgerOnboarding(3)">没有旧账，下一步</button></div>
+          </div>
+          <div v-else class="ledger-onboarding-copy">
+            <div><b>有目标再规划，暂时没有也没关系</b><p>家底能用于预算；圈速和收益要靠后续短跑慢慢积累。{{ props.ledgerMode ? '也可以补记自己打过的活动。' : '接下来去执务台挑一个任务，核对部队和消耗，先短跑一次。' }}现在不必先做完整规划。</p></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">去规划立目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div>
+          </div>
+        </section>
+
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
-          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></header>
+          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></div></header>
+          <p v-if="!props.ledgerMode" class="inventory-notice" role="status">{{ gameInventoryNotice || '打开模拟器并进入游戏本丸，点一次就能读取记录和盘点资源；不用先跑日课。' }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small>
@@ -1137,29 +1226,7 @@ onMounted(async () => {
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>
         </button>
 
-        <section v-if="ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
-          <header>
-            <div><small>第一次使用 · {{ ledgerOnboarding.step }}/3</small><h3 id="ledger-onboarding-title">把账房安顿好</h3></div>
-            <button type="button" :disabled="!!ledgerOnboardingBusy" @click="dismissLedgerOnboarding">不需要引导</button>
-          </header>
-          <ol aria-label="首次设置进度">
-            <li :class="{ active: ledgerOnboarding.step === 1, done: ledgerOnboarding.step > 1 }"><span>1</span>抄家底</li>
-            <li :class="{ active: ledgerOnboarding.step === 2, done: ledgerOnboarding.step > 2 }"><span>2</span>带旧账</li>
-            <li :class="{ active: ledgerOnboarding.step === 3 }"><span>3</span>立目标</li>
-          </ol>
-          <div v-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">
-            <div><b>先抄一次现在的家底</b><p>打开游戏看一眼资源数字；不确定的项目可以留空，以后随时能改。</p></div>
-            <button type="button" class="primary" :disabled="ledgerOnboardingBusy === 'inventory'" @click="beginLedgerOnboarding">{{ ledgerOnboardingBusy === 'inventory' ? '正在准备……' : '抄下当前家底' }}</button>
-          </div>
-          <div v-else-if="ledgerOnboarding.step === 2" class="ledger-onboarding-copy">
-            <div><b>有旧表就顺手带回来</b><p>导入前只做预览，不会碰刚抄好的家底；没有旧账直接下一步。</p></div>
-            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingImport">选旧账预览</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'step-3'" @click="advanceLedgerOnboarding(3)">没有旧账，下一步</button></div>
-          </div>
-          <div v-else class="ledger-onboarding-copy">
-            <div><b>最后立一个真正想盯的目标</b><p>让账房替你算还差多少；暂时没想法也可以直接完成。</p></div>
-            <div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">去规划立目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div>
-          </div>
-        </section>
+
 
         <section class="resource-ledger" :class="{ loading }">
           <header><div><h3>账本与手账</h3><p>{{ ledgerDateRange }}的变化依据</p></div><div class="ledger-actions"><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
@@ -1271,7 +1338,7 @@ onMounted(async () => {
       <template v-else>
         <section v-if="ledgerOnboarding?.visible && ledgerOnboarding.step === 3" class="ledger-onboarding ledger-onboarding-goal" aria-labelledby="ledger-onboarding-goal-title">
           <header><div><small>第一次使用 · 3/3</small><h3 id="ledger-onboarding-goal-title">最后，立一个真正想盯的目标</h3></div></header>
-          <ol aria-label="首次设置进度"><li class="done"><span>1</span>抄家底</li><li class="done"><span>2</span>带旧账</li><li class="active"><span>3</span>立目标</li></ol>
+          <ol aria-label="首次设置进度"><li class="done"><span>1</span>{{ props.ledgerMode ? '记家底' : '读家底' }}</li><li class="done"><span>2</span>带旧账</li><li class="active"><span>3</span>立目标</li></ol>
           <div class="ledger-onboarding-copy"><div><b>让账房替你盯结果</b><p>可以选“攒到多少”或“到哪一天”；暂时没想法也可以直接完成。</p></div><div class="ledger-onboarding-actions"><button type="button" class="primary" @click="openOnboardingGoal">立一个目标</button><button type="button" class="secondary" :disabled="ledgerOnboardingBusy === 'complete'" @click="finishLedgerOnboarding">暂时不立，完成设置</button></div></div>
         </section>
         <PlanningPanel ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" @open-expedition="emit('open-expedition')" @open-activity="(script, loops) => emit('open-activity', script, loops)" />

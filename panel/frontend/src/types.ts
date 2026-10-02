@@ -77,6 +77,7 @@ export interface ScriptInfo {
 export interface ScriptsResponse {
   running: boolean
   current: string | null
+  run_id?: string | null
   workflow?: WorkflowIdentity | null
   scripts: Record<string, ScriptInfo>
   event_hidden?: string[]

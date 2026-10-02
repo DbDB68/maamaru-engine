@@ -1358,6 +1358,16 @@ register_script("snapshot", "库存快照",
                 "手动拍一次完整家底（含小判）刷新看板；日常已由锻刀收工顺手拍+顶栏顺路更新覆盖，想立刻刷新看板才用",
                 _wrap_inventory("库存", _build_simple("status_snapshot_stream"),
                                 inventory=False))
+
+
+def _build_game_inventory(config_path, params):
+    from .game_inventory import refresh_game_inventory
+    yield from refresh_game_inventory(config_path, params, make_agent=_make_agent)
+
+
+register_script("game_inventory", "读取游戏家底",
+                "读取游戏记录，再通过画面盘点资源、小判和符；不执行日课",
+                _build_game_inventory)
 register_script("sword_inventory", "刀帐盘点",
                 "走进刀剑男士一览，逐页认出每把刀的等级、疲劳和属性记成快照；全程只看不点，怕漏会如实报缺口",
                 _wrap_inventory("刀帐盘点", _build_sword_inventory))
@@ -1753,6 +1763,7 @@ async def api_scripts():
             "scripts": {},
             "running": False,
             "current": None,
+            "run_id": None,
             "workflow": None,
             "event_hidden": [],
         }
@@ -1761,6 +1772,7 @@ async def api_scripts():
         "scripts": _scripts_with_preset_options(list_scripts()),
         "running": runner.is_running,
         "current": runner.current_script,
+        "run_id": runner.current_run_id if runner.is_running else None,
         "workflow": runner.current_workflow,
         # 概览页「常用功能」联动：绑活动的脚本没开放就先收起来（配置页不受影响）
         "event_hidden": _event_hidden_scripts(),
@@ -2546,6 +2558,7 @@ _SCRIPT_FLAVOR = {
     "sugar": "正在炼糖🍬",
     "inbox_supplies": "正在收件箱翻杂物📮",
     "snapshot": "正在盘点家底📦",
+    "game_inventory": "正在读取游戏家底📦",
 }
 
 
@@ -3089,6 +3102,14 @@ async def api_ledger_onboarding():
     from touken.ledger_onboarding import ONBOARDING_FILENAME, get_onboarding
     from touken.telemetry import get_telemetry_store
     return get_onboarding(get_telemetry_store(), STATUS_DIR / ONBOARDING_FILENAME)
+
+
+@app.get("/api/data/game-inventory")
+async def api_game_inventory_result():
+    from touken.telemetry import get_telemetry_store
+    events = get_telemetry_store().recent_events(
+        limit=1, event_type="game_inventory.finished")
+    return {"result": events[0] if events else None}
 
 
 @app.post("/api/data/ledger-onboarding")

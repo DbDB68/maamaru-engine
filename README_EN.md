@@ -14,9 +14,9 @@ Maamaru supports the **Simplified Chinese client on the China server**. The app 
 
 ## From today's plan to a new page in your Honmaru
 
-Check your resources and event progress, decide how many runs to do and what to replenish, then save the jobs as a workflow. Start now or schedule it for later. Maamaru follows your spending permissions and stop conditions, then brings the report, transactions, and new swords into your Honmaru journal.
+An empty ledger is fine. Enter the Honmaru in the game and choose Read Game Balances (读取游戏家底) in the warehouse. Then pick one routine task, check the team, spending permissions, and stop conditions, and try a short supervised run. As records accumulate, use your balances and measured run times to plan budgets and schedules.
 
-**Plan → Arrange tasks → Run and supervise → Record the results → Honmaru journal**
+**Read balances → Try a short run → Record results → Plan from records → Honmaru journal**
 
 **1. Return to My Honmaru**
 
@@ -54,9 +54,9 @@ You arrange the day's work; when you return, you can see what got done: complete
 
 I have played Touken Ranbu for nine years, and I still want to keep playing. I just no longer want to click through every repetitive task myself—or maintain an Excel sheet by hand to track my resources. That is why I built Maamaru: to look after my Honmaru when needed, and leave records I can read when I return.
 
-### Planning: decide what to do today
+### Planning: arrange work once you have records
 
-Use your Honmaru's records to estimate the remaining event work, daily runs, and koban budget. Recommended Regiment Battle runs can go into the timetable, with the time and run count still editable. Saved workflows can be scheduled separately.
+Read balances support budgeting; run times and yields need task or manual activity records. You do not need a full plan to get started. Use your Honmaru's records to estimate the remaining event work, daily runs, and koban budget. Recommended Regiment Battle runs can go into the timetable, with the time and run count still editable. Saved workflows can be scheduled separately.
 
 Change Konnosuke's resource focus and the expedition recommendations follow it. If a team cannot reach a useful map, Maamaru explains the missing sword type, total-level requirement, or occupied map. Existing team presets can also be used for expeditions.
 
@@ -83,6 +83,15 @@ New swords, returning expeditions, forging, and sword sorting become journal pos
 
 Switch between washi-paper and pixel themes whenever you like. Kogitsunemaru and Konnosuke are here in the courtyard, too.
 
+
+## First-time setup
+
+1. Choose **Start Maamaru** in the launcher, open the emulator, and enter the game's Honmaru.
+2. Open the warehouse and click **Read Game Balances (读取游戏家底)**. Maamaru reads game records, then checks the forging and inventory screens for resources, koban, and tokens. It does not run daily tasks, forge, or depart. Each reading method reports its result; retry if either is incomplete.
+3. Old-ledger import and goals are optional. Pick a task at the task desk, check the team and spending settings, and try a short supervised run before reviewing the report.
+4. Use planning advice and schedules as run-time and yield records accumulate.
+
+**Open Ledger Only** does not connect to the game. Enter or import balances manually in that mode.
 
 ## Where to start
 

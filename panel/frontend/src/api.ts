@@ -98,6 +98,7 @@ export const api = {
   resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
   resourceLedgerRange: (from: number, to: number) => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}`),
   ledgerOnboarding: () => request<LedgerOnboarding>('/api/data/ledger-onboarding'),
+  gameInventoryResult: () => request<{ result: { run_id: string; payload: { records: string; ocr: string; resources: Record<string, number> } } | null }>('/api/data/game-inventory'),
   updateLedgerOnboarding: (action: 'start' | 'advance' | 'complete' | 'dismiss', step?: 2 | 3) => request<LedgerOnboarding & { ok: boolean }>('/api/data/ledger-onboarding', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, step }),
   }),
