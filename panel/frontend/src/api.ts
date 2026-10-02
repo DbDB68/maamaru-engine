@@ -40,6 +40,9 @@ export const api = {
   setExpeditionHelpPrefs: (roundsPerTeam: number, availableTeams: number[]) => request<{ ok: boolean; expedition_help: DayTimeline['expedition_help'] }>('/api/expedition-help-prefs', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rounds_per_team: roundsPerTeam, available_teams: availableTeams }),
   }),
+  setExpeditionTeamFormations: (teamFormations: Record<string, string>) => request('/api/expedition-help-prefs', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team_formations: teamFormations }),
+  }),
   setExpeditionResourceFocus: (resourceFocus: string) => request('/api/expedition-help-prefs', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_focus: resourceFocus }),
   }),

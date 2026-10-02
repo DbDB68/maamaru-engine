@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
-import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
+import type { CustomFormation, ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 import { canAdoptRaidRecommendation, nextScheduledStart, scheduleMinute } from './report/planningLinkModel'
 
@@ -30,6 +30,34 @@ const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
+const formations = ref<CustomFormation[]>([])
+const formationLoadError = ref('')
+function teamFormationOptions(team: number) {
+  return formations.value.filter(preset => preset.target_team === team)
+}
+function selectedFormation(team: number) {
+  return data.value?.expedition_help.team_formations?.[String(team)] || ''
+}
+async function updateTeamFormation(team: number, event: Event) {
+  if (!data.value || prefsBusy.value || adoptingSuggestion.value) return
+  const fid = (event.target as HTMLSelectElement).value
+  const previous = { ...data.value.expedition_help.team_formations }
+  const next = { ...previous, [String(team)]: fid }
+  data.value.expedition_help.team_formations = next
+  prefsBusy.value = true
+  expeditionMessage.value = ''
+  try {
+    await api.setExpeditionTeamFormations({ [String(team)]: fid })
+    await load()
+    expeditionMessage.value = '编队选择已保存，后续建议已更新。'
+  } catch (error) {
+    expeditionMessage.value = error instanceof Error ? error.message : '编队选择没存上，请重试'
+    if (data.value) data.value.expedition_help.team_formations = previous
+    await load()
+  } finally {
+    prefsBusy.value = false
+  }
+}
 interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
 const gameplayDialog = ref<InstanceType<typeof GameplaySettingsDialog>>()
@@ -55,7 +83,13 @@ let clockTimer: number | undefined
 
 async function load() {
   try {
-    data.value = await api.dayTimeline()
+    const [timelineResult, formationResult] = await Promise.allSettled([api.dayTimeline(), api.customFormations()])
+    if (formationResult.status === 'fulfilled') {
+      formations.value = formationResult.value.formations
+      formationLoadError.value = ''
+    } else formationLoadError.value = '部队预设暂时没读到，请稍后重试。'
+    if (timelineResult.status !== 'fulfilled') return
+    data.value = timelineResult.value
     emit('timelineUpdated', data.value)
     syncSmoothClock()
     if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
@@ -118,7 +152,7 @@ async function toggleExpedition(slot: DayTimelineExpedition) {
 
 async function updateRounds(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
-  if (!data.value || prefsBusy.value) return
+  if (!data.value || prefsBusy.value || adoptingSuggestion.value) return
   const previous = data.value.expedition_help.rounds_per_team
   data.value.expedition_help.rounds_per_team = value
   prefsBusy.value = true
@@ -136,7 +170,7 @@ async function updateRounds(event: Event) {
 }
 
 async function toggleAvailableTeam(team: number) {
-  if (!data.value || prefsBusy.value) return
+  if (!data.value || prefsBusy.value || adoptingSuggestion.value) return
   const current = data.value.expedition_help.available_teams
   const next = current.includes(team)
     ? current.filter(item => item !== team)
@@ -158,7 +192,7 @@ async function toggleAvailableTeam(team: number) {
 }
 
 async function adoptExpeditionSuggestion(suggestion: DayExpeditionSuggestion) {
-  if (adoptingSuggestion.value) return
+  if (adoptingSuggestion.value || prefsBusy.value) return
   adoptingSuggestion.value = suggestion.key
   expeditionMessage.value = ''
   try {
@@ -926,7 +960,7 @@ const caption = computed(() => {
             <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
               <span class="tl-lane-tag">{{ lane.label }}</span>
               <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击取消这班' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
-              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion" @click="adoptExpeditionSuggestion(s.suggestion)">{{ s.text }}</button>
+              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @click="adoptExpeditionSuggestion(s.suggestion)">{{ s.text }}</button>
             </div>
           </template>
           <div v-else class="tl-lane">
@@ -953,15 +987,27 @@ const caption = computed(() => {
       </div>
       <div v-if="data.expedition_help" class="tl-expedition-help">
         <label class="tl-expedition-help-count">可丢的队伍各派
-          <select :value="data.expedition_help.rounds_per_team" :disabled="prefsBusy" @change="updateRounds">
+          <select :value="data.expedition_help.rounds_per_team" :disabled="prefsBusy || !!adoptingSuggestion" @change="updateRounds">
             <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
           </select>
         次远征</label>
         <span class="tl-expedition-help-teams">队伍
-          <button v-for="t in [1, 2, 3, 4, 5]" :key="t" type="button" class="tlx-chip" :class="{ 'is-on': data.expedition_help.available_teams.includes(t) }" :aria-pressed="data.expedition_help.available_teams.includes(t)" :disabled="prefsBusy" @click="toggleAvailableTeam(t)">{{ TEAM_NAMES[t] }}</button>
+          <button v-for="t in [1, 2, 3, 4, 5]" :key="t" type="button" class="tlx-chip" :class="{ 'is-on': data.expedition_help.available_teams.includes(t) }" :aria-pressed="data.expedition_help.available_teams.includes(t)" :disabled="prefsBusy || !!adoptingSuggestion" @click="toggleAvailableTeam(t)">{{ TEAM_NAMES[t] }}</button>
         </span>
 
       </div>
+      <div v-if="data.expedition_help" class="tl-expedition-formations">
+        <label v-for="team in data.expedition_help.available_teams" :key="team">
+          <span>部队{{ TEAM_NAMES[team] }}远征编队</span>
+          <select title="选择预设后，到点先换队再派出。只影响后续建议，已点上的班保持原安排。" :value="selectedFormation(team)" :disabled="prefsBusy || !!adoptingSuggestion || !!formationLoadError" @change="updateTeamFormation(team, $event)">
+            <option value="">保持现有编队</option>
+            <option v-if="selectedFormation(team) && !teamFormationOptions(team).some(preset => preset.id === selectedFormation(team))" :value="selectedFormation(team)" disabled>原预设已删除或更换部队，请重选</option>
+            <option v-for="preset in teamFormationOptions(team)" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="formationLoadError" class="tl-expedition-help-note">{{ formationLoadError }}</p>
+      <p v-if="data.expedition_advice_note" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
       <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}<template v-if="s.formation_name">（先换「{{ s.formation_name }}」）</template></template></p>
       <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
         <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
@@ -1068,6 +1114,15 @@ const caption = computed(() => {
 </template>
 
 <style scoped>
+.tl-expedition-formations { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0; }
+.tl-expedition-formations label { display: flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 12px; }
+.tl-expedition-formations select { min-width: 130px; max-width: 220px; min-height: 32px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper-card); color: var(--ink); font: inherit; }
+@media (max-width: 680px) {
+  .tl-expedition-formations { display: grid; }
+  .tl-expedition-formations label { justify-content: space-between; }
+  .tl-expedition-formations select { min-width: 0; max-width: 60%; }
+}
+
 .tl-tick { white-space: nowrap; }
 .tl-marker i { left: auto; right: 3px; }
 .tl-lane, .tl-mini-axis { overflow: hidden; }

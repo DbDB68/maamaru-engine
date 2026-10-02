@@ -1,6 +1,6 @@
 """远征建议引擎 v2：家底缺什么 → 今天丢哪几队、去哪些图。
 
-玩家每天只做一个决定：丢几队出门（0–5）；"哪些队可以丢"是长期偏好。
+玩家决定每队派几次、哪些队可以丢，以及是否先套用指定的部队预设。
 v2 起建议不再依赖 preset 排班投影——引擎按缺口排序直接算班
 （图/队伍/时刻自描述），采纳 = 写一条自描述 forced 记录
 （expedition_day_choices.json v2），排班总开关关着也单独走状态机，
@@ -70,8 +70,11 @@ def _normalize_prefs(value) -> dict:
                 teams.append(team)
     if not teams:
         teams = list(DEFAULT_AVAILABLE_TEAMS)
+    raw_formations = value.get("team_formations", {})
+    formations = {str(team): fid for team, fid in raw_formations.items()
+                  if str(team) in {str(t) for t in VALID_TEAMS} and isinstance(fid, str)} if isinstance(raw_formations, dict) else {}
     return {"version": PREFS_VERSION, "rounds_per_team": rounds,
-            "available_teams": sorted(teams),
+            "available_teams": sorted(teams), "team_formations": formations,
             "resource_focus": value.get("resource_focus") if value.get("resource_focus") in FOCUS_RESOURCES else ""}
 
 
@@ -101,7 +104,7 @@ def _as_count(value, label: str) -> int:
     raise ValueError(f"{label}得是个数")
 
 
-def save_prefs(*, rounds_per_team=None, available_teams=None, resource_focus=None,
+def save_prefs(*, rounds_per_team=None, available_teams=None, resource_focus=None, team_formations=None,
                path: Path = PREFS_PATH) -> dict:
     """校验落盘（原子替换 + 备份上一版）；参数不合法抛 ValueError。"""
     previous = load_prefs(path)
@@ -111,6 +114,16 @@ def save_prefs(*, rounds_per_team=None, available_teams=None, resource_focus=Non
         available_teams = previous["available_teams"]
     if resource_focus is not None and resource_focus not in (*FOCUS_RESOURCES, ""):
         raise ValueError("关注项不支持远征补给")
+    if team_formations is not None:
+        if not isinstance(team_formations, dict):
+            raise ValueError("编队选择得按部队保存")
+        from touken.custom_formations import load_formations
+        records = {record["id"]: record for record in load_formations()}
+        for team, fid in team_formations.items():
+            if str(team) not in {str(t) for t in VALID_TEAMS} or not isinstance(fid, str):
+                raise ValueError("请选择部队一到五和已保存的预设")
+            if fid and (fid not in records or records[fid].get("target_team") != int(team)):
+                raise ValueError(f"部队{TEAM_NAMES[int(team)]}的预设已删除或覆盖的是另一支部队，请重新选择")
     rounds = _as_count(rounds_per_team, "每队派几次")
     if not 0 <= rounds <= MAX_ROUNDS_PER_TEAM:
         raise ValueError(f"每队派几次要在 0 到 {MAX_ROUNDS_PER_TEAM} 之间")
@@ -128,6 +141,8 @@ def save_prefs(*, rounds_per_team=None, available_teams=None, resource_focus=Non
                               "available_teams": sorted(teams)})
     path = Path(path)
     with _WRITE_LOCK:
+        prefs["team_formations"] = {**load_prefs(path)["team_formations"],
+                                    **(team_formations or {})}
         prefs["resource_focus"] = (load_prefs(path)["resource_focus"]
                                    if resource_focus is None else resource_focus)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -458,10 +473,20 @@ def formation_signature(record: dict) -> str:
     return hashlib.sha256(json.dumps(record, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
+def _known_lock(entry: dict) -> bool | None:
+    # 本丸候选池统一使用 locked；兼容旧的识别状态，但未知值绝不当上锁。
+    if type(entry.get("locked")) is bool:
+        return entry["locked"]
+    return {"locked": True, "unlocked": False}.get(entry.get("lock_status"))
+
+
+def expedition_formation_options(team: int, parties: dict | None, rejections: dict | None = None) -> list[dict]:
     """只用已保存且能核清身份、等级、刀种的预设，不借其他队的刀。"""
     from touken.custom_formations import load_formations, resolve_formation_slots, _current_candidate_pool
+    if rejections is None:
+        rejections = {}
     if not parties or team not in parties:
+        rejections["*"] = "还没读到这支队伍的现有成员，先同步本丸近况"
         return []
     other_names = {name.removesuffix("·极").strip()
                    for number, party in parties.items() if number != team
@@ -474,7 +499,7 @@ def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
     _, forced = load_choice_sets()
     by_id = {record.get("id"): record for record in formations}
     for booking in forced.values():
-        if not isinstance(booking, dict) or booking.get("team_no") == team or adhoc_planned_date(booking) != date.today().isoformat():
+        if not isinstance(booking, dict) or booking.get("team_no") == team or (adhoc_planned_date(booking) or "") < date.today().isoformat():
             continue
         reserved = by_id.get(booking.get("formation_id"), {})
         for entry in reserved.get("slots", {}).values():
@@ -490,6 +515,7 @@ def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
         if any(entry.get("selection_policy") == "locked_highest_level" for entry in record.get("slots", {}).values()):
             pool = _current_candidate_pool()
             if not pool.get("done"):
+                rejections[record["id"]] = "需要完整刀帐才能选出上锁且等级最高的刀，请先更新刀帐"
                 continue
             pinned = {}
             for key, saved in record["slots"].items():
@@ -500,9 +526,9 @@ def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
                            if entry.get("sword_catalog_id") == saved.get("sword_catalog_id")
                            and entry.get("form_status") == saved.get("form_status")]
                 if not matches or any(type(entry.get("level")) is not int
-                                      or entry.get("lock_status") not in ("locked", "unlocked") for entry in matches):
+                                      or _known_lock(entry) is None for entry in matches):
                     break
-                locked = [entry for entry in matches if entry["lock_status"] == "locked"]
+                locked = [entry for entry in matches if _known_lock(entry) is True]
                 if not locked:
                     break
                 highest = max(entry["level"] for entry in locked)
@@ -511,21 +537,27 @@ def expedition_formation_options(team: int, parties: dict | None) -> list[dict]:
                     break
                 pinned[key] = {**top[0], **{field: saved[field] for field in ("troops", "horse", "charm", "treasure") if saved.get(field)}}
             if len(pinned) != len(record["slots"]):
+                rejections[record["id"]] = "未能唯一确定上锁且等级最高的刀，请核对刀帐"
                 continue
             applied_record = {**record, "slots": pinned}
         prepared = resolve_formation_slots(applied_record)
         if not prepared.get("ok"):
+            rejections[record["id"]] = prepared.get("reason") or "预设人选尚未核清"
             continue
         entries = list(prepared["slots"].values())
         if any(entry.get("selection_policy") == "locked_highest_level"
                or type(entry.get("level")) is not int or entry["level"] <= 0
                for entry in entries):
+            rejections[record["id"]] = "预设人选的等级尚未核清，请更新刀帐"
             continue
         party = {"sum": sum(entry["level"] for entry in entries),
                  "max": max(entry["level"] for entry in entries), "count": len(entries),
                  "names": [str(entry.get("name_zh") or entry.get("name") or "") for entry in entries]}
-        if not all(party_sword_types(party)) or any(
-                name.removesuffix("·极").strip() in other_names for name in party["names"]):
+        if not all(party_sword_types(party)):
+            rejections[record["id"]] = "预设人选的刀种尚未核清，请更新刀帐"
+            continue
+        if any(name.removesuffix("·极").strip() in other_names for name in party["names"]):
+            rejections[record["id"]] = "预设人选已在其他部队或已被另一班远征预留，不能借来换队"
             continue
         options.append({"formation_id": record["id"], "formation_name": record["name"],
                         "formation_signature": formation_signature(record), "party": party, "record": applied_record})
@@ -606,9 +638,22 @@ def build_expedition_suggestions(prefs: dict, *,
     if focus in FOCUS_RESOURCES:
         base_order = [(focus, "manual")] + [item for item in base_order if item[0] != focus]
     suggestions = []
-    preset_options = {team: expedition_formation_options(team, party_levels) for team in teams}
+    preset_options = {}
+    selection_notes = []
+    blocked_teams = set()
+    for team in teams:
+        fid = prefs["team_formations"].get(str(team), "")
+        if not fid:
+            continue
+        rejections = {}
+        options = expedition_formation_options(team, party_levels, rejections)
+        preset_options[team] = [option for option in options if option["formation_id"] == fid]
+        if not preset_options[team]:
+            blocked_teams.add(team)
+            reason = rejections.get(fid) or rejections.get("*") or "预设已删除或覆盖的是另一支部队，请重新选择"
+            selection_notes.append(f"部队{TEAM_NAMES[team]}指定预设未能安排：{reason}；不会改用现有编队。")
     misses = []
-    reserved_names = set()
+    reserved_names = {}
     placed_retry_notes = []  # 班排上了但撞过拉黑组合，如实知会一声
     busy: dict[int, int] = {}
     for team, until in (team_busy_until or {}).items():
@@ -626,7 +671,7 @@ def build_expedition_suggestions(prefs: dict, *,
     slot = 0
     for r in range(rounds):
         for team in teams:
-            if remaining[team] <= r:
+            if remaining[team] <= r or team in blocked_teams:
                 continue
             start = next_start[team]
             shift_no = counts.get(team, 0) + r + 1  # 今天第几班（含已排的）
@@ -653,10 +698,11 @@ def build_expedition_suggestions(prefs: dict, *,
                     continue
                 if not miss["resource"]:
                     miss["resource"] = resource
-                candidates = [(code, meta, None) for code, meta in ranked]
-                candidates += [(code, meta, preset) for preset in preset_options[team] for code, meta in ranked]
+                candidates = ([(code, meta, preset) for preset in preset_options[team] for code, meta in ranked]
+                              if team in preset_options else [(code, meta, None) for code, meta in ranked])
                 for map_code, meta, preset in candidates:
-                    if preset and any(name.removesuffix("·极").strip() in reserved_names for name in preset["party"]["names"]):
+                    if preset and any(name.removesuffix("·极").strip() in reserved_names and reserved_names[name.removesuffix("·极").strip()] != team for name in preset["party"]["names"]):
+                        miss["detail"] = "指定预设的人选已被另一支远征队预留"
                         continue
                     def blocked(detail):
                         if resource == assigned[0]:
@@ -718,7 +764,7 @@ def build_expedition_suggestions(prefs: dict, *,
                         reason += (f"；本轮的{assigned[0]}排不出，"
                                    f"顺延补{resource}")
                     if preset:
-                        reserved_names.update(name.removesuffix("·极").strip() for name in preset["party"]["names"])
+                        reserved_names.update({name.removesuffix("·极").strip(): team for name in preset["party"]["names"]})
                         reason += f"；先换成「{preset['formation_name']}」再派出"
                     suggestions.append({
                         **({key: preset[key] for key in ("formation_id", "formation_name", "formation_signature")} if preset else {}),
@@ -751,7 +797,7 @@ def build_expedition_suggestions(prefs: dict, *,
             else:
                 misses.append(miss)
 
-    notes = []
+    notes = list(selection_notes)
     for team, shift_no, blocked_resource, placed_resource \
             in placed_retry_notes:
         team_cn = TEAM_NAMES.get(team, team)
@@ -762,7 +808,11 @@ def build_expedition_suggestions(prefs: dict, *,
         team_cn = TEAM_NAMES.get(miss["team"], miss["team"])
         shift_cn = TEAM_NAMES.get(miss["shift"], miss["shift"])
         head = f"部队{team_cn}第{shift_cn}班（{miss['resource']}）"
+        if miss["team"] in preset_options:
+            head += f" · 指定「{preset_options[miss['team']][0]['formation_name']}」"
         frags = []
+        if miss["detail"] and not miss["type"]:
+            frags.append(miss["detail"])
         if miss["occupied"]:
             frags.append("对口图今天都有班在跑或已点上，明天再丢")
         if miss["retry"]:

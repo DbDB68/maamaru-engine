@@ -1060,6 +1060,7 @@ export interface DayTimelineSuggestion {
 
 /** 远征建议引擎的长期偏好：可丢的队伍各派几次 + 哪些队可以丢（换日不重置） */
 export interface DayExpeditionHelpPrefs {
+  team_formations?: Record<string, string>
   resource_focus?: string
   suggested_resource?: string
   rounds_per_team: number

@@ -1,3 +1,4 @@
+import pytest
 # -*- coding: utf-8 -*-
 """远征建议引擎（panel/expedition_advisor.py）测试。
 
@@ -923,6 +924,22 @@ class AdoptEndpointTests(unittest.TestCase):
                 jobs = scheduler.adhoc_due(scheduler.load_config(), forced, due, date)
                 self.assertTrue(any(job["key"] == ec.adhoc_key(date, 4, minute) for job in jobs))
 
+    def test_selected_preset_is_bound_to_adopted_shift_and_stale_choice_is_rejected(self):
+        self.suggestion.update(formation_id="f4", formation_name="远征四", formation_signature="sig")
+        request = {"team_no": 4, "map_code": "B1", "start_min": 600,
+                   "formation_id": "f4", "formation_signature": "sig"}
+        response = self._put(request)
+        self.assertEqual(response.status_code, 200)
+        _, forced = ec.load_choice_sets(self.path)
+        record = next(iter(forced.values()))
+        self.assertEqual(record["formation_id"], "f4")
+        self.assertEqual(record["formation_signature"], "sig")
+        self.suggestion["start_min"] = 610
+        self.suggestion["formation_signature"] = "edited"
+        response = self._put({**request, "start_min": 610})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(len(ec.load_choice_sets(self.path)[1]), 1)
+
     def test_duplicate_adopt_rejected(self):
         first = self._put({"team_no": 4, "map_code": "B1", "start_min": 600})
         self.assertEqual(first.status_code, 200)
@@ -968,6 +985,16 @@ class HelpPrefsEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["expedition_help"]
                          ["rounds_per_team"], 2)
         self.assertEqual(ea.load_prefs(self.path)["available_teams"], [1, 4])
+
+    def test_save_explicit_formation_and_reject_wrong_team(self):
+        from touken import custom_formations as cf
+        with patch.object(cf, "load_formations", return_value=[{"id": "f4", "target_team": 4}]):
+            response = self._put({"team_formations": {"4": "f4"}})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(ea.load_prefs(self.path)["team_formations"], {"4": "f4"})
+            response = self._put({"team_formations": {"5": "f4"}})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(ea.load_prefs(self.path)["team_formations"], {"4": "f4"})
 
     def test_legacy_teams_out_field_still_accepted(self):
         """旧前端/旧脚本只认 teams_out：兜底读作每队次数。"""
@@ -1072,7 +1099,7 @@ class SharedResourceFocusTests(unittest.TestCase):
             self.assertEqual(manual["suggestions"][0]["map_code"], "D4")
 
 
-def test_recommendation_uses_preset_only_when_current_team_cannot_go(tmp_path):
+def test_recommendation_uses_explicit_preset_even_when_current_team_can_go(tmp_path):
     situation = tmp_path / "situation.json"
     situation.write_text(json.dumps({"parties": [{"party_no": 5, "members": [
         {"name": "小豆长光", "level": 39}]}]}), encoding="utf-8")
@@ -1083,13 +1110,13 @@ def test_recommendation_uses_preset_only_when_current_team_cannot_go(tmp_path):
     args = dict(planning=_planning(limiting=("冷却材",)), maps=maps,
                 situation_path=situation, now_min=60)
     with patch.object(ea, "expedition_formation_options", return_value=[preset]):
-        out = ea.build_expedition_suggestions(_prefs(available_teams=(5,)), **args)
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(5,)), "team_formations": {"5": "f5"}}, **args)
     assert out["suggestions"][0]["formation_id"] == "f5"
     assert "先换成「远征五」" in out["suggestions"][0]["reason"]
     maps["A2"]["rules"] = {}
     with patch.object(ea, "expedition_formation_options", return_value=[preset]):
-        out = ea.build_expedition_suggestions(_prefs(available_teams=(5,)), **args)
-    assert "formation_id" not in out["suggestions"][0]
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(5,)), "team_formations": {"5": "f5"}}, **args)
+    assert out["suggestions"][0]["formation_id"] == "f5"
 
 
 def test_preset_rejects_borrowing_other_teams_and_unknown_levels():
@@ -1143,3 +1170,98 @@ def test_ranked_saved_preset_pins_unique_locked_highest_for_expedition():
         assert record["slots"]["1"]["selection_policy"] == "locked_highest_level"
         entry["lock_status"] = "unknown"
         assert ea.expedition_formation_options(5, {5: {"names": []}}) == []
+
+
+@pytest.mark.parametrize("selection", ["", "missing"])
+def test_keep_current_and_invalid_selection_never_choose_another_preset(tmp_path, selection):
+    situation = _write_situation(tmp_path, [{"party_no": 5, "members": [{"name": "小豆长光", "level": 39}]}])
+    maps = {"A2": {"duration_min": 20, "冷却材": 45, "rules": {"total_level": 100}}}
+    preset = {"formation_id": "f5", "formation_name": "远征五", "formation_signature": "sig",
+              "party": {"sum": 120, "max": 60, "names": ["药研藤四郎", "小豆长光"]}}
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(5,)), "team_formations": {"5": selection}},
+            planning=_planning(limiting=("冷却材",)), maps=maps, situation_path=situation)
+    assert out["suggestions"] == []
+    assert out["note"]
+
+
+def test_explicit_ineligible_preset_never_falls_back_to_eligible_current_team(tmp_path):
+    situation = _write_situation(tmp_path, [{"party_no": 5, "members": [{"name": "小豆长光", "level": 999}]}])
+    preset = {"formation_id": "f5", "formation_name": "远征五", "formation_signature": "sig",
+              "party": {"sum": 1, "max": 1, "names": ["药研藤四郎"]}}
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(5,)), "team_formations": {"5": "f5"}},
+            planning=_planning(), maps={"B1": {"duration_min": 90, "砥石": 180, "rules": {"total_level": 100}}},
+            situation_path=situation)
+    assert not out["suggestions"]
+    assert "指定「远征五」" in out["note"] and "等级" in out["note"]
+
+
+def test_same_team_can_reuse_selected_preset_after_return_but_other_team_cannot(tmp_path):
+    preset = {"formation_id": "f5", "formation_name": "远征五", "formation_signature": "sig",
+              "party": {"sum": 120, "max": 60, "names": ["药研藤四郎"]}}
+    maps = {"A1": {"duration_min": 20, "砥石": 30, "rules": {}},
+            "A2": {"duration_min": 20, "玉钢": 30, "rules": {}}}
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions({**_prefs(rounds=2, available_teams=(5,)), "team_formations": {"5": "f5"}},
+            planning=_planning(), maps=maps, situation_path=tmp_path / "missing.json")
+    assert len(out["suggestions"]) == 2
+    assert all(item["formation_id"] == "f5" for item in out["suggestions"])
+    assert out["suggestions"][1]["start_min"] >= out["suggestions"][0]["start_min"] + 30
+    with patch.object(ea, "expedition_formation_options", return_value=[preset]):
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(4, 5)), "team_formations": {"4": "f5", "5": "f5"}},
+            planning=_planning(), maps=maps, situation_path=tmp_path / "missing.json")
+    assert len(out["suggestions"]) == 1
+    assert "预留" in out["note"]
+
+
+def test_team_preferences_migrate_preserve_other_fields_backup_and_rollback(tmp_path):
+    from touken import custom_formations as cf
+    path = tmp_path / "prefs.json"
+    old = {"version": 1, "teams_out": 2, "available_teams": [4, 5], "resource_focus": "小判"}
+    original = json.dumps(old).encode()
+    path.write_bytes(original)
+    assert ea.load_prefs(path)["team_formations"] == {}
+    assert path.read_bytes() == original
+    with patch.object(cf, "load_formations", return_value=[{"id": "f4", "target_team": 4}, {"id": "f5", "target_team": 5}]):
+        ea.save_prefs(team_formations={"4": "f4"}, path=path)
+        assert path.with_suffix(".json.bak").read_bytes() == original
+        ea.save_prefs(team_formations={"5": "f5"}, path=path)
+        ea.save_prefs(rounds_per_team=3, resource_focus="玉钢", path=path)
+        saved = ea.load_prefs(path)
+        assert saved["team_formations"] == {"4": "f4", "5": "f5"}
+        assert saved["available_teams"] == [4, 5]
+        assert saved["resource_focus"] == "玉钢"
+        assert saved["rounds_per_team"] == 3
+        ea.save_prefs(team_formations={"4": ""}, path=path)
+        assert ea.load_prefs(path)["team_formations"] == {"4": "", "5": "f5"}
+        assert ea.load_prefs(path.with_suffix(".json.bak"))["team_formations"]["4"] == "f4"
+        before = path.read_bytes()
+        for invalid in ({"1": "f5"}, {"9": ""}, {"5": False}, {"5": "deleted"}, []):
+            with pytest.raises(ValueError):
+                ea.save_prefs(team_formations=invalid, path=path)
+            assert path.read_bytes() == before
+    path.write_bytes(original)
+    assert ea.load_prefs(path)["rounds_per_team"] == 2
+    assert ea.load_prefs(path)["team_formations"] == {}
+
+
+def test_ranked_preset_accepts_real_json_locked_boolean_and_rejects_unknown(tmp_path):
+    from touken import custom_formations as cf
+    from touken.game_sword_archive import sync_archive, candidate_pool
+    from touken.telemetry import TelemetryStore
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    sync_archive([{"direction": "S->C", "endpoint": "/party/list", "status": 200,
+        "ts": "2026-10-02 21:00:00", "payload": {"status": 0, "sword": {"1": {
+            "serial_id": 1, "sword_id": 3, "level": 99, "protect": 1,
+            "created_at": "2023-01-27 17:19:10"}}}}], store)
+    pool = candidate_pool(store)
+    record = {"id": "f4", "name": "遠征四", "target_team": 4, "slots": {"1": {
+        "sword_catalog_id": "touken_003_mikazuki_munechika", "form_status": "normal",
+        "selection_policy": "locked_highest_level"}}}
+    with patch.object(cf, "load_formations", return_value=[record]), patch.object(
+            cf, "_current_candidate_pool", return_value=pool), patch.object(
+            cf, "resolve_formation_slots", side_effect=lambda value: {"ok": True, "slots": value["slots"]}):
+        assert ea.expedition_formation_options(4, {4: {"names": []}})[0]["party"]["sum"] == 99
+        pool["entries"][0]["locked"] = None
+        assert ea.expedition_formation_options(4, {4: {"names": []}}) == []
