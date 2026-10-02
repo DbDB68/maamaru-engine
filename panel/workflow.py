@@ -247,10 +247,10 @@ def _run_wait_until(agent, params, config_path):
     yield f"[闹钟] ⏰ {label} 到点，起床接着干活"
 
 
-_node("wait_until", "定时唤醒",
-      "睡到指定时刻再往下跑，适合跨日课刷新（如 04:00）排队；后面记得接「登录游戏」过刷新。",
+_node("wait_until", "等到指定时间再继续",
+      "用于流程中途等待，等待期间其他任务可以开工；整套流程几点开始请在时间表安排。跨刷新后记得接「登录游戏」。",
       "time", _run_wait_until, needs_agent=False,
-      params=[{"key": "time", "type": "text", "label": "睡到几点（24小时制）",
+      params=[{"key": "time", "type": "text", "label": "几点继续（24小时制）",
                "default": "04:05",
                "help": "HH:MM，比如 04:05。今天的点已经过了就睡到明天同一时刻；"
                        "刚过不到 15 分钟算刚错过，直接醒不睡。"}])
@@ -552,7 +552,15 @@ def _finale(report, payload):
         yield f"[工作流] 手机推送翻车（不影响跑）: {exc}"
 
 
-def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False):
+class WorkflowPaused(Exception):
+    def __init__(self, wake_at, resume):
+        self.wake_at = wake_at
+        self.resume = resume
+        super().__init__("任务流正在等待，到点再继续")
+
+
+def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
+                 resume=None, defer_wait=False):
     """
     流式跑一条工作流。
 
@@ -569,11 +577,18 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False)
     if after != "none" and any(n["type"] == "logout" for n in plan):
         raise WorkflowError("已有下班步骤，请先移除再设置结束后的安排")
     config_path = str(config_path)
-    report: list[tuple] = []
-    game_closed = False  # 下班积木跑过后游戏/模拟器已关，收尾不能再导航
+    report: list[tuple] = list((resume or {}).get("report", []))
+    game_closed = bool((resume or {}).get("game_closed", False))
 
-    start = 0
-    if plan[0]["type"] == "boot_emulator":
+    start = (resume or {}).get("next_index", 0)
+    if type(start) is not int or not 0 <= start <= len(plan):
+        raise WorkflowError("续跑位置无效，请重新安排")
+    if resume and (resume.get("nodes") != plan or start == 0
+                   or plan[start - 1]["type"] != "wait_until" or len(report) != start):
+        raise WorkflowError("等待记录与任务流不一致，不能猜着续跑，请重新安排")
+    if resume and report:
+        report[-1] = (report[-1][0], "✓ 等待结束，已继续")
+    if start == 0 and plan[0]["type"] == "boot_emulator":
         # 开模拟器不需要 agent（游戏都还没开），先跑它再建 agent
         yield "【工作流】▶ 第 1 块：开模拟器"
         ok, detail = yield from _run_node(NODE_REGISTRY["boot_emulator"], None,
@@ -590,12 +605,24 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False)
 
     yield "【工作流】正在连接游戏（创建 Agent）..."
     agent = make_agent(config_path)
-    agent._workflow_forge_ran = False
+    agent._workflow_forge_ran = bool((resume or {}).get("forge_ran", False))
     completed = True
 
     for i in range(start, len(plan)):
         node = plan[i]
         defn = NODE_REGISTRY[node["type"]]
+        if node["type"] == "wait_until" and defer_wait:
+            minute = _parse_hhmm(node["params"].get("time"))
+            if minute is not None:
+                now = time.time()
+                seconds, _ = _wait_seconds(minute, now)
+                if seconds > 0:
+                    report.append((defn["label"], f"等待至 {node['params']['time']}"))
+                    _flush_report(report, finished=False)
+                    yield f"【工作流】等待至 {node['params']['time']} 再继续，执行位置已让给其他任务"
+                    raise WorkflowPaused(now + seconds, {"nodes": plan, "next_index": i + 1,
+                        "report": report, "game_closed": game_closed,
+                        "forge_ran": agent._workflow_forge_ran})
         if daily_mode:
             if (yield from agent._daily_update_gate()) is None:
                 yield "【工作流】✗ 游戏更新未完成，后续日课停止"

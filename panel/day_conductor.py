@@ -428,6 +428,9 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
 def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
          emit_fn, path: Path = STATE_PATH, plan_path: Path | None = None) -> None:
     """巡检一次；到点的块排队等 runner 空位，只有换日才结算 missed。"""
+    from . import workflow_waits
+    workflow_waits.resume_due(now, runner)
+    waiting_runs = workflow_waits.load()
     with _LOCK:
         state = load_state(path)
         if not state:
@@ -436,11 +439,14 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
         for block in state["blocks"]:
             if block.get("status") != "running":
                 continue
+            continuation = waiting_runs.get(block.get("run_id"), {})
+            if continuation.get("status") in {"waiting", "launching", "running"}:
+                continue
             if runner.is_running and runner.current_run_id == block.get("run_id"):
                 continue
             last_run_id, last_status = runner.last_run_result
-            block["status"] = ("ended" if last_run_id == block.get("run_id")
-                               and last_status == "completed" else "interrupted")
+            block["status"] = ("ended" if continuation.get("status") == "completed" or (last_run_id == block.get("run_id")
+                               and last_status == "completed") else "interrupted")
             block["finished_at"] = now
             if block["status"] == "interrupted":
                 state["enabled"] = False
@@ -475,7 +481,8 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
         if not state.get("enabled"):
             _save(state, path)
             return
-        if any(b.get("status") == "running" for b in state["blocks"]):
+        if any(b.get("status") == "running" and waiting_runs.get(b.get("run_id"), {}).get("status") != "waiting"
+               for b in state["blocks"]):
             if changed:
                 _save(state, path)
             return
@@ -504,6 +511,8 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
 
 def start_conductor(config_path: str, runner, timeline_fn, raid_settings_fn,
                     emit_fn):
+    from .workflow_waits import recover
+    recover()
     def _loop():
         while True:
             try:

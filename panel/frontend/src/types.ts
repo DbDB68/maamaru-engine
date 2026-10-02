@@ -107,7 +107,15 @@ export interface WorkflowNode {
   on_error: 'stop' | 'continue'
 }
 
+export interface WorkflowProjectionStep {
+  label: string
+  type: string
+  at: number | null
+  wait_time: string | null
+}
+
 export interface WorkflowPreset {
+  steps?: WorkflowProjectionStep[]
   id: string
   name: string
   nodes: WorkflowNode[]
@@ -1048,7 +1056,7 @@ export interface DayTimelineRun {
   started_at: number
   ended_at: number | null
   status: string
-  tone: 'ok' | 'failed' | 'stopped' | 'running'
+  tone: 'ok' | 'failed' | 'stopped' | 'running' | 'waiting'
 }
 
 export interface DayTimelineSuggestion {
@@ -1091,6 +1099,7 @@ export type ScheduleBlockKind = 'raid' | 'activity' | 'workflow' | 'daily'
 
 /** 计划块 v2：activity 带 script/event_key/runs，raid 保留旧安排，workflow 带 workflow_id */
 export interface DayScheduleBlock {
+  steps?: WorkflowProjectionStep[]
   start_min: number
   kind: ScheduleBlockKind
   runs?: number
@@ -1118,6 +1127,7 @@ export type ConductorBlockStatus =
 
 /** 大总管块：计划块 + 展示名 + 运行状态 */
 export interface DayConductorBlock extends DayScheduleBlock {
+  waiting_until?: number
   label: string
   status: ConductorBlockStatus
   run_id?: string
@@ -1145,6 +1155,8 @@ export interface ScheduledGameplayOption {
 }
 
 export interface DayTimeline {
+  workflow_active?: { name: string; steps: WorkflowProjectionStep[] } | null
+  workflow_waits?: Array<{ id: string; name: string; wake_at: number; status: string; reason?: string; steps: WorkflowProjectionStep[] }>
   gameplay_options?: ScheduledGameplayOption[]
   now: number
   day_start: number

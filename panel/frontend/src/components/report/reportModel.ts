@@ -146,6 +146,7 @@ export function runTitle(run: any): string {
 
 export function runStatusLabel(run: any): string {
   const labels: Record<string, string> = {
+    waiting: '等待继续',
     completed: '已完成', stopped: '已手动停止', failed: '翻车',
   }
   return labels[String(run.status || '')] || String(run.status || '状态未记录')

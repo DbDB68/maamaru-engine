@@ -40,6 +40,7 @@ const view = computed<TimelineRun | null>(() => {
 })
 
 const RUN_STATUS_TEXT: Record<RunEndStatus, string> = {
+  waiting: '等待继续',
   completed: '完成', stopped: '已停止', watchdog: '看门狗处决', failed: '翻车',
 }
 

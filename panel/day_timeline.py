@@ -26,6 +26,7 @@ MIN_SUGGESTION_MIN = 30        # 一圈约 7 分钟，不足 30 分钟的碎片�
 MAX_SUGGESTION_BLOCKS = 2      # 一块装不下才切第二块
 
 _RUN_TONES = {
+    "waiting": "waiting",
     "completed": "ok",
     "failed": "failed",
     "stopped": "stopped",

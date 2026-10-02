@@ -68,10 +68,12 @@ class ScriptRunner:
         self._current_run_id: str | None = None
         self._current_script: str | None = None
         self._current_workflow: dict | None = None
+        self._workflow_snapshot: dict | None = None
         self._current_started: float | None = None  # 启动时间戳，仪表盘算已跑多久
         self._on_message = None  # callback(message_dict)
         self._last_output: float = 0.0   # 最后一次收到子进程输出的时间
         self._stop_reason: str = ""      # "user" / "watchdog" / ""
+        self._stop_reasons: dict[str, str] = {}
         self._last_run_id: str | None = None
         self._last_run_status: str | None = None
 
@@ -105,11 +107,19 @@ class ScriptRunner:
         """本轮启动时的流程身份；不暴露参数，也不跟随后续重命名改变。"""
         return dict(self._current_workflow) if self.is_running and self._current_workflow else None
 
+    @property
+    def workflow_snapshot(self):
+        return json.loads(json.dumps(self._workflow_snapshot)) if self.is_running and self._workflow_snapshot else None
+
     def start(self, script_name: str, config_path: str, params: dict | None = None) -> str | None:
         """启动脚本。返回 run_id 或 None（不支持/已在跑/子进程没起来）"""
         with self._lock:
             if self.is_running:
                 return None
+            if (params or {}).get("workflow_wait_root"):
+                from .workflow_waits import load
+                if load().get(params["workflow_wait_root"], {}).get("status") != "launching":
+                    return None
             if script_name not in _SCRIPTS:
                 return None
 
@@ -120,6 +130,7 @@ class ScriptRunner:
             self._last_output = time.time()
             self._stop_reason = ""
             self._current_workflow = None
+            self._workflow_snapshot = None
 
             try:
                 if script_name == "workflow":
@@ -127,11 +138,17 @@ class ScriptRunner:
                     preset = find_preset(str((params or {}).get("workflow_id") or ""))
                     if preset:
                         self._current_workflow = {"id": preset["id"], "name": preset["name"]}
+                        resume = (params or {}).get("workflow_resume")
+                        nodes = resume["nodes"][resume["next_index"]:] if resume else preset.get("nodes", [])
+                        self._workflow_snapshot = json.loads(json.dumps({"nodes": nodes}))
                     elif ((params or {}).get("workflow_id") == "builtin-scheduled-raid"
                           and "scheduled_raid_runs" in (params or {})):
                         self._current_workflow = {
                             "id": "builtin-scheduled-raid", "name": "今日联队战 · 自动开工"}
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
+                if script_name == "workflow" and (params or {}).get("workflow_wait_root"):
+                    from .workflow_waits import segment_started
+                    segment_started(params["workflow_wait_root"], run_id)
                 from touken.telemetry import get_telemetry_store
                 workflow_label = (self._current_workflow or {}).get("name") or None
                 if script_name == "scheduled_gameplay":
@@ -147,7 +164,7 @@ class ScriptRunner:
                 return None
 
             threading.Thread(target=self._pump,
-                             args=(self._proc, run_id, script_name),
+                             args=(self._proc, run_id, script_name, (self._current_workflow or {}).get("name")),
                              daemon=True, name=f"worker-pump-{run_id}").start()
             threading.Thread(target=self._watchdog,
                              args=(self._proc, run_id, script_name),
@@ -180,11 +197,17 @@ class ScriptRunner:
             creationflags=flags,
         )
 
-    def stop(self):
+    def stop(self, cancel_waits=True):
         """紧急停止 = 直接杀子进程（真停，不用等它下次开口）"""
+        from .workflow_waits import cancel
+        if cancel_waits:
+            cancel()
+            if self._current_run_id and self._current_script == "workflow":
+                cancel(self._current_run_id, remember=True)
         proc = self._proc
         if proc is not None and proc.poll() is None:
             self._stop_reason = "user"
+            self._stop_reasons[self._current_run_id] = "user"
             try:
                 proc.kill()
             except Exception:
@@ -192,12 +215,21 @@ class ScriptRunner:
 
     # ---------- 内部：收输出 ----------
 
-    def _pump(self, proc: subprocess.Popen, run_id: str, script_name: str):
+    def _pump(self, proc: subprocess.Popen, run_id: str, script_name: str, workflow_name=None):
         store = get_store()
+        pause_saved = False
+        pause_cancelled = False
         try:
             for line in proc.stdout:
                 msg = line.rstrip()
                 if not msg:
+                    continue
+                if script_name == "workflow" and msg.startswith("@@MAAMARU_WORKFLOW_WAIT@@"):
+                    from .workflow_waits import park
+                    payload = json.loads(msg[len("@@MAAMARU_WORKFLOW_WAIT@@"):])
+                    pause_saved = park(run_id, payload["config_path"], payload["params"], payload["wake_at"],
+                         payload["resume"], workflow_name or "任务流")
+                    pause_cancelled = not pause_saved
                     continue
                 self._last_output = time.time()
                 store.append(run_id, script_name, msg)
@@ -210,12 +242,19 @@ class ScriptRunner:
             print(err, file=sys.stderr)
 
         rc = proc.wait()
-        if self._stop_reason == "user":
+        stop_reason = self._stop_reasons.pop(run_id, "")
+        if rc == 44 and not pause_saved and not pause_cancelled:
+            rc = 1  # 没保存续跑位置绝不能宣称正常等待。
+        if pause_cancelled:
+            stop_reason = "user"
+        if stop_reason == "user":
             final = f"[脚本] 已手动停止（工人进程已杀）— run {run_id}"
-        elif self._stop_reason == "watchdog":
+        elif stop_reason == "watchdog":
             final = f"[脚本] 看门狗已处决卡死的工人进程 — run {run_id}"
         elif rc == 0:
             final = f"[脚本] 完成 — run {run_id}"
+        elif rc == 44:
+            final = f"[脚本] 等待指定时间，其他任务可以开工 — run {run_id}"
         elif rc == EXIT_FLOW_ABORTED:
             final = f"[脚本] 玩法遇到异常，已安全停止且未计作完成 — run {run_id}"
         elif rc == EXIT_MAA_DEAD:
@@ -223,9 +262,11 @@ class ScriptRunner:
                      "建议重启模拟器后再跑")
         else:
             final = f"[脚本] 工人进程异常退出（代码 {rc}）— run {run_id}"
-        status = ("stopped" if self._stop_reason == "user" else
-                  "watchdog" if self._stop_reason == "watchdog" else
-                  "completed" if rc == 0 else "failed")
+        status = ("stopped" if stop_reason == "user" else
+                  "watchdog" if stop_reason == "watchdog" else
+                  "completed" if rc == 0 else "waiting" if rc == 44 else "failed")
+        from .workflow_waits import finish
+        finish(run_id, status)
         try:
             from touken.telemetry import get_telemetry_store
             telemetry = get_telemetry_store()
@@ -304,6 +345,7 @@ class ScriptRunner:
             if silent <= SILENCE_TIMEOUT_SEC:
                 continue
             self._stop_reason = "watchdog"
+            self._stop_reasons[run_id] = "watchdog"
             msg = (f"[看门狗] ⚠️ 工人进程 {int(silent)} 秒一行输出都没有，判定卡死，已强杀。"
                    "日志最后一行就是它咽气前在干的事；建议重启模拟器再跑")
             get_store().append(run_id, script_name, msg)

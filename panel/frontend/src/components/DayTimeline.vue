@@ -58,7 +58,7 @@ async function updateTeamFormation(team: number, event: Event) {
     prefsBusy.value = false
   }
 }
-interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
+interface DraftRow { time: string; start_mode?: 'now' | 'at'; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
 const gameplayDialog = ref<InstanceType<typeof GameplaySettingsDialog>>()
 const gameplayOptions = computed(() => data.value?.gameplay_options || [])
@@ -272,6 +272,7 @@ const STATE_CLASSES: Record<string, string> = {
 }
 
 const TONE_LABELS: Record<string, string> = {
+  waiting: '等待继续',
   ok: '顺利完成',
   failed: '翻车',
   stopped: '被叫停',
@@ -339,7 +340,7 @@ function blockEndMin(block: DayScheduleBlock): number | null {
     if (!activity || activity.name !== '联队战') return null
     return block.start_min + Math.ceil((block.runs ?? 1) * activity.seconds_per_loop / 60)
   }
-  if (block.kind === 'activity') return null
+  if (block.kind === 'activity' || block.kind === 'workflow') return null
   return block.start_min + GENERIC_BLOCK_MIN
 }
 
@@ -356,6 +357,7 @@ const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, stri
 }
 
 function blockStatusText(block: DayConductorBlock): string {
+  if (block.waiting_until) return `等待至 ${clockAt(block.waiting_until)}，其他任务可开工`
   if (block.status === 'pending') {
     // 过点不是错误：runner 忙完手头的活就排队开工
     return block.start_min <= smoothNowMin.value ? '排队中，手头收工就上' : '到点开工'
@@ -415,6 +417,32 @@ async function addTimedWorkflow() {
   addBlock('workflow')
   planMessage.value = ''
   editing.value = true
+}
+
+function clockAt(at: number): string {
+  return new Date(at * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function rowStart(row: DraftRow): number | null {
+  return row.kind === 'workflow' && row.start_mode === 'now' ? Math.floor(smoothNowMin.value) : parseTime(row.time)
+}
+
+function chooseStartMode(row: DraftRow, event: Event) {
+  row.start_mode = (event.target as HTMLSelectElement).value === 'now' ? 'now' : 'at'
+}
+
+function presetSteps(id: string) {
+  return workflowPresets.value.find(preset => preset.id === id)?.steps || []
+}
+
+async function cancelWorkflowWait(id: string) {
+  try {
+    await api.cancelWorkflowWait(id)
+    planMessage.value = '已取消这份任务流的后续步骤。'
+    await load()
+  } catch (e) {
+    planMessage.value = (e as Error).message
+  }
 }
 
 /** 按推荐安排 = 把建议块填进草稿等确认，不直接保存 */
@@ -508,7 +536,7 @@ const preview = computed(() => {
   let totalRuns = 0
   const spans: Array<[number, number]> = []
   for (const [index, row] of draft.value.entries()) {
-    const start = parseTime(row.time)
+    const start = rowStart(row)
     if (start == null) {
       issues.push(`第${index + 1}段请填写今天的时间`)
       continue
@@ -548,7 +576,7 @@ const preview = computed(() => {
         continue
       }
       blocks.push({ start_min: start, kind: 'workflow', workflow_id: row.workflow_id })
-      spans.push([start, start + GENERIC_BLOCK_MIN])
+      spans.push([start, start + 1])
     } else {
       blocks.push({ start_min: start, kind: 'daily' })
       spans.push([start, start + GENERIC_BLOCK_MIN])
@@ -568,14 +596,14 @@ const preview = computed(() => {
 })
 
 function rowEndText(row: DraftRow): string {
-  const start = parseTime(row.time)
+  const start = rowStart(row)
   if (start == null) return ''
   if (row.kind === 'raid') {
     const activity = data.value?.activity
     if (!activity || activity.name !== '联队战') return ''
     return fmtMin(start + Math.ceil(Number(row.runs || 0) * activity.seconds_per_loop / 60))
   }
-  if (row.kind === 'activity') return ''
+  if (row.kind === 'activity' || row.kind === 'workflow') return ''
   return fmtMin(start + GENERIC_BLOCK_MIN)
 }
 
@@ -800,7 +828,7 @@ const scheduleBlocks = computed<ScheduleLaneBlock[]>(() => {
   if (!booking) return []
   const stale = !data.value?.conductor.enabled && booking.issues.length > 0
   return booking.blocks.map((block, index) => {
-    const end = blockEndMin(block) ?? block.start_min + GENERIC_BLOCK_MIN
+    const end = blockEndMin(block) ?? block.start_min + (block.kind === 'workflow' ? 4 : GENERIC_BLOCK_MIN)
     const cblock = conductorBlockFor(block)
     const lane = 'task' as const
     return {
@@ -1047,38 +1075,61 @@ const caption = computed(() => {
       </div>
 
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
+      <section v-if="data.workflow_active" class="tl-booking" aria-label="正在执行的任务流">
+        <strong>正在执行 · {{ data.workflow_active.name }}</strong>
+        <ol class="tl-flow-steps">
+          <li v-for="(step, index) in data.workflow_active.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+      </section>
+      <section v-for="waiting in data.workflow_waits || []" :key="waiting.id" class="tl-booking" :aria-label="`${waiting.name}的后续安排`">
+        <strong>{{ waiting.name }}</strong>
+        <p class="tl-booking-message">{{ waiting.status === 'waiting' ? `等待至 ${clockAt(waiting.wake_at)}；到点排队继续，其他任务可以开工。` : waiting.reason || '正在继续后面的步骤' }}</p>
+        <ol v-if="waiting.steps.length" class="tl-flow-steps">
+          <li v-for="(step, index) in waiting.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+        <button v-if="waiting.status === 'waiting' || waiting.status === 'interrupted'" type="button" class="tl-booking-link" @click="cancelWorkflowWait(waiting.id)">取消后续步骤</button>
+      </section>
       <section class="tl-booking" aria-label="今日安排">
         <div class="tl-booking-head">
           <div>
             <strong>今日安排</strong>
             <small v-if="data.booking">{{ bookingSummary }}</small>
             <small v-else-if="data.activity">推荐的空窗可以直接采用，也可以自己挑时间和活</small>
-            <small v-else>选择玩法或定时任务流</small>
+            <small v-else>选择玩法或任务流，再安排开始时间</small>
           </div>
           <div class="tl-booking-actions">
             <button v-if="!editing" type="button" :disabled="saving || !firstGameplay" @click="editPlan">＋ 安排玩法</button>
-            <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 定时启动任务流</button>
+            <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 安排任务流</button>
           </div>
         </div>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
         <p class="tl-booking-message">00:00–03:59 为次日凌晨，04:00 换日；远征可以跨日归来。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
-          <button v-for="row in bookedRows" :key="row.key" type="button" class="tl-booking-link" @click="highlightIndex = data.booking!.blocks.indexOf(row.block); editPlan()">
+          <div v-for="row in bookedRows" :key="row.key" class="tl-booked-flow">
+          <button type="button" class="tl-booking-link" @click="highlightIndex = data.booking!.blocks.indexOf(row.block); editPlan()">
             {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
             <template v-if="row.cblock"> · <small class="tl-status" :class="blockStatusClass(row.cblock)">{{ blockStatusText(row.cblock) }}</small></template>
             <template v-else-if="row.block.kind === 'raid' && blockEndMin(row.block) != null"> · 预计 {{ fmtMin(blockEndMin(row.block)!) }} 收工</template>
           </button>
+          <ol v-if="row.block.steps?.length" class="tl-flow-steps" aria-label="任务流的执行顺序">
+            <li v-for="(step, index) in row.block.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+          </ol>
+          </div>
         </div>
         <div v-if="editing" class="tl-booking-editor">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
-            <label>第{{ index + 1 }}段 <input v-model="row.time" type="time" step="60" /></label>
+            <span>第{{ index + 1 }}段</span>
+            <label v-if="row.kind === 'workflow'">开始
+              <select :value="row.start_mode || 'at'" @change="chooseStartMode(row, $event)"><option value="at">指定时间</option><option value="now">现在开始</option></select>
+            </label>
+            <label v-if="row.kind !== 'workflow' || row.start_mode !== 'now'">开始时间 <input v-model="row.time" type="time" step="60" /></label>
             <label v-if="row.kind === 'raid' || row.kind === 'activity'">玩法
               <select v-model="row.script" @change="chooseGameplay(row)">
                 <option v-for="option in gameplayOptions" :key="option.script" :value="option.script" :disabled="!option.available">{{ option.label }}{{ option.available ? '' : '（未开放）' }}</option>
               </select>
             </label>
-            <span v-else>{{ row.kind === 'workflow' ? '定时任务流' : '一键日课（旧安排）' }}</span>
+            <span v-else-if="row.kind !== 'workflow'">一键日课（旧安排）</span>
             <label v-if="row.kind === 'raid' || row.kind === 'activity'">次数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
             <label v-if="row.kind === 'workflow'">任务流
               <select v-model="row.workflow_id">
@@ -1091,15 +1142,18 @@ const caption = computed(() => {
             <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
             <button type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
+            <ol v-if="row.kind === 'workflow' && presetSteps(row.workflow_id).length" class="tl-flow-steps" aria-label="任务流预览">
+              <li v-for="(step, stepIndex) in presetSteps(row.workflow_id)" :key="stepIndex"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : stepIndex === 0 ? '开始后' : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+            </ol>
           </div>
           <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队、换队长和补充手形等使用已保存的玩法设置；次数以本段安排为准。</p>
           <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
             <button type="button" class="tl-booking-link" :disabled="!firstGameplay" @click="addBlock('activity')">＋ 安排玩法</button>
-            <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 定时启动任务流</button>
+            <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 安排任务流</button>
           </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
-            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并到点开工' }}</button>
+            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并按安排开工' }}</button>
             <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
           </div>
         </div>
@@ -1114,6 +1168,11 @@ const caption = computed(() => {
 </template>
 
 <style scoped>
+.tl-flow-steps { flex-basis: 100%; margin: 8px 0; padding-left: 22px; color: var(--ink-dim); font-size: 12px; }
+.tl-flow-steps li { padding: 4px 0; overflow-wrap: anywhere; }
+.tl-flow-steps li span { margin-right: 10px; }
+.tl-flow-steps li b { color: var(--ink); font-weight: 500; }
+.tl-booked-flow { width: 100%; }
 .tl-expedition-formations { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0; }
 .tl-expedition-formations label { display: flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 12px; }
 .tl-expedition-formations select { min-width: 130px; max-width: 220px; min-height: 32px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper-card); color: var(--ink); font: inherit; }

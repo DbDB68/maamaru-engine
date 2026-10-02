@@ -1,0 +1,190 @@
+"""隔离验证中途等待、续跑、重启、取消以及时间表展示。"""
+import json
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import pytest
+
+from panel import server, workflow, workflow_waits as waits, day_conductor as dc
+
+
+@pytest.fixture(autouse=True)
+def isolated_waits(tmp_path, monkeypatch):
+    monkeypatch.setattr(waits, "PATH", tmp_path / "waits.json")
+    monkeypatch.setattr(workflow, "STATUS_DIR", tmp_path)
+    monkeypatch.setattr(workflow, "_finale", lambda *args: iter([]))
+
+
+def test_wait_releases_execution_and_resume_does_not_repeat_steps(tmp_path, monkeypatch):
+    calls = []
+    def run(agent, params, config):
+        calls.append(params["name"])
+        yield "✓ 完成"
+    monkeypatch.setitem(workflow.NODE_REGISTRY, "qa_step", {"type": "qa_step", "label": "测试步骤", "run": run})
+    now = datetime(2026, 10, 3, 10).timestamp()
+    monkeypatch.setattr(workflow.time, "time", lambda: now)
+    plan = workflow.normalize_nodes([
+        {"type": "qa_step", "params": {"name": "first"}},
+        {"type": "wait_until", "params": {"time": "18:00"}},
+        {"type": "qa_step", "params": {"name": "second"}}])
+    def agent(_):
+        return SimpleNamespace(navigate_to_stream=lambda _: iter([]), current_location="本丸")
+    with pytest.raises(workflow.WorkflowPaused) as paused:
+        list(workflow.run_workflow("qa.json", plan, agent, defer_wait=True))
+    assert calls == ["first"]
+    assert paused.value.resume["next_index"] == 2
+    assert json.loads((tmp_path / "latest_report.json").read_text(encoding="utf-8"))["finished"] is False
+    # 经过真实序列化再续跑，前面的积木不再执行。
+    resume = json.loads(json.dumps(paused.value.resume))
+    list(workflow.run_workflow("qa.json", plan, agent, resume=resume, defer_wait=True))
+    assert calls == ["first", "second"]
+    report = json.loads((tmp_path / "latest_report.json").read_text(encoding="utf-8"))
+    assert report["finished"] and report["all_green"]
+    assert len(report["steps"]) == 3
+
+
+def state():
+    return {"nodes": workflow.normalize_nodes([
+        {"type": "wait_until", "params": {"time": "18:00"}},
+        {"type": "signin", "params": {}}]), "next_index": 1,
+        "report": [["等待", "等待至18:00"]], "game_closed": False, "forge_ran": True}
+
+
+def test_worker_pause_message_is_saved_without_exposing_checkpoint(monkeypatch):
+    from panel import script_runner
+    from touken import telemetry
+    store, telemetry_store = Mock(), Mock()
+    telemetry_store.run_summary.return_value = None
+    monkeypatch.setattr(script_runner, "get_store", lambda: store)
+    monkeypatch.setattr(telemetry, "get_telemetry_store", lambda: telemetry_store)
+    payload = {"config_path": "PRIVATE_PATH", "params": {}, "wake_at": 100, "resume": state()}
+    process = SimpleNamespace(stdout=["@@MAAMARU_WORKFLOW_WAIT@@" + json.dumps(payload)], wait=lambda: 44)
+    runner = script_runner.ScriptRunner()
+    runner._proc = process
+    runner._pump(process, "root", "workflow", "晚班")
+    assert runner.last_run_result == ("root", "waiting")
+    assert waits.load()["root"]["status"] == "waiting"
+    assert runner._proc is None
+    assert "PRIVATE_PATH" not in str(store.append.call_args_list)
+    telemetry_store.finish_run.assert_called_once_with("root", "waiting")
+
+
+def test_missing_checkpoint_is_failed_instead_of_waiting(monkeypatch):
+    from panel import script_runner
+    from touken import telemetry
+    monkeypatch.setattr(script_runner, "get_store", lambda: Mock())
+    monkeypatch.setattr(telemetry, "get_telemetry_store", lambda: Mock())
+    process = SimpleNamespace(stdout=[], wait=lambda: 44)
+    runner = script_runner.ScriptRunner()
+    runner._proc = process
+    runner._pump(process, "root", "workflow")
+    assert runner.last_run_result == ("root", "failed")
+
+
+def test_wait_survives_restart_backs_up_and_resumes_once(monkeypatch):
+    waits.park("root", "qa.json", {"workflow_id": "wf"}, 100, state(), "晚班")
+    original = waits.PATH.read_bytes()
+    waits.recover()
+    assert waits.load()["root"]["status"] == "waiting"
+    runner = SimpleNamespace(is_running=True, start=Mock())
+    waits.resume_due(110, runner)
+    runner.start.assert_not_called()
+    runner.is_running = False
+    waits.resume_due(99, runner)
+    runner.start.assert_not_called()
+    def start(script, config, params):
+        waits.segment_started(params["workflow_wait_root"], "child")
+        return "child"
+    runner.start.side_effect = start
+    waits.resume_due(110, runner)
+    assert runner.start.call_count == 1
+    assert waits.load()["root"]["run_id"] == "child"
+    assert waits.PATH.with_suffix(".json.bak").exists()
+    waits.resume_due(120, runner)
+    assert runner.start.call_count == 1
+    waits.finish("child", "completed")
+    assert waits.load()["root"]["status"] == "completed"
+    # 原始安全等待记录的备份可以独立恢复读取。
+    restored = waits.PATH.parent / "restored.json"
+    restored.write_bytes(original)
+    assert waits.load(restored)["root"]["status"] == "waiting"
+
+
+def test_restart_does_not_replay_in_progress_steps():
+    waits.park("root", "qa.json", {}, 100, state(), "晚班")
+    runs = waits.load()
+    runs["root"]["status"] = "launching"
+    waits._save(runs)
+    waits.recover()
+    runner = SimpleNamespace(is_running=False, start=Mock())
+    waits.resume_due(200, runner)
+    runner.start.assert_not_called()
+    assert waits.load()["root"]["status"] == "interrupted"
+
+
+def test_cancel_cannot_be_revived_by_late_pause_message():
+    waits.cancel("root", remember=True)
+    waits.park("root", "qa.json", {}, 100, state(), "晚班")
+    assert waits.load()["root"]["status"] == "cancelled"
+    runner = SimpleNamespace(is_running=False, start=Mock())
+    waits.resume_due(200, runner)
+    runner.start.assert_not_called()
+
+
+def test_second_wait_keeps_same_logical_flow():
+    waits.park("root", "qa.json", {}, 100, state(), "晚班")
+    waits.park("child", "qa.json", {"workflow_wait_root": "root"}, 200, state(), "晚班")
+    waits.finish("child", "waiting")
+    assert len(waits.load()) == 1
+    assert waits.load()["root"]["wake_at"] == 200
+
+
+def test_projection_does_not_invent_times_and_public_data_hides_params():
+    start = datetime(2026, 10, 3, 10).timestamp()
+    steps = waits.projection({"nodes": [
+        {"type": "signin", "params": {}},
+        {"type": "wait_until", "params": {"time": "18:00"}},
+        {"type": "repair", "params": {}}]}, start)
+    assert steps[0]["at"] == start
+    assert steps[1]["wait_time"] == "18:00"
+    assert steps[2]["at"] is None
+    waits.park("root", "PRIVATE_PATH", {"private": "SECRET"}, start, state(), "晚班")
+    public = json.dumps(waits.public_records())
+    assert "PRIVATE_PATH" not in public and "SECRET" not in public
+
+
+def test_modified_preset_blocks_resume_before_touching_game(monkeypatch):
+    preset = {"id": "wf", "nodes": [{"type": "signin", "params": {}}]}
+    monkeypatch.setattr(workflow, "find_preset", lambda _: preset)
+    agent = Mock(side_effect=AssertionError("不准碰游戏"))
+    monkeypatch.setattr(server, "_make_agent", agent)
+    from touken.flow_control import FlowAborted
+    with pytest.raises(FlowAborted):
+        list(server._build_workflow("qa.json", {"workflow_id": "wf", "workflow_resume": state(), "workflow_preset_signature": "old"}))
+    agent.assert_not_called()
+
+
+def test_deleted_preset_does_not_mark_continuation_complete(monkeypatch):
+    monkeypatch.setattr(workflow, "find_preset", lambda _: None)
+    from touken.flow_control import FlowAborted
+    with pytest.raises(FlowAborted, match="已删除"):
+        list(server._build_workflow("qa.json", {"workflow_id": "wf", "workflow_resume": state()}))
+
+
+def test_conductor_does_not_treat_wait_as_finished_and_other_block_can_start(tmp_path, monkeypatch):
+    from panel.day_plan import save_plan
+    now = 2_000_000_000
+    plan_path, conductor_path = tmp_path / "plan.json", tmp_path / "conductor.json"
+    plan = save_plan(now, None, [{"kind": "workflow", "start_min": 1, "workflow_id": "wf"},
+                               {"kind": "daily", "start_min": 10}], plan_path)
+    first = {**plan["blocks"][0], "status": "running", "run_id": "root"}
+    second = {**plan["blocks"][1], "status": "pending"}
+    dc._save({"version": 2, "enabled": True, "day_start": now,
+              "plan_signature": dc._plan_signature(plan), "blocks": [first, second]}, conductor_path)
+    waits.park("root", "qa.json", {}, now + 3600, state(), "晚班")
+    runner = SimpleNamespace(is_running=False, last_run_result=("root", "waiting"), start=Mock(return_value="daily-run"))
+    dc.tick(now + 10 * 60, runner, lambda: {}, lambda: {}, "qa.json", lambda *a: None, conductor_path, plan_path)
+    assert runner.start.call_args.args[0] == "daily"
+    assert dc.load_state(conductor_path)["blocks"][0]["status"] == "running"
+    assert dc.load_state(conductor_path)["enabled"]

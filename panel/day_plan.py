@@ -149,7 +149,7 @@ def review_plan(plan: dict, timeline: dict) -> list[str]:
                     or not block["workflow_id"]):
                 issues.append(f"第{i}段需要选一个任务流")
                 continue
-            end = start + GENERIC_BLOCK_MINUTES
+            end = start + 1  # 耗时未知，不用虚构的半小时阻止其他定时安排。
         else:  # daily
             end = start + GENERIC_BLOCK_MINUTES
         spans.append((start, end))

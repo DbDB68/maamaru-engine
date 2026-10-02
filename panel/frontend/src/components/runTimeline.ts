@@ -9,7 +9,7 @@
 export interface LogEntry { id: number; ts: number; run_id: string; script: string; message: string }
 
 export type StepStatus = 'info' | 'ok' | 'warn' | 'skip' | 'fail'
-export type RunEndStatus = 'completed' | 'stopped' | 'watchdog' | 'failed'
+export type RunEndStatus = 'completed' | 'stopped' | 'watchdog' | 'failed' | 'waiting'
 
 export interface TimelineLine { id: number; ts: number; message: string; status: StepStatus }
 
@@ -41,7 +41,7 @@ const NOISE_TAGS = new Set(['NAV', 'ADB', 'MAA'])
 /** 调度器的提醒不是任务 run，不进时间线 */
 const SCHEDULER_RUN_ID = 'scheduler'
 /** script_runner._pump 的收尾行：一次 run 的句号 */
-const RUN_END_RE = /^\[脚本\]\s*(完成|已手动停止|看门狗已处决|工人进程异常退出|MAA 连续超时|玩法遇到异常)/
+const RUN_END_RE = /^\[脚本\]\s*(完成|等待指定时间|已手动停止|看门狗已处决|工人进程异常退出|MAA 连续超时|玩法遇到异常)/
 /** 流程/工作流的成绩单分隔线，出现即进入「总成绩单」步骤 */
 const SCOREBOARD_RE = /={5,}/
 /** 步骤横幅：流程工坊「[名] ▶ 第 3/5 步：label」、工作流「【工作流】▶ 第 1 块：label」 */
@@ -71,6 +71,7 @@ export function lineStatus(message: string): StepStatus {
 }
 
 function endStatusOf(message: string): RunEndStatus {
+  if (/等待指定时间/.test(message)) return 'waiting'
   if (/已手动停止/.test(message)) return 'stopped'
   if (/看门狗已处决/.test(message)) return 'watchdog'
   if (/异常退出|MAA 连续超时|玩法遇到异常/.test(message)) return 'failed'

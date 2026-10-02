@@ -82,6 +82,7 @@ export const api = {
   deleteCustomFormation: (id: string) => request<{ ok: boolean }>(`/api/custom-formations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
+  cancelWorkflowWait: (id: string) => request<{ ok: boolean }>(`/api/workflows/waits/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   homeLayout: () => request<HomeLayout>('/api/home-layout'),
   saveHomeLayout: (order: string[], hidden: string[]) => request<{ ok: boolean; entries: HomeLayoutEntry[] }>('/api/home-layout', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order, hidden }),

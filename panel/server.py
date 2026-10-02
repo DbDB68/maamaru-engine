@@ -1460,8 +1460,15 @@ def _build_workflow(config_path, params):
     else:
         preset = _workflow.find_preset(preset_id)
     if preset is None:
+        if params.get("workflow_resume"):
+            raise FlowAborted("等待期间任务流已删除，续跑已停止，请重新安排")
         yield f"[工作流] 找不到预设 {preset_id!r}，可能已被删除"
         return
+    from .day_conductor import _workflow_block_signature
+    preset_signature = _workflow_block_signature(preset)
+    if params.get("workflow_resume") and params.get("workflow_preset_signature") != preset_signature:
+        raise FlowAborted("等待期间任务流已修改，续跑已停止，请重新安排")
+    params["workflow_preset_signature"] = preset_signature
     try:
         plan = _workflow.normalize_nodes(preset.get("nodes"))
     except _workflow.WorkflowError as exc:
@@ -1484,7 +1491,8 @@ def _build_workflow(config_path, params):
     completed = yield from _workflow.run_workflow(
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
-        daily_mode=preset.get("daily_mode", False))
+        daily_mode=preset.get("daily_mode", False),
+        resume=params.get("workflow_resume"), defer_wait=os.environ.get("MAAMARU_WORKER") == "1")
     if scheduled_runs is not None and completed is False:
         raise FlowAborted("今日安排的联队战步骤未完成")
 
@@ -1839,10 +1847,22 @@ async def api_run_script(request: Request):
 @app.post("/api/scripts/stop")
 async def api_stop_script():
     runner = get_runner()
-    if not runner.is_running:
+    from .workflow_waits import load
+    if not runner.is_running and not any(r.get("status") == "waiting" for r in load().values()):
         return {"ok": False, "reason": "没有在运行的脚本"}
     runner.stop()
     return {"ok": True}
+
+
+@app.post("/api/workflows/waits/{root}/cancel")
+async def api_cancel_workflow_wait(root: str):
+    from .workflow_waits import load, cancel
+    record = load().get(root, {})
+    runner = get_runner()
+    cancelled = cancel(root)
+    if cancelled and runner.is_running and runner.current_run_id == record.get("run_id"):
+        runner.stop(cancel_waits=False)
+    return {"ok": cancelled}
 
 
 # ── API：预设编队（玩法出阵前一键覆盖某部队）──
@@ -1923,7 +1943,8 @@ async def api_delete_custom_formation(fid: str):
 
 @app.get("/api/workflows")
 async def api_list_workflows():
-    return {"presets": _workflow.list_presets()}
+    from .workflow_waits import projection
+    return {"presets": [{**preset, "steps": projection(preset, None)} for preset in _workflow.list_presets()]}
 
 
 @app.get("/api/workflows/nodes")
@@ -2257,6 +2278,22 @@ def _day_timeline_payload():
         plan, timeline, (_load_panel_settings().get("params", {})
                          .get("raid", {}) or {}))
     timeline["conductor"]["available"] = not _ledger_mode()
+    from .workflow_waits import load as load_waits, projection as workflow_projection, public_records
+    waits = load_waits()
+    timeline["workflow_waits"] = public_records()
+    snapshot = getattr(runner, "workflow_snapshot", None)
+    timeline["workflow_active"] = None
+    if runner.is_running and runner.current_workflow and isinstance(snapshot, dict) and snapshot.get("nodes"):
+        timeline["workflow_active"] = {"name": runner.current_workflow["name"],
+            "steps": workflow_projection(snapshot, runner.current_started)}
+    for block in (timeline.get("booking") or {}).get("blocks", []):
+        if block.get("kind") == "workflow":
+            preset = _workflow.find_preset(block["workflow_id"])
+            block["steps"] = workflow_projection(preset, timeline["day_start"] + block["start_min"] * 60) if preset else []
+    for block in timeline["conductor"]["blocks"]:
+        record = waits.get(block.get("run_id"), {})
+        if record.get("status") == "waiting":
+            block["waiting_until"] = record["wake_at"]
     return timeline
 
 

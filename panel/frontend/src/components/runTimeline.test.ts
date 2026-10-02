@@ -18,6 +18,12 @@ describe('lineStatus', () => {
 })
 
 describe('parseRun 步骤归并', () => {
+  it('中途等待记为等待继续，不记作完成', () => {
+    const run = parseRun('run1', 'workflow', [
+      entry('[脚本] 等待指定时间，其他任务可以开工 — run run1'),
+    ])
+    expect(run.endStatus).toBe('waiting')
+  })
   it('连续同 tag 的行归成一步，换 tag 开新步', () => {
     const run = parseRun('run1', 'daily', [
       entry('[远征] 收菜开始'),
