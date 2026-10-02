@@ -234,6 +234,63 @@ def _expedition_items(cfg: dict, now: float, day_start: float,
     return items
 
 
+def _expedition_counts(cfg, forced, records, store, day_start, now):
+    """当天出发事实 + 尚未执行的安排；收菜销掉倒计时也不销掉次数。"""
+    begin, end = day_start + 4 * 3600, day_start + DAY_MINUTES * 60
+    facts = []
+
+    def remember(team, code, stamp):
+        try:
+            team = int(team)
+            at = (datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").timestamp()
+                  if isinstance(stamp, str) else float(stamp))
+        except (TypeError, ValueError, OverflowError):
+            return
+        if team not in range(1, 6) or not begin <= at < end or at > now:
+            return
+        if not any(t == team and c == code and abs(s - at) < 5 for t, c, s in facts):
+            facts.append((team, code, at))
+
+    auto = cfg.get("automation", {})
+    for key, stamp in auto.get("last_runs", {}).items():
+        source = forced.get(key) or auto.get("slot_states", {}).get(key) or {}
+        remember(source.get("team_no"), source.get("map_code"), stamp)
+    for source in auto.get("slot_states", {}).values():
+        if isinstance(source, dict) and source.get("state") == scheduler.SLOT_DISPATCHED:
+            remember(source.get("team_no"), source.get("map_code"), source.get("dispatched_at"))
+    for team, record in (records or {}).items():
+        if isinstance(record, dict):
+            remember(team, record.get("map_code"), record.get("dispatched_at"))
+    if store:
+        try:
+            cursor = None
+            while True:
+                rows = store.recent_events(limit=1000, event_type="expedition.dispatched",
+                                           from_ts=begin, to_ts=min(end, now + 0.001), before_id=cursor)
+                for row in rows:
+                    payload = row.get("payload") or {}
+                    remember(payload.get("team_no"), payload.get("map_code"), row.get("ts"))
+                if len(rows) < 1000:
+                    break
+                cursor = rows[-1]["id"]
+        except Exception:
+            pass
+    counts = {}
+    for team, _, _ in facts:
+        counts[team] = counts.get(team, 0) + 1
+    for item in _forced_expedition_items(cfg, now, day_start, forced, {}):
+        if item["will_run"] and item["state"] not in scheduler.TERMINAL_STATES:
+            team = item["team_no"]
+            counts[team] = counts.get(team, 0) + 1
+        elif item["state"] == scheduler.SLOT_DISPATCHED:
+            # 兼容只有班次终态、没有出发时间的旧记录。
+            source = auto.get("slot_states", {}).get(item["key"], {})
+            if not source.get("dispatched_at") and not auto.get("last_runs", {}).get(item["key"]):
+                team = item["team_no"]
+                counts[team] = counts.get(team, 0) + 1
+    return counts
+
+
 def _run_items(store, active: dict | None, day_start: float, day_end: float,
                script_labels: dict | None) -> list[dict]:
     labels = script_labels or {}
@@ -564,9 +621,11 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             expedition_choices = loaded_choices
         if expedition_forced is None:
             expedition_forced = loaded_forced
+    raw_records = expedition_records
     if expedition_records is None:
         try:
             expedition_records = scheduler.expedition_records()
+            raw_records = expedition_records
             from .expedition_observation import load_observations, visible_records
             expedition_records = visible_records(expedition_records, load_observations())
         except Exception:
@@ -579,9 +638,9 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     if planning is None:
         planning = _load_planning_snapshot(store)
     now_min = (now - day_start) / 60
-    # 每队已排班计数（在跑/待收/已点的班都算一班），引擎按每队 N 班补足；
+    # 每队当天已出发（含已完成）及待执行的班都计数，按每队 N 班补足；
     # team_busy_until 记每队最后一班几点收工，补的班往那之后排
-    committed_counts: dict[int, int] = {}
+    committed_counts = _expedition_counts(cfg, expedition_forced, raw_records, store, day_start, now)
     team_busy_until: dict[int, int] = {}
     for item in expeditions:
         if item["kind"] == "running" \
@@ -589,7 +648,6 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                     and item["state"] not in scheduler.TERMINAL_STATES):
             team_no = int(item.get("team_no") or 0)
             if team_no:
-                committed_counts[team_no] = committed_counts.get(team_no, 0) + 1
                 end_min = int(item.get("time_min") or 0) + int(
                     item.get("duration_min") or 0)
                 team_busy_until[team_no] = max(
@@ -597,15 +655,19 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     # 一张图同时只能一队在跑：未完结班（running/待收/已点且时段没过完）
     # 占住的图不再给新建议；expired/failed 的班 will_run=False，不占图
     occupied_maps = set()
+    occupied_windows = []
     for item in expeditions:
         code = str(item.get("map_code") or "")
         if not code:
             continue
         if item["kind"] == "running":  # 远征中/待收都算没完结
-            occupied_maps.add(code)
+            if item["state"] == "awaiting_collect":
+                occupied_maps.add(code)  # 未确认收菜，不能让别队抢同图
+            else:
+                occupied_windows.append((code, item["time_min"], item["time_min"] + item["duration_min"]))
         elif item.get("will_run") and now_min < item["time_min"] + int(
                 item.get("duration_min") or 0):
-            occupied_maps.add(code)
+            occupied_windows.append((code, item["time_min"], item["time_min"] + item["duration_min"]))
     # 今天同图同队 failed 过的组合拉黑到今天结束（防失败循环；
     # 图本身不拉黑，换队仍可荐）
     failed_combos = {(str(item.get("map_code") or ""),
@@ -616,7 +678,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                      and item.get("map_code")}
     advice = expedition_advisor.build_expedition_suggestions(
         expedition_help, planning=planning, situation_path=situation_path,
-        now_min=now_min, committed_counts=committed_counts,
+        now_min=now_min, committed_counts=committed_counts, occupied_windows=occupied_windows,
         team_busy_until=team_busy_until,
         occupied_maps=occupied_maps, failed_combos=failed_combos)
     hanafuda_plan = _hanafuda_active_plan(now, store)

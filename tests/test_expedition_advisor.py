@@ -22,6 +22,41 @@ from panel import expedition_choices as ec
 from panel import server
 
 
+def test_completed_departures_survive_collection_and_restart(tmp_path):
+    from datetime import datetime
+    from touken.telemetry import TelemetryStore
+    begin = datetime(2026, 10, 2).timestamp()
+    cfg = {"automation": {"last_runs": {"a": "2026-10-02 08:00:00", "b": "2026-10-02 12:00:00"},
+           "slot_states": {"a": {"state": "dispatched", "team_no": 4, "map_code": "C1", "dispatched_at": "2026-10-02 08:00:00"},
+                           "b": {"state": "dispatched", "team_no": 4, "map_code": "C2", "dispatched_at": "2026-10-02 12:00:00"}}}}
+    store = TelemetryStore(tmp_path / "t.db")
+    with patch("touken.telemetry.time.time", return_value=begin + 8 * 3600 + 0.5):
+        store.record_event("expedition.dispatched", {"team_no": 4, "map_code": "C1"})
+    # 倒计时/forced 已清空；三个来源的同一班不能算三次。
+    assert day_timeline._expedition_counts(cfg, {}, {}, store, begin, begin + 13 * 3600) == {4: 2}
+    reopened = TelemetryStore(tmp_path / "t.db")
+    assert day_timeline._expedition_counts(cfg, {}, {}, reopened, begin, begin + 27 * 3600) == {4: 2}
+    # 04:00 换日，昨日完成班不占今日名额。
+    assert day_timeline._expedition_counts(cfg, {}, {}, reopened, begin + 86400, begin + 28 * 3600) == {}
+    advice = ea.build_expedition_suggestions(_prefs(rounds=2, available_teams=(4,)),
+        planning=_planning(), committed_counts={4: 2}, maps={}, situation_path=tmp_path / "missing")
+    assert advice["suggestions"] == []
+
+
+def test_two_shifts_reuse_same_map_after_return(tmp_path):
+    prefs = {**_prefs(rounds=2, available_teams=(4,)), "resource_focus": "砥石"}
+    maps = {"C1": {"duration_min": 60, "砥石": 100}}
+    suggestions = ea.build_expedition_suggestions(prefs, planning=_planning(), maps=maps,
+        now_min=600, situation_path=tmp_path / "missing")["suggestions"]
+    assert [(s["map_code"], s["start_min"], s["shift_no"]) for s in suggestions] == [
+        ("C1", 605, 1), ("C1", 675, 2)]
+    # 第一班采纳后刷新，只补第二班，时间不跑到第一班前面。
+    remainder = ea.build_expedition_suggestions(prefs, planning=_planning(), maps=maps,
+        now_min=600, committed_counts={4: 1}, team_busy_until={4: 665},
+        occupied_windows=[("C1", 605, 665)], situation_path=tmp_path / "missing")["suggestions"]
+    assert len(remainder) == 1 and remainder[0]["start_min"] == 675
+
+
 def test_explicit_total_level_does_not_require_one_sword_to_reach_total():
     meta = {"level_req": 350, "rules": {"total_level": 350}}
     assert ea._level_ok(meta, {"sum": 396, "max": 99})
@@ -197,7 +232,7 @@ class SuggestionBuildTests(unittest.TestCase):
                           committed_counts={4: 1})
         got = [(s["team_no"], s["resource"], s["shift_no"])
                for s in out["suggestions"]]
-        self.assertEqual(got, [(1, "砥石", 1), (4, "玉钢", 2), (1, "木炭", 2)])
+        self.assertEqual(got, [(1, "砥石", 1), (4, "小判", 2), (1, "木炭", 2)])
 
     def test_committed_shift_pushes_next_start_after_it(self):
         """已排的班占着时间：补的班从已排班收工+缓冲后起排。"""
@@ -696,7 +731,7 @@ class TimelineIntegrationTests(unittest.TestCase):
         self.assertEqual(suggestion["shift_no"], 2)
         # 在跑班 05:00+90min=06:30(390) 收工 +10 分钟缓冲 → 400 起排
         self.assertEqual(suggestion["start_min"], 400)
-        self.assertEqual(suggestion["map_code"], "D4")  # 小判榜首，没被占
+        self.assertEqual(suggestion["map_code"], "B1")  # 第二班延续资源轮转，已归来的图可复用
 
     def test_running_team_gets_no_new_suggestion(self):
         """队伍还在外面远征（expeditions.json）时不再给新建议。"""
@@ -755,10 +790,10 @@ class TimelineIntegrationTests(unittest.TestCase):
         now = self._today_at(6, 0)
         cfg = {"entries": [], "automation": {"enabled": False,
                                              "mode": "custom"}}
-        records = {"5": {"map_code": "D4", "duration_min": 240,
+        records = {"5": {"map_code": "D4", "duration_min": 90,
                          "dispatched_at": time.strftime(
                              "%Y-%m-%d %H:%M:%S",
-                             time.localtime(self._today_at(1, 0)))}}
+                             time.localtime(self._today_at(4, 0)))}}
         out = self._build(now, cfg, expedition_records=records,
                           expedition_help=_prefs(rounds=1,
                                                  available_teams=(4, 5)),

@@ -146,6 +146,49 @@ def test_empty_home_situation_preserves_previous_record(tmp_path):
     assert path.read_text(encoding="utf-8") == '{"schema":1}'
 
 
+def test_home_refresh_preserves_party_section_and_backup(tmp_path):
+    path = tmp_path / "situation.json"
+    full = tmp_path / "full.log"
+    full.write_text(SAMPLE, encoding="utf-8")
+    previous = youzu_log.save_home_situation(youzu_log.parse_events(full), path)
+    original = path.read_bytes()
+    home = tmp_path / "home.log"
+    home.write_text(_s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com/home",
+                        {"status": 0, "resource": {"file": 500}}), encoding="utf-8")
+    current = youzu_log.save_home_situation(youzu_log.parse_events(home), path)
+    assert current["parties"] == previous["parties"]
+    assert current["parties_observed_at"] == previous["parties_observed_at"]
+    assert current["resources"]["whetstone"] == 500
+    assert path.with_suffix(".json.bak").read_bytes() == original
+    # 备份可恢复旧快照，读取没有改写备份。
+    assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8")) == previous
+
+
+def test_login_party_can_use_full_sword_data_and_latest_party_wins(tmp_path):
+    path = tmp_path / "log.txt"
+    party = {"4": {"slot": {"1": {"serial_id": "111"}}, "status": "1", "finished_at": None}}
+    path.write_text(SAMPLE + "\n" + _s2c("2026-09-28 12:00:00",
+        "https://s39-ios-djlw.youzu.com/login/start", {"status": 0, "party": party}), encoding="utf-8")
+    current = youzu_log.build_home_situation(youzu_log.parse_events(path))
+    assert current["parties_observed_at"] == "2026-09-28 12:00:00"
+    assert current["parties"][0]["party_no"] == 4
+    assert current["parties"][0]["members"][0]["level"] == 99
+
+
+def test_preparation_pages_supply_parties_and_partial_state_does_not_erase_them(tmp_path):
+    path = tmp_path / "log.txt"
+    sword = {"111": {"serial_id": "111", "sword_id": "118", "level": "99"}}
+    party = {"4": {"slot": {"1": {"serial_id": "111"}}, "status": "1", "finished_at": None}}
+    for endpoint, field in [("/sally", "sword_all"), ("/conquest", "sword")]:
+        path.write_text(_s2c("2026-09-28 12:00:00", "https://s39-ios-djlw.youzu.com" + endpoint,
+            {"status": 0, "party": party, field: sword}) + "\n" +
+            _s2c("2026-09-28 12:01:00", "https://s39-ios-djlw.youzu.com/conquest/complete",
+                 {"status": 0, "party": {"4": {"status": "1"}}}), encoding="utf-8")
+        current = youzu_log.build_home_situation(youzu_log.parse_events(path))
+        assert current["parties_observed_at"] == "2026-09-28 12:00:00"
+        assert current["parties"][0]["members"][0]["level"] == 99
+
+
 def test_home_situation_api_refresh_uses_private_state_and_burns_log(tmp_path):
     from panel import server
     from touken.telemetry import TelemetryStore

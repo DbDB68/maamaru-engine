@@ -190,6 +190,24 @@ def _sword_name(sword_id, db) -> str:
     return info.get("name_zh") or info.get("name") or f"刀帐{sid}"
 
 
+def _party_source(events):
+    """只认含槽位的完整部队块；home/situation 的状态片段不能覆盖名单。"""
+    endpoints = {"/party/list", "/login/start", "/sally", "/conquest", "/conquest/start", "/conquest/complete"}
+    for ev in reversed(events):
+        body = ev.get("payload")
+        if (ev.get("direction") != "S->C" or ev.get("endpoint") not in endpoints
+                or ev.get("status") != 200 or not isinstance(body, dict)
+                or str(body.get("status")) != "0"):
+            continue
+        parties = body.get("party")
+        if isinstance(parties, dict) and (
+                (not parties and ev["endpoint"] == "/party/list")
+                or (parties and all(isinstance(p, dict) and isinstance(p.get("slot"), dict)
+                                    for p in parties.values()))):
+            return ev
+    return None
+
+
 def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     """把事件流汇总成本丸状态快照（latest-wins）。
 
@@ -209,8 +227,22 @@ def build_snapshot(events: list[dict], with_swords: bool = True) -> dict:
     leave = _latest_merged(events, "/home/leave")
     activity = _latest(events, "/home/get_all_activity") or {}
 
-    swords = party_list.get("sword") or sally.get("sword_all") or {}
-    parties = party_list.get("party") or login.get("party") or {}
+    swords = {}
+    # 编队页/出阵准备页提供全量刀数据；远征页与结算响应补充最新成员状态。
+    for ev in events:
+        body = ev.get("payload")
+        endpoint = ev.get("endpoint")
+        if (ev.get("direction") != "S->C" or ev.get("status") != 200
+                or not isinstance(body, dict) or str(body.get("status")) != "0"):
+            continue
+        if endpoint == "/party/list" and isinstance(body.get("sword"), dict):
+            swords = dict(body["sword"])
+        elif endpoint == "/sally" and isinstance(body.get("sword_all"), dict):
+            swords = dict(body["sword_all"])
+        elif endpoint in ("/conquest", "/conquest/complete") and isinstance(body.get("sword"), dict):
+            swords.update(body["sword"])
+    party_source = _party_source(events)
+    parties = party_source["payload"]["party"] if party_source else {}
 
     # 资源：home/forge/conquest 里都带 resource，谁新用谁（此处按端点
     # 优先级取第一个非空，同一局内差异不大；要精确到时刻就查事件流）
@@ -461,7 +493,8 @@ def build_home_situation(events: list[dict]) -> dict | None:
     login/party response, so pull time must never masquerade as observation time.
     """
     endpoints = ("/login/start", "/home", "/party/list",
-                 "/home/leave", "/home/situation", "/sally")
+                 "/home/leave", "/home/situation", "/sally",
+                 "/conquest", "/conquest/start", "/conquest/complete")
     found = {}
     accepted = []
     for ev in events:
@@ -473,6 +506,7 @@ def build_home_situation(events: list[dict]) -> dict | None:
     if not found:
         return None
     snap = build_snapshot(accepted, with_swords=True)
+    party_source = _party_source(accepted)
     # 同名刀消歧（label/serial_tail 是新增字段，name/level 原样不动，
     # 旧前端无感；渲染侧认领后展示 label 即可）
     labels = dup_labels(snap.get("swords") or [])
@@ -522,8 +556,8 @@ def build_home_situation(events: list[dict]) -> dict | None:
         "parties": [{"party_no": p["party_no"], "party_name": p["party_name"],
                      "members": [_member(m) for m in p["members"]],
                      "finished_at": p["finished_at"]}
-                    for p in snap["parties"]] if "/party/list" in found else [],
-        "parties_observed_at": observed("/party/list"),
+                    for p in snap["parties"]] if party_source else [],
+        "parties_observed_at": party_source["ts"] if party_source else None,
         "kiwame_return": [{"name": k["name"], "finished_at": k["finished_at"]}
                           for k in snap["kiwame_return"] if k["finished_at"]],
         "kiwame_observed_at": observed("/home/leave"),
@@ -548,8 +582,18 @@ def save_home_situation(events: list[dict], path: Path | str) -> dict | None:
         return None
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not situation.get("parties_observed_at"):
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            situation["parties"] = previous.get("parties", [])
+            situation["parties_observed_at"] = previous.get("parties_observed_at")
+        except (OSError, ValueError, AttributeError):
+            pass
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(situation, ensure_ascii=False), encoding="utf-8")
+    if path.exists():
+        import shutil
+        shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
     temporary.replace(path)
     return situation
 

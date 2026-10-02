@@ -595,6 +595,38 @@ if __name__ == "__main__":
     unittest.main()
 
 
+def test_next_shift_waits_for_confirmed_collection(tmp_path):
+    from panel import server
+    from panel import expedition_observation
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter(["没有读到结算"])
+    record = {"4": {"map_code": "C1", "dispatched_at": "2026-10-02 08:00:00", "duration_min": 60}}
+    with patch.object(server, "STATUS_DIR", tmp_path), \
+         patch.object(server, "_read_expedition_records", return_value=record), \
+         patch.object(expedition_observation, "load_observations", return_value={}):
+        messages = list(server._build_dispatch(agent, "unused", {"team_no": 4,
+            "map_code": "C2", "scheduled": True, "slot_key": "second"}))
+    agent.expedition_stream.assert_not_called()
+    assert "尚未确认" in messages[-1]
+    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "refused"
+
+
+def test_next_shift_collects_then_departs(tmp_path):
+    from panel import server
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter(["收菜成功"])
+    agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
+    record = {"4": {"map_code": "C1", "dispatched_at": "2026-10-02 08:00:00", "duration_min": 60}}
+    with patch.object(server, "STATUS_DIR", tmp_path), \
+         patch.object(server, "_read_expedition_records", side_effect=[record, {}]):
+        messages = list(server._build_dispatch(agent, "unused", {"team_no": 4,
+            "map_code": "C2", "scheduled": True, "slot_key": "second"}))
+    assert messages == ["收菜成功", "[远征] ✅ 部队4已出发"]
+    agent.expedition_stream.assert_called_once()
+
+
 def test_dispatch_does_not_depart_after_preset_failure(tmp_path):
     from panel import server, expedition_advisor as ea
     from touken import custom_formations as cf

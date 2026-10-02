@@ -571,13 +571,14 @@ def build_expedition_suggestions(prefs: dict, *,
                                  committed_counts=None,
                                  team_busy_until=None,
                                  occupied_maps=(),
+                                 occupied_windows=(),
                                  failed_combos=()) -> dict:
     """玩家驱动的建议：每个可丢队伍今天各派 N 班（rounds_per_team）。
 
     - 班次轮转：各队第 1 班依次取缺口榜第 1、2… 种资源的对口图，
       第 2 班接着往后排；榜轮完从头再轮（越缺的资源出现越勤）。
     - 图：该资源时薪从高到低试，次日 03:59 前能出发即可，归来可跨日；
-      occupied_maps（未完结班占图）不入选，本批建议内部也一图一班
+      occupied_maps（待收菜占图）不入选，其余班按时间段核对撞图
       （游戏机制一张图同时只能一队在跑）。
     - 队：滤图的等级条件（total_level/level_req）和刀种条件
       （required_types「含有」语义 / min_distinct_types，有近况才核）。
@@ -624,6 +625,7 @@ def build_expedition_suggestions(prefs: dict, *,
         return empty
 
     occupied = {str(code) for code in occupied_maps or () if code}
+    windows = list(occupied_windows or ())
 
     failed = set()
     for combo in failed_combos or ():
@@ -668,14 +670,14 @@ def build_expedition_suggestions(prefs: dict, *,
         if t in busy:  # 已排的班占着时间，补班排在收工+缓冲后
             start = max(start, busy[t] + COLLECT_BUFFER_MIN)
         next_start[t] = start
-    slot = 0
     for r in range(rounds):
         for team in teams:
             if remaining[team] <= r or team in blocked_teams:
                 continue
             start = next_start[team]
             shift_no = counts.get(team, 0) + r + 1  # 今天第几班（含已排的）
-            priority_slot = 0 if focus in FOCUS_RESOURCES else slot
+            # 固定到「队伍 × 当天班次」，采纳首班后刷新不能把次班资源重置。
+            priority_slot = 0 if focus in FOCUS_RESOURCES else (shift_no - 1) * len(teams) + teams.index(team)
             assigned = base_order[priority_slot % len(base_order)]
             placed = False
             restrictions = []
@@ -708,7 +710,9 @@ def build_expedition_suggestions(prefs: dict, *,
                         if resource == assigned[0]:
                             restrictions.append(f"{map_code}：{detail}")
 
-                    if map_code in occupied:
+                    duration = int(meta.get("duration_min") or 0)
+                    if map_code in occupied or any(code == map_code and start < end and start + duration > begin
+                                                   for code, begin, end in windows):
                         miss["occupied"] = True
                         owner = next((s["team_no"] for s in suggestions if s["map_code"] == map_code), None)
                         blocked(f"已安排部队{TEAM_NAMES.get(owner, owner)}" if owner else "已有远征安排")
@@ -783,8 +787,7 @@ def build_expedition_suggestions(prefs: dict, *,
                         "formation_change": formation_change if i else False,
                     })
                     next_start[team] = start + duration + COLLECT_BUFFER_MIN
-                    occupied.add(map_code)  # 本批建议内部也去重：一张图一班
-                    slot += i + 1
+                    windows.append((map_code, start, start + duration))
                     placed = True
                     break
                 if placed:

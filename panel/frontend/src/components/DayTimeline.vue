@@ -986,7 +986,7 @@ const caption = computed(() => {
         </div>
       </div>
       <div v-if="data.expedition_help" class="tl-expedition-help">
-        <label class="tl-expedition-help-count">可丢的队伍各派
+        <label class="tl-expedition-help-count" title="包含今天已出发和已安排的班次。多班会接在前班归来、收菜后；跑够次数就不再推荐。">每支勾选部队今天共安排
           <select :value="data.expedition_help.rounds_per_team" :disabled="prefsBusy || !!adoptingSuggestion" @change="updateRounds">
             <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
           </select>

@@ -840,6 +840,14 @@ def _build_dispatch(agent, config_path, params):
         time.sleep(min(5, remain))
         remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
     yield from agent.collect_expedition_stream(redispatch=None)
+    from .expedition_observation import load_observations, visible_records
+    remaining_records = visible_records(_read_expedition_records(), load_observations())
+    if str(team_no) in remaining_records:
+        detail = "尚未确认这支部队已收菜，暂不续派"
+        if scheduled:
+            _write_dispatch_result(slot_key, "refused", detail)
+        yield f"[远征] {detail}"
+        return
     if params.get("formation_id"):
         from touken.runtime_paths import STATE_DIR
         from .expedition_advisor import (expedition_formation_options, party_levels_from_situation,
