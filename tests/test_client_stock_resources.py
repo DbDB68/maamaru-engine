@@ -32,3 +32,16 @@ def test_missing_client_resource_uses_actual_screen_read_only(tmp_path):
     assert stock["resources"]["加速符"] == {"count": 211, "observed_at": 20, "source": "screen"}
     assert "玉钢" not in stock["resources"]
     store.close()
+
+
+def test_old_client_speedup_name_remains_client_fact(tmp_path):
+    store = TelemetryStore(tmp_path / "stock.db")
+    for ts, script, resources in [(10, "youzu_log", {"加速符·极": 207}),
+                                  (20, "game_inventory", {"加速符": 211})]:
+        store._conn().execute("INSERT INTO events(ts,script,event_type,payload) VALUES(?,?,'inventory.captured',?)",
+                              (ts, script, json.dumps({"resources": resources})))
+    store._conn().commit()
+    assert store.client_item_inventory(30)["resources"]["加速符"] == {"count": 207, "observed_at": 10}
+    row = next(r for r in store.resource_ledger(15, 30)["per_resource"] if r["resource"] == "加速符")
+    assert (row["opening"], row["closing"]) == (207, 211)
+    store.close()

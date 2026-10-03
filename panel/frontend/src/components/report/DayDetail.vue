@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { HumanReport, InventoryGap, LedgerAttribution, ManualSession } from '../../types'
-import { categoryLabel, dayLabel, eventTime, recordOrigin, scriptNames, signed } from './reportModel'
+import { resourceLabel, categoryLabel, dayLabel, eventTime, recordOrigin, scriptNames, signed } from './reportModel'
 
 const props = defineProps<{
   date: string
@@ -98,7 +98,7 @@ function recordDateLabel(date: string): string {
     <header>
       <div>
         <small>{{ date }}</small>
-        <h4>{{ dayLabel(date) }} · {{ resource }} {{ signed(totalDelta) }}<template v-if="highlightCategory"> · 看「{{ categoryLabel(highlightCategory) }}」这部分</template></h4>
+        <h4>{{ dayLabel(date) }} · {{ resourceLabel(resource) }} {{ signed(totalDelta) }}<template v-if="highlightCategory"> · 看「{{ categoryLabel(highlightCategory) }}」这部分</template></h4>
       </div>
       <button type="button" class="secondary" @click="emit('close')">收起</button>
     </header>
@@ -119,10 +119,10 @@ function recordDateLabel(date: string): string {
     <ul v-if="groupedAttributions.length" class="day-detail-attributions">
       <li v-for="group in groupedAttributions" :key="`${group.ts}:${group.label}`">
         <time>{{ eventTime(group.ts) }}<template v-if="group.count > 1"> → {{ eventTime(group.tsEnd) }}</template></time>
-        <span><b>{{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template></b><small>{{ group.script }} · {{ resource }} {{ signed(group.delta) }}<template v-if="group.count > 1"> · 共 {{ signed(group.delta * group.count) }}</template></small></span>
+        <span><b>{{ group.label }}<template v-if="group.count > 1"> ×{{ group.count }}</template></b><small>{{ group.script }} · {{ resourceLabel(resource) }} {{ signed(group.delta) }}<template v-if="group.count > 1"> · 共 {{ signed(group.delta * group.count) }}</template></small></span>
       </li>
     </ul>
-    <p v-else class="day-detail-empty">这天没有自动对上来源的{{ resource }}流水。</p>
+    <p v-else class="day-detail-empty">这天没有自动对上来源的{{ resourceLabel(resource) }}流水。</p>
 
     <button v-if="runs.length" type="button" class="day-detail-records" @click="emit('open-records', date)">
       <span>当天共执行 <b>{{ runs.length }}</b> 次任务</span>

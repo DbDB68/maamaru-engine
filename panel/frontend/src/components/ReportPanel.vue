@@ -7,9 +7,8 @@ import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
-import StockInventory from './report/StockInventory.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
+import { resourceLabel, categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
 
 const emit = defineEmits<{
@@ -588,7 +587,7 @@ const dayResourceOverview = computed(() => {
 })
 const dayChartResources = computed(() => resourceNames.filter(resource => resource !== '甲州金'))
 const displayedChartDates = computed(() => days.value === 1 ? dayChartResources.value : chartDates.value)
-const displayedChartLabels = computed(() => days.value === 1 ? dayChartResources.value : [])
+const displayedChartLabels = computed(() => days.value === 1 ? dayChartResources.value.map(resourceLabel) : [])
 const displayedChartSeries = computed<ChartSeries[]>(() => {
   if (days.value !== 1) return chartSeries.value
   return sourceCategories.map(category => ({
@@ -1151,7 +1150,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '所持物品与资源收支' : '账目和接下来的打算'">
+    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源家底与记录' : '账目和接下来的打算'">
       <template #actions>
         <div v-if="!props.pageSection" class="report-toolbar-actions">
           <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
@@ -1200,7 +1199,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
-              <small>{{ row.name }}</small>
+              <small>{{ resourceLabel(row.name) }}</small>
               <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
               <small v-if="!props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
               <span v-if="props.ledgerMode" class="resource-change">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
@@ -1209,7 +1208,21 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             </article>
           </div>
         </section>
-        <StockInventory v-if="!props.ledgerMode" :stock="clientStock" />
+        <section class="resource-trend">
+          <header>
+            <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
+            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3></div>
+            <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ resourceLabel(name) }}</button></nav>
+            <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ resourceLabel(name) }}</button></nav>
+            <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
+          </header>
+          <p v-if="anomalyInsight && (mode === 'compare' ? compareResources.includes(anomalyInsight.resource || '') : selectedResource === anomalyInsight.resource)" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
+          <ResourceChart :dates="displayedChartDates" :labels="displayedChartLabels" :series="displayedChartSeries" :stacked="days === 1 || mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="days !== 1 && onChartSelect($event)" />
+          <template v-if="days !== 1">
+            <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
+          </template>
+        </section>
+
       </template>
       <template v-if="props.ledgerMode && view === 'chart' || !props.ledgerMode && view === 'records'">
         <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
@@ -1297,7 +1310,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 <form class="manual-inventory-form" @submit.prevent="saveManualInventory">
             <header><div><h4>{{ editingInventoryId ? '修改家底记录' : '更新当前家底' }}</h4><p>不确定的项目可以留空，修改后会重新计算前后账目。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false; editingInventoryId = null">×</button></header>
             <label class="manual-inventory-time">记录时间<input v-model="inventoryObservedAt" type="datetime-local" required></label>
-            <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
+            <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ resourceLabel(name) }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
             <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '保存中……' : editingInventoryId ? '保存修改' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false; editingInventoryId = null">取消</button></div>
           <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
@@ -1323,7 +1336,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <header class="report-form-heading"><div><h4>{{ reportGap ? '补上这段账' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '补上这笔账' : '记一笔收支' }}</h4><p>{{ reportGap || reportForm.claim_limit != null ? '只补你能确定的，想不起来可以选“记不清了”。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>待补：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
-            <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
+            <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ resourceLabel(name) }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
           </template>
           <label v-if="reportForm.resource && reportForm.claim_limit != null">其中有多少是这次操作<input v-model.number="reportForm.claimed_delta" type="number" step="1" :min="Number(reportForm.claim_limit) > 0 ? 1 : reportForm.claim_limit ?? undefined" :max="Number(reportForm.claim_limit) > 0 ? reportForm.claim_limit ?? undefined : -1"><small>最多补到当前没对上的 {{ signed(reportForm.claim_limit) }}</small></label>
           <label>大概时间<input v-model="reportForm.occurred_at" type="datetime-local"></label>
@@ -1332,23 +1345,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '保存中……' : editingManualReport ? '保存修改' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null; editingManualReport = null">取消</button></div>
         <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
-
-        </details>
-        <details class="warehouse-fold" :open="props.ledgerMode"><summary>查看变化趋势</summary>
-        <section class="resource-trend">
-          <header>
-            <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
-            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3></div>
-            <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
-            <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>
-            <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
-          </header>
-          <p v-if="anomalyInsight && (mode === 'compare' ? compareResources.includes(anomalyInsight.resource || '') : selectedResource === anomalyInsight.resource)" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
-          <ResourceChart :dates="displayedChartDates" :labels="displayedChartLabels" :series="displayedChartSeries" :stacked="days === 1 || mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="days !== 1 && onChartSelect($event)" />
-          <template v-if="days !== 1">
-            <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
-          </template>
-        </section>
 
         </details>
         <section v-if="props.ledgerMode && unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">

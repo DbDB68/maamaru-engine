@@ -2,6 +2,7 @@
 import type { LedgerAttribution } from '../../types'
 
 export const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
+export function resourceLabel(name: string) { return name === '加速符' ? '加速符·极' : name }
 
 export interface SourceCategory { key: string; label: string; color: string }
 
@@ -158,12 +159,12 @@ const deltaOrder = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托
 
 export function deltaStats(run: any): string {
   return deltaOrder.filter(name => run.resource_delta?.[name])
-    .map(name => `${name} ${signed(Number(run.resource_delta[name]))}`).join(' · ')
+    .map(name => `${resourceLabel(name)} ${signed(Number(run.resource_delta[name]))}`).join(' · ')
 }
 
 export function attributedStats(run: any): string {
   return deltaOrder.filter(name => run.attributed_resource_delta?.[name])
-    .map(name => `${name} ${signed(Number(run.attributed_resource_delta[name]))}`).join(' · ')
+    .map(name => `${resourceLabel(name)} ${signed(Number(run.attributed_resource_delta[name]))}`).join(' · ')
 }
 
 export interface DayStack {

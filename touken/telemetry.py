@@ -29,6 +29,15 @@ DEFAULT_RETENTION_DAYS = 90
 LEDGER_SCHEMA_VERSION = 2
 # 资源全集，顺序固定：顶栏四资源 + 真小判 + 甲州金 + 右栏两符
 LEDGER_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石", "小判", "甲州金", "委托符", "加速符")
+
+
+def _resource_reading(reading):
+    """旧客户端名称与资源字段对应；只在读取时转换，不改写历史。"""
+    result = dict(reading or {})
+    if "加速符·极" in result:
+        result.setdefault("加速符", result.pop("加速符·极"))
+    return result
+
 # peek 只有顶栏五资源（契约：永远不含小判/委托符/加速符），
 # 白名单过滤防脏 payload 污染小判观察链
 _LEDGER_PEEK_RESOURCES = frozenset(("木炭", "玉钢", "冷却材", "砥石", "甲州金"))
@@ -1234,7 +1243,7 @@ class TelemetryStore:
                 "SELECT ts, payload FROM events WHERE script = 'youzu_log' "
                 "AND event_type = 'inventory.captured' AND ts <= ? ORDER BY ts DESC, id DESC",
                 (time.time() if to_ts is None else float(to_ts),)):
-            reading = _loads(row["payload"], {}).get("resources") or {}
+            reading = _resource_reading(_loads(row["payload"], {}).get("resources"))
             for name in LEDGER_RESOURCES:
                 value = reading.get(name)
                 if name not in resources and isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
@@ -1259,7 +1268,7 @@ class TelemetryStore:
             for row in self._conn().execute(
                     "SELECT ts, payload FROM events WHERE event_type='inventory.captured' AND script NOT IN ('youzu_log','manual') AND ts <= ? ORDER BY ts DESC, id DESC",
                     (time.time() if to_ts is None else float(to_ts),)):
-                reading = _loads(row["payload"], {}).get("resources") or {}
+                reading = _resource_reading(_loads(row["payload"], {}).get("resources"))
                 for name in list(missing):
                     value = reading.get(name)
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
@@ -1304,19 +1313,19 @@ class TelemetryStore:
                 row = conn.execute(
                     "SELECT id, ts, run_id, script, event_type, payload FROM events "
                     "WHERE ts < ? AND event_type = ? "
-                    "AND json_type(payload, ?) IN ('integer', 'real') "
+                    "AND (json_type(payload, ?) IN ('integer', 'real') OR json_type(payload, ?) IN ('integer', 'real')) "
                     "ORDER BY ts DESC, id DESC LIMIT 1",
-                    (from_ts, event_type, path)).fetchone()
+                    (from_ts, event_type, path, '$.resources."加速符·极"' if name == '加速符' and event_type == 'inventory.captured' else path)).fetchone()
                 if row:
                     baseline_by_id[row["id"]] = row
         for name in LEDGER_RESOURCES:
             row = conn.execute(
                 "SELECT id, ts, run_id, script, event_type, payload FROM events "
                 "WHERE ts < ? AND event_type = 'resource.change' "
-                "AND json_extract(payload, '$.resource') = ? "
+                "AND json_extract(payload, '$.resource') IN (?, ?) "
                 "AND json_type(payload, '$.before') IN ('integer', 'real') "
                 "AND json_type(payload, '$.after') IN ('integer', 'real') "
-                "ORDER BY ts DESC, id DESC LIMIT 1", (from_ts, name)).fetchone()
+                "ORDER BY ts DESC, id DESC LIMIT 1", (from_ts, name, '加速符·极' if name == '加速符' else name)).fetchone()
             if row:
                 baseline_by_id[row["id"]] = row
         baseline_rows = list(baseline_by_id.values())
@@ -1338,7 +1347,7 @@ class TelemetryStore:
                                     "value": value, "priority": 3, "source": event_type,
                                     "event_id": row["id"], "evidence": [row["id"]]})
             elif event_type == "inventory.captured":
-                for name, value in (payload.get("resources") or {}).items():
+                for name, value in _resource_reading(payload.get("resources")).items():
                     if isinstance(value, (int, float)):
                         raw.append({"ts": row["ts"], "sub": 0, "resource": name,
                                     "value": value, "priority": 2, "source": event_type,
@@ -1354,6 +1363,8 @@ class TelemetryStore:
                 # 带 before/after 的 resource.change（如异去补充提灯）是直读观察，
                 # 否则跨日分桶的 opening 会跳过这条消费链，把支出漏成次日未归因
                 name = payload.get("resource")
+                if name == "加速符·极":
+                    name = "加速符"
                 if name:
                     for sub, key in ((0, "before"), (1, "after")):
                         value = payload.get(key)
@@ -1420,6 +1431,8 @@ class TelemetryStore:
                   and row["id"] not in ambiguous_reward_changes):
                 delta = payload.get("delta")
                 resource = str(payload.get("resource") or "")
+                if resource == "加速符·极":
+                    resource = "加速符"
                 if resource and isinstance(delta, (int, float)) and delta:
                     item = {"resource": resource, "delta": delta,
                             "source": str(payload.get("source") or event_type),
@@ -1440,6 +1453,8 @@ class TelemetryStore:
                 # 300 小判写进 payload。兼容这些旧事实，让历史统计即时补账；
                 # 新事件优先使用自身携带的 resource/delta，不猜其他活动票价。
                 resource = str(payload.get("resource") or "")
+                if resource == "加速符·极":
+                    resource = "加速符"
                 delta = payload.get("delta")
                 if (not resource and row["script"] == "edocastle"
                         and payload.get("source") == "江户城"):
