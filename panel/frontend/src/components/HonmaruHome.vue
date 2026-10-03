@@ -3,9 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import { buildJournalPosts } from '../honmaruJournal'
 import type { JournalPost } from '../honmaruJournal'
-import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
+import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
-import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
+import HonmaruClock from './HonmaruClock.vue'
+import { homeMoments, remainingTime } from './homeClockModel'
+import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
 const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
@@ -18,14 +20,11 @@ const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
 const dayPlan = ref<DayTimeline | null>(null)
-const swordEvents = ref<any[]>([])
 const journalEvents = ref<any[]>([])
 const swordDepartures = ref<any[]>([])
-const swordEventsTruncated = ref(false)
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
 const situationError = ref('')
-const briefUpdatedAt = ref(0)
 const editingProfile = ref(false)
 const writing = ref(false)
 const noteBody = ref('')
@@ -85,62 +84,11 @@ const recentKoban = computed<number | null>(() => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 })
 const nearestEvent = computed<EventTimelineEntry | null>(() => timeline.value?.ongoing[0] || timeline.value?.upcoming[0] || null)
-const latestRun = computed(() => runs.value[0] || null)
-const briefTime = computed(() => briefUpdatedAt.value
-  ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(briefUpdatedAt.value)
-  : '--:--')
-const briefFreshness = computed(() => {
-  if (!briefUpdatedAt.value) return '整理中'
-  const minutes = Math.max(0, Math.floor((now.value - briefUpdatedAt.value) / 60000))
-  return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前更新` : `${briefTime.value} 更新`
-})
-const caretakerBrief = computed(() => {
-  if (active.value) return { title: currentActivityTitle.value, detail: currentActivityStep.value || '任务进行中' }
-  const run = latestRun.value
-  if (!run) return { title: '今天的收获', detail: '还没有脚本执务记录' }
-  const title = runTitle(run)
-  return { title, detail: run.status === 'failed' ? '未能完成 · 查看记录' : run.status === 'stopped' ? '已停止' : run.status === 'completed' ? '已完成' : '结果待确认' }
-})
-const todaySwords = computed(() => swordReceiptEntries(swordEvents.value))
-const todaySwordNames = computed(() => [...new Set(todaySwords.value.map(e => e.payload.name))].slice(0, 3).join('、'))
-const nextBlock = computed(() => dayPlan.value?.conductor.enabled
-  ? dayPlan.value.conductor.blocks.find(b => b.status === 'running')
-    || dayPlan.value.conductor.blocks.filter(b => b.status === 'pending').sort((a, b) => a.start_min - b.start_min)[0]
-  : null)
-function blockTime(minute: number) { return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}` }
 const activityPlan = computed(() => {
   const activity = dayPlan.value?.activity
   return activity && activity.name === nearestEvent.value?.name ? activity : null
 })
-const briefChanges = computed(() => {
-  const deltas = latestRun.value?.attributed_resource_delta || {}
-  return Object.entries(deltas)
-    .filter(([, value]) => Number(value))
-    .sort(([left], [right]) => resourceNames.indexOf(left) - resourceNames.indexOf(right))
-    .slice(0, 6)
-    .map(([name, value]) => ({ name, value: signed(Number(value)) }))
-})
-const situationMoments = computed(() => {
-  const state = situation.value
-  if (!state) return []
-  const stamp = (value: string) => Date.parse(value.replace(' ', 'T') + '+08:00')
-  const moments = [
-    ...state.parties.filter(p => p.finished_at).map(p => ({ key: `party-${p.party_no}`, label: `第${p.party_no}部队完成时间`, time: p.finished_at!, observedAt: state.parties_observed_at })),
-    ...state.kiwame_return.map((item, index) => ({ key: `return-${index}`, label: `${item.name || '刀剑'}修行归来`, time: item.finished_at, observedAt: state.kiwame_observed_at })),
-    ...(state.forge_slots || []).map(f => ({ key: `forge-${f.slot_no}`, label: `第${f.slot_no}炉锻刀完成`, time: f.finished_at, observedAt: state.forge_observed_at })),
-    ...(state.repair || []).filter(r => r.finished_at).map(r => ({ key: `repair-${r.slot_no}`, label: r.name ? `${r.name}手入完成` : `手入第${r.slot_no}槽完成`, time: r.finished_at!, observedAt: state.repair_observed_at ?? null })),
-    ...(state.duty?.finished_at ? [{ key: 'duty', label: '内番完成', time: state.duty.finished_at, observedAt: state.duty_observed_at ?? null }] : []),
-  ].map(m => ({ ...m, done: stamp(m.time) <= now.value }))
-  // 时间已过的排最前，按时间倒序；没完成的按时间正序（最近要来）
-  return moments.sort((a, b) => Number(b.done) - Number(a.done) || (a.done ? stamp(b.time) - stamp(a.time) : stamp(a.time) - stamp(b.time)))
-})
-const filledParties = computed(() => situation.value?.parties.filter(p => p.members.length) || [])
-function memberTitle(member: HonmaruSituationMember) {
-  const facts = []
-  if (member.hp != null && member.hp_max) facts.push(`生存 ${member.hp}/${member.hp_max}`)
-  if (member.fatigue != null) facts.push(`疲劳 ${member.fatigue}`)
-  return facts.join(' · ')
-}
+const situationMoments = computed(() => homeMoments(situation.value, now.value))
 const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符']
 function fmt(value: number | null | undefined) { return value == null ? '尚未记录' : Math.round(value).toLocaleString() }
 function resource(name: string) {
@@ -162,7 +110,6 @@ async function syncSituation() {
   try {
     situation.value = (await api.refreshHonmaruSituation()).situation
     loadErrors.value = await loadSummaries()
-    briefUpdatedAt.value = Date.now()
   }
   catch (error) { situationError.value = errorMessage(error) }
   finally { syncingSituation.value = false }
@@ -220,7 +167,6 @@ function eventBudget(event: EventTimelineEntry) {
   return '正在核算'
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : '暂时没能保存，请再试一次。' }
-function openBriefReport() { emit('records') }
 
 async function loadHome() {
   const data = await api.honmaruHome()
@@ -237,8 +183,6 @@ async function loadSummaries() {
       const from = Date.parse(`${today.value}T00:00:00+08:00`) / 1000
       const data = await api.dataEvents(1000, undefined, from - 6 * 86400, from + 86400)
       journalEvents.value = data.items
-      swordEvents.value = data.items.filter(item => Number(item.ts) >= from)
-      swordEventsTruncated.value = data.has_more
     } },
     { label: '刀剑整理', run: async () => { swordDepartures.value = (await api.swordArchive()).sword_departures || [] } },
     { label: '近期活动', run: async () => { timeline.value = await api.eventsTimeline() } },
@@ -256,7 +200,6 @@ async function refresh() {
     ...(results[0]!.status === 'rejected' ? ['个人档案和小记'] : []),
     ...(results[1]!.status === 'fulfilled' ? results[1]!.value : ['本丸近况']),
   ]
-  if (results[1]!.status === 'fulfilled') briefUpdatedAt.value = Date.now()
   loading.value = false
 }
 function editProfile() {
@@ -316,7 +259,7 @@ async function saveNote() {
 }
 onMounted(() => {
   void refresh()
-  timer = window.setInterval(() => { now.value = Date.now() }, 60000)
+  timer = window.setInterval(() => { now.value = Date.now() }, 1000)
 })
 onBeforeUnmount(() => window.clearInterval(timer))
 watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refresh() })
@@ -341,7 +284,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
-      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
+      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">
@@ -357,39 +300,16 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
-      <section class="home-situation" aria-label="本丸近况">
-        <header><div><h2>本丸近况</h2></div><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
+      <HonmaruClock :timeline="dayPlan" :now="now" @open="emit('planning')" />
+      <PaperCard variant="dashboard" class="home-brief" aria-label="本丸近况">
+        <header class="brief-meta"><span>狐之助小报</span><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
-        <p v-if="!situation" class="home-muted">还没有读到游戏近况。进入本丸后点“同步近况”。</p>
-        <template v-else>
-          <div v-if="situationMoments.length" class="situation-moments">
-            <p class="situation-caption">最近的归期 <small>游戏时间</small></p>
-            <div v-for="moment in situationMoments.slice(0, 2)" :key="moment.key" class="situation-moment"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ moment.done ? '预计已完成' : gameTime(moment.time) }}</span><small>{{ moment.done ? gameTime(moment.time) + ' · ' : '' }}{{ situationTime(moment.observedAt) }}</small></div>
-            <p v-if="situationMoments.length > 2" class="situation-more">还有 {{ situationMoments.length - 2 }} 个时间记录，展开可看。</p>
-          </div>
-          <p v-else class="home-muted">暂无锻刀、手入或归期记录。</p>
-          <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name && party.party_name !== `第${party.party_no}部队` ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}</span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
-        </template>
-      </section>
-      <PaperCard v-if="active || latestRun || todaySwords.length || nextBlock" variant="dashboard" class="home-brief">
-        <header class="brief-meta"><span>狐之助小报</span><span>{{ briefFreshness }}</span></header>
-        <h2>{{ caretakerBrief.title }}</h2>
-        <p class="brief-detail">{{ caretakerBrief.detail }}<small v-if="!active && latestRun"> · {{ eventTime(Number(latestRun.ended_at || latestRun.started_at)) }}</small></p>
-        <p v-if="todaySwords.length" class="home-daily-fact">今天收获{{ swordEventsTruncated ? '至少' : '' }} {{ todaySwords.length }} 振刀剑<br><small>{{ todaySwordNames }}{{ new Set(todaySwords.map(e => e.payload.name)).size > 3 ? '等' : '' }}</small></p>
-        <p v-if="nextBlock" class="home-daily-fact">{{ nextBlock.status === 'running' ? '正在跑' : blockTime(nextBlock.start_min) + ' 接下来' }} · {{ nextBlock.label }}</p>
-        <div v-if="briefChanges.length" class="brief-changes" aria-label="这一趟的家底变化"><span v-for="item in briefChanges" :key="item.name"><b>{{ item.name }}</b> {{ item.value }}</span></div>
-        <button type="button" class="home-text-button" @click="openBriefReport">查看账房记录 →</button>
+        <p v-if="!situation" class="home-muted">进入本丸后，同步近况。</p>
+        <div v-else-if="situationMoments.length" class="situation-moments">
+          <div v-for="moment in situationMoments" :key="moment.key" class="situation-moment" :title="`${gameTime(moment.time)} · ${situationTime(moment.observedAt)}`"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ remainingTime(moment.time, now) }}</span></div>
+        </div>
+        <p v-else class="home-muted">暂无远征、锻刀或手入倒计时。</p>
       </PaperCard>
-      <section class="home-planning-card home-finances">
-        <p class="home-eyebrow">博多账房</p>
-        <h2>小判与锻刀</h2>
-        <p class="finance-lead">{{ kobanWatch?.available == null ? '最近的小判记录' : '可安排的小判' }} <strong>{{ fmt(kobanWatch?.available ?? recentKoban) }}</strong></p>
-        <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `账本 ${fmt(kobanWatch.current)} · 预留 ${fmt(kobanWatch.reserved)}` }}</p>
-        <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
-        <p v-if="kobanWatch?.budgets?.some(b => b.amount)" class="planning-note">预留给 {{ kobanWatch.budgets.filter(b => b.amount).map(b => `${b.event} ${fmt(b.amount)}`).join(' · ') }}</p>
-        <details class="finance-details"><summary>查看家底明细</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
-        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
-      </section>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
@@ -398,6 +318,13 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
+      </section>
+      <section class="home-planning-card home-finances">
+        <h2>家底</h2>
+        <p class="finance-lead">小判 <strong>{{ fmt(recentKoban) }}</strong></p>
+        <dl class="finance-resources"><div v-for="name in ['木炭', '玉钢', '冷却材', '砥石']" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl>
+        <details class="finance-details"><summary>资源与预留</summary><dl><div v-for="name in resourceNames.filter(name => !['小判', '木炭', '玉钢', '冷却材', '砥石'].includes(name))" :key="name"><dt>{{ name === '加速符' ? '加速符·极' : name }}</dt><dd>{{ resource(name) }}</dd></div></dl><p v-if="kobanWatch?.reserved" class="planning-note">预留 {{ fmt(kobanWatch.reserved) }} 小判 · 可安排 {{ fmt(kobanWatch.available) }}</p><p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀可锻 {{ fmt(resourceWatch.forge_capacity) }} 炉</p></details>
+        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
       </section>
     </aside>
 
@@ -526,6 +453,14 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .brief-changes b { font-weight: 500; }
 .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
 .home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
+.home-finances { padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--paper-line); background: transparent; }
+.finance-resources { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin: 16px 0; }
+.finance-resources dt { color: var(--ink-dim); font-size: 11px; }
+.finance-resources dd { margin: 3px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
+.home-brief .situation-moments { border-top: 0; padding-top: 0; }
+.home-brief .situation-moment { grid-template-columns: minmax(0, 1fr) auto; padding-block: 9px; border-bottom: 1px dashed #d6c9aa; }
+.home-brief .situation-moment:last-child { border-bottom: 0; }
+.home-brief .brief-meta { align-items: center; }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }
 .pencil-mark { position: relative; z-index: 0; display: inline-block; padding-inline: 2px; font-weight: inherit; }
