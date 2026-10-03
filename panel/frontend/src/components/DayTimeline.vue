@@ -50,7 +50,6 @@ function gameplaySaved(script: string, params: ScriptParams) {
 const highlightIndex = ref(-1)
 /** 运行图块气泡：块在 booking.blocks 里的下标 + 所在泳道 + 块左缘（%） */
 const suggestedGameplay = ref<DayScheduleBlock | null>(null)
-const dismissedGameplay = ref<number[]>([])
 const planEditorDialog = ref<HTMLDialogElement>()
 watch(editing, async value => { if (value) { await nextTick(); planEditorDialog.value?.showModal() } })
 const popover = ref<{ index: number; lane: 'task' | 'daily'; left: number; origin?: 'booking' } | null>(null)
@@ -164,7 +163,6 @@ async function toggleAvailableTeam(team: number) {
 }
 
 const expeditionPopup = ref<{team: number; left: number; suggestion?: DayExpeditionSuggestion; slot?: DayTimelineExpedition} | null>(null)
-const dismissedSuggestions = ref<string[]>([])
 const expeditionDialog = ref<HTMLDialogElement>()
 const expeditionTime = ref('')
 const expeditionFormation = ref('')
@@ -213,9 +211,22 @@ async function saveExpeditionConfiguration() {
 async function removeExpeditionFromPopup() {
   const selected = expeditionPopup.value
   if (!selected) return
-  expeditionPopup.value = null
-  if (selected.suggestion) dismissedSuggestions.value.push(selected.suggestion.key)
-  else if (selected.slot) await toggleExpedition(selected.slot)
+  if (selected.suggestion) {
+    if (adoptingSuggestion.value) return
+    const suggestion = selected.suggestion
+    adoptingSuggestion.value = suggestion.key
+    expeditionMessage.value = ''
+    try {
+      await api.adoptDayExpeditionSuggestion(selected.team, suggestion.map_code, suggestion.start_min, suggestion.formation_id, suggestion.formation_signature)
+      expeditionPopup.value = null
+      await load()
+    } catch (error) {
+      expeditionMessage.value = error instanceof Error ? error.message : '这班没有启用，请重试'
+    } finally { adoptingSuggestion.value = '' }
+  } else if (selected.slot) {
+    expeditionPopup.value = null
+    await toggleExpedition(selected.slot)
+  }
 }
 
 function closePopoverOnOutside(event: MouseEvent) {
@@ -697,9 +708,17 @@ function editFromPopover() {
 /** 气泡「移出安排」：删掉这块走同一个保存即开工端点重存（保持 armed） */
 async function removeFromSchedule() {
   if (popover.value?.index === -1 && suggestedGameplay.value) {
-    dismissedGameplay.value.push(suggestedGameplay.value.start_min)
-    popover.value = null
-    suggestedGameplay.value = null
+    if (removing.value) return
+    removing.value = true
+    planMessage.value = ''
+    try {
+      const blocks = [...(data.value?.booking?.blocks || []), {...suggestedGameplay.value}]
+      await persistSchedule(blocks.sort((a, b) => a.start_min - b.start_min), '')
+      popover.value = null
+      suggestedGameplay.value = null
+    } catch (error) {
+      planMessage.value = error instanceof Error ? error.message : '这段没有启用，请重试'
+    } finally { removing.value = false }
     return
   }
   const booking = data.value?.booking
@@ -756,7 +775,7 @@ const displayedExpeditionBlocks = expeditionBlocks
 /** 远征建议淡影：投进对应队伍的子泳道，点采纳 = 那班记 forced */
 const expeditionSuggestionBlocks = computed(() => {
   if (!data.value) return []
-  return (data.value.expedition_suggestions || []).filter(s => !dismissedSuggestions.value.includes(s.key)).map((s) => {
+  return (data.value.expedition_suggestions || []).map((s) => {
     const team = TEAM_NAMES[s.team_no] ?? String(s.team_no)
     const visibleDuration = Math.min(Math.max(s.duration_min, 10), DAY - s.start_min)
     const range = `${fmtMin(s.start_min)}–${fmtMin(Math.min(DAY, s.start_min + s.duration_min))}`
@@ -766,7 +785,7 @@ const expeditionSuggestionBlocks = computed(() => {
       teamNo: s.team_no,
       left: pct(s.start_min),
       width: Math.max(pct(visibleDuration), 0.7),
-      title: `建议：部队${team} ${s.map_code}（${range}）· ${s.reason} · 点我配置`,
+      title: `建议：部队${team} ${s.map_code}（${range}）· ${s.reason} · 点击配置或启用`,
       text: s.map_code,
     }
   })
@@ -822,7 +841,7 @@ const suggestionBlocks = computed(() => {
   // 已排联队战就展示正式安排；改过时间的安排也属于已采纳。
   const hasRaid = (editing.value ? draft.value : data.value?.booking?.blocks || [])
     .some(row => row.kind === 'raid' || (row.kind === 'activity' && row.script === 'raid'))
-  return suggestions.filter(s => (s.runs == null || !hasRaid) && !dismissedGameplay.value.includes(s.start_min)).map((s, i) => {
+  return suggestions.filter(s => s.runs == null || !hasRaid).map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
     const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
     const detail = `${s.runs != null ? `${s.runs} 圈 · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
@@ -833,7 +852,7 @@ const suggestionBlocks = computed(() => {
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
       cls: 'tlx-suggest',
-      title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点击配置或移除`,
+      title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点击配置或启用`,
       text: s.runs != null ? `建议 ${s.runs} 圈` : '建议',
       rowTitle: activityLabel,
       rowDetail: `${range} ${detail}`,
@@ -1007,7 +1026,7 @@ const caption = computed(() => {
               <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @click="openExpeditionPopup(lane.team, s.left, s.suggestion)">{{ s.text }}</button>
               <div v-if="expeditionPopup?.team === lane.team" class="tl-popover" :style="{left: popoverLeft(expeditionPopup?.left || 0)}">
                 <strong>部队{{ TEAM_NAMES[lane.team] }}远征 {{ expeditionPopup?.suggestion?.map_code || expeditionPopup?.slot?.map_code }}</strong>
-                <div class="tl-popover-actions"><button type="button" @click="configureExpedition">配置</button><button type="button" @click="removeExpeditionFromPopup">移除</button></div>
+                <div class="tl-popover-actions"><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="configureExpedition">配置</button><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="removeExpeditionFromPopup">{{ expeditionPopup.suggestion || !expeditionPopup.slot?.will_run ? (adoptingSuggestion || togglingExpedition ? '启用中…' : '启用') : '移除' }}</button></div>
               </div>
             </div>
           </template>
@@ -1025,8 +1044,8 @@ const caption = computed(() => {
               <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
               <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
               <div class="tl-popover-actions">
-                <button type="button" @click="editFromPopover">配置</button>
-                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ removing ? '移除中…' : '移除' }}</button>
+                <button type="button" :disabled="removing" @click="editFromPopover">配置</button>
+                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ popover.index === -1 ? (removing ? '启用中…' : '启用') : (removing ? '移除中…' : '移除') }}</button>
               </div>
             </div>
           </div>
