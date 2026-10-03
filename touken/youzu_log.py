@@ -1011,6 +1011,18 @@ def build_ledger(events: list[dict]) -> dict:
         grouped = {}
         for name, amount in delta.items():
             meta = ledger_change_source(ev["endpoint"], resource_requests.get(name, []), detail)
+            # Daily Yosari tickets can be observed after several battle requests.
+            # Those steps are one gameplay flow, not competing resource sources.
+            actions = set(meta.get("candidate_endpoints", []))
+            yosari_steps = {"/sally/parallelpastsally", "/sally/parallelpaststartup",
+                            "/sally/parallelpastforward", "/battle/battle"}
+            if (name == "归城提灯五" and amount < 0
+                    and "/sally/parallelpastsally" in actions
+                    and actions <= yosari_steps):
+                meta = {"source_endpoint": "/sally/parallelpastsally",
+                        "attribution": "inferred", "via": ["异去门票消耗"],
+                        "evidence": "client_ticket_balance_with_yosari_flow"}
+
             if name in rewards:
                 meta = {"source_endpoint": None, "attribution": "inferred",
                         "via": ["来源待确认"], "candidate_endpoints": meta.get("candidate_endpoints", [])}
@@ -1084,6 +1096,49 @@ def _ledger_state_path() -> Path:
     return STATE_DIR / "youzu_ledger_state.json"
 
 
+def _repair_receipt_sources(store, ledger: dict, last_ts: float) -> int:
+    """Correct uniquely matching old receipts; preserve amounts and event identities."""
+    conn = store._conn()
+    updates = {}
+    for change in ledger.get("changes", []):
+        ts = change.get("ts")
+        endpoint = change.get("source_endpoint")
+        if not ts or ts > last_ts or not endpoint:
+            continue
+        for name, delta in change.get("delta", {}).items():
+            matches = []
+            for row in conn.execute("SELECT id, payload FROM events WHERE ts = ? AND script = ? AND event_type = 'resource.change'", (ts, _LEDGER_SCRIPT)):
+                old = json.loads(row["payload"])
+                old_name = old.get("resource")
+                if old_name == "加速符·极":
+                    old_name = "加速符"
+                if old_name == name and old.get("delta") == delta:
+                    matches.append((row["id"], old))
+            if len(matches) != 1:
+                continue
+            event_id, old = matches[0]
+            if old.get("source") != "youzu_log.unknown":
+                continue
+            old.update(source="youzu_log." + endpoint.lstrip("/"),
+                       note="、".join(change["via"]) + f" {name} {delta:+d}",
+                       attribution=change.get("attribution", "inferred"),
+                       evidence=change.get("evidence", "client_reward_list"))
+            updates[event_id] = json.dumps(old, ensure_ascii=False)
+    if updates:
+        # Back up before correcting user-local history; no records are deleted.
+        import sqlite3
+        db_path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
+        backup_dir = db_path.parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{db_path.name}.receipt-sources-{time.time_ns()}.bak"
+        with sqlite3.connect(backup_path) as backup:
+            conn.backup(backup)
+        with conn:
+            conn.executemany("UPDATE events SET payload = ? WHERE id = ?",
+                             [(payload, event_id) for event_id, payload in updates.items()])
+    return len(updates)
+
+
 def write_ledger(store, ledger: dict,
                  state_path: Path | str | None = None) -> dict:
     """把账本写进 TelemetryStore（账房页面直接可见）。
@@ -1104,6 +1159,7 @@ def write_ledger(store, ledger: dict,
         pass
 
     conn = store._conn()
+    repaired_sources = _repair_receipt_sources(store, ledger, last_ts)
     written_obs = written_changes = 0
     max_ts = last_ts
     for obs in ledger["observations"]:
@@ -1156,7 +1212,7 @@ def write_ledger(store, ledger: dict,
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps({"last_ts": max_ts}),
                               encoding="utf-8")
-    return {"observations_written": written_obs,
+    return {"sources_repaired": repaired_sources, "observations_written": written_obs,
             "changes_written": written_changes, "last_ts": max_ts}
 
 

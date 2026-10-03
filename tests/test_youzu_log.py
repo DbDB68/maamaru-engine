@@ -1031,3 +1031,43 @@ def test_old_unknown_source_keeps_explicit_operation():
         assert note.startswith(label)
     source, _ = youzu_log.translate_ledger_source("youzu_log.unknown", "来源待确认 木炭 +1550")
     assert source.startswith("unknown")
+
+
+def test_yosari_daily_ticket_flow_is_one_source(tmp_path):
+    f = tmp_path / "log.txt"
+    lines = [_s2c("2026-10-03 03:23:00", "https://example.test/sally", {
+        "item": {"ticket": {"consumable_id": 6005, "num": 3}}})]
+    for index, endpoint in enumerate(["parallelpastsally", "parallelpaststartup", "parallelpastforward"]):
+        lines.append(_c2s(f"2026-10-03 03:23:0{index + 1}", "POST", "https://example.test/sally/" + endpoint, ""))
+    lines.append(_s2c("2026-10-03 03:24:00", "https://example.test/sally", {
+        "item": {"ticket": {"consumable_id": 6005, "num": 2}}}))
+    f.write_text("\n".join(lines), encoding="utf-8")
+    changes = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"]
+    ticket = next(c for c in changes if c["delta"].get("归城提灯五"))
+    assert ticket["source_endpoint"] == "/sally/parallelpastsally"
+    assert ticket["delta"]["归城提灯五"] == -1
+
+
+def test_receipt_source_repair_is_backed_up_and_idempotent(tmp_path):
+    import json, sqlite3
+    from touken.telemetry import TelemetryStore
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    conn = store._conn()
+    old = {"resource": "木炭", "delta": 1550, "source": "youzu_log.unknown", "before": 10, "after": 1560}
+    conn.execute("INSERT INTO events(ts,run_id,script,event_type,payload) VALUES(100,'kept','youzu_log','resource.change',?)", (json.dumps(old),))
+    conn.commit()
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"last_ts": 200}), encoding="utf-8")
+    ledger = {"observations": [], "changes": [{"ts": 100, "delta": {"木炭": 1550}, "source_endpoint": "/mission/rewards", "via": ["任务奖励"], "attribution": "confirmed", "evidence": "client_reward_list"}]}
+    assert youzu_log.write_ledger(store, ledger, state)["sources_repaired"] == 1
+    assert youzu_log.write_ledger(store, ledger, state)["sources_repaired"] == 0
+    rows = conn.execute("SELECT run_id,payload FROM events").fetchall()
+    assert len(rows) == 1 and rows[0]["run_id"] == "kept"
+    updated = json.loads(rows[0]["payload"])
+    assert updated["source"] == "youzu_log.mission/rewards"
+    assert updated["delta"] == 1550 and updated["before"] == 10 and updated["after"] == 1560
+    backups = list((tmp_path / "backups").glob("*.bak"))
+    assert len(backups) == 1
+    with sqlite3.connect(backups[0]) as backup:
+        assert json.loads(backup.execute("SELECT payload FROM events").fetchone()[0])["source"] == "youzu_log.unknown"
+    store.close()
