@@ -648,7 +648,9 @@ _ENDPOINT_LABEL = {
     "/mission/rewards": "任务奖励", "/receive/get": "收信箱",
     "/composition/compose": "合成", "/composition/union": "习合",
     "/duty/complete": "内番完成", "/home/back": "修行归来",
-    "/monthcard/salary": "月卡俸禄", "/sign/info": "签到",
+    "/monthcard/salary": "月卡俸禄", "/sign/info": "签到", "/sign": "签到",
+    "/sally/recovercost": "补充活动手形",
+    "/shop/buy": "万屋购买", "/sword/dismantle_many": "刀解",
     "/sally/parallelpastsally": "异去出阵",
     "/sally/parallelpastrecovercost": "异去恢复探索次数",
     "/artifact/buybindingagent": "购买碎片结合剂",
@@ -684,7 +686,9 @@ _LEDGER_ENDPOINT_CATEGORIES = {
     "mission/rewards": "task_rewards", "receive/get": "inbox",
     "sally/parallelpastsally": "yosari", "sally/parallelpastrecovercost": "yosari",
     "artifact/buybindingagent": "artifact", "monthcard/salary": "salary",
-    "sign/info": "signin", "composition/compose": "composition",
+    "sign/info": "signin", "sign": "signin",
+    "sally/recovercost": "ticket", "shop/buy": "shop",
+    "sword/dismantle_many": "dismantle", "composition/compose": "composition",
     "composition/union": "union", "duty/complete": "duty", "home/back": "training",
 }
 
@@ -839,26 +843,25 @@ def _reading_from_payload(payload) -> dict | None:
     return reading or None
 
 
-def _payload_koban_reward(payload) -> int:
-    """响应里直接列出的小判收入（item_type=4 的条目合计）。
-
-    不少动作响应没有 currency 块，小判只出现在奖励清单里——
-    /conquest/complete 叫 reward、/mission/rewards 叫 item，结构相同。
-    item_type=5 是资源/委托符（item_id：1=委托符 2=木炭 3=玉钢 4=冷却材
-    5=砥石，2026-09-28 实测），那部分响应自带的 resource 块差值已覆盖，
-    这里只取小判，不重复计。
-    """
+def _payload_resource_rewards(payload) -> dict[str, int]:
+    """Only decode calibrated resource IDs from explicit reward lists."""
+    names = {"1": "委托符", "2": "木炭", "3": "玉钢", "4": "冷却材", "5": "砥石"}
+    rewards = {}
     if not isinstance(payload, dict):
-        return 0
-    total = 0
+        return rewards
     for key in ("reward", "item"):
         entries = payload.get(key)
         if not isinstance(entries, list):
             continue
         for entry in entries:
-            if isinstance(entry, dict) and str(entry.get("item_type")) == "4":
-                total += _int(entry.get("item_num"))
-    return total
+            if not isinstance(entry, dict):
+                continue
+            kind = str(entry.get("item_type"))
+            name = "小判" if kind == "4" else names.get(str(entry.get("item_id"))) if kind == "5" else None
+            amount = _int(entry.get("item_num"))
+            if name and amount > 0:
+                rewards[name] = rewards.get(name, 0) + amount
+    return rewards
 
 
 def build_ledger(events: list[dict]) -> dict:
@@ -866,7 +869,7 @@ def build_ledger(events: list[dict]) -> dict:
 
     原理：每个带资源块的响应是一次精确读数；相邻读数间同一资源的差值，
     归因给夹在中间的那些 C->S 请求的玩法。全部来自服务器响应原文，
-    余额来自原文；只有动作明确时确认来源，混合净差保留待确认。
+    奖励清单优先作为明确收据；余额差只核对剩余变化，混合净差保留待确认。
 
     注意响应是稀疏的（比如 /sally 的 currency 只带 money）：差值只在
     「这次读到了、以前也读到过」的资源上计算，缺键不等于归零。
@@ -906,13 +909,32 @@ def build_ledger(events: list[dict]) -> dict:
                 detail = _conquest_detail_label(ev["endpoint"],
                                                 req.get("payload"))
 
+        # Explicit receipts own their amounts; balance differences only explain
+        # the remainder. Do not manufacture a balance for a receipt without a read.
+        rewards = _payload_resource_rewards(ev.get("payload"))
+        for name, amount in rewards.items():
+            old = last_known.get(name)
+            new = reading.get(name)
+            changes.append({"ts": ts, "delta": {name: amount},
+                "source_endpoint": ev["endpoint"], "attribution": "confirmed",
+                "before": {name: old if new is not None and old is not None and new - old == amount else None},
+                "after": {name: new if new is not None and old is not None and new - old == amount else None},
+                "via": [detail or _ENDPOINT_LABEL.get(ev["endpoint"], (ev["endpoint"] or "?").lstrip("/"))],
+                "via_endpoints": [], "evidence": "client_reward_list"})
+            if new is None and old is not None:
+                last_known[name] = old + amount
+
         delta, before, after = {}, {}, {}
         for name, value in reading.items():
-            if name in last_known and last_known[name] != value:
-                delta[name] = value - last_known[name]
-                before[name] = last_known[name]
-                after[name] = value
-        changed = delta or not last_known
+            if name in last_known:
+                residual = value - last_known[name] - rewards.get(name, 0)
+                if residual:
+                    delta[name] = residual
+                    # A mixed residual is not itself a direct balance pair.
+                    if name not in rewards:
+                        before[name] = last_known[name]
+                        after[name] = value
+        changed = delta or rewards or not last_known
         for name, value in reading.items():
             last_known[name] = value
 
@@ -922,40 +944,18 @@ def build_ledger(events: list[dict]) -> dict:
         grouped = {}
         for name, amount in delta.items():
             meta = ledger_change_source(ev["endpoint"], resource_requests.get(name, []), detail)
+            if name in rewards:
+                meta = {"source_endpoint": None, "attribution": "inferred",
+                        "via": ["来源待确认"], "candidate_endpoints": meta.get("candidate_endpoints", [])}
             key = (meta["source_endpoint"], tuple(meta["via"]), meta["attribution"])
             ch = grouped.setdefault(key, {"ts": ts, "delta": {}, "before": {},
                 "after": {}, "via_endpoints": [r["endpoint"] for r in resource_requests.get(name, [])], **meta})
             ch["delta"][name] = amount
-            ch["before"][name] = before[name]
-            ch["after"][name] = after[name]
+            ch["before"][name] = before.get(name)
+            ch["after"][name] = after.get(name)
         changes.extend(grouped.values())
         for name in reading:
             resource_requests[name] = []
-
-        # 小判（currency.money）在不少动作响应里没有容器：complete 没有
-        # currency 块，mission/rewards 也没有——小判只列在奖励清单里
-        # （item_type=4，见 _payload_koban_reward）。按原文补记一笔并把
-        # 水位线同步推高，否则同一笔小判会拖到下一次带 currency 的轮询
-        # 才爆出来、归到不相干的端点头上（2026-09-28 实测：任务奖励的
-        # 小判+250 拖了两个钟头，差点赖给 party/list）。
-        # 响应自己已带小判读数时跳过（读数已是发奖后的值，不能再加）。
-        koban = _payload_koban_reward(ev.get("payload")) \
-            if "小判" not in reading else 0
-        if koban:
-            before_k = last_known.get("小判")
-            after_k = (before_k + koban) if before_k is not None else None
-            changes.append({
-                "ts": ts,
-                "delta": {"小判": koban},
-                "source_endpoint": ev["endpoint"], "attribution": "confirmed",
-                "before": {"小判": before_k},
-                "after": {"小判": after_k},
-                "via": [detail or _ENDPOINT_LABEL.get(
-                    ev["endpoint"], (ev["endpoint"] or "?").lstrip("/"))],
-                "via_endpoints": [r["endpoint"] for r in pending_requests],
-            })
-            if after_k is not None:
-                last_known["小判"] = after_k
 
         # 远征经验账：result 块有审神者经验（exp 是发奖后的总值，
         # before = exp - user_exp 反推）；sword 块每刀带 get_exp，
@@ -1068,6 +1068,7 @@ def write_ledger(store, ledger: dict,
                 "candidate_endpoints": ch.get("candidate_endpoints", []),
                 "note": f"{via} {name} {delta:+d}",
                 "attribution": ch.get("attribution", "inferred"),
+                "evidence": ch.get("evidence", "client_balance_difference"),
             }
             conn.execute(
                 "INSERT INTO events(ts, run_id, script, event_type, payload) "

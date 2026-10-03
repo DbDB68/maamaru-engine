@@ -405,12 +405,13 @@ def test_conquest_complete_koban_reward(tmp_path):
     assert len(koban_changes) == 1
     ch = koban_changes[0]
     assert ch["delta"] == {"小判": 200}
-    assert ch["before"] == {"小判": 570}
-    assert ch["after"] == {"小判": 770}
+    assert ch["before"] == {"小判": None}
+    assert ch["after"] == {"小判": None}
     assert ch["via"][0].startswith("远征完成·四队·B1")
     # 资源差值照常走 resource 块，不受影响
     res = [c for c in ledger["changes"] if "冷却材" in c["delta"]]
-    assert res and res[0]["delta"] == {"冷却材": 135, "砥石": 135}
+    assert sum(c["delta"].get("冷却材", 0) for c in ledger["changes"]) == 135
+    assert sum(c["delta"].get("砥石", 0) for c in ledger["changes"]) == 135
 
 
 def test_mission_rewards_koban_from_item_list(tmp_path):
@@ -443,8 +444,8 @@ def test_mission_rewards_koban_from_item_list(tmp_path):
     koban = [c for c in ledger["changes"] if "小判" in c["delta"]]
     assert len(koban) == 1
     assert koban[0]["delta"] == {"小判": 250}
-    assert koban[0]["before"] == {"小判": 1000}
-    assert koban[0]["after"] == {"小判": 1250}
+    assert koban[0]["before"] == {"小判": None}
+    assert koban[0]["after"] == {"小判": None}
     assert koban[0]["via"] == ["任务奖励"]
     # item 里的资源条目不重复计（resource 块差值已覆盖）
     res = [c for c in ledger["changes"] if "木炭" in c["delta"]]
@@ -892,3 +893,30 @@ def test_legacy_conflicting_signin_label_is_not_reassigned_as_fact():
         "youzu_log.sally/parallelpastsally", "签到 三所物·狮子碎片 +1")
     assert source == "unknown.youzu_log"
     assert label == "来源待确认"
+
+
+def test_explicit_reward_keeps_mixed_balance_remainder_unknown(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {"resource": {"charcoal": 100}}),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/composition/compose", ""),
+        _s2c("2026-09-28 13:02:00", "https://example.test/mission/rewards", {
+            "resource": {"charcoal": 140},
+            "item": [{"item_type": 5, "item_id": 2, "item_num": 50}]}),
+        _s2c("2026-09-28 13:03:00", "https://example.test/home", {"resource": {"charcoal": 140}}),
+    ]), encoding="utf-8")
+    changes = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"]
+    receipt = next(c for c in changes if c["source_endpoint"] == "/mission/rewards")
+    remainder = next(c for c in changes if c["source_endpoint"] is None)
+    assert receipt["delta"] == {"木炭": 50}
+    assert receipt["evidence"] == "client_reward_list"
+    assert remainder["delta"] == {"木炭": -10}
+    assert remainder["attribution"] == "inferred"
+    assert len(changes) == 2
+
+
+def test_calibrated_operation_labels():
+    for endpoint in ("/sally/recovercost", "/sword/dismantle_many", "/shop/buy", "/sign"):
+        source = youzu_log.ledger_change_source(endpoint, [{"endpoint": endpoint}])
+        assert source["attribution"] == "confirmed"
+        assert source["source_endpoint"] == endpoint
