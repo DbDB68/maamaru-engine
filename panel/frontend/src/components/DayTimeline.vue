@@ -1120,9 +1120,12 @@ const caption = computed(() => {
             <strong>{{ blockLabel(row.block) }}</strong>
             <div class="tl-popover-actions"><button type="button" @click="editFromPopover">配置</button><button type="button" :disabled="removing" @click="removeFromSchedule">移除</button></div>
           </div>
-          <ol v-if="row.block.steps?.length" class="tl-flow-steps" aria-label="任务流的执行顺序">
+          <details v-if="row.block.steps?.length" class="tl-booked-steps">
+          <summary>查看步骤</summary>
+          <ol class="tl-flow-steps" aria-label="任务流的执行顺序">
             <li v-for="(step, index) in row.block.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
           </ol>
+          </details>
           </div>
         </div>
         <dialog v-if="editing" ref="planEditorDialog" class="tl-plan-dialog tl-booking-editor" @cancel="editing = false">
@@ -1192,6 +1195,8 @@ const caption = computed(() => {
 .tl-expedition-dialog footer { display: flex; gap: 12px; margin-top: 24px; }
 
 .tl-flow-steps { flex-basis: 100%; margin: 8px 0; padding-left: 22px; color: var(--ink-dim); font-size: 12px; }
+.tl-booked-steps { margin-top: 6px; }
+.tl-booked-steps summary { width: fit-content; cursor: pointer; color: var(--ink-dim); font-size: 12px; }
 .tl-flow-steps li { padding: 4px 0; overflow-wrap: anywhere; }
 .tl-flow-steps li span { margin-right: 10px; }
 .tl-flow-steps li b { color: var(--ink); font-weight: 500; }
