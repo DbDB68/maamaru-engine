@@ -52,3 +52,15 @@ describe('honmaru journal facts', () => {
     expect(posts[1]!.facts).toEqual(['任务奖励', '火车切'])
   })
 })
+
+it('uses receipt captains and separates changed captains in the same team', () => {
+  const receipt = (id: number, serial: number) => ({ id, ts, event_type: 'expedition.settled', payload: {
+    team_no: 5, map_code: 'C4', captain: { name: '小豆长光·极', serial_id: serial, sword_id: 149 }, rewards: { 砥石: 750 },
+  } })
+  const posts = buildJournalPosts([receipt(1, 1), receipt(2, 2)])
+  expect(posts).toHaveLength(2)
+  expect(posts[0]!.author).toBe('小豆长光·极')
+  expect(posts[0]!.avatar).toBe('/api/journal/avatar/149')
+  expect(posts[0]!.text).toContain('C4')
+  expect(posts[0]!.facts).toEqual(['砥石 +750'])
+})

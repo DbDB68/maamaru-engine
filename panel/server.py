@@ -3077,6 +3077,16 @@ def api_home_situation():
         raise HTTPException(503, "本丸近况暂时读不到，原记录已保留。") from exc
 
 
+@app.get('/api/journal/avatar/{sword_id}')
+def api_journal_avatar(sword_id: int):
+    if sword_id < 1 or sword_id > 9999:
+        raise HTTPException(404, '暂无头像')
+    portraits = sorted((RESOURCE_DIR / 'image' / '头像').glob(f'{sword_id:04d}_*.png'))
+    if not portraits:
+        raise HTTPException(404, '暂无头像')
+    return FileResponse(str(portraits[0]), media_type='image/png')
+
+
 @app.post("/api/honmaru-home/situation/refresh")
 def api_refresh_home_situation():
     from touken import youzu_log

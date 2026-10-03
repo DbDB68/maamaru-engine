@@ -91,7 +91,8 @@ def build_receipts(events):
     from .inbox_receipts import build_inbox_receipts, link_receipt_serials, observed_swords
     swords = observed_swords(events)
     link_receipt_serials(receipts, swords)
-    return receipts + build_inbox_receipts(events, swords)
+    from .expedition_receipts import build_expedition_receipts
+    return receipts + build_inbox_receipts(events, swords) + build_expedition_receipts(events)
 
 
 def write_receipts(store, receipts):
@@ -105,7 +106,7 @@ def write_receipts(store, receipts):
         rows = conn.execute(
             "SELECT id, ts, run_id, script, event_type, payload FROM events "
             "WHERE ts BETWEEN ? AND ? AND event_type IN "
-            "('forge.collected', 'sword.obtained', 'sword.drop_unrecognized', 'sword.inbox_received')",
+            "('forge.collected', 'sword.obtained', 'sword.drop_unrecognized', 'sword.inbox_received', 'expedition.settled')",
             (min(r["ts"] for r in receipts) - 90,
              max(r["ts"] for r in receipts) + 90)).fetchall()
         existing = [dict(zip(("id", "ts", "run_id", "script", "event_type", "payload"), row))
@@ -126,6 +127,10 @@ def write_receipts(store, receipts):
                         and p.get("slot") == old.get("slot")
                         and (not old.get("name") or old["name"] in
                              [s["name"] for s in p["swords"]]))
+            if receipt["event_type"] == "expedition.settled":
+                return (row['event_type'] == 'expedition.settled'
+                        and p['team_no'] == old.get('team_no')
+                        and p['era'] == old.get('era') and p['slot'] == old.get('slot'))
             return (receipt["event_type"] == "sword.obtained" and p.get("source") == "sortie.drop"
                     and row["event_type"] in ("sword.obtained", "sword.drop_unrecognized")
                     and old.get("source") == "sortie.drop"

@@ -21,7 +21,7 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
     if (seen.has(key)) continue
     seen.add(key)
     const source = kind === 'drop' ? `${p.source || ''}:${p.chapter || ''}:${p.map_no || ''}`
-      : kind === 'expedition' ? String(p.team_no || '') : ''
+      : kind === 'expedition' ? `${p.team_no || ''}:${p.captain?.serial_id || ''}:${p.map_code || ''}` : ''
     const group = `${kind}|${source}|${shanghaiDate(Number(event.ts))}`
     const list = batches.get(group) || []
     list.push({ ts: Number(event.ts), key, payload: p })
@@ -87,6 +87,12 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
           if (typeof amount === 'number' && Number.isFinite(amount)) rewards.set(name, (rewards.get(name) || 0) + amount)
         }
         facts = [...rewards].map(([name, value]) => `${name} ${signed(value)}`)
+        const captain = first.payload.captain
+        if (captain?.name && captain.serial_id > 0 && captain.sword_id > 0) {
+          author = captain.name
+          avatar = `/api/journal/avatar/${captain.sword_id}`
+          text = `我们${first.payload.map_code ? `从 ${first.payload.map_code}` : ''}回来了。带回的东西都放在这里。`
+        }
       }
       posts.push({ key: `journal-${kind}-${first.key}`, ts: last.ts, title, text, label, icon, scene, facts, author, avatar, firstObtained })
     }
