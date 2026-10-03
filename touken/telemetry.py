@@ -1247,7 +1247,8 @@ class TelemetryStore:
         asset_row = self._conn().execute(
             "SELECT ts, payload FROM events WHERE script = 'youzu_log' AND event_type = 'game_assets.captured' AND ts <= ? ORDER BY ts DESC, id DESC LIMIT 1",
             (time.time() if to_ts is None else float(to_ts),)).fetchone()
-        assets = {**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]} if asset_row else None
+        from .client_equipment import name_client_assets
+        assets = name_client_assets({**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]}) if asset_row else None
         return {"assets": assets, "items": items, "koban_boxes": boxes,
                 "koban_reserve": sum(v["count"] * v["value_each"] for v in boxes.values()) if complete else None,
                 "koban_reserve_known": sum(v["count"] * v["value_each"] for v in boxes.values())}
