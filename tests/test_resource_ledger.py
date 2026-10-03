@@ -22,6 +22,13 @@ class ResourceLedgerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.store = TelemetryStore(Path(self.temp.name) / "telemetry.db")
 
+    def test_receipt_keeps_recorded_workflow_name(self):
+        self.store.start_run("named", "workflow", started_at=100, label="晚间收菜")
+        self._event(110, "resource.change", {"resource": "小判", "delta": 500,
+                    "source": "inbox", "label": "领取收信箱"}, run_id="named", script="workflow")
+        ledger = self.store.resource_ledger(100, 120)
+        self.assertEqual(ledger["attributions"][0]["run_label"], "晚间收菜")
+
     def tearDown(self):
         self.store.close()
         self.temp.cleanup()

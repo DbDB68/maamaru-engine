@@ -164,6 +164,7 @@ export interface ClientInventory {
 }
 
 export interface LedgerAttribution {
+  run_label?: string
   raw_source?: string
   execution_script?: string
   evidence_ids?: number[]

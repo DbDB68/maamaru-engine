@@ -1306,7 +1306,21 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
               </li>
             </ul>
           </section>
-          <dialog v-if="inventoryFormOpen" ref="inventoryEditor" class="ledger-editor-dialog" @cancel.prevent="!inventorySaving && (inventoryFormOpen = false, editingInventoryId = null)">
+
+          <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
+        </section>
+
+
+
+
+
+        </details>
+        <section v-if="props.ledgerMode && unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
+          <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
+        </section>
+      </template>
+
+<dialog v-if="inventoryFormOpen" ref="inventoryEditor" class="ledger-editor-dialog" @cancel.prevent="!inventorySaving && (inventoryFormOpen = false, editingInventoryId = null)">
 <form class="manual-inventory-form" @submit.prevent="saveManualInventory">
             <header><div><h4>{{ editingInventoryId ? '修改家底记录' : '更新当前家底' }}</h4><p>不确定的项目可以留空，修改后会重新计算前后账目。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false; editingInventoryId = null">×</button></header>
             <label class="manual-inventory-time">记录时间<input v-model="inventoryObservedAt" type="datetime-local" required></label>
@@ -1314,10 +1328,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '保存中……' : editingInventoryId ? '保存修改' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false; editingInventoryId = null">取消</button></div>
           <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
-          <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
-        </section>
-
-        <dialog v-if="manualSessionFormOpen" ref="sessionEditor" class="ledger-editor-dialog" @cancel.prevent="!manualSessionSaving && (manualSessionFormOpen = false, editingManualSessionId = null)">
+<dialog v-if="manualSessionFormOpen" ref="sessionEditor" class="ledger-editor-dialog" @cancel.prevent="!manualSessionSaving && (manualSessionFormOpen = false, editingManualSessionId = null)">
 <form class="manual-session-form" @submit.prevent="saveManualSession">
           <header><div><h4>{{ editingManualSessionId ? '修改手动活动' : '补记一段活动' }}</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false; editingManualSessionId = null">×</button></header>
           <div class="manual-session-fields">
@@ -1330,8 +1341,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '保存中……' : editingManualSessionId ? '保存修改' : '记下这段活动' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false; editingManualSessionId = null">取消</button></div>
         <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
-
-        <dialog v-if="reportMode" ref="reportEditor" class="ledger-editor-dialog" @cancel.prevent="!reportSaving && (reportMode = '', reportGap = null, editingManualReport = null)">
+<dialog v-if="reportMode" ref="reportEditor" class="ledger-editor-dialog" @cancel.prevent="!reportSaving && (reportMode = '', reportGap = null, editingManualReport = null)">
 <form class="report-form" @submit.prevent="saveHumanReport(false)">
           <header class="report-form-heading"><div><h4>{{ reportGap ? '补上这段账' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '补上这笔账' : '记一笔收支' }}</h4><p>{{ reportGap || reportForm.claim_limit != null ? '只补你能确定的，想不起来可以选“记不清了”。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>待补：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
@@ -1345,13 +1355,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '保存中……' : editingManualReport ? '保存修改' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null; editingManualReport = null">取消</button></div>
         <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
-
-        </details>
-        <section v-if="props.ledgerMode && unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
-          <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
-        </section>
-      </template>
-
       <ReportRecords v-if="props.ledgerMode && view === 'records'" :attributions="recordReceipts" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 

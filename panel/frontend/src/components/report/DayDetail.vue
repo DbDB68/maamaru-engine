@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { HumanReport, InventoryGap, LedgerAttribution, ManualSession } from '../../types'
-import { resourceLabel, categoryLabel, dayLabel, eventTime, recordOrigin, scriptNames, signed } from './reportModel'
+import { resourceLabel, categoryLabel, dayLabel, eventTime, recordOrigin, runTitle, signed } from './reportModel'
 
 const props = defineProps<{
   date: string
@@ -25,7 +25,7 @@ const groupedAttributions = computed(() => {
   const groups: { ts: number; tsEnd: number; label: string; source: string; script: string; delta: number; count: number }[] = []
   for (const item of sortedAttributions.value) {
     const label = item.label || categoryLabel(item.source)
-    const script = recordOrigin(item)
+    const script = recordOrigin(item, props.runs)
     const delta = Number(item.delta || 0)
     const last = groups[groups.length - 1]
     if (last && last.label === label && last.script === script && last.delta === delta) {
@@ -49,14 +49,14 @@ function reportSource(report: HumanReport): string {
 function runSummary(): string {
   const groups = new Map<string, { count: number; loops: number }>()
   for (const run of props.runs) {
-    const script = String(run.script || '')
+    const script = runTitle({ ...run, loops: 0 })
     const current = groups.get(script) || { count: 0, loops: 0 }
     current.count += 1
     current.loops += Number(run.loops || 0)
     groups.set(script, current)
   }
   return [...groups.entries()].map(([script, value]) => {
-    const name = scriptNames[script] || '挂机任务'
+    const name = script
     return value.loops > 0 ? `${name} ${value.loops} 圈` : `${name} ${value.count} 次`
   }).join(' · ')
 }
@@ -97,14 +97,13 @@ function recordDateLabel(date: string): string {
   <section class="day-detail" aria-live="polite">
     <header>
       <div>
-        <small>{{ date }}</small>
-        <h4>{{ dayLabel(date) }} · {{ resourceLabel(resource) }} {{ signed(totalDelta) }}<template v-if="highlightCategory"> · 看「{{ categoryLabel(highlightCategory) }}」这部分</template></h4>
+        <h4>{{ dayLabel(date) }} · {{ resourceLabel(resource) }} {{ signed(totalDelta) }}<template v-if="highlightCategory"> · {{ categoryLabel(highlightCategory) }}</template></h4>
       </div>
       <button type="button" class="secondary" @click="emit('close')">收起</button>
     </header>
 
     <p class="day-detail-total">
-      自动记录已对上 {{ signed(attributedTotal) }}<template v-if="claimedAmount"> · 你补记了 {{ signed(claimedAmount) }}</template><template v-if="unexplained"> · 还有 <b>{{ signed(unexplained) }}</b> 没对上</template>
+      已记录 {{ signed(attributedTotal) }}<template v-if="claimedAmount"> · 你补记了 {{ signed(claimedAmount) }}</template><template v-if="unexplained"> · 还有 <b>{{ signed(unexplained) }}</b> 来源未确认</template>
     </p>
 
     <details v-if="needsRecall && recallClues.length" class="day-detail-recall" aria-label="回忆线索">
@@ -139,9 +138,6 @@ function recordDateLabel(date: string): string {
     </div>
 
     <div v-if="!gaps.length && unexplained" class="day-detail-gap">
-      <div>
-        <small>未对上的部分按天估算；只补你能确定的。</small>
-      </div>
       <button type="button" class="primary" @click="emit('report-day')">补账</button>
     </div>
   </section>
@@ -171,7 +167,7 @@ function recordDateLabel(date: string): string {
 .day-detail-records:hover { color: var(--fox-gold-deep); background: var(--fox-gold-pale); }
 .day-detail-records em { color: var(--fox-gold-deep); font-style: normal; white-space: nowrap; }
 .day-detail-empty { margin: 0; color: var(--ink-dim); }
-.day-detail-gap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
+.day-detail-gap { display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
 .day-detail-gap p { margin: 2px 0; }
 @media (max-width: 600px) {
   .day-detail-recall > header { align-items: flex-start; flex-direction: column; gap: 2px; }

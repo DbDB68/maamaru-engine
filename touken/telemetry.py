@@ -1678,6 +1678,17 @@ class TelemetryStore:
                           and opening is not closing)
             return opening, closing, within, paired
 
+        # Keep the recorded workflow name with its receipts, including historical runs.
+        run_ids = {a.get("run_id") for a in [*attributions, *unresolved_changes] if a.get("run_id")}
+        run_labels = {}
+        for run_id in run_ids:
+            run = conn.execute("SELECT label FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run and run["label"]:
+                run_labels[run_id] = run["label"]
+        for item in [*attributions, *unresolved_changes]:
+            if item.get("run_id") in run_labels:
+                item["run_label"] = run_labels[item["run_id"]]
+
         per_resource = []
         for name in LEDGER_RESOURCES:
             opening, closing, within, paired = _pair(

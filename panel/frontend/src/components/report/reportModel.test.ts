@@ -47,6 +47,8 @@ describe('game receipts and caretaker execution', () => {
   it('labels game evidence separately from a linked execution', () => {
     const a = receipt('木炭', 15, 1)
     expect(recordOrigin(a)).toBe('游戏记录')
+    expect(recordOrigin({ ...a, run_label: '晚间收菜', execution_script: 'workflow' })).toBe('游戏记录 · まあ丸执行晚间收菜')
+    expect(recordOrigin({ ...a, script: 'workflow', run_id: 'named' }, [{ run_id: 'named', label: '一键日课' }])).toBe('まあ丸 · 一键日课')
     expect(recordOrigin({ ...a, run_id: 'run-a', execution_script: 'expedition' })).toBe('游戏记录 · まあ丸执行远征')
     expect(gameLedgerRecords([{ ...a, script: 'expedition' }])).toEqual([])
   })

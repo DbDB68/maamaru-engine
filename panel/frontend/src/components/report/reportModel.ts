@@ -20,7 +20,7 @@ export const sourceCategories: SourceCategory[] = [
   { key: 'artifact', label: '宝物道具', color: '#957963' },
   { key: 'other', label: '其他来源', color: '#c7b299' },
   { key: 'human', label: '你补记的', color: '#a89c8d' },
-  { key: 'unknown', label: '还不知道', color: '#ddd6cb' },
+  { key: 'unknown', label: '来源未确认', color: '#ddd6cb' },
 ]
 
 export const resourceColors: Record<string, string> = {
@@ -37,12 +37,14 @@ export function categoryLabel(key: string): string {
   return sourceCategories.find(item => item.key === key)?.label || key
 }
 
-export function recordOrigin(item: LedgerAttribution): string {
+export function recordOrigin(item: LedgerAttribution, runs: any[] = []): string {
   if (item.script === 'manual' || item.source.startsWith('human')) return '你补记的'
+  const run = runs.find(run => run.run_id === item.run_id)
+  const name = item.run_label?.trim() || run?.label?.trim() || scriptNames[item.execution_script || item.script || ''] || ''
   if (item.script === 'youzu_log') {
-    return item.execution_script ? `游戏记录 · まあ丸执行${scriptNames[item.execution_script] || ''}` : '游戏记录'
+    return item.execution_script || item.run_label || run?.label ? `游戏记录 · まあ丸执行${name}` : '游戏记录'
   }
-  return `まあ丸${scriptNames[item.script || ''] ? ` · ${scriptNames[item.script || '']}` : ''}`
+  return `まあ丸${name ? ` · ${name}` : ''}`
 }
 
 export function gameLedgerRecords(attributions: LedgerAttribution[]) {
