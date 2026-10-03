@@ -3,6 +3,7 @@ import { shanghaiDate, signed } from './components/report/reportModel'
 export interface JournalPost {
   key: string; ts: number; title: string; text: string; label: string
   scene: string; icon: string; facts: string[]
+  author: string; avatar?: string; firstObtained?: boolean
 }
 
 // 同类、同一来源的一小批操作合成一张小报；保留真实时间，不随机改写旧动态。
@@ -53,9 +54,14 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
       for (const sword of swords) if (sword.name) names.set(sword.name, (names.get(sword.name) || 0) + 1)
       const nameFacts = [...names].map(([name, count]) => `${name}${count > 1 ? ` ×${count}` : ''}`)
       let title = '', text = '', label = '', icon = '', scene = 'honmaru_garden_stage.png', facts = nameFacts
+      let author = '狐之助', avatar: string | undefined, firstObtained = false
       if (kind === 'forge') {
-        title = '炉火歇了，新刀来了'; label = '锻刀手记'; icon = 'forge.png'; scene = 'honmaru_forge_stage.png'
-        text = `收下了 ${swords.length} 振锻好的刀。今天的炉边又热闹了一些。`
+        author = '刀匠'; avatar = '/static/img/ui/forge-smith-avatar.png'
+        const newcomers = [...new Set(swords.filter(s => s.is_first_get_sword === true && s.name).map(s => s.name))]
+        firstObtained = newcomers.length > 0
+        title = firstObtained ? `${newcomers.join('、')}，锻出来了！` : swords.length === 1 ? '这一炉，锻好了。' : '这批刀，锻好了。'
+        label = '锻刀手记'; icon = 'forge.png'; scene = 'honmaru_forge_stage.png'
+        text = firstObtained ? `第一次迎来${newcomers.map(name => `【${name}】`).join('、')}！${swords.length > 1 ? `这批一共收下 ${swords.length} 振刀。` : '快来看看吧。'}` : `收下了 ${swords.length} 振刀，炉边又忙完一阵。`
       } else if (kind === 'drop') {
         title = '归途中，迎来了新伙伴'; label = '出阵见闻'; icon = 'sortie.png'; scene = 'honmaru_sortie_stage.png'
         const route = first.payload.chapter && first.payload.map_no ? `${first.payload.chapter}-${first.payload.map_no}`
@@ -82,7 +88,7 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
         }
         facts = [...rewards].map(([name, value]) => `${name} ${signed(value)}`)
       }
-      posts.push({ key: `journal-${kind}-${first.key}`, ts: last.ts, title, text, label, icon, scene, facts })
+      posts.push({ key: `journal-${kind}-${first.key}`, ts: last.ts, title, text, label, icon, scene, facts, author, avatar, firstObtained })
     }
   }
   return posts.sort((a, b) => b.ts - a.ts)

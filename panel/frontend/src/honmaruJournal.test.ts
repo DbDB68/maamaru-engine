@@ -10,7 +10,22 @@ describe('honmaru journal facts', () => {
     expect(posts).toHaveLength(1)
     expect(posts[0]!.text).toContain('3 振')
     expect(posts[0]!.facts).toEqual(['今剑 ×2', '岩融'])
+    expect(posts[0]!.author).toBe('刀匠')
+    expect(posts[0]!.firstObtained).toBe(false)
     expect(buildJournalPosts([first, second])[0]!.key).toBe(posts[0]!.key)
+  })
+  it('celebrates only client-confirmed first acquisitions, including manual collection', () => {
+    const receipt = { id: 7, ts, script: 'youzu_log', event_type: 'forge.collected', payload: { receipt_key: 'manual', swords: [
+      { name: '火车切', serial_id: 123, is_first_get_sword: true },
+      { name: '今剑', serial_id: 124, is_first_get_sword: false },
+    ] } }
+    const post = buildJournalPosts([receipt, receipt])[0]!
+    expect(post.author).toBe('刀匠')
+    expect(post.title).toBe('火车切，锻出来了！')
+    expect(post.text).toContain('2 振')
+    expect(post.avatar).toContain('forge-smith-avatar')
+    expect(post.firstObtained).toBe(true)
+    expect(buildJournalPosts([{ ...receipt, payload: { name: '火车切' } }])[0]!.firstObtained).toBe(false)
   })
   it('keeps different maps and separate batches distinct', () => {
     const drop = (id: number, time: number, map: string) => ({ id, ts: time, event_type: 'sword.obtained', payload: { name: '今剑', chapter: '1', map_no: map } })
