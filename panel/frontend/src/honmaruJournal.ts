@@ -1,4 +1,7 @@
 import { shanghaiDate, signed } from './components/report/reportModel'
+import expeditionData from '../../../touken/data/expedition_maps.json'
+
+const expeditionMaps: Record<string, { name: string }> = expeditionData.maps
 
 export interface JournalPost {
   key: string; ts: number; title: string; text: string; label: string
@@ -79,6 +82,10 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
         }).filter(Boolean)
         text = '整理妥当，留下一页小记。'
       } else {
+        const p = first.payload
+        const mapCode = p.map_code || (p.era >= 1 && p.era <= 5 && p.slot >= 1 && p.slot <= 4
+          ? `${'ABCDE'[p.era - 1]}${p.slot}` : '')
+        const destination = expeditionMaps[mapCode]?.name || p.map_name || ''
         title = first.payload.team_no ? `第 ${first.payload.team_no} 部队回来了` : '远征的部队回来了'
         label = '远征来信'; icon = 'expedition.png'
         text = '一路辛苦，带回来的收获收好了。'
@@ -91,7 +98,8 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
         if (captain?.name && captain.serial_id > 0 && captain.sword_id > 0) {
           author = captain.name
           avatar = `/api/journal/avatar/${captain.sword_id}`
-          text = `我们${first.payload.map_code ? `从 ${first.payload.map_code}` : ''}回来了。带回的东西都放在这里。`
+          text = destination ? `${destination}远征回来了。带回的东西都放在这里。`
+            : '我们远征回来了。带回的东西都放在这里。'
         }
       }
       posts.push({ key: `journal-${kind}-${first.key}`, ts: last.ts, title, text, label, icon, scene, facts, author, avatar, firstObtained })

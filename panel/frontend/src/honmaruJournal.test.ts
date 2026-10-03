@@ -61,6 +61,6 @@ it('uses receipt captains and separates changed captains in the same team', () =
   expect(posts).toHaveLength(2)
   expect(posts[0]!.author).toBe('小豆长光·极')
   expect(posts[0]!.avatar).toBe('/api/journal/avatar/149')
-  expect(posts[0]!.text).toContain('C4')
+  expect(posts[0]!.text).toContain('天下布武远征回来了')
   expect(posts[0]!.facts).toEqual(['砥石 +750'])
 })

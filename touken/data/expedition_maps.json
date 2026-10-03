@@ -252,7 +252,7 @@
   "C1": {
    "era": 3,
    "slot": 1,
-   "name": "",
+   "name": "美浓国决战",
    "duration_min": 240,
    "exp_saniwa": 260,
    "exp_sword": 760,
@@ -281,7 +281,7 @@
   "C2": {
    "era": 3,
    "slot": 2,
-   "name": "",
+   "name": "举起反旗的原因",
    "duration_min": 180,
    "exp_saniwa": 210,
    "exp_sword": 700,
@@ -312,7 +312,7 @@
   "C3": {
    "era": 3,
    "slot": 3,
-   "name": "",
+   "name": "安土城的警备",
    "duration_min": 600,
    "exp_saniwa": 630,
    "exp_sword": 2325,
@@ -341,7 +341,7 @@
   "C4": {
    "era": 3,
    "slot": 4,
-   "name": "",
+   "name": "天下布武",
    "duration_min": 480,
    "exp_saniwa": 510,
    "exp_sword": 1860,
@@ -370,7 +370,7 @@
   "D1": {
    "era": 4,
    "slot": 1,
-   "name": "",
+   "name": "长篠城攻城战",
    "duration_min": 120,
    "exp_saniwa": 160,
    "exp_sword": 540,
@@ -399,7 +399,7 @@
   "D2": {
    "era": 4,
    "slot": 2,
-   "name": "",
+   "name": "西上作战",
    "duration_min": 300,
    "exp_saniwa": 340,
    "exp_sword": 1345,
@@ -428,7 +428,7 @@
   "D3": {
    "era": 4,
    "slot": 3,
-   "name": "",
+   "name": "甲相骏三国同盟",
    "duration_min": 720,
    "exp_saniwa": 770,
    "exp_sword": 3600,
@@ -457,7 +457,7 @@
   "D4": {
    "era": 4,
    "slot": 4,
-   "name": "",
+   "name": "比叡山延历寺",
    "duration_min": 360,
    "exp_saniwa": 400,
    "exp_sword": 1610,
@@ -544,7 +544,7 @@
   "E3": {
    "era": 5,
    "slot": 3,
-   "name": "",
+   "name": "备齐流镝马",
    "duration_min": 900,
    "exp_saniwa": 950,
    "exp_sword": 4500,
