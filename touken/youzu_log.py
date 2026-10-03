@@ -896,6 +896,7 @@ def build_ledger(events: list[dict]) -> dict:
     pending_requests: list[dict] = []  # 当前响应前的请求
     resource_requests: dict[str, list[dict]] = {}
     inbox_entries: dict[str, dict] = {}
+    assets = []
 
     for ev in events:
         if ev["direction"] == "C->S":
@@ -916,8 +917,21 @@ def build_ledger(events: list[dict]) -> dict:
             for entry in payload["receive"].values():
                 if isinstance(entry, dict) and entry.get("serial_id") is not None:
                     inbox_entries[str(entry["serial_id"])] = entry
+        if ev["endpoint"] in ("/party/list", "/sally"):
+            fields = {"equip": ("serial_id", "equip_id", "soldier"),
+                      "artifact": ("serial_id", "artifact_id", "level", "usage_score", "equip_sword_serial_id"),
+                      "sword": ("serial_id", "sword_id", "equip_serial_id1", "equip_serial_id2", "equip_serial_id3", "horse_serial_id", "item_id", "artifact_serial_id1", "artifact_serial_id2")}
+            observed = {name: [{k: row[k] for k in keys if k in row} for row in payload[name].values() if isinstance(row, dict)]
+                        for name, keys in fields.items() if isinstance(payload.get(name), dict)}
+            if observed:
+                assets.append({"ts": _event_epoch(ev), "source": "youzu_log", **observed})
         reading = _reading_from_payload(ev.get("payload"))
         reading = reading or {}
+        # These responses contain the complete held consumable inventory;
+        # absence there means zero, unlike missing fields in sparse responses.
+        if ev["endpoint"] in ("/login/start", "/sally", "/shop/list") and isinstance(payload.get("item"), dict):
+            for name in ITEM_NAMES.values():
+                reading.setdefault(name, 0)
         ts = _event_epoch(ev)
 
         # 远征细分标签：complete 响应原文自带 party_no+field_id；start 的
@@ -1039,7 +1053,7 @@ def build_ledger(events: list[dict]) -> dict:
                 })
         pending_requests = []
 
-    return {"observations": observations, "changes": changes}
+    return {"observations": observations, "changes": changes, "assets": assets}
 
 
 def format_ledger(ledger: dict) -> str:
@@ -1122,6 +1136,13 @@ def write_ledger(store, ledger: dict,
                 (ts, _LEDGER_SCRIPT, json.dumps(payload, ensure_ascii=False)))
             written_changes += 1
         max_ts = max(max_ts, ts)
+    for snapshot in ledger.get("assets", []):
+        ts = snapshot.get("ts")
+        if ts:
+            encoded = json.dumps(snapshot, ensure_ascii=False)
+            conn.execute("INSERT INTO events(ts, run_id, script, event_type, payload) SELECT ?, NULL, ?, 'game_assets.captured', ? WHERE NOT EXISTS (SELECT 1 FROM events WHERE ts = ? AND script = ? AND event_type = 'game_assets.captured' AND payload = ?)",
+                         (ts, _LEDGER_SCRIPT, encoded, ts, _LEDGER_SCRIPT, encoded))
+            max_ts = max(max_ts, ts)
     conn.commit()
 
     if max_ts > last_ts:

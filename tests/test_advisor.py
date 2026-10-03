@@ -1646,3 +1646,23 @@ class FragmentGoalTests(unittest.TestCase):
         # 表单下拉和指引卡用的碎片途径卡也在汇总里
         self.assertIn("曜变天目", planning["fragments"])
         self.assertTrue(planning["fragment_notes"]["rate_source"])
+
+
+class ClientFragmentInventoryTests(unittest.TestCase):
+    def test_client_fragment_names_and_freshness(self):
+        class Store(_FakeStore):
+            def recent_events(self, limit=100, event_type=None):
+                if event_type == "yosari.fragments":
+                    return [{"ts": 100, "payload": {"counts": {"三所物·狮子": 2}}}]
+                return super().recent_events(limit=limit, event_type=event_type)
+            def client_item_inventory(self, to_ts):
+                return {"items": {"三所物·狮子碎片": {"count": 7, "observed_at": self.client_ts}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "goals.json"
+            advisor.add_fragment_goal(path, fragment="三所物·狮子", target=10)
+            store = Store()
+            for timestamp, expected in ((101, 7), (99, 2)):
+                store.client_ts = timestamp
+                data = advisor.get_planning(store, path, today=date(2026, 8, 25))
+                goal = next(g for g in data["goals"] if g["kind"] == "fragment")
+                self.assertEqual(goal["current"], expected)

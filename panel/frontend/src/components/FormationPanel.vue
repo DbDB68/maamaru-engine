@@ -57,6 +57,7 @@ const HORSE_OPTIONS = [
 ]
 const CHARM_OPTIONS = ['御守', '御守·极', '御守·桃'] as const
 
+const clientInventory = ref<Awaited<ReturnType<typeof api.clientInventory>> | null>(null)
 const profile = ref<HonmaruFormationProfile | null>(null)
 const catalog = ref<Array<{ id: string; name: string; name_zh: string; type: string }>>([])
 const loading = ref(true)
@@ -102,9 +103,10 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const [profileResult, catalogResult] = await Promise.allSettled([
-      api.honmaruProfile(), api.swords(),
+    const [profileResult, catalogResult, inventoryResult] = await Promise.allSettled([
+      api.honmaruProfile(), api.swords(), api.clientInventory(),
     ])
+    if (inventoryResult.status === 'fulfilled') clientInventory.value = inventoryResult.value
     if (profileResult.status === 'fulfilled') profile.value = profileResult.value
     else loadError.value = '刀帐暂时没有翻开；仍可按上锁刀和等级设置预设。'
     if (catalogResult.status === 'fulfilled') catalog.value = catalogResult.value.swords
@@ -503,11 +505,12 @@ onMounted(() => { load(); loadPresets() })
                   <select :value="draftSlots[String(equipmentSlot)].charm || ''" @change="setSlotAccessory(equipmentSlot!, 'charm', ($event.target as HTMLSelectElement).value)">
                     <option value="">不指定</option>
                     <option v-if="draftSlots[String(equipmentSlot)].charm && !CHARM_OPTIONS.some(option => option === draftSlots[String(equipmentSlot)].charm)" :value="draftSlots[String(equipmentSlot)].charm">{{ draftSlots[String(equipmentSlot)].charm }}</option>
-                    <option v-for="option in CHARM_OPTIONS" :key="option" :value="option">{{ option }}</option>
+                    <option v-for="option in CHARM_OPTIONS" :key="option" :value="option">{{ option }}{{ clientInventory?.items?.[option] ? ` · 所持 ${clientInventory.items[option].count}` : '' }}</option>
                   </select>
                 </label>
               </div>
               <b class="formation-equipment-subtitle">宝物</b>
+              <small v-if="clientInventory?.assets?.artifact">最近读到 {{ clientInventory.assets.artifact.length }} 件宝物</small>
               <p>选填。按游戏里的名称、等级、爱用度填写；同样信息的宝物有多件时会停下，避免选错。</p>
               <div class="formation-preset-form">
                 <label class="formation-preset-field">

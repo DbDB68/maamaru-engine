@@ -1197,10 +1197,15 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small>
               <strong>{{ row.current == null ? '—' : row.current.toLocaleString() }}</strong>
+              <small v-if="row.name === '小判' && planning?.koban_watch?.boxed_reserve != null" :title="'小箱 ×200、中箱 ×400、大箱 ×700；未开箱，不计入收支。'">箱内储备 {{ planning.koban_watch.boxed_reserve.toLocaleString() }} · 合计 {{ planning.koban_watch.total_with_boxes?.toLocaleString() ?? '—' }}</small>
               <span class="resource-change" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
               <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
             </article>
           </div>
+          <details v-if="planning?.client_inventory && ['暖心福袋', '堆肥'].some(name => planning?.client_inventory?.items?.[name])">
+            <summary>道具库存</summary>
+            <p v-for="name in ['暖心福袋', '堆肥']" :key="name"><template v-if="planning.client_inventory.items[name]">{{ name }} {{ planning.client_inventory.items[name].count.toLocaleString() }}</template></p>
+          </details>
           <p class="resource-overview-note">数量取近 {{ planning?.rate_window_days || 14 }} 天最近一次记录；没有记录的项目留空。切换时间范围只改变变化数字。</p>
         </section>
         <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">

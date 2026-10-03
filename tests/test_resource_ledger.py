@@ -48,6 +48,23 @@ class ResourceLedgerTests(unittest.TestCase):
         return next((d for d in ledger["daily_series"]
                      if d["date"] == date and d["resource"] == resource), None)
 
+    def test_client_items_reserve_is_not_income_and_zero_is_known(self):
+        t = sh("2026-09-30 10:00:00")
+        self._captured(t, {"小判": 1000, "小判箱·小": 2, "小判箱·中": 1, "小判箱·大": 0,
+                           "堆肥": 0, "暖心福袋": 3}, script="youzu_log")
+        self._captured(t + 10, {"小判": 1100}, script="youzu_log")
+        stock = self.store.client_item_inventory(t + 20)
+        self.assertEqual(stock["koban_reserve"], 800)
+        self.assertEqual(stock["items"]["堆肥"]["count"], 0)
+        self.assertEqual(stock["items"]["暖心福袋"]["observed_at"], t)
+        ledger = self.store.resource_ledger(t, t + 20)
+        self.assertEqual(self._res(ledger, "小判")["total_delta"], 100)
+
+    def test_missing_box_inventory_is_unknown(self):
+        t = sh("2026-09-30 10:00:00")
+        self._captured(t, {"小判箱·小": 2}, script="youzu_log")
+        self.assertIsNone(self.store.client_item_inventory(t + 1)["koban_reserve"])
+
     def test_sparse_client_baselines_remain_per_resource(self):
         t = sh("2026-09-30 10:00:00")
         self._captured(t - 120, {"木炭": 100, "小判": 1000}, script="youzu_log")

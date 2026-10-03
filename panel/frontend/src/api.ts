@@ -77,6 +77,7 @@ export const api = {
     body: JSON.stringify({ script, params }),
   }),
   honmaruProfile: () => request<HonmaruFormationProfile>('/api/data/honmaru-profile'),
+  clientInventory: () => request<{ items: Record<string, { count: number; observed_at: number }>; assets: { equip?: unknown[]; artifact?: unknown[]; sword?: unknown[]; observed_at: number } | null }>('/api/data/client-inventory'),
   customFormations: () => request<{ formations: CustomFormation[] }>('/api/custom-formations'),
   saveCustomFormation: (record: CustomFormationDraft, id?: string) => request<{ ok: boolean; formation: CustomFormation }>(`/api/custom-formations${id ? `/${encodeURIComponent(id)}` : ''}`, {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record),

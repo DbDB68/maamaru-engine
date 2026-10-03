@@ -1224,6 +1224,34 @@ class TelemetryStore:
                          "reported": gap_key in reported})
         return list(reversed(gaps[-max(1, min(int(limit), 200)):]))
 
+    def client_item_inventory(self, to_ts: float | None = None) -> dict:
+        """Latest actual client read per named item; never treat absence as zero."""
+        from .youzu_log import ITEM_NAMES
+        remaining = set(ITEM_NAMES.values())
+        items = {}
+        for row in self._conn().execute(
+                "SELECT ts, payload FROM events WHERE script = 'youzu_log' "
+                "AND event_type = 'inventory.captured' AND ts <= ? ORDER BY ts DESC, id DESC",
+                (time.time() if to_ts is None else float(to_ts),)):
+            reading = _loads(row["payload"], {}).get("resources") or {}
+            for name in remaining.intersection(reading):
+                value = reading[name]
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                    items[name] = {"count": int(value), "observed_at": row["ts"]}
+            remaining.difference_update(items)
+            if not remaining:
+                break
+        box_values = {"小判箱·小": 200, "小判箱·中": 400, "小判箱·大": 700}
+        boxes = {name: {**items[name], "value_each": value} for name, value in box_values.items() if name in items}
+        complete = len(boxes) == len(box_values)
+        asset_row = self._conn().execute(
+            "SELECT ts, payload FROM events WHERE script = 'youzu_log' AND event_type = 'game_assets.captured' AND ts <= ? ORDER BY ts DESC, id DESC LIMIT 1",
+            (time.time() if to_ts is None else float(to_ts),)).fetchone()
+        assets = {**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]} if asset_row else None
+        return {"assets": assets, "items": items, "koban_boxes": boxes,
+                "koban_reserve": sum(v["count"] * v["value_each"] for v in boxes.values()) if complete else None,
+                "koban_reserve_known": sum(v["count"] * v["value_each"] for v in boxes.values())}
+
     def resource_ledger(self, from_ts: float, to_ts: float) -> dict:
         """聚合时间窗口内八种资源的总账：观察链、已确认归因、缺口。
 

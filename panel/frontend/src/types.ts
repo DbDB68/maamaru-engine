@@ -369,7 +369,10 @@ export interface PlanningReport {
       limiting: string[]
     }
   }
+  client_inventory?: { items: Record<string, { count: number; observed_at: number }> }
   koban_watch?: {
+    boxed_reserve?: number | null
+    total_with_boxes?: number | null
     budgets?: { id: string; event: string; amount: number | null; source: string }[]
     current: number | null
     reserved: number

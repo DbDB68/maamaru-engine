@@ -901,6 +901,14 @@ def get_planning(store, goals_path: Path, *,
         if isinstance(payload, dict) and isinstance(payload.get("counts"), dict):
             fragment_inventory = payload["counts"]
             break
+    client_items = (store.client_item_inventory(now_ts)
+                    if hasattr(store, "client_item_inventory") else {"items": {}})
+    fragment_inventory = dict(fragment_inventory or {})
+    ocr_fragment_ts = float(event.get("ts") or 0) if fragment_inventory else 0
+    for name, item in client_items["items"].items():
+        fragment = name.removesuffix("碎片")
+        if "碎片" in name and (fragment not in fragment_inventory or item["observed_at"] >= ocr_fragment_ts):
+            fragment_inventory[fragment] = item["count"]
     fragment_guides = acquisition.fragment_catalog()
     cards = load_event_cards(Path(goals_path).parent)
     event_windows = [{"name": name, "start_date": card.get("start_date"),
@@ -1047,8 +1055,11 @@ def get_planning(store, goals_path: Path, *,
         "koban_per_floor": floor_yield,
         "osaka_floor_speed": floor_speed,
         "resource_watch": {**normal_forge, "ten_forge": ten_forge},
+        "client_inventory": client_items,
         "koban_watch": {
             "current": koban_current,
+            "boxed_reserve": client_items.get("koban_reserve"),
+            "total_with_boxes": (int(koban_current) + client_items["koban_reserve"] if koban_current is not None and client_items.get("koban_reserve") is not None else None),
             "reserved": reserved,
             "budgets": budgets,
             "available": (None if koban_current is None

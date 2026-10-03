@@ -992,3 +992,33 @@ def test_observations_do_not_retimestamp_sparse_old_balances(tmp_path):
     obs = youzu_log.build_ledger(youzu_log.parse_events(f))["observations"]
     assert len(obs) == 2
     assert obs[-1]["reading"] == {"小判": 1000}
+
+
+def test_client_assets_and_complete_item_inventory_are_sanitized(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text(_s2c("2026-09-28 13:00:00", "https://example.test/sally", {
+        "item": {"1": {"consumable_id": 1, "num": 2}},
+        "equip": {"e": {"serial_id": "e", "equip_id": 1, "soldier": 10, "secret": "never-store"}},
+        "artifact": {"a": {"serial_id": "a", "artifact_id": 1, "level": 3, "usage_score": 100}},
+        "sword": {"s": {"serial_id": "s", "horse_serial_id": "h", "item_id": 1}},
+    }), encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    assert ledger["observations"][0]["reading"]["小判箱·大"] == 0
+    assert ledger["observations"][0]["reading"]["御守"] == 2
+    assert ledger["assets"][0]["equip"][0] == {"serial_id": "e", "equip_id": 1, "soldier": 10}
+    assert ledger["assets"][0]["sword"][0]["horse_serial_id"] == "h"
+
+
+def test_new_asset_observations_backfill_without_rewriting_ledger(tmp_path):
+    from touken.telemetry import TelemetryStore
+    import json
+    store = TelemetryStore(tmp_path / "db")
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"last_ts": 1000}), encoding="utf-8")
+    ledger = {"observations": [], "changes": [], "assets": [{"ts": 900, "equip": [{"serial_id": 1}]}]}
+    youzu_log.write_ledger(store, ledger, state)
+    youzu_log.write_ledger(store, ledger, state)
+    assert store._conn().execute("SELECT count(*) FROM events WHERE event_type='game_assets.captured'").fetchone()[0] == 1
+    assert json.loads(state.read_text(encoding="utf-8"))["last_ts"] == 1000
+    assert store.client_item_inventory()["assets"]["equip"] == [{"serial_id": 1}]
+    store.close()

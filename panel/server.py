@@ -3217,6 +3217,12 @@ async def api_attach_run_inventory(run_id: str):
     return {"ok": True, "run": summary}
 
 
+@app.get("/api/data/client-inventory")
+async def api_client_inventory():
+    from touken.telemetry import get_telemetry_store
+    return get_telemetry_store().client_item_inventory()
+
+
 @app.get("/api/data/resource-ledger")
 async def api_data_resource_ledger(days: int = 7,
                                    from_ts: float | None = Query(None, alias="from"),
