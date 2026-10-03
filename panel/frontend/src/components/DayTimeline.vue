@@ -4,7 +4,7 @@ import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
-import { canAdoptRaidRecommendation, nextScheduledStart, scheduleMinute } from './report/planningLinkModel'
+import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
@@ -30,8 +30,10 @@ const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
-interface DraftRow { time: string; start_mode?: 'now' | 'at'; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
+interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
+const editedBlockIndex = ref<number | null>(null)
+let editedBlockSnapshot = ''
 const gameplayDialog = ref<InstanceType<typeof GameplaySettingsDialog>>()
 const gameplayOptions = computed(() => data.value?.gameplay_options || [])
 const firstGameplay = computed(() => gameplayOptions.value.find(option => option.available))
@@ -413,8 +415,11 @@ function defaultDraftRow(): DraftRow {
 }
 
 function editPlan() {
-  const blocks = data.value?.booking?.blocks || recommendedBlocks()
-  draft.value = blocks.length ? blocks.map(toDraftRow) : [defaultDraftRow()]
+  const block = data.value?.booking?.blocks[highlightIndex.value]
+  if (!block) return
+  editedBlockIndex.value = highlightIndex.value
+  editedBlockSnapshot = JSON.stringify(block)
+  draft.value = [toDraftRow(block)]
   planMessage.value = ''
   void loadWorkflowPresets()
   editing.value = true
@@ -422,8 +427,8 @@ function editPlan() {
 
 async function addTimedWorkflow() {
   await loadWorkflowPresets()
-  draft.value = (data.value?.booking?.blocks || []).map(toDraftRow)
-  addBlock('workflow')
+  editedBlockIndex.value = -1
+  draft.value = [{...defaultDraftRow(), kind: 'workflow', workflow_id: workflowPresets.value[0]?.id || ''}]
   planMessage.value = ''
   editing.value = true
 }
@@ -433,11 +438,7 @@ function clockAt(at: number): string {
 }
 
 function rowStart(row: DraftRow): number | null {
-  return row.kind === 'workflow' && row.start_mode === 'now' ? Math.floor(smoothNowMin.value) : parseTime(row.time)
-}
-
-function chooseStartMode(row: DraftRow, event: Event) {
-  row.start_mode = (event.target as HTMLSelectElement).value === 'now' ? 'now' : 'at'
+  return parseTime(row.time)
 }
 
 function presetSteps(id: string) {
@@ -456,6 +457,7 @@ async function cancelWorkflowWait(id: string) {
 
 /** 按推荐安排 = 把建议块填进草稿等确认，不直接保存 */
 function fillRecommended() {
+  editedBlockIndex.value = null
   highlightIndex.value = -1
   const blocks = recommendedBlocks()
   draft.value = blocks.length ? blocks.map(toDraftRow) : [defaultDraftRow()]
@@ -541,23 +543,6 @@ function addGameplayConfiguration() {
 function configureBookedBlock(block: DayScheduleBlock, index: number) {
   if (block.kind === 'raid' || block.kind === 'activity') openGameplayConfiguration(block, index)
   else { highlightIndex.value = index; editPlan() }
-}
-
-function normalizeRow(row: DraftRow) {
-  if (row.kind === 'raid' && (!Number.isInteger(row.runs) || row.runs < 1)) row.runs = 1
-  if (row.kind === 'workflow' && !row.workflow_id) row.workflow_id = workflowPresets.value[0]?.id || ''
-}
-
-function addBlock(kind: 'raid' | 'activity' | 'workflow') {
-  if (draft.value.length >= MAX_BLOCKS) return
-  syncSmoothClock()
-  const last = draft.value[draft.value.length - 1]
-  const start = parseTime(last?.time || '') ?? Math.ceil(nowMin.value)
-  const pace = data.value?.activity?.seconds_per_loop || 0
-  const lastDuration = last?.kind === 'raid' && pace
-    ? Math.ceil((last?.runs || 1) * pace / 60)
-    : GENERIC_BLOCK_MIN
-  draft.value.push({ time: fmtClock(nextScheduledStart(smoothNowMin.value, start + (last ? lastDuration : 0))), kind, runs: 1, workflow_id: workflowPresets.value[0]?.id || '', script: firstGameplay.value?.script || '', event_key: firstGameplay.value?.event_key || '' })
 }
 
 const draftHasRaid = computed(() => draft.value.some(row => row.kind === 'raid'))
@@ -662,10 +647,17 @@ async function persistSchedule(blocks: DayScheduleBlock[], message: string) {
 }
 
 async function saveSchedule() {
-  const blocks = [...preview.value.blocks].sort((a, b) => a.start_min - b.start_min)
   saving.value = true
   planMessage.value = ''
   try {
+    const blocks = editedBlockIndex.value == null ? [...preview.value.blocks] : [...(data.value?.booking?.blocks || [])]
+    if (editedBlockIndex.value != null) {
+      const index = editedBlockIndex.value
+      if (index >= 0 && JSON.stringify(blocks[index]) !== editedBlockSnapshot) throw new Error('这段安排已经变化，请关闭后重新配置')
+      if (index >= 0) blocks.splice(index, 1, ...preview.value.blocks)
+      else blocks.push(...preview.value.blocks)
+    }
+    blocks.sort((a, b) => a.start_min - b.start_min)
     await persistSchedule(blocks, '')
     editing.value = false
     highlightIndex.value = -1
@@ -962,8 +954,6 @@ const compactRows = computed(() => {
 
 const compactHeading = '近期活动'
 
-const totalItemCount = computed(() => (data.value?.expeditions || []).filter(e => ['dispatched', 'running', 'awaiting_collect', 'failed_unknown'].includes(e.state)).length + runBlocks.value.length)
-const hiddenItemCount = computed(() => Math.max(0, totalItemCount.value - compactRows.value.length))
 const showDetails = computed(() => !props.collapsible || expanded.value)
 
 const caption = computed(() => {
@@ -1080,7 +1070,6 @@ const caption = computed(() => {
             <span class="tl-agenda-dot" :class="row.tone"></span>
             <span class="tl-agenda-copy"><b>{{ row.title }}</b><small>{{ row.detail }}</small></span>
           </div>
-          <p v-if="hiddenItemCount" class="tl-more">另外 {{ hiddenItemCount }} 项已经收进上面的时间轴。</p>
         </div>
         <p v-else class="empty">今天还没有执行记录</p>
       </div>
@@ -1105,8 +1094,6 @@ const caption = computed(() => {
           <div>
             <strong>今日安排</strong>
             <small v-if="data.booking">{{ bookingSummary }}</small>
-            <small v-else-if="data.activity">推荐的空窗可以直接采用，也可以自己挑时间和活</small>
-            <small v-else>选择玩法或任务流，再安排开始时间</small>
           </div>
           <div class="tl-booking-actions">
             <button v-if="!editing" type="button" :disabled="saving || !firstGameplay" @click="addGameplayConfiguration">＋ 安排玩法</button>
@@ -1122,7 +1109,6 @@ const caption = computed(() => {
         </details>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
-        <p class="tl-booking-message">00:00–03:59 为次日凌晨，04:00 换日；远征可以跨日归来。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
           <div v-for="row in bookedRows" :key="row.key" class="tl-booked-flow">
           <button type="button" class="tl-booking-link" @click="openBlockPopover({index: data.booking!.blocks.indexOf(row.block), lane: 'task', left: pct(row.block.start_min), origin: 'booking'})">
@@ -1141,11 +1127,7 @@ const caption = computed(() => {
         </div>
         <dialog v-if="editing" ref="planEditorDialog" class="tl-plan-dialog tl-booking-editor" @cancel="editing = false">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
-            <span>第{{ index + 1 }}段</span>
-            <label v-if="row.kind === 'workflow'">开始
-              <select :value="row.start_mode || 'at'" @change="chooseStartMode(row, $event)"><option value="at">指定时间</option><option value="now">现在开始</option></select>
-            </label>
-            <label v-if="row.kind !== 'workflow' || row.start_mode !== 'now'">开始时间 <input v-model="row.time" type="time" step="60" /></label>
+            <label>开始时间 <input v-model="row.time" type="time" step="60" /></label>
             <label v-if="row.kind === 'raid' || row.kind === 'activity'">玩法
               <select v-model="row.script" @change="chooseGameplay(row)">
                 <option v-for="option in gameplayOptions" :key="option.script" :value="option.script" :disabled="!option.available">{{ option.label }}{{ option.available ? '' : '（未开放）' }}</option>
@@ -1163,21 +1145,17 @@ const caption = computed(() => {
             <span v-if="row.kind === 'activity'">暂无圈速，暂留 30 分钟；前段收工后再开工</span>
             <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
             <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
-            <button type="button" class="tl-booking-link" @click="draft.splice(index, 1)">移除</button>
             <ol v-if="row.kind === 'workflow' && presetSteps(row.workflow_id).length" class="tl-flow-steps" aria-label="任务流预览">
               <li v-for="(step, stepIndex) in presetSteps(row.workflow_id)" :key="stepIndex"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : stepIndex === 0 ? '开始后' : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
             </ol>
           </div>
           <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队、换队长和补充手形等使用已保存的玩法设置；次数以本段安排为准。</p>
-          <div v-if="draft.length < MAX_BLOCKS" class="tl-booking-actions">
-            <button type="button" class="tl-booking-link" :disabled="!firstGameplay" @click="addBlock('activity')">＋ 安排玩法</button>
-            <button type="button" class="tl-booking-link" @click="addBlock('workflow')">＋ 安排任务流</button>
-          </div>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
-            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并按安排开工' }}</button>
+            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存' }}</button>
             <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
           </div>
+          <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         </dialog>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
