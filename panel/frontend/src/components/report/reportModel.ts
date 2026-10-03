@@ -59,6 +59,10 @@ export function linkReceiptRuns(receipts: LedgerAttribution[], events: any[], ru
       for (const run of runs) if ((run.loop_records || []).some((loop: any) =>
         loop.mode === 'yosari' && loop.started_at <= receipt.ts && receipt.ts <= loop.ended_at)) owners.add(run.run_id)
     }
+    if (receipt.resource === '活动点数·10031' && receipt.source.startsWith('raid.')) {
+      for (const event of events) if (event.event_type === 'raid.round_completed' && event.run_id
+        && event.payload?.shells === receipt.delta && event.ts >= receipt.ts && event.ts - receipt.ts <= 60) owners.add(event.run_id)
+    }
     if (owners.size !== 1) return receipt
     const run_id = [...owners][0]
     return { ...receipt, run_id, run_label: runs.find(run => run.run_id === run_id)?.label }

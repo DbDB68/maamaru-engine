@@ -148,7 +148,7 @@ function activityTitle(item: any) {
   if (item.event_type === 'osaka.floor_completed') return `大阪城完成 ${count} 圈`
   if (item.event_type === 'edocastle.run_completed') return `江户城完成 ${count} 圈`
   if (item.event_type === 'hanafuda.run_completed') return `秘宝之里完成 ${count} 圈`
-  if (item.event_type === 'raid.round_completed') return `联队战完成 ${count} 圈`
+  if (item.event_type === 'raid.round_completed') return item.payload?.sequence != null ? `联队战 · 第 ${item.payload.sequence} 圈` : '联队战完成一圈'
   if (item.event_type === 'practice.result') return `完成演练 ${count} 场`
   if (item.event_type === 'forge.collected') {
     const entries = item.items || [item]
@@ -282,14 +282,26 @@ function loopDetail(loop: any) {
 
 const timelineEvents = computed(() => {
   const visible: any[] = []
+  const seenClientSwords = new Set<string>()
   const repairs = new Map<string, any>()
   // loop_started 是逐圈事实的起点标记，成绩单按配对后的逐圈明细展示，
   // 绝不裸奔成「本丸记录」；结束事件照常单独可见（跨日游离行用）。
   const hidden = new Set(['team_record.saved', 'game_assets.captured', 'inventory.peek', 'osaka.koban_session', 'sortie.loop_started'])
   for (const item of props.events) {
     if (hidden.has(item.event_type)) continue
+    if (item.script === 'youzu_log' && item.event_type === 'sword.obtained' && item.payload?.serial_id != null) {
+      const key = `${item.payload.source}:${item.payload.serial_id}`
+      if (seenClientSwords.has(key)) continue
+      seenClientSwords.add(key)
+    }
+
     if (!item.event_type.startsWith('repair.')) {
-      visible.push(item)
+      if (!item.run_id && item.event_type === 'sword.obtained' && item.payload?.source === 'raid.drop') {
+        const owners = props.runs.filter(run => run.started_at <= item.ts && item.ts <= run.ended_at
+          && props.events.some(event => event.run_id === run.run_id && event.event_type === 'raid.round_completed'
+            && event.ts >= item.ts && event.ts - item.ts <= 60))
+        visible.push(owners.length === 1 ? { ...item, run_id: owners[0].run_id } : item)
+      } else visible.push(item)
       continue
     }
     const key = item.run_id || `minute:${Math.floor(item.ts / 60)}`
@@ -323,6 +335,7 @@ function activityGroupKey(item: any) {
   if (item.event_type === 'sortie.retreated_before_boss') return `${prefix}:retreat:${p.chapter}:${p.map_no}`
   if (item.event_type === 'osaka.floor_completed') return `${prefix}:osaka:${p.selected_floor}`
   if (item.event_type === 'edocastle.run_completed') return `${prefix}:edocastle`
+  if (item.event_type === 'raid.round_completed') return `${prefix}:raid:${p.sequence ?? item.id}`
   if (item.event_type === 'practice.result') return `${prefix}:practice`
   if (item.event_type.startsWith('task_rewards.')) return `${prefix}:${item.event_type}`
   if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${prefix}:${item.event_type}`
@@ -404,6 +417,10 @@ function runActivities(run: any) {
     item.run_id && item.run_id === run.run_id && shanghaiDate(Number(item.ts)) === startDay
     // 逐圈明细已接管出阵圈事件的展示，任务卡里不再重复列一遍
     && !(runLoopRecords(run).length && sortieEventTypes.has(item.event_type))
+    && !(item.event_type === 'game.resource_changed' && item.payload?.label === '联队战奖励'
+      && props.events.some(event => event.run_id === run.run_id && event.event_type === 'raid.round_completed'
+        && event.payload?.shells === item.payload?.resources?.['夜光贝'] && Math.abs(event.ts - item.ts) <= 60))
+
     && !receiptEvents.value.some(receipt => receipt.run_id === item.run_id && Math.abs(receipt.ts - item.ts) <= 10
       && ((item.event_type === 'task_rewards.claimed' && receipt.payload.label === '任务奖励')
         || (item.event_type === 'dismantle.completed' && receipt.payload.label === '刀解')))

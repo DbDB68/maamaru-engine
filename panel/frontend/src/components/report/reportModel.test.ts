@@ -77,3 +77,12 @@ it('links receipts only with matching operation evidence and preserves ambiguous
   expect(linkReceiptRuns([receipt], [event], [{ run_id: 'daily', label: '一键日课' }])[0].run_id).toBe('daily')
   expect(linkReceiptRuns([receipt], [event, { ...event, run_id: 'other' }], [])[0].run_id).toBeUndefined()
 })
+
+
+it('links raid rewards using recorded round rewards rather than task time alone', async () => {
+  const { linkReceiptRuns } = await import('./reportModel')
+  const receipt = { id: 'raid', ts: 100, resource: '活动点数·10031', delta: 756, source: 'raid.youzu_log', script: 'youzu_log' }
+  const event = { ts: 120, run_id: 'raid-task', event_type: 'raid.round_completed', payload: { shells: 756, sequence: 1 } }
+  expect(linkReceiptRuns([receipt], [event], [])[0].run_id).toBe('raid-task')
+  expect(linkReceiptRuns([receipt], [{ ...event, payload: { shells: 700 } }], [])[0].run_id).toBeUndefined()
+})
