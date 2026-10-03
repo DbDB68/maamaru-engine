@@ -49,7 +49,7 @@ def build_receipts(events):
                      "team_no": _int(request.get("party_no"))}
         if endpoint == "/sally/forward":
             square = payload.get("square_id")
-        if endpoint in ("/forge/completemultiple", "/forge/complete"):
+        if endpoint in ("/forge/completemultiple", "/forge/complete", "/forge/fastmultiple"):
             swords = payload.get("sword")
             if isinstance(swords, dict):
                 swords = [swords]

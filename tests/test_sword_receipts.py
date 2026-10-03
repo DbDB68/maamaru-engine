@@ -23,6 +23,23 @@ def test_batch_preserves_ten_instances_and_ignores_remaining_slots():
     assert receipt["payload"]["slot"] == 1
 
 
+def test_accelerated_collection_preserves_new_swords_and_deduplicates(tmp_path):
+    events = forge()
+    for item in events:
+        item['endpoint'] = '/forge/fastmultiple'
+    events[1]['payload']['sword'][0]['is_first_get_sword'] = True
+    receipt, = build_receipts(events)
+    assert receipt['event_type'] == 'forge.collected'
+    assert receipt['payload']['count'] == 10
+    assert receipt['payload']['swords'][0]['is_first_get_sword'] is True
+    store = TelemetryStore(tmp_path / 'events.db')
+    assert write_receipts(store, [receipt]) == {'written': 1, 'reconciled': 0}
+    assert write_receipts(store, [receipt, receipt]) == {'written': 0, 'reconciled': 0}
+    assert len(store.recent_events()) == 1
+    events[1]['payload']['status'] = 1
+    assert build_receipts(events) == []
+
+
 def test_drops_use_route_and_no_party_member_serial():
     events = [event("/sally/sally", {"episode_id": "8", "field_id": "2", "party_no": "4"}, direction="C->S"),
               event("/sally/sally", {}), event("/sally/forward", {"square_id": 17}),
