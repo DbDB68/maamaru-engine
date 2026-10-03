@@ -77,6 +77,8 @@ onMounted(() => {
 </script>
 
 <template>
+  <details class="budget-disclosure" :open="!!metadata && metadata.campaign_status !== '已结束'">
+    <summary>{{ metadata?.campaign_status === '已结束' ? '已结束活动 · 异去预算' : '异去预算' }}</summary>
   <section class="gameplay-planner">
     <header class="budget-heading">
       <div><span class="eyebrow">活动预算</span><h3>这期异去，准备怎么花</h3></div>
@@ -98,7 +100,7 @@ onMounted(() => {
       <p v-else>{{ error || '正在帮你算这趟出阵…' }}</p>
     </div>
 
-    <div class="budget-decision">
+    <div v-if="metadata?.campaign_status !== '已结束'" class="budget-decision">
       <p v-if="result?.runs != null">{{ form.mode === 'runs' ? `目标打 ${result.runs.toLocaleString()} 次` : `每天 ${form.hours_per_day} 小时` }}，最多花 {{ Number(form.budget).toLocaleString() }} 小判。保存后，它会作为一笔独立活动预算，并告诉你会让攒钱目标推迟多久。</p>
       <p v-else>先补一个圈速，才能把这套异去方案保存成活动预算。</p>
       <button type="button" class="primary" :disabled="!canSave || saving" @click="saveGoal">{{ saving ? '正在留预算……' : saved ? '活动预算已更新' : '按这个方案立为活动预算' }}</button>
@@ -131,9 +133,11 @@ onMounted(() => {
       <a v-if="metadata" :href="metadata.campaign.source" target="_blank" rel="noopener noreferrer">查看活动公告 ↗</a>
     </details>
   </section>
+  </details>
 </template>
 
 <style scoped>
+.budget-disclosure > summary { padding: 12px 2px; cursor: pointer; color: var(--ink-dim); font-size: 13px; }
 .gameplay-planner { padding: 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-left: 5px solid #9b6652; border-radius: 12px; color: var(--ink); }
 .budget-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .eyebrow { color: #8d5545; font-size: 11px; font-weight: 700; letter-spacing: .08em; }

@@ -416,11 +416,30 @@ onMounted(load)
 
     <DayTimeline :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
-    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
+    <EventTimeline
+      id="event-timeline"
+      :timeline="timeline"
+      :abacuses="planning?.events || []"
+      :goals="planning?.goals || []"
+      :loading="loading"
+      :error="timelineError"
+      :estimate-saving="estimateSaving"
+      :goal-saving="abacusGoalSaving"
+      :target-saving="tamaTargetSaving"
+      :target-error="error"
+      :activity-paces="activityPaces"
+      :day-timeline="dayTimeline"
+      @save-estimate="saveEstimate"
+      @save-tama-target="saveTamaTarget"
+      @add-goal="goalFromAbacus"
+      @add-stock-goal="goalFromStockTarget"
+      @open-activity="(script, loops) => emit('openActivity', script, loops)"
+      @open-raid-recommendation="openRaidRecommendation"
+    />
 
     <header class="planning-toolbar">
       <div><h3>自定目标</h3><span v-if="customGoals.length">{{ customGoals.length }} 个</span></div>
-      <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 自定目标</button>
+      <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 添加</button>
     </header>
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
@@ -499,30 +518,10 @@ onMounted(load)
         </article>
     </section>
 
-    <div v-else-if="planning" class="planning-empty-state">
-      <span><b>还没有目标</b><small>有想攒的资源或活动预算时，再立一个。</small></span>
-    </div>
 
-    <EventTimeline
-      id="event-timeline"
-      :timeline="timeline"
-      :abacuses="planning?.events || []"
-      :goals="planning?.goals || []"
-      :loading="loading"
-      :error="timelineError"
-      :estimate-saving="estimateSaving"
-      :goal-saving="abacusGoalSaving"
-      :target-saving="tamaTargetSaving"
-      :activity-paces="activityPaces"
-      :day-timeline="dayTimeline"
-      @save-estimate="saveEstimate"
-      @save-tama-target="saveTamaTarget"
-      @add-goal="goalFromAbacus"
-      @add-stock-goal="goalFromStockTarget"
-      @open-activity="(script, loops) => emit('openActivity', script, loops)"
-      @open-raid-recommendation="openRaidRecommendation"
-    />
 
+
+    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
   </section>
 </template>
 

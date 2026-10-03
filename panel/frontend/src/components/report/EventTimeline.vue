@@ -13,6 +13,7 @@ const props = defineProps<{
   estimateSaving?: string
   goalSaving?: string
   targetSaving?: string
+  targetError?: string
   activityPaces?: Record<string, ActivityPace[]>
   dayTimeline?: DayTimeline | null
 }>()
@@ -31,6 +32,13 @@ const targetInputs = ref<Record<string, string>>({})
 const tamaTargetInputs = ref<Record<string, string>>({})
 const paceWindows = ref<Record<string, 'event' | '1h' | '3h'>>({})
 const paceSources = ref<Record<string, 'maamaru' | 'manual'>>({})
+const targetDialog = ref<HTMLDialogElement>()
+const targetEntry = ref<EventTimelineEntry>()
+function editTarget(entry: EventTimelineEntry) { targetEntry.value = entry; targetDialog.value?.showModal() }
+watch(() => props.targetSaving, (value, previous) => {
+  const entry = targetEntry.value
+  if (previous && !value && !props.targetError && entry && abacusByName.value.get(entry.name)?.tama_target === Number(tamaTargetInputs.value[entry.name])) targetDialog.value?.close()
+})
 const nowMs = ref(Date.now())
 let clockTimer: number | undefined
 
@@ -265,6 +273,13 @@ function tamaEstimateText(entry: EventTimelineEntry) {
   return `按本期 ${fmt(budget.tama_samples)} 圈实测平均每圈约 ${fmt(budget.tama_per_loop)} ${currency}，还要打约 ${fmt(budget.runs_needed)} 圈${time}。`
 }
 
+function tamaRemainingText(entry: EventTimelineEntry) {
+  const budget = entry.budget
+  if (budget?.runs_needed == null) return tamaEstimateText(entry)
+  if (!budget.runs_needed) return '目标已达成'
+  return `还需约 ${fmt(budget.runs_needed)} 圈${budget.estimated_seconds != null ? `，约 ${paceDuration(budget.estimated_seconds)}` : ''}`
+}
+
 function tamaTimeText(entry: EventTimelineEntry) {
   const budget = entry.budget
   if (!budget || budget.can_finish == null || budget.estimated_seconds == null) return ''
@@ -361,8 +376,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
   <section class="event-timeline-card">
     <header class="timeline-heading">
       <div>
-        <small>近期活动</small>
-        <h4>活动日程</h4>
+        <h4>活动</h4>
       </div>
       <span v-if="timeline?.calendar_stale" class="timeline-stale">日历可能不是最新</span>
     </header>
@@ -371,16 +385,16 @@ function candidateRange(candidate: EventTimelineCandidate) {
     <div v-else-if="loading && !timeline" class="timeline-empty">正在整理近期活动……</div>
     <div v-else-if="timeline">
       <div v-if="activeGroups.length" class="timeline-axis">
-        <section v-for="group in activeGroups" :key="group.key" class="timeline-group">
-          <header class="timeline-group-heading">
+        <component :is="group.key === 'ended' ? 'details' : 'section'" v-for="group in activeGroups" :key="group.key" class="timeline-group">
+          <summary v-if="group.key === 'ended'">已结束活动 · {{ group.items.length }} 场</summary>
+          <header v-if="group.key === 'upcoming'" class="timeline-group-heading">
             <b>{{ group.title }}</b>
           </header>
 
           <article v-for="entry in group.items" :key="entry.name" class="timeline-axis-entry" :class="`is-${group.key}`">
-            <time>{{ axisMoment(entry, group.key) }}</time>
-            <span class="timeline-rail" aria-hidden="true"><i /></span>
+
             <div class="timeline-event-card">
-              <span class="event-mobile-moment">{{ axisMoment(entry, group.key) }}</span>
+
               <header>
                 <div>
                   <span class="event-tags">
@@ -388,12 +402,12 @@ function candidateRange(candidate: EventTimelineCandidate) {
                     <span v-else-if="group.key === 'ended'" class="event-state">已收官</span>
                     <span v-if="supportsTokenLearning(entry)" class="experience-tag" :class="`source-${abacusFor(entry)?.keys_source || 'new'}`">{{ experienceLabel(entry) }}</span>
                   </span>
-                  <h5>{{ entry.name }}</h5>
+                  <h5>{{ entry.name }} <small class="event-moment">{{ axisMoment(entry, group.key) }}</small></h5>
                 </div>
                 <span class="event-range">{{ eventRange(entry) }}</span>
               </header>
 
-              <p v-if="group.key !== 'ended' && eventSummary(entry)" class="event-summary">{{ eventSummary(entry) }}</p>
+              <p v-if="group.key !== 'ended' && !isCurrencyMechanics(entry.budget?.mechanics || '') && eventSummary(entry)" class="event-summary">{{ eventSummary(entry) }}</p>
 
               <section v-if="group.key === 'ended'" class="event-ended-summary">
                 <p v-if="!entry.summary" class="ended-empty">这期狐之助没跑，没留下数据。</p>
@@ -407,19 +421,14 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </section>
 
               <section v-if="group.key === 'ongoing' && entry.budget && isCurrencyMechanics(entry.budget.mechanics)" class="event-tama-plan">
-                <header>
-                  <span><small>当前累计</small><b>{{ entry.budget.tama_current == null ? '待第一圈记账' : `${fmt(entry.budget.tama_current)} ${currencyOf(entry)}` }}</b></span>
-                  <span><small>{{ entry.budget.tama_target_custom ? '我的目标' : '最高档目标' }}</small><b>{{ fmt(entry.budget.tama_target || 300000) }} {{ currencyOf(entry) }}</b></span>
+                <header class="currency-progress-heading">
+                  <b>{{ entry.budget.tama_current == null ? '待第一圈记账' : fmt(entry.budget.tama_current) }} / {{ fmt(entry.budget.tama_target || 300000) }} {{ currencyOf(entry) }}</b>
+                  <button type="button" class="target-edit" @click="editTarget(entry)">修改目标</button>
                 </header>
                 <div v-if="entry.budget.tama_current != null" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
-                <p v-if="entry.budget.tama_remaining === 0">{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}已经拿到啦 🎉 剩下的手形想刷就刷。</p>
-                <p v-else-if="entry.budget.tama_current != null">离{{ entry.budget.tama_target_custom ? '本期目标' : '最高档' }}还差 {{ fmt(entry.budget.tama_remaining) }} {{ currencyOf(entry) }}。</p>
-                <p v-if="tamaEstimateText(entry)" class="tama-action">{{ tamaEstimateText(entry) }}</p>
-                <div v-if="entry.budget.mechanics === 'raid' && entry.budget.runs_needed" class="tama-action raid-day-plan">
-                  <p v-if="raidRecommendation(entry)?.available">按目标进度，今天建议再跑 {{ fmt(raidRecommendation(entry)?.targetRuns) }} 圈；时间表当前能排 {{ fmt(raidRecommendation(entry)?.runs) }} 圈{{ raidRecommendation(entry)!.runs < raidRecommendation(entry)!.targetRuns ? '，剩下的时间不够排下' : '' }}。</p>
-                  <p v-else>{{ raidRecommendation(entry)?.reason }}</p>
-                  <button type="button" class="secondary" :disabled="!raidRecommendation(entry)?.available" @click="emit('open-raid-recommendation')">带入时间表</button>
-                </div>
+                <p class="tama-action">{{ tamaRemainingText(entry) }}</p>
+                <p v-if="entry.budget.can_finish === false" class="timeline-error">{{ tamaTimeText(entry) }}</p>
+                <button v-if="entry.budget.mechanics === 'raid' && raidRecommendation(entry)?.available" type="button" class="secondary raid-schedule-action" @click="emit('open-raid-recommendation')">带入时间表</button>
                 <section v-if="entry.budget.mechanics !== 'raid' && tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
                   <span>
                     <small>现在这一锅</small>
@@ -429,20 +438,16 @@ function candidateRange(candidate: EventTimelineCandidate) {
                   <p>{{ tamaBatchNote(entry) }}</p>
                   <button v-if="tamaBatchPlan(entry)!.runs" type="button" class="primary" @click="openTamaBatch(entry)">带着 {{ fmt(tamaBatchPlan(entry)!.runs) }} 圈去开工</button>
                 </section>
-                <p v-if="tamaTimeText(entry)">{{ tamaTimeText(entry) }}</p>
-                <p v-if="tamaTicketText(entry)">{{ tamaTicketText(entry) }}</p>
-                <p v-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
-                <details class="tama-target-editor">
-                  <summary>修改本期目标</summary>
-                  <div>
-                    <input v-model="tamaTargetInputs[entry.name]" type="number" min="1" max="10000000" step="1000" :aria-label="`本期目标${currencyOf(entry)}数`">
-                    <button type="button" class="primary" :disabled="targetSaving === entry.name" @click="submitTamaTarget(entry)">{{ targetSaving === entry.name ? '保存中……' : '保存目标' }}</button>
-                  </div>
-                  <small>默认按最高档 300,000 {{ currencyOf(entry) }} 计算；改后只影响本期，复刻时会恢复默认。</small>
+                <details class="tama-estimate-details">
+                  <summary>查看估算</summary>
+                  <p>{{ tamaEstimateText(entry) }}</p>
+                  <p v-if="entry.budget.can_finish !== false && tamaTimeText(entry)">{{ tamaTimeText(entry) }}</p>
+                  <p v-if="tamaTicketText(entry)">{{ tamaTicketText(entry) }}</p>
+                  <p v-if="entry.budget.tama_observed_at">{{ observedTime(entry.budget.tama_observed_at) }} 收工后读到</p>
                 </details>
               </section>
 
-              <section v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator">
+              <details v-if="group.key === 'ongoing' && paceFor(entry)" class="event-pace-calculator"><summary>圈速与时长试算</summary>
                 <header>
                   <span><small>按{{ paceSourceLabel(paceFor(entry)!.source) }}</small><b>{{ loopPace(paceFor(entry)!.secondsPerLoop) }}</b></span>
                   <span><small>{{ selectedPaceWindow(entry) === 'event' ? '活动结束前' : `接下来 ${paceDuration(availablePaceSeconds(entry))}` }}</small><strong>{{ selectedPaceWindow(entry) === 'event' ? '纯按时间最多' : '约' }} {{ fmt(possibleLoops(entry)) }} 圈</strong></span>
@@ -456,7 +461,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
                   <button type="button" :class="{ active: selectedPaceWindow(entry) === '3h' }" @click="setPaceWindow(entry, '3h')">3 小时</button>
                 </div>
                 <p>{{ paceSampleDate(paceFor(entry)!.runStartedAt) }} 实测 {{ fmt(paceFor(entry)!.loops) }} 圈 · {{ selectedPaceWindow(entry) === 'event' ? '只算时间，手形另算' : '连续挂机，不预留收尾时间' }}</p>
-              </section>
+              </details>
 
               <div v-if="entry.budget && !isCurrencyMechanics(entry.budget.mechanics) && entry.budget.koban_cost != null" class="event-budget" :class="{ ready: entry.budget.sufficient === true || entry.budget.koban_cost === 0 }">
                 <span>
@@ -502,7 +507,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </details>
             </div>
           </article>
-        </section>
+        </component>
       </div>
 
       <section v-if="timeline.later.length" class="timeline-later">
@@ -523,8 +528,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
 
       <details v-if="timeline.unverified.length" class="timeline-unverified">
         <summary>
-          <span><b>待确认日期</b><small>公告里抓到了 {{ timeline.unverified.length }} 条，还没放上正式时间轴</small></span>
-          <em>{{ timeline.unverified.length }}</em>
+          <span>待确认日程 · {{ timeline.unverified.length }} 条</span>
         </summary>
         <div>
           <a v-for="(candidate, index) in timeline.unverified" :key="`${candidate.name}-${candidate.start_at}-${index}`" :href="candidate.url || undefined" target="_blank" rel="noopener">
@@ -534,10 +538,30 @@ function candidateRange(candidate: EventTimelineCandidate) {
         </div>
       </details>
     </div>
+  <dialog ref="targetDialog" class="event-target-dialog" aria-label="修改本期目标" @click="($event.target === targetDialog) && targetDialog?.close()">
+    <template v-if="targetEntry">
+      <h3>{{ targetEntry.name }} · 修改目标</h3>
+      <label>目标{{ currencyOf(targetEntry) }}数<input v-model="tamaTargetInputs[targetEntry.name]" type="number" min="1" max="10000000" step="1000"></label>
+      <p>只影响本期活动。</p>
+      <p v-if="targetError" role="alert">{{ targetError }}</p>
+      <button type="button" class="primary" :disabled="targetSaving === targetEntry.name" @click="submitTamaTarget(targetEntry)">{{ targetSaving === targetEntry.name ? '保存中…' : '保存目标' }}</button>
+      <button type="button" class="secondary" @click="targetDialog?.close()">关闭</button>
+    </template>
+  </dialog>
   </section>
 </template>
 
 <style scoped>
+.event-target-dialog { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; padding: 24px; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); }
+.event-target-dialog::backdrop { background: rgb(0 0 0 / 38%); }
+.event-target-dialog label { display: grid; gap: 8px; }
+.event-target-dialog input { width: 100%; box-sizing: border-box; }
+.event-target-dialog p { color: var(--ink-dim); font-size: 12px; }
+.event-moment { color: var(--ink-dim); font-size: 12px; font-weight: 400; margin-left: 10px; }
+.target-edit { background: transparent; border: 0; color: var(--fox-gold-deep); cursor: pointer; white-space: nowrap; font-size: 12px; }
+.raid-schedule-action { justify-self: start; }
+.tama-estimate-details p { font-size: 12px; color: var(--ink-dim); line-height: 1.7; }
+
 .event-timeline-card { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
 .timeline-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .timeline-heading small { color: var(--fox-gold-deep); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
@@ -546,17 +570,17 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .timeline-error { margin: 12px 0 0; padding: 10px 12px; color: #9f3d28; background: #f9e6df; border-radius: 8px; font-size: 13px; }
 .timeline-axis { display: grid; gap: 16px; margin-top: 16px; }
 .timeline-group { display: grid; gap: 9px; }
-.timeline-group-heading { display: flex; align-items: baseline; gap: 8px; padding-left: 110px; }
+.timeline-group-heading { display: flex; align-items: baseline; gap: 8px; padding-left: 0; }
 .timeline-group-heading b { font-size: 13px; }
 .timeline-group-heading span { color: var(--ink-dim); font-size: 11px; }
-.timeline-axis-entry { display: grid; grid-template-columns: 84px 18px minmax(0, 1fr); align-items: stretch; }
+.timeline-axis-entry { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
 .timeline-axis-entry > time { padding: 11px 8px 0 0; color: var(--ink-dim); font-size: 11px; font-weight: 700; text-align: right; }
 .timeline-rail { position: relative; display: flex; justify-content: center; }
 .timeline-rail::after { position: absolute; top: 0; bottom: -10px; width: 1px; background: var(--paper-line); content: ''; }
 .timeline-rail i { position: relative; z-index: 1; width: 9px; height: 9px; margin-top: 14px; background: var(--paper-card); border: 2px solid var(--fox-gold); border-radius: 50%; }
 .is-ongoing .timeline-rail i { background: #5b813f; border-color: #5b813f; box-shadow: 0 0 0 4px color-mix(in srgb, #5b813f 14%, transparent); }
-.timeline-event-card { min-width: 0; padding: 13px 15px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
-.is-ongoing .timeline-event-card { border-left: 4px solid #5b813f; }
+.timeline-event-card { min-width: 0; padding: 13px 15px; background: transparent; border: 0; border-radius: 0; }
+.is-ongoing .timeline-event-card { border-left: 0; }
 .is-upcoming .timeline-event-card { border-left: 4px solid var(--fox-gold); }
 .timeline-event-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .timeline-event-card > header > div { display: grid; gap: 2px; min-width: 0; }
@@ -571,7 +595,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-range { flex: none; color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .event-mobile-moment { display: none; }
 .event-summary { margin: 9px 0 0; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
-.event-tama-plan { display: grid; gap: 9px; margin-top: 11px; padding: 11px 12px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-left: 4px solid #5b813f; border-radius: 8px; }
+.event-tama-plan { display: grid; gap: 9px; margin-top: 11px; padding: 11px 12px; background: transparent; border-left: 0; border-radius: 8px; }
 .event-tama-plan > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-tama-plan > header span { display: grid; gap: 1px; }
 .event-tama-plan > header span:last-child { text-align: right; }
@@ -592,7 +616,7 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .tama-now-plan p { margin: 0; color: var(--ink-dim); font-size: 11px; }
 .tama-now-plan button { white-space: nowrap; }
 .tama-now-plan.waiting { grid-template-columns: minmax(130px, auto) 1fr; background: color-mix(in srgb, var(--paper) 72%, var(--paper-card)); border-style: dashed; }
-.event-pace-calculator { display: grid; gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
+.event-pace-calculator { gap: 9px; margin-top: 11px; padding: 11px; background: color-mix(in srgb, var(--fox-gold-pale) 70%, var(--paper-card)); border: 1px solid color-mix(in srgb, var(--fox-gold) 38%, var(--paper-line)); border-radius: 8px; }
 .event-pace-calculator > header { display: flex; align-items: end; justify-content: space-between; gap: 14px; }
 .event-pace-calculator > header > span { display: grid; gap: 1px; }
 .event-pace-calculator > header > span:last-child { text-align: right; }
@@ -606,14 +630,14 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .pace-window-buttons button:disabled { cursor: not-allowed; opacity: .45; }
 .event-pace-calculator > p { margin: 0; color: var(--ink-dim); font-size: 11px; }
 .event-budget { display: flex; align-items: center; gap: 14px; margin-top: 11px; padding: 9px 11px; background: color-mix(in srgb, #f4dfd7 68%, var(--paper-card)); border-radius: 8px; }
-.event-budget.ready { background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); }
+.event-budget.ready { background: transparent; }
 .event-budget > span { display: grid; flex: 0 0 auto; gap: 1px; min-width: 92px; }
 .event-budget small { color: var(--ink-dim); font-size: 10px; }
 .event-budget b { color: #9f3d28; font-size: 14px; }
 .event-budget.ready b { color: #426b36; }
 .event-budget p { margin: 0; color: var(--ink-dim); font-size: 12px; }
 .event-estimate { display: flex; align-items: flex-end; gap: 8px; margin-top: 11px; padding: 10px 11px; background: var(--fox-gold-pale); border-radius: 8px; }
-.event-ended-summary { margin-top: 11px; padding: 10px 11px; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border-radius: 8px; }
+.event-ended-summary { margin-top: 11px; padding: 10px 11px; background: transparent; border-radius: 8px; }
 .event-ended-summary p { margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; }
 .event-ended-summary .ended-clear { color: #426b36; font-size: 14px; }
 .event-ended-summary .ended-empty { margin: 0; }
