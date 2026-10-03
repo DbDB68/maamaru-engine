@@ -66,12 +66,12 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "run_sakura",
-            "description": "刷花：指定部队的队长去 1-1 刷疲劳到 100",
+            "description": "刷花：先解散指定部队的队员，全本丸按樱吹雪升序轮选疲劳≤49的刀，单人刷到100后卸装换下一振",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "team_no": {"type": "integer", "description": "部队编号", "default": 1},
-                    "slot": {"type": "integer", "description": "位置（1=队长）", "default": 1},
+                    "sword_count": {"type": "integer", "description": "本次刷几振", "default": 1, "minimum": 1, "maximum": 1000},
                 },
             },
         },

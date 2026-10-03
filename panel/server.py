@@ -734,9 +734,12 @@ def _build_osaka(agent, config_path, params):
 
 
 def _build_sakura(agent, config_path, params):
+    if str(params.get("team_no", "1")) not in ("1", "2", "3", "4", "5"):
+        yield "[刷花] 请先选择部队一到五；全本丸轮刷不使用预设名单，未清队"
+        return
     yield from agent.sakura_stream(
         team_no=_i(params, "team_no", 1),
-        slot=_i(params, "slot", 1))
+        slot=1, sword_count=_i(params, "sword_count", 1))
 
 
 def _build_sword_inventory(agent, config_path, params):
@@ -1263,9 +1266,9 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _wrap_inventory("刷花", _build_sakura),
                 params=[_team_field("1"),
-                        {"key": "slot", "type": "select", "label": "位置",
-                         "options": [[str(i), f"{i}号位" + ("（队长）" if i == 1 else "")]
-                                     for i in range(1, 7)], "default": "1"}])
+                        {"key": "sword_count", "type": "number", "label": "本次刷几振",
+                         "default": 1, "min": 1, "max": 1000,
+                         "help": "先解散所选部队的队员，再替换队长；全本丸按樱吹雪升序选疲劳≤49的刀，不区分上锁和标签。每振刷到100后卸装换人。"}])
 def _build_practice(agent, config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
     team_no = yield from _team_with_preset_stream(agent, params, default=2)
@@ -1792,6 +1795,9 @@ def _scripts_with_preset_options(scripts: dict) -> dict:
               for f in formations]
     out = {}
     for name, info in scripts.items():
+        if name == "sakura":
+            out[name] = info
+            continue
         params, touched = [], False
         for field in info.get("params") or []:
             if isinstance(field, dict) and field.get("key") == "team_no":
