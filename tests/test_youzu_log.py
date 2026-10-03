@@ -466,7 +466,7 @@ def test_reading_event_points_and_consumables():
     # ITEM_NAMES 已校准的用真名（2026-09-28 CU 道具页逐页对上 +
     # 三次 diff 实验，当日 117 种全部锤死）
     assert reading["御守"] == 32
-    assert reading["加速符·极"] == 388
+    assert reading["加速符"] == 388
     assert reading["狮子螺钿鞍碎片"] == 2
     # 没校准的新道具保持「道具#N」，不硬猜
     assert reading["道具#99999"] == 7
@@ -920,3 +920,75 @@ def test_calibrated_operation_labels():
         source = youzu_log.ledger_change_source(endpoint, [{"endpoint": endpoint}])
         assert source["attribution"] == "confirmed"
         assert source["source_endpoint"] == endpoint
+
+
+def test_speedup_inventory_and_reward_are_one_resource(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/forge", {
+            "item": {"8": {"consumable_id": 8, "num": 390}}}),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/forge/fastmultiple", "slot_no=1"),
+        _s2c("2026-09-28 13:01:01", "https://example.test/forge/fastmultiple", {
+            "assist_item_id": 8, "assist_item_num": "380"}),
+        _s2c("2026-09-28 13:02:00", "https://example.test/mission/rewards", {
+            "item": [{"item_type": 1, "item_id": 8, "item_num": 3}]}),
+        _s2c("2026-09-28 13:03:00", "https://example.test/forge", {
+            "item": {"8": {"consumable_id": 8, "num": 383}}}),
+    ]), encoding="utf-8")
+    ledger = youzu_log.build_ledger(youzu_log.parse_events(f))
+    changes = [c for c in ledger["changes"] if "加速符" in c["delta"]]
+    assert [c["delta"]["加速符"] for c in changes] == [-10, 3]
+    assert changes[0]["source_endpoint"] == "/forge/fastmultiple"
+    assert not any(o["reading"].get("加速符") == 383 for o in ledger["observations"][:-1])
+
+
+def test_inbox_receipt_uses_only_confirmed_serials_and_keeps_remainder(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {"resource": {"charcoal": 100}}),
+        _s2c("2026-09-28 13:00:10", "https://example.test/receive/list", {"receive": {
+            "a": {"serial_id": "a", "item_type": 5, "item_id": 2, "item_num": 1000},
+            "b": {"serial_id": "b", "item_type": 5, "item_id": 2, "item_num": 2000}}}),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/composition/compose", ""),
+        _s2c("2026-09-28 13:02:00", "https://example.test/receive/get", {
+            "serial_ids": ["a"], "resource": {"charcoal": 1090}}),
+        _s2c("2026-09-28 13:03:00", "https://example.test/receive/get", {
+            "serial_ids": ["a"], "resource": {"charcoal": 1090}}),
+    ]), encoding="utf-8")
+    changes = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"]
+    assert len(changes) == 2
+    assert changes[0]["delta"] == {"木炭": 1000}
+    assert changes[0]["evidence"] == "client_inbox_receipt"
+    assert changes[1]["delta"] == {"木炭": -10}
+    assert changes[1]["source_endpoint"] is None
+
+
+def test_forge_receipt_materials_do_not_infer_discounted_bills(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {
+            "resource": {"charcoal": 10000, "bill": 100}}),
+        _c2s("2026-09-28 13:00:20", "POST", "https://example.test/forge/fastmultiple", ""),
+        _c2s("2026-09-28 13:01:00", "POST", "https://example.test/forge/startmultiple", "charcoal=700"),
+        _s2c("2026-09-28 13:01:01", "https://example.test/forge/startmultiple", {
+            "multiple": [{"finished_at": "later"}] * 10,
+            "resource": {"charcoal": 3000, "bill": 91}}),
+    ]), encoding="utf-8")
+    changes = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"]
+    assert changes[0]["delta"] == {"木炭": -7000}
+    assert changes[0]["source_endpoint"] == "/forge/startmultiple"
+    assert changes[0]["evidence"] == "client_forge_recipe"
+    assert changes[1]["delta"] == {"委托符": -9}
+    assert changes[1]["source_endpoint"] is None
+
+
+def test_observations_do_not_retimestamp_sparse_old_balances(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-09-28 13:00:00", "https://example.test/home", {
+            "resource": {"charcoal": 100}, "currency": {"money": 1000}}),
+        _s2c("2026-09-28 13:01:00", "https://example.test/sally", {"currency": {"money": 1000}}),
+    ]), encoding="utf-8")
+    obs = youzu_log.build_ledger(youzu_log.parse_events(f))["observations"]
+    assert len(obs) == 2
+    assert obs[-1]["reading"] == {"小判": 1000}

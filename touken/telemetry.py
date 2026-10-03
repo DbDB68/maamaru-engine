@@ -1244,27 +1244,35 @@ class TelemetryStore:
             "SELECT id, ts, run_id, script, event_type, payload FROM events "
             f"WHERE ts >= ? AND ts <= ? AND event_type IN ({marks}) ORDER BY ts, id",
             (from_ts, to_ts, *event_types)).fetchall()
-        # 窗前基线：三种观察来源各取窗口前最近一条，合成各资源的 opening
-        baseline_rows = []
+        # Sparse client responses must retain a separate baseline per resource.
+        baseline_by_id = {}
         for event_type in _LEDGER_OBS_TYPES:
+            names = (_LEDGER_PEEK_RESOURCES if event_type == "inventory.peek"
+                     else ("小判",) if event_type == "osaka.koban_session"
+                     else LEDGER_RESOURCES)
+            for name in names:
+                path = ('$.resources."' + name + '"' if event_type == "inventory.captured"
+                        else '$."' + name + '"' if event_type == "inventory.peek"
+                        else '$.after')
+                row = conn.execute(
+                    "SELECT id, ts, run_id, script, event_type, payload FROM events "
+                    "WHERE ts < ? AND event_type = ? "
+                    "AND json_type(payload, ?) IN ('integer', 'real') "
+                    "ORDER BY ts DESC, id DESC LIMIT 1",
+                    (from_ts, event_type, path)).fetchone()
+                if row:
+                    baseline_by_id[row["id"]] = row
+        for name in LEDGER_RESOURCES:
             row = conn.execute(
                 "SELECT id, ts, run_id, script, event_type, payload FROM events "
-                "WHERE ts < ? AND event_type = ? ORDER BY ts DESC, id DESC LIMIT 1",
-                (from_ts, event_type)).fetchone()
-            if row:
-                baseline_rows.append(row)
-        # resource.change 的 before/after 同样是直读观察（异去补充提灯等），
-        # 但不是每条都有余额，基线向前翻找最近一条带 before/after 的
-        for row in conn.execute(
-                "SELECT id, ts, run_id, script, event_type, payload FROM events "
                 "WHERE ts < ? AND event_type = 'resource.change' "
-                "ORDER BY ts DESC, id DESC LIMIT 50", (from_ts,)).fetchall():
-            rc_payload = _loads(row["payload"], {})
-            if (rc_payload.get("resource")
-                    and isinstance(rc_payload.get("before"), (int, float))
-                    and isinstance(rc_payload.get("after"), (int, float))):
-                baseline_rows.append(row)
-                break
+                "AND json_extract(payload, '$.resource') = ? "
+                "AND json_type(payload, '$.before') IN ('integer', 'real') "
+                "AND json_type(payload, '$.after') IN ('integer', 'real') "
+                "ORDER BY ts DESC, id DESC LIMIT 1", (from_ts, name)).fetchone()
+            if row:
+                baseline_by_id[row["id"]] = row
+        baseline_rows = list(baseline_by_id.values())
         reports = conn.execute(
             "SELECT id, occurred_at, gap_key, resource, claimed_delta FROM human_reports "
             "WHERE occurred_at <= ? ORDER BY occurred_at, id", (to_ts,)).fetchall()

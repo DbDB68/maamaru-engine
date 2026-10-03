@@ -48,6 +48,15 @@ class ResourceLedgerTests(unittest.TestCase):
         return next((d for d in ledger["daily_series"]
                      if d["date"] == date and d["resource"] == resource), None)
 
+    def test_sparse_client_baselines_remain_per_resource(self):
+        t = sh("2026-09-30 10:00:00")
+        self._captured(t - 120, {"木炭": 100, "小判": 1000}, script="youzu_log")
+        self._captured(t - 60, {"小判": 1100}, script="youzu_log")
+        self._captured(t + 60, {"木炭": 120, "小判": 1150}, script="youzu_log")
+        ledger = self.store.resource_ledger(t, t + 120)
+        self.assertEqual(self._res(ledger, "木炭")["total_delta"], 20)
+        self.assertEqual(self._res(ledger, "小判")["total_delta"], 50)
+
     def test_game_and_script_same_receipt_count_once_and_link_run(self):
         t = sh("2026-09-30 10:00:00")
         self._captured(t - 60, {"小判": 1000}, phase="before")

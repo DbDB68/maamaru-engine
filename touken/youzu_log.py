@@ -623,7 +623,7 @@ ITEM_NAMES = {
     "1": "御守", "2": "御守·极",
     "3": "仙人团子", "4": "御札·富士", "5": "御札·松",
     "6": "御札·竹", "7": "御札·梅",
-    "8": "加速符·极", "9": "修行召回鸽",
+    "8": "加速符", "9": "修行召回鸽",
     "13": "小判箱·小", "14": "小判箱·中", "15": "小判箱·大",
     "17": "幕内便当", "18": "一套纸笔", "19": "修行衣装",
     "20": "修行道具", "21": "远征召回鸽", "22": "兵粮丸",
@@ -650,6 +650,7 @@ _ENDPOINT_LABEL = {
     "/duty/complete": "内番完成", "/home/back": "修行归来",
     "/monthcard/salary": "月卡俸禄", "/sign/info": "签到", "/sign": "签到",
     "/sally/recovercost": "补充活动手形",
+    "/sally/forward": "出阵资源奖励",
     "/shop/buy": "万屋购买", "/sword/dismantle_many": "刀解",
     "/sally/parallelpastsally": "异去出阵",
     "/sally/parallelpastrecovercost": "异去恢复探索次数",
@@ -661,7 +662,10 @@ _LEDGER_READ_ENDPOINTS = {
     "/home/number_info", "/home/notice", "/home/test", "/party/list",
     "/mission/index", "/sally", "/push", "/keepalive", "/rolling/index",
     "/enter", "/platformmobile/login", "/login/start", "/treasurebox/check_open",
-    "/party/setsword",
+    "/party/setsword", "/party/set_preset", "/composition/list",
+    "/forge", "/repair", "/conquest", "/practice", "/duty",
+    "/receive/list", "/shop/list", "/notice/index", "/user/profile",
+    "/user/param", "/album/list", "/sign/info",
 }
 
 
@@ -687,7 +691,7 @@ _LEDGER_ENDPOINT_CATEGORIES = {
     "sally/parallelpastsally": "yosari", "sally/parallelpastrecovercost": "yosari",
     "artifact/buybindingagent": "artifact", "monthcard/salary": "salary",
     "sign/info": "signin", "sign": "signin",
-    "sally/recovercost": "ticket", "shop/buy": "shop",
+    "sally/recovercost": "ticket", "sally/forward": "sortie", "shop/buy": "shop",
     "sword/dismantle_many": "dismantle", "composition/compose": "composition",
     "composition/union": "union", "duty/complete": "duty", "home/back": "training",
 }
@@ -840,6 +844,11 @@ def _reading_from_payload(payload) -> dict | None:
                 if num is not None:
                     cid = str(entry["consumable_id"])
                     reading[ITEM_NAMES.get(cid, f"道具#{cid}")] = num
+    # Real ten-forge acceleration traces identify item 8: 390 -> 380 -> 370.
+    if str(payload.get("assist_item_id")) == "8":
+        value = _int(payload.get("assist_item_num"), None)
+        if value is not None:
+            reading["加速符"] = value
     return reading or None
 
 
@@ -857,7 +866,14 @@ def _payload_resource_rewards(payload) -> dict[str, int]:
             if not isinstance(entry, dict):
                 continue
             kind = str(entry.get("item_type"))
-            name = "小判" if kind == "4" else names.get(str(entry.get("item_id"))) if kind == "5" else None
+            if kind == "4":
+                name = "小判"
+            elif kind == "5":
+                name = names.get(str(entry.get("item_id")))
+            elif kind == "1" and str(entry.get("item_id")) == "8":
+                name = "加速符"
+            else:
+                name = None
             amount = _int(entry.get("item_num"))
             if name and amount > 0:
                 rewards[name] = rewards.get(name, 0) + amount
@@ -879,6 +895,7 @@ def build_ledger(events: list[dict]) -> dict:
     last_known: dict[str, int] = {}
     pending_requests: list[dict] = []  # 当前响应前的请求
     resource_requests: dict[str, list[dict]] = {}
+    inbox_entries: dict[str, dict] = {}
 
     for ev in events:
         if ev["direction"] == "C->S":
@@ -894,6 +911,11 @@ def build_ledger(events: list[dict]) -> dict:
             for requests in [pending_requests, *resource_requests.values()]:
                 requests[:] = [r for r in requests if r["endpoint"] != ev["endpoint"]]
             continue
+        payload = ev["payload"]
+        if ev["endpoint"] == "/receive/list" and isinstance(payload.get("receive"), dict):
+            for entry in payload["receive"].values():
+                if isinstance(entry, dict) and entry.get("serial_id") is not None:
+                    inbox_entries[str(entry["serial_id"])] = entry
         reading = _reading_from_payload(ev.get("payload"))
         reading = reading or {}
         ts = _event_epoch(ev)
@@ -911,7 +933,31 @@ def build_ledger(events: list[dict]) -> dict:
 
         # Explicit receipts own their amounts; balance differences only explain
         # the remainder. Do not manufacture a balance for a receipt without a read.
-        rewards = _payload_resource_rewards(ev.get("payload"))
+        rewards = _payload_resource_rewards(payload)
+        receipt_evidence = "client_reward_list"
+        if ev["endpoint"] == "/receive/get":
+            # Only items the successful response explicitly confirms as received.
+            ids = payload.get("serial_ids")
+            if isinstance(ids, str):
+                ids = ids.split(",")
+            if isinstance(ids, list):
+                claimed = [inbox_entries.pop(str(i)) for i in ids if str(i) in inbox_entries]
+                if not rewards:
+                    rewards = _payload_resource_rewards({"item": claimed})
+                    receipt_evidence = "client_inbox_receipt"
+        if ev["endpoint"] == "/forge/startmultiple":
+            requests = [r for r in pending_requests if r["endpoint"] == ev["endpoint"]]
+            accepted = payload.get("multiple")
+            if len(requests) == 1 and isinstance(accepted, list) and accepted:
+                recipe = requests[0].get("payload") or {}
+                for field, name in LEDGER_RESOURCE_MAP.items():
+                    if field == "bill":
+                        continue  # Discounts are not inferable from recipe quantities.
+                    amount = _int(recipe.get(field), None)
+                    if amount is not None and amount > 0:
+                        rewards[name] = -amount * len(accepted)
+                receipt_evidence = "client_forge_recipe"
+
         for name, amount in rewards.items():
             old = last_known.get(name)
             new = reading.get(name)
@@ -920,7 +966,7 @@ def build_ledger(events: list[dict]) -> dict:
                 "before": {name: old if new is not None and old is not None and new - old == amount else None},
                 "after": {name: new if new is not None and old is not None and new - old == amount else None},
                 "via": [detail or _ENDPOINT_LABEL.get(ev["endpoint"], (ev["endpoint"] or "?").lstrip("/"))],
-                "via_endpoints": [], "evidence": "client_reward_list"})
+                "via_endpoints": [], "evidence": receipt_evidence})
             if new is None and old is not None:
                 last_known[name] = old + amount
 
@@ -934,13 +980,13 @@ def build_ledger(events: list[dict]) -> dict:
                     if name not in rewards:
                         before[name] = last_known[name]
                         after[name] = value
-        changed = delta or rewards or not last_known
         for name, value in reading.items():
             last_known[name] = value
 
-        if changed:
+        # Emit only fields actually returned now, never a carried or computed balance.
+        if reading:
             observations.append({"ts": ts, "endpoint": ev["endpoint"],
-                                 "reading": dict(last_known)})
+                                 "reading": dict(reading)})
         grouped = {}
         for name, amount in delta.items():
             meta = ledger_change_source(ev["endpoint"], resource_requests.get(name, []), detail)
