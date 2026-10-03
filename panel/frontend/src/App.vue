@@ -616,7 +616,7 @@ watch(tab, value => {
           <summary>队伍</summary>
           <h3>队伍</h3>
           <SideNavItem :active="false" @click="swordView = 'formation'; tab = 'swords'">
-            <span><img class="task-menu-icon" :src="'/static/img/ui/singleplayer.png'" alt="">部队预设 <span class="task-menu-jump">→刀剑页</span></span>
+            <span><img class="task-menu-icon" :src="'/static/img/ui/formation.svg'" alt="">部队预设 <span class="task-menu-jump">→刀剑页</span></span>
           </SideNavItem>
         </details>
         <details class="task-nav-group" open>
@@ -629,7 +629,7 @@ watch(tab, value => {
             <span><img class="task-menu-icon" :src="'/static/img/ui/dismantle.png'" alt="">刀解白名单</span>
           </SideNavItem>
           <SideNavItem :active="selected === '$wishlist'" @click="selected = '$wishlist'">
-            <span><img class="task-menu-icon" :src="'/static/img/ui/menuList.png'" alt="">心愿刀名单</span>
+            <span><img class="task-menu-icon" :src="'/static/img/ui/sword-wishlist.svg'" alt="">心愿刀名单</span>
           </SideNavItem>
         </details>
       </nav>
