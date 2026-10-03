@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ActivityPace, DayTimeline, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
 import { dailyRunTarget, immediateBatchPlan } from './eventTimelineModel'
-import { raidDayRecommendation } from './planningLinkModel'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -131,9 +130,6 @@ function currencyScript(mechanics: string | null | undefined): 'hanafuda' | 'rai
   return mechanics === 'raid' ? 'raid' : 'hanafuda'
 }
 
-function raidRecommendation(entry: EventTimelineEntry) {
-  return raidDayRecommendation(props.dayTimeline, entry.budget?.mechanics === 'raid')
-}
 
 function goalFor(entry: EventTimelineEntry) {
   return goalByEvent.value.get(entry.name)
@@ -428,7 +424,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
                 <div v-if="entry.budget.tama_current != null" class="tama-progress"><i :style="{ width: `${tamaProgress(entry)}%` }" /></div>
                 <p class="tama-action">{{ tamaRemainingText(entry) }}</p>
                 <p v-if="entry.budget.can_finish === false" class="timeline-error">{{ tamaTimeText(entry) }}</p>
-                <button v-if="entry.budget.mechanics === 'raid' && raidRecommendation(entry)?.available" type="button" class="secondary raid-schedule-action" @click="emit('open-raid-recommendation')">带入时间表</button>
                 <section v-if="entry.budget.mechanics !== 'raid' && tamaBatchPlan(entry)" class="tama-now-plan" :class="{ waiting: !tamaBatchPlan(entry)!.runs }">
                   <span>
                     <small>现在这一锅</small>
@@ -559,7 +554,6 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-target-dialog p { color: var(--ink-dim); font-size: 12px; }
 .event-moment { color: var(--ink-dim); font-size: 12px; font-weight: 400; margin-left: 10px; }
 .target-edit { background: transparent; border: 0; color: var(--fox-gold-deep); cursor: pointer; white-space: nowrap; font-size: 12px; }
-.raid-schedule-action { justify-self: start; }
 .tama-estimate-details p { font-size: 12px; color: var(--ink-dim); line-height: 1.7; }
 
 .event-timeline-card { padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
