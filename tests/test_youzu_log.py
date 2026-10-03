@@ -1071,3 +1071,17 @@ def test_receipt_source_repair_is_backed_up_and_idempotent(tmp_path):
     with sqlite3.connect(backups[0]) as backup:
         assert json.loads(backup.execute("SELECT payload FROM events").fetchone()[0])["source"] == "youzu_log.unknown"
     store.close()
+
+
+def test_raid_points_flow_has_gameplay_source(tmp_path):
+    f = tmp_path / "log.txt"
+    f.write_text("\n".join([
+        _s2c("2026-10-03 03:00:00", "https://example.test/sally", {"point": {"10031": 1000}}),
+        _c2s("2026-10-03 03:00:01", "POST", "https://example.test/sally/eventsally", ""),
+        _c2s("2026-10-03 03:00:02", "POST", "https://example.test/battle/alloutbattle", ""),
+        _s2c("2026-10-03 03:03:00", "https://example.test/sally", {"point": {"10031": 1756}}),
+    ]), encoding="utf-8")
+    changes = youzu_log.build_ledger(youzu_log.parse_events(f))["changes"]
+    reward = next(c for c in changes if "活动点数·10031" in c["delta"])
+    assert reward["source_endpoint"] == "/battle/alloutbattle"
+    assert reward["delta"]["活动点数·10031"] == 756

@@ -67,3 +67,13 @@ describe('honmaru receipt summary', () => {
     expect(honmaruReceipts([], 'cost')).toEqual([])
   })
 })
+
+
+it('links receipts only with matching operation evidence and preserves ambiguous owners', async () => {
+  const { linkReceiptRuns } = await import('./reportModel')
+  const receipt = { id: 'a', ts: 100, resource: '木炭', delta: 1550, source: 'task_rewards.youzu_log', script: 'youzu_log' }
+  const event = { run_id: 'daily', ts: 102, script: 'workflow', event_type: 'resource.change', payload: { resource: '木炭', delta: 1550, source: 'task_rewards.reward_popup' } }
+  expect(linkReceiptRuns([receipt], [], [{ run_id: 'daily', started_at: 90, ended_at: 120 }])[0].run_id).toBeUndefined()
+  expect(linkReceiptRuns([receipt], [event], [{ run_id: 'daily', label: '一键日课' }])[0].run_id).toBe('daily')
+  expect(linkReceiptRuns([receipt], [event, { ...event, run_id: 'other' }], [])[0].run_id).toBeUndefined()
+})

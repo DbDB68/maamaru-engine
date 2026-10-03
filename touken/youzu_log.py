@@ -643,6 +643,7 @@ ITEM_NAMES = {
 }
 
 _ENDPOINT_LABEL = {
+    "/battle/alloutbattle": "联队战奖励",
     "/conquest/complete": "远征完成", "/conquest/start": "远征派遣",
     "/forge/startmultiple": "锻刀开炉", "/forge/complete": "锻刀完成",
     "/forge/completemultiple": "锻刀完成", "/forge/fastmultiple": "锻刀加速",
@@ -689,7 +690,7 @@ def ledger_change_source(endpoint: str | None, requests: list[dict],
 _LEDGER_ENDPOINT_CATEGORIES = {
     "conquest": "expedition", "forge": "forge", "repair": "repair",
     "mission/rewards": "task_rewards", "receive/get": "inbox",
-    "sally/parallelpastsally": "yosari", "sally/parallelpastrecovercost": "yosari",
+    "battle/alloutbattle": "raid", "sally/parallelpastsally": "yosari", "sally/parallelpastrecovercost": "yosari",
     "artifact/buybindingagent": "artifact", "monthcard/salary": "salary",
     "sign/info": "signin", "sign": "signin",
     "sally/recovercost": "ticket", "sally/forward": "sortie", "shop/buy": "shop",
@@ -1023,6 +1024,11 @@ def build_ledger(events: list[dict]) -> dict:
                         "attribution": "inferred", "via": ["异去门票消耗"],
                         "evidence": "client_ticket_balance_with_yosari_flow"}
 
+            raid_steps = {"/sally/eventsally", "/battle/alloutbattle", "/sally/recovercost", "/notice/index"}
+            if (name == "活动点数·10031" and amount > 0
+                    and "/battle/alloutbattle" in actions and actions <= raid_steps):
+                meta = {"source_endpoint": "/battle/alloutbattle", "attribution": "inferred",
+                        "via": ["联队战奖励"], "evidence": "client_event_points_with_raid_flow"}
             if name in rewards:
                 meta = {"source_endpoint": None, "attribution": "inferred",
                         "via": ["来源待确认"], "candidate_endpoints": meta.get("candidate_endpoints", [])}

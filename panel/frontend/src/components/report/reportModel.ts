@@ -2,7 +2,7 @@
 import type { LedgerAttribution } from '../../types'
 
 export const resourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石', '委托符', '加速符', '甲州金']
-export function resourceLabel(name: string) { return name === '加速符' ? '加速符·极' : name }
+export function resourceLabel(name: string) { return name === '加速符' ? '加速符·极' : name === '活动点数·10031' ? '夜光贝' : name }
 
 export interface SourceCategory { key: string; label: string; color: string }
 
@@ -47,6 +47,24 @@ export function recordOrigin(item: LedgerAttribution, runs: any[] = []): string 
   return `まあ丸${name ? ` · ${name}` : ''}`
 }
 
+export function linkReceiptRuns(receipts: LedgerAttribution[], events: any[], runs: any[]): LedgerAttribution[] {
+  return receipts.map(receipt => {
+    if (receipt.run_id) return receipt
+    const matches = events.filter(event => event.run_id && event.script !== 'youzu_log'
+      && event.event_type === 'resource.change' && event.payload?.resource === receipt.resource
+      && event.payload?.delta === receipt.delta && Math.abs(event.ts - receipt.ts) <= 10
+      && categoryOf(event.payload?.source) === categoryOf(receipt.source))
+    const owners = new Set(matches.map(event => event.run_id))
+    if (receipt.resource === '归城提灯五' && receipt.delta < 0 && receipt.source.startsWith('yosari.')) {
+      for (const run of runs) if ((run.loop_records || []).some((loop: any) =>
+        loop.mode === 'yosari' && loop.started_at <= receipt.ts && receipt.ts <= loop.ended_at)) owners.add(run.run_id)
+    }
+    if (owners.size !== 1) return receipt
+    const run_id = [...owners][0]
+    return { ...receipt, run_id, run_label: runs.find(run => run.run_id === run_id)?.label }
+  })
+}
+
 export function gameLedgerRecords(attributions: LedgerAttribution[]) {
   const groups = new Map<string, any>()
   const seen = new Set<string>()
@@ -64,7 +82,8 @@ export function gameLedgerRecords(attributions: LedgerAttribution[]) {
         event_type: 'game.resource_changed', payload: { label, resources: {}, origin: recordOrigin(item) }, items: [] }
       groups.set(key, group)
     }
-    group.payload.resources[item.resource] = (group.payload.resources[item.resource] || 0) + item.delta
+    const name = resourceLabel(item.resource)
+    group.payload.resources[name] = (group.payload.resources[name] || 0) + item.delta
   }
   return [...groups.values()]
 }

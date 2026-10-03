@@ -4,7 +4,7 @@ import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
 import type { LedgerAttribution, ManualSession } from '../../types'
-import { gameLedgerRecords, signed } from './reportModel'
+import { gameLedgerRecords, linkReceiptRuns, signed } from './reportModel'
 import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runStatusLabel, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
@@ -339,12 +339,16 @@ const groupedActivityEvents = computed(() => {
   }
   return [...groups.values()].sort((a, b) => b.ts - a.ts)
 })
+const receiptEvents = computed(() => gameLedgerRecords(linkReceiptRuns(props.attributions || [], props.events, props.runs)))
 const allRecords = computed(() => {
   const runsById = new Map(props.runs.filter(run => run.run_id).map(run => [run.run_id, run]))
   return [
     ...props.runs.map(run => ({ kind: 'run' as const, ts: Number(run.started_at), run })),
     ...props.manualSessions.map(session => ({ kind: 'manual' as const, ts: Number(session.started_at), session })),
-    ...gameLedgerRecords(props.attributions || []).map(item => ({ kind: 'activity' as const, ts: Number(item.ts), item })),
+    ...receiptEvents.value.filter(item => {
+      const run = runsById.get(item.run_id)
+      return !run || shanghaiDate(run.started_at) !== shanghaiDate(item.ts)
+    }).map(item => ({ kind: 'activity' as const, ts: Number(item.ts), item })),
     ...groupedActivityEvents.value
       .filter(item => {
         if (!item.run_id) return true
@@ -396,10 +400,14 @@ function recordTime(timestamp: number): string {
 }
 function runActivities(run: any) {
   const startDay = shanghaiDate(Number(run.started_at))
-  return groupedActivityEvents.value.filter(item => (
+  return [...groupedActivityEvents.value, ...receiptEvents.value].filter(item => (
     item.run_id && item.run_id === run.run_id && shanghaiDate(Number(item.ts)) === startDay
     // 逐圈明细已接管出阵圈事件的展示，任务卡里不再重复列一遍
     && !(runLoopRecords(run).length && sortieEventTypes.has(item.event_type))
+    && !receiptEvents.value.some(receipt => receipt.run_id === item.run_id && Math.abs(receipt.ts - item.ts) <= 10
+      && ((item.event_type === 'task_rewards.claimed' && receipt.payload.label === '任务奖励')
+        || (item.event_type === 'dismantle.completed' && receipt.payload.label === '刀解')))
+
   ))
 }
 function runRepairTotal(run: any) {
@@ -508,8 +516,7 @@ watch(() => props.selectedDate, () => { timelineLimit.value = 20 })
             <div class="run-evidence">
               <p v-if="Number(slotProps.item.run.loops) > 0 && !hasUpkeep(slotProps.item.run)" class="run-upkeep-quiet">本轮无额外养护消耗</p>
               <div v-if="hasUpkeep(slotProps.item.run)" class="run-upkeep" aria-label="本轮养护"><span v-if="runRepairTotal(slotProps.item.run)">🩹 手入 <b>{{ runRepairTotal(slotProps.item.run) }}</b> 振</span><span v-if="runSpeedupTotal(slotProps.item.run)">⚡ 加速符 <b>{{ runSpeedupTotal(slotProps.item.run) }}</b> 枚</span><span v-if="runEquipmentTotal(slotProps.item.run)">🛡️ 补刀装 <b>{{ runEquipmentTotal(slotProps.item.run) }}</b> 次</span></div>
-              <p v-if="attributedStats(slotProps.item.run)" class="run-delta"><small>🦊 已确认收支</small>{{ attributedStats(slotProps.item.run) }}</p>
-              <p v-if="deltaStats(slotProps.item.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(slotProps.item.run) }}<span v-if="kobanPerHourLabel(slotProps.item.run)">· 小判约 {{ kobanPerHourLabel(slotProps.item.run) }} / 小时</span><span v-if="kobanPerFloorLabel(slotProps.item.run)">· 平均每层 {{ kobanPerFloorLabel(slotProps.item.run) }}</span></p>
+              <p v-if="!attributedStats(slotProps.item.run) && deltaStats(slotProps.item.run)" class="run-delta"><small>📦 库存变化</small>{{ deltaStats(slotProps.item.run) }}<span v-if="kobanPerHourLabel(slotProps.item.run)">· 小判约 {{ kobanPerHourLabel(slotProps.item.run) }} / 小时</span><span v-if="kobanPerFloorLabel(slotProps.item.run)">· 平均每层 {{ kobanPerFloorLabel(slotProps.item.run) }}</span></p>
               <div v-if="runLoopRecords(slotProps.item.run).length" class="run-activities run-loops"><p v-for="(loop, index) in runLoopRecords(slotProps.item.run)" :key="`loop-${index}`"><time>{{ recordTime(loop.ended_at || loop.started_at || 0) }}</time><span><b>{{ loopHeadline(loop) }}</b><small>{{ loopDetail(loop) }}</small></span></p></div>
               <div v-if="runActivities(slotProps.item.run).length" class="run-activities"><p v-for="item in runActivities(slotProps.item.run)" :key="item.id"><time>{{ recordTime(item.ts) }}</time><span><b>{{ activityTitle(item) }}</b><small>{{ activityDetail(item) }}</small></span></p></div>
               <p v-else-if="!attributedStats(slotProps.item.run) && !deltaStats(slotProps.item.run)" class="run-upkeep-quiet">这次任务没有额外成绩明细。</p>
