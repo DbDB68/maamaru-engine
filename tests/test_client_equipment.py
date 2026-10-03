@@ -21,7 +21,7 @@ def test_confirmed_names_preserve_instances_and_original_observation():
 
 def test_unknown_and_missing_ids_are_not_named():
     original = {"equip": [{"equip_id": True}, {"serial_id": "missing"}],
-                "artifact": [{"artifact_id": 999}], "sword": [{"item_id": 3155}]}
+                "artifact": [{"artifact_id": 999}], "sword": [{"item_id": 999}]}
     assert name_client_assets(original) == original
 
 
@@ -44,5 +44,14 @@ def test_player_calibrated_names(identifier, name, kind):
 
 
 def test_unconfirmed_grade_and_special_horse_are_not_inferred():
-    original = {"equip": [{"equip_id": n} for n in (1, 2, 11044, 11045, 11049)]}
+    original = {"equip": [{"equip_id": n} for n in (1, 2, 11050)]}
     assert name_client_assets(original) == original
+
+
+def test_horses_calibrated_by_nine_successive_equipment_changes():
+    names = ["祝九号", "祝八号", "祝七号", "祝六号", "祝五号", "祝四号", "祝三号", "祝二号", "祝一号"]
+    rows = name_client_assets({"equip": [{"equip_id": n} for n in range(11049, 11040, -1)],
+                               "sword": [{"item_id": 3155}]})
+    assert [r["name"] for r in rows["equip"]] == names
+    assert all(r["kind"] == "horse" for r in rows["equip"])
+    assert rows["sword"][0]["charm_name"] == "御守·桃"

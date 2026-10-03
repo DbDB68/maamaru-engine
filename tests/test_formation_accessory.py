@@ -42,6 +42,11 @@ class HorseListTests(unittest.TestCase):
         self.assertEqual(accessory.find_horse_in_list(maa, "08望月"),
                          (Point(990, 188), True))
 
+    def test_ninth_anniversary_horse_requires_transfer(self):
+        maa = _ListMaa([_card("祝九号x1", 188, occupied=True)])
+        self.assertEqual(accessory.find_horse_in_list(maa, "祝九号"),
+                         (Point(990, 188), True))
+
     def test_generic_occupied_horse_is_not_chosen(self):
         maa = _ListMaa([_card("白毛x1", 188, occupied=True)])
         with patch.object(accessory.time, "sleep"):

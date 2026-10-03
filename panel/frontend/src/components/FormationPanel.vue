@@ -53,7 +53,7 @@ const HORSE_OPTIONS = [
   { label: '高楯黑', value: '05高楯黑' }, { label: '花柑子', value: '06花柑子' },
   { label: '青海波', value: '07青海波' }, { label: '望月', value: '08望月' },
   ...['白毛', '鹿毛', '青毛'].map(name => ({ label: name, value: name })),
-  ...['一', '二', '三', '四', '五', '六', '七', '八'].map(no => ({ label: `祝${no}号`, value: `祝${no}号` })),
+  ...['一', '二', '三', '四', '五', '六', '七', '八', '九'].map(no => ({ label: `祝${no}号`, value: `祝${no}号` })),
 ]
 const CHARM_OPTIONS = ['御守', '御守·极', '御守·桃'] as const
 

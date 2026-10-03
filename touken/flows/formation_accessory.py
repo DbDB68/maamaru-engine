@@ -51,7 +51,7 @@ def find_horse_in_list(maa, name):
     """同名马优先选未装备的一匹；已装备的只接受有序号的唯一马。"""
     previous = None
     uniquely_named = bool(re.match(r"^\d{2}", name)
-                          or re.match(r"^祝[一二三四五六七八]号$", name))
+                          or re.match(r"^祝[一二三四五六七八九]号$", name))
     for _ in range(12):
         tokens = _tokens(maa, _HORSE_LIST)
         matches = _horse_matches(tokens, name)
