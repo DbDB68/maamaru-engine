@@ -59,7 +59,6 @@ const CHARM_OPTIONS = ['御守', '御守·极', '御守·桃'] as const
 
 const clientInventory = ref<Awaited<ReturnType<typeof api.clientInventory>> | null>(null)
 const profile = ref<HonmaruFormationProfile | null>(null)
-const catalog = ref<Array<{ id: string; name: string; name_zh: string; type: string }>>([])
 const loading = ref(true)
 const loadError = ref('')
 
@@ -81,12 +80,11 @@ const candidateGroups = computed<CandidateGroup[]>(() => {
     .map(([name, rows]) => ({ name, rows }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
-const catalogMatches = computed(() => catalog.value.filter(sword =>
-  (sword.name_zh || sword.name).includes(presetQuery.value.trim())))
+
 
 const profileSummary = computed(() => {
   if (!profile.value) return ''
-  if (!poolDone.value) return '没有完整刀帐也能编队；具体一振仍需刀帐'
+  if (!poolDone.value) return '请先更新刀帐，再选择具体一振'
   const skipped = pool.value?.skipped_newer_snapshots?.length || 0
   const base = `刀帐候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
   return skipped ? `${base} · 之后还有 ${skipped} 次盘点没认全，以这份为准` : base
@@ -103,14 +101,14 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const [profileResult, catalogResult, inventoryResult] = await Promise.allSettled([
-      api.honmaruProfile(), api.swords(), api.clientInventory(),
+    const [profileResult, inventoryResult, archiveResult] = await Promise.allSettled([
+      api.honmaruProfile(), api.clientInventory(), api.swordArchive(),
     ])
+    if (archiveResult.status === 'fulfilled') archive.value = archiveResult.value
     if (inventoryResult.status === 'fulfilled') clientInventory.value = inventoryResult.value
     if (profileResult.status === 'fulfilled') profile.value = profileResult.value
-    else loadError.value = '刀帐暂时没有翻开；仍可按上锁刀和等级设置预设。'
-    if (catalogResult.status === 'fulfilled') catalog.value = catalogResult.value.swords
-    else loadError.value = '刀剑名册暂时没有翻开，请稍后更新刀帐。'
+    else loadError.value = '刀帐暂时没有翻开，请更新刀帐后再选刀。'
+    if (archiveResult.status === 'rejected') loadError.value = '刀帐标签暂时没有翻开，请重新读取。'
   } catch (cause) {
     loadError.value = cause instanceof Error ? cause.message : '本丸档案没有翻开'
   } finally {
@@ -129,7 +127,12 @@ const draftTeam = ref(1)
 const draftSlots = ref<Record<string, CustomFormationSlotEntry>>({})
 const pickerSlot = ref<number | null>(null) // 正在选刀的格子
 const equipmentSlot = ref<number | null>(null)
-const pickerMode = ref<'ranked' | 'exact'>('ranked')
+const pickerTag = ref<'favorite' | 'watch' | 'keeper' | 'all'>('all')
+const archive = ref<Awaited<ReturnType<typeof api.swordArchive>> | null>(null)
+const pickerTags = [{ value: 'favorite', label: '常用' }, { value: 'watch', label: '特别关心' }, { value: 'keeper', label: '要练' }, { value: 'all', label: '整本' }] as const
+function candidateMarks(entry: FormationCandidate) {
+  return archive.value?.entries.find(row => row.observation_id === entry.observation_id)?.human
+}
 const presetQuery = ref('')
 const presetSaving = ref(false)
 const presetMessage = ref('')
@@ -145,8 +148,9 @@ const draftError = computed(() => validatePresetDraft({
 // 预设选刀池直接复用本丸档案的候选分组（同名多振逐振列出，同一口径）。
 const presetFilteredGroups = computed(() => {
   const needle = presetQuery.value.trim()
-  if (!needle) return candidateGroups.value
-  return candidateGroups.value.filter(group => group.name.includes(needle))
+  return candidateGroups.value.map(group => ({ ...group, rows: group.rows.filter(entry =>
+    pickerTag.value === 'all' || candidateMarks(entry)?.[pickerTag.value])
+  })).filter(group => group.rows.length && (!needle || group.name.includes(needle)))
 })
 
 function cloneSlots(slots: Record<string, CustomFormationSlotEntry>): Record<string, CustomFormationSlotEntry> {
@@ -202,22 +206,6 @@ function togglePresetPicker(no: number) {
 function toggleEquipmentEditor(no: number) {
   equipmentSlot.value = equipmentSlot.value === no ? null : no
   pickerSlot.value = null
-}
-
-function assignRankedSword(sword: { id: string; name: string; name_zh: string }, form: 'normal' | 'kiwame') {
-  if (pickerSlot.value == null) return
-  const next = cloneSlots(draftSlots.value)
-  next[String(pickerSlot.value)] = {
-    selection_policy: 'locked_highest_level', sword_catalog_id: sword.id,
-    name_zh: sword.name_zh || sword.name, form_status: form,
-    ...(next[String(pickerSlot.value)]?.treasure ? { treasure: next[String(pickerSlot.value)].treasure } : {}),
-    ...(next[String(pickerSlot.value)]?.troops ? { troops: next[String(pickerSlot.value)].troops } : {}),
-    ...(next[String(pickerSlot.value)]?.horse ? { horse: next[String(pickerSlot.value)].horse } : {}),
-    ...(next[String(pickerSlot.value)]?.charm ? { charm: next[String(pickerSlot.value)].charm } : {}),
-  }
-  draftSlots.value = next
-  const rest = [1, 2, 3, 4, 5, 6].find(no => no !== pickerSlot.value && !next[String(no)])
-  pickerSlot.value = rest ?? null
 }
 
 function assignPresetCandidate(entry: FormationCandidate) {
@@ -380,10 +368,10 @@ onMounted(() => { load(); loadPresets() })
             @updated="load" @error="loadError = $event" @run-inventory="emit('runInventory')" />
         </template>
       </PanelHeader>
-      <p class="formation-hintline">保存预设不会立刻动游戏；开工时会在名单里找上锁且等级最高的刀。</p>
+      <p class="formation-hintline">保存预设不会立刻动游戏；开工时会按预设找到你选定的那振。</p>
 
       <p v-if="loadError" class="formation-error">{{ loadError }}</p>
-      <div v-if="loading && !catalog.length" class="formation-empty">正在读取刀剑名册……</div>
+      <div v-if="loading && !profile" class="formation-empty">正在读取刀剑名册……</div>
       <template v-else>
         <section class="formation-presets">
           <header class="formation-presets-head">
@@ -436,7 +424,7 @@ onMounted(() => { load(); loadPresets() })
                 </select>
               </label>
             </div>
-            <p class="formation-hintline">按刀名选上锁最高级，或从刀帐指定具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
+            <p class="formation-hintline">从刀帐选择具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
             <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
             <ol class="formation-preset-slots">
               <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
@@ -534,25 +522,15 @@ onMounted(() => { load(); loadPresets() })
             </div>
 
             <div v-if="pickerSlot != null" class="formation-preset-picker">
-              <div class="formation-picker-modes" role="group" aria-label="选刀方式">
-                <button type="button" class="secondary" :aria-pressed="pickerMode === 'ranked'" @click="pickerMode = 'ranked'">按上锁最高级</button>
-                <button type="button" class="secondary" :aria-pressed="pickerMode === 'exact'" @click="pickerMode = 'exact'">指定刀帐里的一振</button>
+              <div class="formation-picker-modes" role="group" aria-label="刀帐标签">
+                <button v-for="tag in pickerTags" :key="tag.value" type="button" class="secondary" :aria-pressed="pickerTag === tag.value" @click="pickerTag = tag.value">{{ tag.label }}</button>
               </div>
               <label class="formation-search">
                 <span>给 {{ pickerSlot }} 号位选刀</span>
                 <input v-model="presetQuery" type="search" placeholder="输入刀名">
-                <em>{{ pickerMode === 'ranked' ? catalogMatches.length : presetFilteredGroups.length }} 种</em>
+                <em>{{ presetFilteredGroups.reduce((sum, group) => sum + group.rows.length, 0) }} 振</em>
               </label>
-              <p v-if="pickerMode === 'ranked'" class="formation-hintline">选普通或极。开工时只考虑黄色上锁的刀；最高级并列或认不清时会停下。</p>
-              <div v-if="pickerMode === 'ranked' && catalogMatches.length" class="formation-preset-candidates">
-                <section v-for="sword in catalogMatches" :key="sword.id" class="formation-candidate-group formation-ranked-choice">
-                  <b>{{ sword.name_zh || sword.name }}</b>
-                  <button type="button" class="formation-candidate" @click="assignRankedSword(sword, 'normal')">普通 · 上锁最高级</button>
-                  <button type="button" class="formation-candidate" @click="assignRankedSword(sword, 'kiwame')">极 · 上锁最高级</button>
-                </section>
-              </div>
-              <p v-else-if="pickerMode === 'ranked'" class="formation-empty">没有找到这个刀名。</p>
-              <p v-else-if="!poolDone" class="formation-empty">指定具体一振需要完整刀帐；可以切回「按上锁最高级」。</p>
+              <p v-if="!poolDone" class="formation-empty">请先更新刀帐，再选择具体一振。</p>
               <div v-else-if="presetFilteredGroups.length" class="formation-preset-candidates">
                 <section v-for="group in presetFilteredGroups" :key="group.name" class="formation-candidate-group">
                   <h4 v-if="group.rows.length > 1"><b>{{ group.name }}</b><small>同名 {{ group.rows.length }} 振，按档案逐振选</small></h4>
@@ -570,12 +548,13 @@ onMounted(() => { load(); loadPresets() })
                     <span class="formation-badges">
                       <i :class="{ kiwame: entry.form_status === 'kiwame' }" :title="(entry.form_evidence || []).join('；')">{{ candidateFormLabel(entry) }}</i>
                       <i>Lv.{{ entry.level ?? '—' }}</i>
+                      <i v-for="tag in pickerTags.filter(tag => tag.value !== 'all' && candidateMarks(entry)?.[tag.value])" :key="tag.value">{{ tag.label }}</i>
                       <i v-for="gap in candidateEvidenceGaps(entry)" :key="gap" class="formation-gap">缺{{ gap }}</i>
                     </span>
                   </button>
                 </section>
               </div>
-              <p v-else class="formation-empty">没有找到这个刀名。</p>
+              <p v-else class="formation-empty">这个范围里没有符合条件的刀。</p>
             </div>
 
             <p v-if="presetMessage" class="formation-preset-message" :class="{ failed: presetFailed }" :role="presetFailed ? 'alert' : 'status'">{{ presetMessage }}</p>

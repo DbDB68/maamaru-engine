@@ -280,7 +280,12 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
             resolved[key] = saved
             continue
         direct = by_oid.get(saved.get("observation_id"))
-        if direct is not None and _fingerprint_matches(saved, direct,
+        stable_id = str(saved.get("observation_id") or "").startswith("youzu:")
+        if stable_id:
+            # Client instance IDs remain stable across levels and roster refreshes.
+            # A missing instance must never fall back to another sword's fingerprint.
+            matches = [direct] if direct is not None else []
+        elif direct is not None and _fingerprint_matches(saved, direct,
                                                       cultivation):
             matches = [direct]
         else:

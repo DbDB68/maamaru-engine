@@ -279,6 +279,18 @@ class ResolvePresetTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("不能重复", result["reason"])
 
+    def test_client_instance_survives_growth_and_never_replaces_missing_sword(self):
+        entry = _pool_entry("youzu:1732", "touken_003", "三日月宗近")
+        entry["level"] = 100
+        record = _record(slots={"1": {"observation_id": "youzu:1732",
+                          "sword_catalog_id": "touken_003", "name_zh": "三日月宗近", "level": 50}})
+        result = cf.resolve_formation_slots(record, {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertIs(result["slots"]["1"], entry)
+        other = {**entry, "observation_id": "youzu:9999", "level": 50}
+        result = cf.resolve_formation_slots(record, {"done": True, "entries": [other]})
+        self.assertFalse(result["ok"])
+
     def test_observation_id_links_directly(self):
         entry = _pool_entry("9:1", "touken_003", "三日月宗近")
         record = _record(slots={"1": {"observation_id": "9:1",
