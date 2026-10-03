@@ -4,7 +4,7 @@ import DatePicker from 'primevue/datepicker'
 import Timeline from 'primevue/timeline'
 import { api } from '../../api'
 import type { LedgerAttribution, ManualSession } from '../../types'
-import { gameLedgerRecords, linkReceiptRuns, signed } from './reportModel'
+import { gameLedgerRecords, linkReceiptRuns, signed, scriptNames } from './reportModel'
 import { attributedStats, deltaStats, elapsedTime, eventTime, kobanPerFloorLabel, kobanPerHourLabel, loopTime, obtainSourceLabel, runElapsedSeconds, runStatusLabel, runTitle, shanghaiDate } from './reportModel'
 
 const props = defineProps<{
@@ -124,7 +124,7 @@ function eventDetail(item: any) {
   }
   if (item.event_type === 'dismantle.completed') return p.sword ? `刀解【${p.sword}】` : '刀解结果已记录'
   if (item.event_type === 'equipment.restored') return `恢复第 ${p.record_no ?? '？'} 套编队记录的刀装`
-  if (item.event_type === 'ticket.refilled') return `${p.source || '活动'} · ${p.ticket_price ? `使用 ${Number(p.ticket_price).toLocaleString()} 小判补充 1 枚` : '补充 1 枚'}`
+  if (item.event_type === 'ticket.refilled') return `${scriptNames[String(p.source || '').toLowerCase()] || p.source || '活动'} · ${p.ticket_price ? `使用 ${Number(p.ticket_price).toLocaleString()} 小判补充 1 枚` : '补充 1 枚'}`
   if (item.event_type === 'yosari.ticket_refilled') return `${p.item || '归城提灯'}补充完成${Number.isFinite(Number(p.delta)) ? ` · 小判 ${Number(p.delta).toLocaleString()}` : ''}`
   if (item.event_type === 'yosari.fragments') {
     const gained = Object.values(p.gained || {}).reduce((sum: number, value: any) => sum + Number(value || 0), 0)
@@ -336,6 +336,7 @@ function activityGroupKey(item: any) {
   if (item.event_type === 'osaka.floor_completed') return `${prefix}:osaka:${p.selected_floor}`
   if (item.event_type === 'edocastle.run_completed') return `${prefix}:edocastle`
   if (item.event_type === 'raid.round_completed') return `${prefix}:raid:${p.sequence ?? item.id}`
+  if (item.event_type === 'sword.obtained') return `${prefix}:sword:${p.serial_id ?? item.id}`
   if (item.event_type === 'practice.result') return `${prefix}:practice`
   if (item.event_type.startsWith('task_rewards.')) return `${prefix}:${item.event_type}`
   if (['forge.started', 'forge.collected', 'expedition.dispatched', 'expedition.settled'].includes(item.event_type)) return `${prefix}:${item.event_type}`
@@ -423,9 +424,11 @@ function runActivities(run: any) {
 
     && !receiptEvents.value.some(receipt => receipt.run_id === item.run_id && Math.abs(receipt.ts - item.ts) <= 10
       && ((item.event_type === 'task_rewards.claimed' && receipt.payload.label === '任务奖励')
-        || (item.event_type === 'dismantle.completed' && receipt.payload.label === '刀解')))
+        || (item.event_type === 'dismantle.completed' && receipt.payload.label === '刀解')
+        || (item.event_type === 'ticket.refilled' && receipt.payload.label.endsWith('补充手形'))
+        || (item.event_type === 'ticket.refilled' && receipt.payload.label === '补充活动手形')))
 
-  ))
+  )).sort((a, b) => b.ts - a.ts)
 }
 function runRepairTotal(run: any) {
   const activityTotal = runActivities(run).filter(item => item.event_type === 'repair.summary')

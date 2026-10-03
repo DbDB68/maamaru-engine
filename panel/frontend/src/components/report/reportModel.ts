@@ -55,6 +55,13 @@ export function linkReceiptRuns(receipts: LedgerAttribution[], events: any[], ru
       && event.payload?.delta === receipt.delta && Math.abs(event.ts - receipt.ts) <= 10
       && categoryOf(event.payload?.source) === categoryOf(receipt.source))
     const owners = new Set(matches.map(event => event.run_id))
+    if (receipt.resource === '小判' && receipt.delta < 0 && receipt.source.startsWith('ticket.')
+      && receipt.source.includes('sally/recovercost')) {
+      for (const event of events) if (event.event_type === 'ticket.refilled' && event.run_id
+        && event.script !== 'youzu_log' && event.payload?.source
+        && Math.abs(event.ts - receipt.ts) <= 10
+        && (event.payload.ticket_price == null || event.payload.ticket_price === -receipt.delta)) owners.add(event.run_id)
+    }
     if (receipt.resource === '归城提灯五' && receipt.delta < 0 && receipt.source.startsWith('yosari.')) {
       for (const run of runs) if ((run.loop_records || []).some((loop: any) =>
         loop.mode === 'yosari' && loop.started_at <= receipt.ts && receipt.ts <= loop.ended_at)) owners.add(run.run_id)
@@ -65,7 +72,11 @@ export function linkReceiptRuns(receipts: LedgerAttribution[], events: any[], ru
     }
     if (owners.size !== 1) return receipt
     const run_id = [...owners][0]
-    return { ...receipt, run_id, run_label: runs.find(run => run.run_id === run_id)?.label }
+    const refill = receipt.source.startsWith('ticket.') && events.find(event => event.run_id === run_id
+      && event.event_type === 'ticket.refilled' && Math.abs(event.ts - receipt.ts) <= 10)
+    const activity = refill && scriptNames[String(refill.payload?.source || '').toLowerCase()]
+    return { ...receipt, run_id, run_label: runs.find(run => run.run_id === run_id)?.label,
+      label: activity ? `${activity}补充手形` : receipt.label }
   })
 }
 

@@ -86,3 +86,15 @@ it('links raid rewards using recorded round rewards rather than task time alone'
   expect(linkReceiptRuns([receipt], [event], [])[0].run_id).toBe('raid-task')
   expect(linkReceiptRuns([receipt], [{ ...event, payload: { shells: 700 } }], [])[0].run_id).toBeUndefined()
 })
+
+it('links client ticket costs only to explicit refills with an unambiguous owner', async () => {
+  const { linkReceiptRuns } = await import('./reportModel')
+  const receipt = { id: 'ticket', ts: 100, resource: '小判', delta: -300, source: 'ticket.youzu_log.sally/recovercost', script: 'youzu_log' }
+  const event = { ts: 104, run_id: 'raid-task', script: 'workflow', event_type: 'ticket.refilled', payload: { source: 'RAID' } }
+  expect(linkReceiptRuns([receipt], [event], [])[0].run_id).toBe('raid-task')
+  expect(linkReceiptRuns([receipt], [event], [])[0].label).toBe('联队战补充手形')
+  expect(linkReceiptRuns([receipt], [], [{ run_id: 'raid-task', started_at: 90, ended_at: 120 }])[0].run_id).toBeUndefined()
+  expect(linkReceiptRuns([receipt], [{ ...event, payload: { source: 'RAID', ticket_price: 600 } }], [])[0].run_id).toBeUndefined()
+  expect(linkReceiptRuns([receipt], [event, { ...event, run_id: 'other' }], [])[0].run_id).toBeUndefined()
+  expect(linkReceiptRuns([{ ...receipt, source: 'shop.youzu_log.shop/buy' }], [event], [])[0].run_id).toBeUndefined()
+})
