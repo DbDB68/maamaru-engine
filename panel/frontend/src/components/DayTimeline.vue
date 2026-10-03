@@ -47,7 +47,11 @@ function gameplaySaved(script: string, params: ScriptParams) {
 /** 运行图气泡点开「改参数」时要高亮的草稿行；-1 = 不高亮 */
 const highlightIndex = ref(-1)
 /** 运行图块气泡：块在 booking.blocks 里的下标 + 所在泳道 + 块左缘（%） */
-const popover = ref<{ index: number; lane: 'task' | 'daily'; left: number } | null>(null)
+const suggestedGameplay = ref<DayScheduleBlock | null>(null)
+const dismissedGameplay = ref<number[]>([])
+const planEditorDialog = ref<HTMLDialogElement>()
+watch(editing, async value => { if (value) { await nextTick(); planEditorDialog.value?.showModal() } })
+const popover = ref<{ index: number; lane: 'task' | 'daily'; left: number; origin?: 'booking' } | null>(null)
 // 现在线走浏览器本地时钟平滑推进；30s 轮询只负责校准和数据
 const smoothNowMin = ref(0)
 let timer: number | undefined
@@ -215,7 +219,7 @@ async function removeExpeditionFromPopup() {
 function closePopoverOnOutside(event: MouseEvent) {
   const target = event.target as HTMLElement | null
   if (!target) return
-  if (target.closest('.tl-popover') || target.closest('.tl-block')) return
+  if (target.closest('.tl-popover') || target.closest('.tl-block') || target.closest('.tl-booking-link')) return
   expeditionPopup.value = null
   popover.value = null
 }
@@ -492,17 +496,51 @@ watch(() => props.adoptRecommendationRequest, (request, previous) => {
   if (request > previous) void openRaidRecommendation()
 })
 
-/** 运行图里点建议淡影 = 采纳这一段进草稿 */
-function adoptSuggestion(shadow: { minute: number; runs?: number }) {
-  const base = data.value?.booking?.blocks || []
-  const block: DayScheduleBlock = { start_min: shadow.minute, kind: 'raid', runs: shadow.runs ?? 1 }
-  const exists = base.some(item => item.kind === 'raid'
-    && item.start_min === block.start_min && item.runs === block.runs)
-  highlightIndex.value = -1
-  draft.value = [...base.map(toDraftRow), ...(exists ? [] : [toDraftRow(block)])]
-  planMessage.value = ''
-  void loadWorkflowPresets()
-  editing.value = true
+/** 点建议淡影先打开操作菜单，保存配置后才采纳。 */
+function adoptSuggestion(shadow: { minute: number; runs?: number; left: number }) {
+  expeditionPopup.value = null
+  suggestedGameplay.value = {start_min: shadow.minute, kind: 'raid', runs: shadow.runs ?? 1}
+  popover.value = {index: -1, lane: 'task', left: shadow.left}
+}
+
+function openGameplayConfiguration(block: DayScheduleBlock, index = -1, chooseGameplay = false) {
+  const script = block.script || 'raid'
+  const original = index >= 0 ? JSON.stringify(data.value?.booking?.blocks[index]) : ''
+  popover.value = null
+  void gameplayDialog.value?.open(script, {time: fmtClock(block.start_min), runs: block.runs ?? 1,
+    choices: chooseGameplay ? gameplayOptions.value : undefined,
+    choose: (key, time, runs) => {
+      const option = gameplayOptions.value.find(item => item.script === key && item.available)
+      if (!option) return
+      openGameplayConfiguration({kind: key === 'raid' ? 'raid' : 'activity', script: key, event_key: option.event_key, start_min: parseTime(time) ?? block.start_min, runs}, -1, true)
+    },
+    save: async (params, time, runs) => {
+      const start = parseTime(time)
+      if (start == null || start < Math.floor(smoothNowMin.value)) throw new Error('请选择现在至次日03:59之间的开始时间')
+      const blocks = [...(data.value?.booking?.blocks || [])]
+      if (index >= 0 && JSON.stringify(blocks[index]) !== original) throw new Error('这段安排已经变化，请关闭后重新配置')
+      const cblock = index >= 0 && blocks[index] ? conductorBlockFor(blocks[index]) : undefined
+      if (cblock && cblock.status !== 'pending') throw new Error('这段已经执行或停止，请另行安排')
+      const updated = { ...block, start_min: start, runs }
+      if (index >= 0) blocks[index] = updated
+      else blocks.push(updated)
+      if (blocks.length > MAX_BLOCKS) throw new Error('今天最多安排6段')
+      const result = await api.saveGameplaySettings(script, params)
+      await persistSchedule(blocks.sort((a, b) => a.start_min - b.start_min), '')
+      return result.params
+    }})
+}
+function addGameplayConfiguration() {
+  const option = firstGameplay.value
+  if (!option) return
+  const block: DayScheduleBlock = option.script === 'raid'
+    ? {kind: 'raid', start_min: Math.ceil(smoothNowMin.value), runs: 1}
+    : {kind: 'activity', script: option.script, event_key: option.event_key, start_min: Math.ceil(smoothNowMin.value), runs: 1}
+  openGameplayConfiguration(block, -1, true)
+}
+function configureBookedBlock(block: DayScheduleBlock, index: number) {
+  if (block.kind === 'raid' || block.kind === 'activity') openGameplayConfiguration(block, index)
+  else { highlightIndex.value = index; editPlan() }
 }
 
 function normalizeRow(row: DraftRow) {
@@ -641,28 +679,37 @@ async function saveSchedule() {
 
 const popoverBlock = computed(() => {
   if (popover.value == null) return undefined
-  return data.value?.booking?.blocks[popover.value.index]
+  return popover.value.index === -1 ? suggestedGameplay.value || undefined : data.value?.booking?.blocks[popover.value.index]
 })
 
-function openBlockPopover(entry: { index: number; lane: 'task' | 'daily'; left: number }) {
+function openBlockPopover(entry: { index: number; lane: 'task' | 'daily'; left: number; origin?: 'booking' }) {
   expeditionPopup.value = null
-  popover.value = { index: entry.index, lane: entry.lane, left: entry.left }
+  suggestedGameplay.value = null
+  popover.value = { index: entry.index, lane: entry.lane, left: entry.left, origin: entry.origin }
 }
 
 function popoverLeft(left: number): string {
   return `max(0px, min(${left}%, calc(100% - 240px)))`
 }
 
-/** 气泡「改参数」：打开编辑器载入当前 booking 草稿，并高亮被点的那块 */
+/** 气泡「配置」：玩法单独配置，任务流打开安排编辑器。 */
 function editFromPopover() {
   if (popover.value == null) return
-  highlightIndex.value = popover.value.index
-  editPlan()
+  const index = popover.value.index
+  const block = popoverBlock.value
+  if (!block) return
+  configureBookedBlock(block, index)
   popover.value = null
 }
 
 /** 气泡「移出安排」：删掉这块走同一个保存即开工端点重存（保持 armed） */
 async function removeFromSchedule() {
+  if (popover.value?.index === -1 && suggestedGameplay.value) {
+    dismissedGameplay.value.push(suggestedGameplay.value.start_min)
+    popover.value = null
+    suggestedGameplay.value = null
+    return
+  }
   const booking = data.value?.booking
   if (!booking || popover.value == null || removing.value) return
   const remaining = booking.blocks.filter((_, index) => index !== popover.value!.index)
@@ -783,7 +830,7 @@ const suggestionBlocks = computed(() => {
   // 已排联队战就展示正式安排；改过时间的安排也属于已采纳。
   const hasRaid = (editing.value ? draft.value : data.value?.booking?.blocks || [])
     .some(row => row.kind === 'raid' || (row.kind === 'activity' && row.script === 'raid'))
-  return suggestions.filter(s => s.runs == null || !hasRaid).map((s, i) => {
+  return suggestions.filter(s => (s.runs == null || !hasRaid) && !dismissedGameplay.value.includes(s.start_min)).map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
     const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
     const detail = `${s.runs != null ? `${s.runs} 圈 · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
@@ -794,7 +841,7 @@ const suggestionBlocks = computed(() => {
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
       cls: 'tlx-suggest',
-      title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点我采纳`,
+      title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点击配置或移除`,
       text: s.runs != null ? `建议 ${s.runs} 圈` : '建议',
       rowTitle: activityLabel,
       rowDetail: `${range} ${detail}`,
@@ -983,13 +1030,13 @@ const caption = computed(() => {
             <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="openBlockPopover(b)">{{ b.text }}</button>
             <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="adoptSuggestion(b)">{{ b.text }}</button>
             <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活</span>
-            <div v-if="popover && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
+            <div v-if="popover && popover.origin !== 'booking' && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
               <strong>{{ blockLabel(popoverBlock) }}</strong>
               <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
               <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
               <div class="tl-popover-actions">
                 <button type="button" @click="editFromPopover">配置</button>
-                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
+                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ removing ? '移除中…' : '移除' }}</button>
               </div>
             </div>
           </div>
@@ -1062,7 +1109,7 @@ const caption = computed(() => {
             <small v-else>选择玩法或任务流，再安排开始时间</small>
           </div>
           <div class="tl-booking-actions">
-            <button v-if="!editing" type="button" :disabled="saving || !firstGameplay" @click="editPlan">＋ 安排玩法</button>
+            <button v-if="!editing" type="button" :disabled="saving || !firstGameplay" @click="addGameplayConfiguration">＋ 安排玩法</button>
             <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 安排任务流</button>
           </div>
         </div>
@@ -1078,17 +1125,21 @@ const caption = computed(() => {
         <p class="tl-booking-message">00:00–03:59 为次日凌晨，04:00 换日；远征可以跨日归来。</p>
         <div v-if="data.booking && !editing" class="tl-booked-list">
           <div v-for="row in bookedRows" :key="row.key" class="tl-booked-flow">
-          <button type="button" class="tl-booking-link" @click="highlightIndex = data.booking!.blocks.indexOf(row.block); editPlan()">
+          <button type="button" class="tl-booking-link" @click="openBlockPopover({index: data.booking!.blocks.indexOf(row.block), lane: 'task', left: pct(row.block.start_min), origin: 'booking'})">
             {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
             <template v-if="row.cblock"> · <small class="tl-status" :class="blockStatusClass(row.cblock)">{{ blockStatusText(row.cblock) }}</small></template>
             <template v-else-if="row.block.kind === 'raid' && blockEndMin(row.block) != null"> · 预计 {{ fmtMin(blockEndMin(row.block)!) }} 收工</template>
           </button>
+          <div v-if="popover?.origin === 'booking' && popover.index === data.booking!.blocks.indexOf(row.block)" class="tl-popover tl-booking-popover">
+            <strong>{{ blockLabel(row.block) }}</strong>
+            <div class="tl-popover-actions"><button type="button" @click="editFromPopover">配置</button><button type="button" :disabled="removing" @click="removeFromSchedule">移除</button></div>
+          </div>
           <ol v-if="row.block.steps?.length" class="tl-flow-steps" aria-label="任务流的执行顺序">
             <li v-for="(step, index) in row.block.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
           </ol>
           </div>
         </div>
-        <div v-if="editing" class="tl-booking-editor">
+        <dialog v-if="editing" ref="planEditorDialog" class="tl-plan-dialog tl-booking-editor" @cancel="editing = false">
           <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
             <span>第{{ index + 1 }}段</span>
             <label v-if="row.kind === 'workflow'">开始
@@ -1127,7 +1178,7 @@ const caption = computed(() => {
             <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存并按安排开工' }}</button>
             <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
           </div>
-        </div>
+        </dialog>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
@@ -1153,6 +1204,9 @@ const caption = computed(() => {
 </template>
 
 <style scoped>
+.tl-booking-popover { position: static; margin: 8px 0; }
+.tl-plan-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--paper-line); border-radius: 14px; color: var(--ink); background: var(--paper-card); }
+.tl-plan-dialog::backdrop { background: rgb(0 0 0 / 38%); }
 .tl-expedition-dialog { width: min(460px, calc(100vw - 32px)); box-sizing: border-box; padding: 24px; border: 1px solid var(--paper-line); border-radius: 14px; color: var(--ink); background: var(--paper-card); }
 .tl-expedition-dialog::backdrop { background: rgb(0 0 0 / 38%); }
 .tl-expedition-dialog label { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 8px; }
