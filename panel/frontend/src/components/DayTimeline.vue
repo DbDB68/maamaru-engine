@@ -252,7 +252,7 @@ const STATE_LABELS: Record<string, string> = {
   dispatched: '已派出',
   expired: '已跳过',
   missed: '已错过',
-  failed_unknown: '待确认',
+  failed_unknown: '派遣失败',
   running: '远征中',
   awaiting_collect: '待收菜',
 }
@@ -697,7 +697,7 @@ const expeditionBlocks = computed(() => {
       title: `${bits.join(' · ')}${e.toggleable ? ' · 点我取消这班' : ''}`,
       text: e.map_code,
       rowTitle: `部队${team} · ${e.map_code}`,
-      rowDetail: `${durationText(e.duration_min)}远征 · ${stateLabel}`,
+      rowDetail: e.state === 'failed_unknown' ? `派遣失败${e.blocked_reason ? `：${e.blocked_reason}` : ''}` : `${durationText(e.duration_min)}远征 · ${stateLabel}`,
       time: fmtMin(e.time_min),
       tone: STATE_CLASSES[e.state] ?? 'is-pending',
       enabled: e.enabled,
@@ -898,45 +898,18 @@ const compactRows = computed(() => {
     current: b.current,
     enabled: true,
   }))
-  const suggestions = suggestionBlocks.value.map((b) => ({
-    key: b.key,
-    minute: b.minute,
-    time: b.time,
-    title: b.rowTitle,
-    detail: b.rowDetail,
-    tone: b.tone,
-    current: false,
-    enabled: true,
-  }))
-  const planned = scheduleBlocks.value.map(b => ({
-    key: b.key,
-    minute: b.block.start_min,
-    time: fmtMin(b.block.start_min),
-    title: blockLabel(b.block),
-    detail: conductorBlockFor(b.block) ? blockStatusText(conductorBlockFor(b.block)!) : '已安排',
-    tone: b.cls,
-    current: false,
-    enabled: true,
-  }))
-  const rows = [...expeditions, ...runs, ...suggestions, ...planned]
-  const current = rows.filter((row) => row.current)
-  const futureEnabled = rows
-    .filter((row) => !row.current && row.minute >= nowMin.value && row.enabled)
-    .sort((a, b) => a.minute - b.minute)
-  const recent = rows
-    .filter((row) => !row.current && row.minute < nowMin.value)
-    .sort((a, b) => b.minute - a.minute)
-
-  const chosen = [...current, ...futureEnabled].slice(0, COMPACT_LIMIT)
-  if (chosen.length < COMPACT_LIMIT) {
-    chosen.push(...recent.slice(0, COMPACT_LIMIT - chosen.length).reverse())
-  }
-  return chosen
+  // 近期活动只收实际执行的记录，待执行安排和建议留在安排区。
+  const rows = [...expeditions.filter(row => {
+    const item = data.value?.expeditions.find(e => `exp-${e.key}` === row.key)
+    return item && ['dispatched', 'running', 'awaiting_collect', 'failed_unknown'].includes(item.state)
+  }), ...runs]
+  return rows.sort((a, b) => Number(b.current) - Number(a.current) || b.minute - a.minute)
+    .slice(0, COMPACT_LIMIT)
 })
 
 const compactHeading = '近期活动'
 
-const totalItemCount = computed(() => displayedExpeditionBlocks.value.length + runBlocks.value.length + suggestionBlocks.value.length + scheduleBlocks.value.length)
+const totalItemCount = computed(() => (data.value?.expeditions || []).filter(e => ['dispatched', 'running', 'awaiting_collect', 'failed_unknown'].includes(e.state)).length + runBlocks.value.length)
 const hiddenItemCount = computed(() => Math.max(0, totalItemCount.value - compactRows.value.length))
 const showDetails = computed(() => !props.collapsible || expanded.value)
 
@@ -1035,14 +1008,6 @@ const caption = computed(() => {
         </label>
       </div>
       <p v-if="formationLoadError" class="tl-expedition-help-note">{{ formationLoadError }}</p>
-      <p v-if="data.expedition_advice_note" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
-      <p v-if="data.expedition_suggestions?.length" class="tl-expedition-help-note">远征推荐：<template v-for="(s, index) in data.expedition_suggestions" :key="s.key"><span v-if="index">；</span>{{ TEAM_NAMES[s.team_no] ?? s.team_no }}·{{ s.map_code }} 补{{ s.resource }}<template v-if="s.formation_name">（先换「{{ s.formation_name }}」）</template></template></p>
-      <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
-        <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
-        <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>
-        <p v-if="s.formation_change">想优先补{{ s.blocked_resource }}，先在游戏里调整部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}，同步近况后再看推荐。</p>
-        <p v-else>换个出发时间，或等远征图空出来，再看推荐。</p>
-      </details>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
         <div class="tl-mini-meta">
@@ -1071,7 +1036,7 @@ const caption = computed(() => {
           </div>
           <p v-if="hiddenItemCount" class="tl-more">另外 {{ hiddenItemCount }} 项已经收进上面的时间轴。</p>
         </div>
-        <p v-else class="empty">今天的时间表还空着</p>
+        <p v-else class="empty">今天还没有执行记录</p>
       </div>
 
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
@@ -1102,6 +1067,13 @@ const caption = computed(() => {
             <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 安排任务流</button>
           </div>
         </div>
+        <p v-if="data.expedition_advice_note" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
+        <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
+          <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
+          <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>
+          <p v-if="s.formation_change">想优先补{{ s.blocked_resource }}，先在游戏里调整部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}，同步近况后再看推荐。</p>
+          <p v-else>换个出发时间，或等远征图空出来，再看推荐。</p>
+        </details>
         <p v-if="data.booking?.issues.length && !data.conductor.enabled" class="tl-booking-warning">{{ data.booking.issues.join('；') }}。请重新安排。</p>
         <p v-if="!data.conductor.available && !editing" class="tl-booking-message">纯净账房只记安排；自动开工需在自动化面板开启。</p>
         <p class="tl-booking-message">00:00–03:59 为次日凌晨，04:00 换日；远征可以跨日归来。</p>

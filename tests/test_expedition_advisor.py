@@ -560,6 +560,20 @@ class TypeGateTests(unittest.TestCase):
         self.assertIn("这班今天没派成", out["note"])
         self.assertIn("换队/换图试试", out["note"])
 
+    def test_failed_combo_still_explains_missing_sword_type(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = _write_situation(folder.name, [
+            {"party_no": 4, "members": _members("三日月宗近", "小狐丸", "一期一振")},
+        ])
+        out = ea.build_expedition_suggestions(
+            _prefs(rounds=1, available_teams=(4,)),
+            planning=_planning(limiting=(), koban_available=-50),
+            maps={"B2": _TYPE_MAPS["B2"]}, situation_path=path, now_min=600,
+            failed_combos={("B2", 4)})
+        self.assertEqual(out["suggestions"], [])
+        self.assertIn("没有打刀", out["note"])
+
 
 class PrefsStorageTests(unittest.TestCase):
     def setUp(self):
@@ -870,7 +884,19 @@ class TimelineIntegrationTests(unittest.TestCase):
         self.assertEqual([(s["map_code"], s["team_no"]) for s in suggestions],
                          [("A2", 4)])
         self.assertIn("没派成", out["expedition_advice_note"])
-        self.assertIn("同图同队先拉黑", out["expedition_advice_note"])
+        self.assertIn("今天暂不重试同队同图", out["expedition_advice_note"])
+
+    def test_selecting_different_preset_rechecks_failed_combination(self):
+        now = self._today_at(6, 0)
+        cfg = {"entries": [], "automation": {"enabled": False,
+               "slot_states": {"k": {"state": "failed_unknown"}}}}
+        forced = {"k": {"team_no": 4, "map_code": "B2",
+                        "planned_at": self._today_at(5, 0),
+                        "start_min": 300, "duration_min": 180}}
+        prefs = {**_prefs(rounds=1, available_teams=(4,)), "team_formations": {"4": "new-preset"}}
+        with patch.object(ea, "build_expedition_suggestions", return_value={"suggestions": [], "note": None}) as build:
+            self._build(now, cfg, expedition_forced=forced, expedition_help=prefs, planning=_planning())
+        self.assertEqual(build.call_args.kwargs["failed_combos"], set())
 
     def test_timeline_note_when_no_planning(self):
         now = self._today_at(6, 0)

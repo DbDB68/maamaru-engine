@@ -676,6 +676,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                      for item in expeditions
                      if item["kind"] == "forced"
                      and item.get("state") == scheduler.SLOT_FAILED
+                     and not ((expedition_help or {}).get("team_formations", {}).get(str(item.get("team_no")))
+                              and expedition_help["team_formations"][str(item["team_no"])] != item.get("formation_id"))
                      and item.get("map_code")}
     advice = expedition_advisor.build_expedition_suggestions(
         expedition_help, planning=planning, situation_path=situation_path,

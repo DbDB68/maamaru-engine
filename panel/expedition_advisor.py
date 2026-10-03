@@ -722,13 +722,6 @@ def build_expedition_suggestions(prefs: dict, *,
                         miss["fit"] = True
                         blocked("今天剩余时间排不下")
                         continue
-                    # 同图同队今天 failed 过的组合拉黑到今天结束（图不拉黑）
-                    if (map_code, team) in failed:
-                        miss["retry"] = True
-                        blocked("本队今天派遣失败，暂不重试")
-                        if not miss["retry_resource"]:
-                            miss["retry_resource"] = resource
-                        continue
                     party = preset["party"] if preset else (party_levels or {}).get(team)
                     level_detail = _level_shortfall(meta, party)
                     shortfall = _type_shortfall(meta, party)
@@ -747,6 +740,13 @@ def build_expedition_suggestions(prefs: dict, *,
                             miss["detail"] = (
                                 f"{map_code}要{_type_req_text(meta)}，"
                                 + _type_block_detail(team, party, shortfall))
+                        continue
+                    # 同图同队今天 failed 过的组合拉黑到今天结束（图不拉黑）
+                    if (map_code, team) in failed:
+                        miss["retry"] = True
+                        blocked("本队今天派遣失败，暂不重试")
+                        if not miss["retry_resource"]:
+                            miss["retry_resource"] = resource
                         continue
                     per_hour = _per_hour(meta, resource)
                     rank = _resource_rank(maps, resource, map_code)
@@ -806,7 +806,7 @@ def build_expedition_suggestions(prefs: dict, *,
         team_cn = TEAM_NAMES.get(team, team)
         shift_cn = TEAM_NAMES.get(shift_no, shift_no)
         notes.append(f"部队{team_cn}第{shift_cn}班：{blocked_resource}这班"
-                     f"今天没派成，同图同队先拉黑；改排了{placed_resource}。")
+                     f"今天没派成，今天暂不重试同队同图；改排了{placed_resource}。")
     for miss in misses:
         team_cn = TEAM_NAMES.get(miss["team"], miss["team"])
         shift_cn = TEAM_NAMES.get(miss["shift"], miss["shift"])
@@ -819,7 +819,7 @@ def build_expedition_suggestions(prefs: dict, *,
         if miss["occupied"]:
             frags.append("对口图今天都有班在跑或已点上，明天再丢")
         if miss["retry"]:
-            frags.append("这班今天没派成，同图同队先拉黑，换队/换图试试")
+            frags.append("这班今天没派成，今天暂不重试同队同图，换队/换图试试")
         if miss["type"]:
             frags.append(f"刀种门槛卡住：{miss['detail']}")
         if miss["fit"]:
