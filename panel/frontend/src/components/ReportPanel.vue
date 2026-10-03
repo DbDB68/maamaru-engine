@@ -8,7 +8,6 @@ import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import StockInventory from './report/StockInventory.vue'
-import ResourceReceipts from './report/ResourceReceipts.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
 import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
@@ -48,7 +47,6 @@ const error = ref('')
 const hasMoreEvents = ref(false), hasMoreRuns = ref(false)
 const eventCursor = ref<number | null>(null), runCursor = ref<number | null>(null)
 const recordDate = ref('')
-const receiptDate = ref('')
 const recordHighlightRunId = ref('')
 const recordLoading = ref(false)
 const recordHasMoreEvents = ref(false), recordHasMoreRuns = ref(false)
@@ -144,7 +142,7 @@ const honmaruItems = [
 ]
 const viewItems = [
   { value: 'chart', label: '家底' },
-  { value: 'records', label: '收支' },
+  { value: 'records', label: '全部记录' },
 ]
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 
@@ -685,14 +683,12 @@ function selectRecordDate(date: string) {
   recordHighlightRunId.value = ''
   recordDate.value = date
   view.value = 'records'
-  if (!props.ledgerMode) { receiptDate.value = date; return }
   void loadRecordDay(date)
 }
 
 function switchView(nextView: 'chart' | 'records') {
   recordHighlightRunId.value = ''
   view.value = nextView
-  if (!props.ledgerMode) { receiptDate.value = ''; return }
   if (nextView !== 'records') return
   const date = recordDate.value || latestRecordDate()
   recordDate.value = date
@@ -1166,7 +1162,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
       <p v-if="error" class="report-error">{{ error }}</p>
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
-        <SegmentedControl v-if="view === 'records' || props.ledgerMode" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+        <SegmentedControl v-if="props.ledgerMode && view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
         <button v-if="!props.ledgerMode && view === 'records'" type="button" class="secondary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button>
       </div>
       <template v-if="currentSection === 'report'">
@@ -1206,6 +1202,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small>
               <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
+              <small v-if="!props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
               <span v-if="props.ledgerMode" class="resource-change">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
               <button v-if="props.ledgerMode && row.goal" type="button" class="resource-goal-link" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
               <small v-if="row.name === '小判' && clientStock?.koban_reserve != null" title="未开箱，不计入收支。">箱内储备 {{ clientStock.koban_reserve.toLocaleString() }}<template v-if="clientStock.resources?.['小判']"> · 合计 {{ (clientStock.resources['小判'].count + clientStock.koban_reserve).toLocaleString() }}</template></small>
@@ -1216,8 +1213,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
       </template>
       <template v-if="props.ledgerMode && view === 'chart' || !props.ledgerMode && view === 'records'">
         <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
-        <button v-if="!props.ledgerMode && receiptDate" type="button" class="secondary" @click="receiptDate = ''">{{ receiptDate }} · 查看全部收支</button>
-        <ResourceReceipts v-if="!props.ledgerMode" :receipts="[...(ledger?.attributions || []), ...(ledger?.unresolved_changes || [])].filter(row => !receiptDate || shanghaiDate(row.ts) === receiptDate)" />
+        <ReportRecords v-if="!props.ledgerMode" :attributions="recordReceipts" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
         <section v-if="props.ledgerMode" class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
           <header>
             <div><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
@@ -1341,6 +1337,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         <details class="warehouse-fold" :open="props.ledgerMode"><summary>查看变化趋势</summary>
         <section class="resource-trend">
           <header>
+            <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
             <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3></div>
             <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ name }}</button></nav>
             <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ name }}</button></nav>

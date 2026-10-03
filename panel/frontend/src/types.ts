@@ -158,7 +158,7 @@ export interface ClientAsset {
 }
 export interface ClientInventory {
   items: Record<string, { count: number; observed_at: number }>
-  resources: Record<string, { count: number; observed_at: number }>
+  resources: Record<string, { count: number; observed_at: number; source?: 'screen' }>
   koban_reserve: number | null
   assets: { equip?: ClientAsset[]; artifact?: ClientAsset[]; sword?: ClientAsset[]; observed_at: number } | null
 }

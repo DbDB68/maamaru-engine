@@ -51,7 +51,9 @@ export function gameLedgerRecords(attributions: LedgerAttribution[]) {
     const identity = `${item.event_id || item.id}:${item.ts}:${item.resource}`
     if (seen.has(identity)) continue
     seen.add(identity)
-    const label = (item.label || categoryLabel(categoryOf(item.source))).split(` ${item.resource} `)[0]
+    const rawLabel = (item.label || '').split(` ${item.resource} `)[0]
+    const label = item.source.startsWith('unknown') || !rawLabel || rawLabel.startsWith(item.resource)
+      ? '资源变化 · 来源未确认' : rawLabel
     const key = `${item.ts}:${item.source}:${label}:${item.run_id || ''}`
     let group = groups.get(key)
     if (!group) {

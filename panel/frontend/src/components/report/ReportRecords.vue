@@ -290,7 +290,7 @@ const timelineEvents = computed(() => {
   const repairs = new Map<string, any>()
   // loop_started 是逐圈事实的起点标记，成绩单按配对后的逐圈明细展示，
   // 绝不裸奔成「本丸记录」；结束事件照常单独可见（跨日游离行用）。
-  const hidden = new Set(['team_record.saved', 'inventory.peek', 'osaka.koban_session', 'sortie.loop_started'])
+  const hidden = new Set(['team_record.saved', 'game_assets.captured', 'inventory.peek', 'osaka.koban_session', 'sortie.loop_started'])
   for (const item of props.events) {
     if (hidden.has(item.event_type)) continue
     if (!item.event_type.startsWith('repair.')) {

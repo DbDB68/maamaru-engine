@@ -1254,6 +1254,19 @@ class TelemetryStore:
             (time.time() if to_ts is None else float(to_ts),)).fetchone()
         from .client_equipment import name_client_assets
         assets = name_client_assets({**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]}) if asset_row else None
+        missing = set(LEDGER_RESOURCES) - resources.keys()
+        if missing:
+            for row in self._conn().execute(
+                    "SELECT ts, payload FROM events WHERE event_type='inventory.captured' AND script NOT IN ('youzu_log','manual') AND ts <= ? ORDER BY ts DESC, id DESC",
+                    (time.time() if to_ts is None else float(to_ts),)):
+                reading = _loads(row["payload"], {}).get("resources") or {}
+                for name in list(missing):
+                    value = reading.get(name)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                        resources[name] = {"count": int(value), "observed_at": row["ts"], "source": "screen"}
+                        missing.remove(name)
+                if not missing:
+                    break
         return {"assets": assets, "items": items, "resources": resources, "koban_boxes": boxes,
                 "koban_reserve": sum(v["count"] * v["value_each"] for v in boxes.values()) if complete else None,
                 "koban_reserve_known": sum(v["count"] * v["value_each"] for v in boxes.values())}

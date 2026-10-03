@@ -17,3 +17,18 @@ def test_stock_uses_latest_actual_client_count_without_window_or_manual_override
     assert "玉钢" not in stock["resources"]
     assert store.client_item_inventory(15)["resources"]["小判"]["count"] == 100
     store.close()
+
+
+def test_missing_client_resource_uses_actual_screen_read_only(tmp_path):
+    store = TelemetryStore(tmp_path / "stock.db")
+    for ts, script, resources in [(10, "youzu_log", {"小判": 100}),
+                                  (20, "game_inventory", {"小判": 999, "加速符": 211}),
+                                  (30, "manual", {"加速符": 555})]:
+        store._conn().execute("INSERT INTO events(ts,script,event_type,payload) VALUES(?,?,'inventory.captured',?)",
+                              (ts, script, json.dumps({"resources": resources})))
+    store._conn().commit()
+    stock = store.client_item_inventory(100)
+    assert stock["resources"]["小判"]["count"] == 100
+    assert stock["resources"]["加速符"] == {"count": 211, "observed_at": 20, "source": "screen"}
+    assert "玉钢" not in stock["resources"]
+    store.close()
