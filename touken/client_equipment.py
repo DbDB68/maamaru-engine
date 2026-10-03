@@ -76,6 +76,10 @@ def name_client_assets(assets: dict) -> dict:
         if name:
             row["name"] = name
     for row in result.get("sword", []):
+        if row.get("sword_id") is not None:
+            from . import sword_db
+            from .youzu_log import _sword_name
+            row["name"] = _sword_name(row["sword_id"], sword_db)
         name = CHARM_NAMES.get(_number(row.get("item_id")))
         if name:
             row["charm_name"] = name

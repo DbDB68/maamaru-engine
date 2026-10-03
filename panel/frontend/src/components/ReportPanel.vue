@@ -7,6 +7,8 @@ import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
 import ReportRecords from './report/ReportRecords.vue'
+import StockInventory from './report/StockInventory.vue'
+import ResourceReceipts from './report/ResourceReceipts.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
 import { categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
 import type { ChartSeries } from './report/reportModel'
@@ -32,6 +34,8 @@ const recordReceipts = computed(() => {
   return [...(book?.attributions || []), ...(book?.unresolved_changes || [])]
 })
 const planning = ref<PlanningReport | null>(null)
+const clientStock = ref<Awaited<ReturnType<typeof api.clientInventory>> | null>(null)
+const stockReadAt = computed(() => Math.max(0, ...Object.values(clientStock.value?.resources || {}).map(row => row.observed_at)))
 const events = ref<any[]>([])
 const runs = ref<any[]>([])
 const humanReports = ref<HumanReport[]>([])
@@ -44,6 +48,7 @@ const error = ref('')
 const hasMoreEvents = ref(false), hasMoreRuns = ref(false)
 const eventCursor = ref<number | null>(null), runCursor = ref<number | null>(null)
 const recordDate = ref('')
+const receiptDate = ref('')
 const recordHighlightRunId = ref('')
 const recordLoading = ref(false)
 const recordHasMoreEvents = ref(false), recordHasMoreRuns = ref(false)
@@ -138,8 +143,8 @@ const honmaruItems = [
   { value: 'planning', label: '规划' },
 ]
 const viewItems = [
-  { value: 'chart', label: '概览' },
-  { value: 'records', label: '全部记录' },
+  { value: 'chart', label: '家底' },
+  { value: 'records', label: '收支' },
 ]
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 
@@ -680,12 +685,14 @@ function selectRecordDate(date: string) {
   recordHighlightRunId.value = ''
   recordDate.value = date
   view.value = 'records'
+  if (!props.ledgerMode) { receiptDate.value = date; return }
   void loadRecordDay(date)
 }
 
 function switchView(nextView: 'chart' | 'records') {
   recordHighlightRunId.value = ''
   view.value = nextView
+  if (!props.ledgerMode) { receiptDate.value = ''; return }
   if (nextView !== 'records') return
   const date = recordDate.value || latestRecordDate()
   recordDate.value = date
@@ -1059,10 +1066,11 @@ async function load(nextDays = days.value) {
   days.value = nextDays; loading.value = true
   try {
     const rangeStartedAt = Date.now() / 1000 - nextDays * 86400
-    const [nextSummary, nextLedger, nextEvents, nextRuns, nextFailedRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding, nextLists] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.dataRuns(1, undefined, rangeStartedAt, undefined, 'failed'), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null), api.configLists().catch((): Record<string, string[]> => ({}))])
+    const [nextSummary, nextLedger, nextEvents, nextRuns, nextFailedRuns, nextHuman, nextManualSessions, nextManualInventory, nextPlanning, nextOnboarding, nextLists, nextStock] = await Promise.all([api.dataSummary(nextDays), api.resourceLedger(nextDays), api.dataEvents(1000), api.dataRuns(30), api.dataRuns(1, undefined, rangeStartedAt, undefined, 'failed'), api.humanReports(), api.manualSessions(1000, Date.now() / 1000 - 365 * 86400), api.manualInventory(500), api.planning().catch(() => null), api.ledgerOnboarding().catch(() => null), api.configLists().catch((): Record<string, string[]> => ({})), api.clientInventory().catch(() => null)])
     summary.value = nextSummary
     ledger.value = nextLedger
     planning.value = nextPlanning
+    clientStock.value = nextStock
     failedRun.value = nextFailedRuns.items[0] || null
     events.value = nextEvents.items.filter(item => item.ts >= Date.now() / 1000 - nextDays * 86400)
     runs.value = nextRuns.items.filter(item => item.started_at >= Date.now() / 1000 - nextDays * 86400)
@@ -1147,7 +1155,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 
 <template>
   <section class="report-panel">
-    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '账房' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源、手账和记录' : '账目和接下来的打算'">
+    <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '所持物品与资源收支' : '账目和接下来的打算'">
       <template #actions>
         <div v-if="!props.pageSection" class="report-toolbar-actions">
           <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
@@ -1158,11 +1166,12 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
       <p v-if="error" class="report-error">{{ error }}</p>
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
-        <SegmentedControl v-if="view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+        <SegmentedControl v-if="view === 'records' || props.ledgerMode" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
+        <button v-if="!props.ledgerMode && view === 'records'" type="button" class="secondary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button>
       </div>
       <template v-if="currentSection === 'report'">
       <template v-if="view === 'chart'">
-        <section v-if="ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
+        <section v-if="props.ledgerMode && ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
           <header>
             <div><small>第一次使用 · {{ ledgerOnboarding.step }}/3</small><h3 id="ledger-onboarding-title">把账房安顿好</h3></div>
             <button type="button" :disabled="!!ledgerOnboardingBusy || gameInventoryBusy" @click="dismissLedgerOnboarding">不需要引导</button>
@@ -1191,24 +1200,25 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         </section>
 
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
-          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>最近记下的资源数量 · {{ rangeLabel }}变化</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><span class="ledger-confidence" :class="confidence.level"><b>{{ confidence.label }}</b></span></div></header>
+          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
           <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ row.name }}</small>
-              <strong>{{ row.current == null ? '—' : row.current.toLocaleString() }}</strong>
-              <small v-if="row.name === '小判' && planning?.koban_watch?.boxed_reserve != null" :title="'小箱 ×200、中箱 ×400、大箱 ×700；未开箱，不计入收支。'">箱内储备 {{ planning.koban_watch.boxed_reserve.toLocaleString() }} · 合计 {{ planning.koban_watch.total_with_boxes?.toLocaleString() ?? '—' }}</small>
-              <span class="resource-change" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
-              <button v-if="row.goal" type="button" class="resource-goal-link" :title="`去规划查看${row.name}目标`" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
+              <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
+              <span v-if="props.ledgerMode" class="resource-change">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
+              <button v-if="props.ledgerMode && row.goal" type="button" class="resource-goal-link" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
+              <small v-if="row.name === '小判' && clientStock?.koban_reserve != null" title="未开箱，不计入收支。">箱内储备 {{ clientStock.koban_reserve.toLocaleString() }}<template v-if="clientStock.resources?.['小判']"> · 合计 {{ (clientStock.resources['小判'].count + clientStock.koban_reserve).toLocaleString() }}</template></small>
             </article>
           </div>
-          <details v-if="planning?.client_inventory && ['暖心福袋', '堆肥'].some(name => planning?.client_inventory?.items?.[name])">
-            <summary>道具库存</summary>
-            <p v-for="name in ['暖心福袋', '堆肥']" :key="name"><template v-if="planning.client_inventory.items[name]">{{ name }} {{ planning.client_inventory.items[name].count.toLocaleString() }}</template></p>
-          </details>
-          <p class="resource-overview-note">数量取近 {{ planning?.rate_window_days || 14 }} 天最近一次记录；没有记录的项目留空。切换时间范围只改变变化数字。</p>
         </section>
-        <section class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
+        <StockInventory v-if="!props.ledgerMode" :stock="clientStock" />
+      </template>
+      <template v-if="props.ledgerMode && view === 'chart' || !props.ledgerMode && view === 'records'">
+        <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
+        <button v-if="!props.ledgerMode && receiptDate" type="button" class="secondary" @click="receiptDate = ''">{{ receiptDate }} · 查看全部收支</button>
+        <ResourceReceipts v-if="!props.ledgerMode" :receipts="[...(ledger?.attributions || []), ...(ledger?.unresolved_changes || [])].filter(row => !receiptDate || shanghaiDate(row.ts) === receiptDate)" />
+        <section v-if="props.ledgerMode" class="report-glance" :class="{ loading }" aria-labelledby="report-insight-title">
           <header>
             <div><h2 id="report-insight-title">{{ insightHeading }}</h2></div>
             <span>已确认的收获与花费</span>
@@ -1229,12 +1239,13 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           </footer>
         </section>
 
-        <button v-if="unreportedGaps.length" type="button" class="report-attention" @click="openGapReport(unreportedGaps[0])">
+        <button v-if="props.ledgerMode && unreportedGaps.length" type="button" class="report-attention" @click="openGapReport(unreportedGaps[0])">
           <span><b>🦊 有 {{ unreportedGaps.length }} 段家底变化等你认领</b><small>它们没有算进任何一轮挂机收益，说明一下就会染回彩色。</small></span><em>去说明 →</em>
         </button>
 
 
 
+        <details class="warehouse-fold" :open="props.ledgerMode"><summary>手动补记与账本进出</summary>
         <section class="resource-ledger" :class="{ loading }">
           <header><div><h3>账本与手账</h3><p>{{ ledgerDateRange }}的变化依据</p></div><div class="ledger-actions"><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
           <section v-if="ledgerTransferOpen" class="ledger-transfer" aria-labelledby="ledger-transfer-title">
@@ -1326,6 +1337,8 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
 </dialog>
 
+        </details>
+        <details class="warehouse-fold" :open="props.ledgerMode"><summary>查看变化趋势</summary>
         <section class="resource-trend">
           <header>
             <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3></div>
@@ -1340,12 +1353,13 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           </template>
         </section>
 
-        <section v-if="unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
+        </details>
+        <section v-if="props.ledgerMode && unreportedGaps.length" class="inventory-gap-panel" aria-label="库存差值说明">
           <div v-for="gap in unreportedGaps" :key="gap.gap_key" class="inventory-gap-alert"><div><strong>🦊 上次任务和这次开工之间，家底对不上啦</strong><p>{{ gapDelta(gap) }}</p><small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }}。这段差值单独留档，不会算进任何一轮挂机收益。</small></div><button type="button" class="secondary" @click="openGapReport(gap)">这期间做过什么？</button><button type="button" @click="skipGap(gap)">不想说，记差值就好</button></div>
         </section>
       </template>
 
-      <ReportRecords v-if="view === 'records'" :attributions="recordReceipts" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
+      <ReportRecords v-if="props.ledgerMode && view === 'records'" :attributions="recordReceipts" :events="events" :runs="runs" :manual-sessions="manualSessions" :selected-date="recordDate" :highlight-run-id="recordHighlightRunId" :has-more-events="recordHasMoreEvents" :has-more-runs="recordHasMoreRuns" :loading="recordLoading" :loading-older="loadingOlder" @select-date="selectRecordDate" @load-more="loadOlder" @refresh="refreshRecords" />
       </template>
 
       <template v-else>
@@ -1361,6 +1375,9 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 </template>
 
 <style scoped>
+.warehouse-fold { padding: 16px 20px; background: var(--paper-card); border-top: 1px solid var(--border-light, #ddd3c5); }
+.warehouse-fold > summary { cursor: pointer; color: var(--ink-dim); }
+.warehouse-fold > section { margin-top: 16px; }
 .ledger-editor-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; box-sizing: border-box; padding: 20px; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); }
 .ledger-editor-dialog::backdrop { background: rgb(0 0 0 / 38%); }
 .ledger-editor-dialog .report-form, .ledger-editor-dialog .manual-inventory-form, .ledger-editor-dialog .manual-session-form { margin: 0; padding: 0; border: 0; background: transparent; }

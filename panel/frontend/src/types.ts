@@ -139,6 +139,30 @@ export type ScriptParams = Record<string, unknown>
 
 // ---- 本丸成绩单 /api/data/resource-ledger ----
 
+export interface ClientAsset {
+  serial_id?: string | number
+  name?: string
+  kind?: 'troop' | 'horse'
+  equip_id?: string | number
+  artifact_id?: string | number
+  level?: string | number
+  sword_id?: string | number
+  charm_name?: string
+  item_id?: string | number
+  horse_serial_id?: string | number
+  equip_serial_id1?: string | number
+  equip_serial_id2?: string | number
+  equip_serial_id3?: string | number
+  artifact_serial_id1?: string | number
+  artifact_serial_id2?: string | number
+}
+export interface ClientInventory {
+  items: Record<string, { count: number; observed_at: number }>
+  resources: Record<string, { count: number; observed_at: number }>
+  koban_reserve: number | null
+  assets: { equip?: ClientAsset[]; artifact?: ClientAsset[]; sword?: ClientAsset[]; observed_at: number } | null
+}
+
 export interface LedgerAttribution {
   raw_source?: string
   execution_script?: string

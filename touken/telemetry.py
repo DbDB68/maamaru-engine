@@ -1229,17 +1229,22 @@ class TelemetryStore:
         from .youzu_log import ITEM_NAMES
         remaining = set(ITEM_NAMES.values())
         items = {}
+        resources = {}
         for row in self._conn().execute(
                 "SELECT ts, payload FROM events WHERE script = 'youzu_log' "
                 "AND event_type = 'inventory.captured' AND ts <= ? ORDER BY ts DESC, id DESC",
                 (time.time() if to_ts is None else float(to_ts),)):
             reading = _loads(row["payload"], {}).get("resources") or {}
+            for name in LEDGER_RESOURCES:
+                value = reading.get(name)
+                if name not in resources and isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                    resources[name] = {"count": int(value), "observed_at": row["ts"]}
             for name in remaining.intersection(reading):
                 value = reading[name]
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
                     items[name] = {"count": int(value), "observed_at": row["ts"]}
             remaining.difference_update(items)
-            if not remaining:
+            if not remaining and len(resources) == len(LEDGER_RESOURCES):
                 break
         box_values = {"小判箱·小": 200, "小判箱·中": 400, "小判箱·大": 700}
         boxes = {name: {**items[name], "value_each": value} for name, value in box_values.items() if name in items}
@@ -1249,7 +1254,7 @@ class TelemetryStore:
             (time.time() if to_ts is None else float(to_ts),)).fetchone()
         from .client_equipment import name_client_assets
         assets = name_client_assets({**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]}) if asset_row else None
-        return {"assets": assets, "items": items, "koban_boxes": boxes,
+        return {"assets": assets, "items": items, "resources": resources, "koban_boxes": boxes,
                 "koban_reserve": sum(v["count"] * v["value_each"] for v in boxes.values()) if complete else None,
                 "koban_reserve_known": sum(v["count"] * v["value_each"] for v in boxes.values())}
 
