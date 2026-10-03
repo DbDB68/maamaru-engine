@@ -5,7 +5,7 @@ export interface JournalPost {
   scene: string; icon: string; facts: string[]
 }
 
-// 同类、同一来源的一小批操作合成一张小报；保留真实时间，不随机改写旧动态。
+// 掉落按日期与地图汇总，其余操作合并相邻的一小批；保留实际收获与时间。
 export function buildJournalPosts(events: any[], departures: any[] = []): JournalPost[] {
   const batches = new Map<string, Array<{ ts: number; key: string; payload: any }>>()
   const seen = new Set<string>()
@@ -16,7 +16,7 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
       : event.event_type === 'sword.inbox_received' ? 'inbox'
       : event.event_type === 'expedition.settled' ? 'expedition' : ''
     if (!kind || !Number.isFinite(Number(event.ts))) continue
-    const key = String(p.receipt_key || `event-${event.id}`)
+    const key = String(kind === 'drop' && p.serial_id != null ? `sword-${p.serial_id}` : p.receipt_key || `event-${event.id}`)
     if (seen.has(key)) continue
     seen.add(key)
     const source = kind === 'drop' ? `${p.source || ''}:${p.chapter || ''}:${p.map_no || ''}`
@@ -43,7 +43,7 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
     const chunks: typeof rows[] = []
     for (const row of rows) {
       const chunk = chunks[chunks.length - 1]
-      if (chunk && row.ts - chunk[0]!.ts <= 300) chunk.push(row)
+      if (chunk && (kind === 'drop' || row.ts - chunk[0]!.ts <= 300)) chunk.push(row)
       else chunks.push([row])
     }
     for (const chunk of chunks) {
@@ -57,10 +57,10 @@ export function buildJournalPosts(events: any[], departures: any[] = []): Journa
         title = '炉火歇了，新刀来了'; label = '锻刀手记'; icon = 'forge.png'; scene = 'honmaru_forge_stage.png'
         text = `收下了 ${swords.length} 振锻好的刀。今天的炉边又热闹了一些。`
       } else if (kind === 'drop') {
-        title = '归途中，迎来了新伙伴'; label = '出阵见闻'; icon = 'sortie.png'; scene = 'honmaru_sortie_stage.png'
         const route = first.payload.chapter && first.payload.map_no ? `${first.payload.chapter}-${first.payload.map_no}`
           : first.payload.source === 'raid.drop' ? '联队战' : '战斗'
-        text = `在 ${route} 带回了 ${swords.length} 振刀，名字记在这里。`
+        title = `${route} · 带回 ${swords.length} 振刀`; label = '出阵见闻'; icon = 'sortie.png'; scene = 'honmaru_sortie_stage.png'
+        text = ''
       } else if (kind === 'inbox') {
         title = '收件箱里的刀，接回来了'; label = '本丸来信'; icon = 'sword.svg'
         text = `从收件箱接回 ${swords.length} 振刀。`

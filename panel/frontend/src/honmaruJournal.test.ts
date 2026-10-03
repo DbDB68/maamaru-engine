@@ -12,9 +12,13 @@ describe('honmaru journal facts', () => {
     expect(posts[0]!.facts).toEqual(['今剑 ×2', '岩融'])
     expect(buildJournalPosts([first, second])[0]!.key).toBe(posts[0]!.key)
   })
-  it('keeps different maps and separate batches distinct', () => {
+  it('summarizes drops by map and day without counting the same instance twice', () => {
     const drop = (id: number, time: number, map: string) => ({ id, ts: time, event_type: 'sword.obtained', payload: { name: '今剑', chapter: '1', map_no: map } })
-    expect(buildJournalPosts([drop(1, ts, '1'), drop(2, ts + 1, '2'), drop(3, ts + 301, '1')])).toHaveLength(3)
+    const posts = buildJournalPosts([drop(1, ts, '1'), drop(2, ts + 1, '2'), drop(3, ts + 301, '1'), drop(4, ts + 86400, '1')])
+    expect(posts).toHaveLength(3)
+    expect(posts.find(post => post.ts === ts + 301)?.facts).toEqual(['今剑 ×2'])
+    const blade = { ...drop(5, ts, '1'), payload: { name: '今剑', chapter: '1', map_no: '1', serial_id: 123 } }
+    expect(buildJournalPosts([blade, { ...blade, id: 6 }])[0]?.title).toContain('1 振')
   })
   it('groups consumption by confirmed materials, ignoring unsupported reasons', () => {
     const posts = buildJournalPosts([], [
