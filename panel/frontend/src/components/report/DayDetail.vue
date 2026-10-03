@@ -107,15 +107,14 @@ function recordDateLabel(date: string): string {
       自动记录已对上 {{ signed(attributedTotal) }}<template v-if="claimedAmount"> · 你补记了 {{ signed(claimedAmount) }}</template><template v-if="unexplained"> · 还有 <b>{{ signed(unexplained) }}</b> 没对上</template>
     </p>
 
-    <section v-if="needsRecall" class="day-detail-recall" aria-label="回忆线索">
-      <header><strong>先帮你回忆一下</strong><small>只列已经留下的记录，不替你猜。</small></header>
+    <details v-if="needsRecall && recallClues.length" class="day-detail-recall" aria-label="回忆线索">
+      <summary>查看当天线索</summary>
       <ul v-if="recallClues.length">
         <li v-for="clue in recallClues" :key="clue.key">
           <b>{{ clue.owner }}</b><span><strong>{{ clue.title }}</strong><small>{{ clue.detail }}</small></span>
         </li>
       </ul>
-      <p v-else>这天没有留下其他可核对的记录。想不起来就选“记不清了”，不必硬猜。</p>
-    </section>
+    </details>
 
     <ul v-if="groupedAttributions.length" class="day-detail-attributions">
       <li v-for="group in groupedAttributions" :key="`${group.ts}:${group.label}`">
@@ -136,27 +135,27 @@ function recordDateLabel(date: string): string {
         <p>{{ gapDelta(gap) }}</p>
         <small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }} · 看完上面的线索再补</small>
       </div>
-      <button type="button" class="primary" @click="emit('report', gap)">补上这段账</button>
+      <button type="button" class="primary" @click="emit('report', gap)">补账</button>
     </div>
 
     <div v-if="!gaps.length && unexplained" class="day-detail-gap">
       <div>
-        <strong>🦊 {{ resource }} {{ signed(unexplained) }} 还没对上账</strong>
-        <small>这部分没赶上前后盘点，只能按天估算；只补你能确定的。</small>
+        <small>未对上的部分按天估算；只补你能确定的。</small>
       </div>
-      <button type="button" class="primary" @click="emit('report-day')">补上这段账</button>
+      <button type="button" class="primary" @click="emit('report-day')">补账</button>
     </div>
   </section>
 </template>
 
 <style scoped>
+.day-detail-recall summary { cursor: pointer; color: var(--ink-dim); font-size: 12px; }
 .day-detail { background: var(--paper); border: 1px solid var(--paper-line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .day-detail > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .day-detail h4 { margin: 2px 0 0; }
 .day-detail small { color: var(--ink-dim); }
 .day-detail-total { margin: 0; color: var(--ink-dim); }
 .day-detail-total b { color: var(--ink); }
-.day-detail-recall { padding: 12px; background: color-mix(in srgb, var(--paper) 76%, var(--fox-gold-pale)); border: 1px dashed var(--paper-line); border-radius: 10px; }
+.day-detail-recall { padding: 0; }
 .day-detail-recall > header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
 .day-detail-recall ul { display: flex; flex-direction: column; gap: 7px; list-style: none; padding: 0; margin: 0; }
 .day-detail-recall li { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: start; gap: 9px; }
@@ -172,7 +171,7 @@ function recordDateLabel(date: string): string {
 .day-detail-records:hover { color: var(--fox-gold-deep); background: var(--fox-gold-pale); }
 .day-detail-records em { color: var(--fox-gold-deep); font-style: normal; white-space: nowrap; }
 .day-detail-empty { margin: 0; color: var(--ink-dim); }
-.day-detail-gap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--fox-gold-pale); border-radius: 10px; padding: 10px 12px; }
+.day-detail-gap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
 .day-detail-gap p { margin: 2px 0; }
 @media (max-width: 600px) {
   .day-detail-recall > header { align-items: flex-start; flex-direction: column; gap: 2px; }

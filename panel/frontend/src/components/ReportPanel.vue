@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger, ScriptParams } from '../types'
 import PanelHeader from './PanelHeader.vue'
@@ -202,7 +202,6 @@ async function beginLedgerOnboarding() {
     ledgerOnboarding.value = await api.updateLedgerOnboarding('start')
     openInventoryForm()
     await nextTick()
-    document.querySelector('.manual-inventory-form')?.scrollIntoView({ block: 'start' })
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '首次设置没能开始' }
   finally { ledgerOnboardingBusy.value = '' }
 }
@@ -754,10 +753,6 @@ function localDateTime(timestamp = Date.now()) {
   const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60000)
   return date.toISOString().slice(0, 16)
 }
-const reportFormEl = ref<HTMLElement | null>(null)
-function scrollToReportForm() {
-  void nextTick(() => reportFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
-}
 function openProactiveReport(timestamp?: number, resource = '', claimedDelta: number | null = null) {
   manualActionsOpen.value = false
   inventoryFormOpen.value = false
@@ -767,7 +762,6 @@ function openProactiveReport(timestamp?: number, resource = '', claimedDelta: nu
   reportGap.value = null
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(timestamp), resource, claimed_delta: claimedDelta, claim_limit: claimedDelta }
   manualResourceAmounts.value = Object.fromEntries(resourceNames.map(name => [name, null]))
-  scrollToReportForm()
 }
 function editManualReport(entry: Extract<HandLedgerEntry, { kind: 'resource' }>) {
   manualActionsOpen.value = false
@@ -786,7 +780,6 @@ function editManualReport(entry: Extract<HandLedgerEntry, { kind: 'resource' }>)
     const report = entry.entries.find(item => item.resource === name)
     return [name, report?.claimed_delta ?? null]
   }))
-  scrollToReportForm()
 }
 function openDayClaim(date: string, resource: string, unexplained: number | null) {
   const amount = Number(unexplained)
@@ -797,7 +790,6 @@ function openGapReport(gap: InventoryGap) {
   reportMode.value = `gap:${gap.gap_key}`
   reportGap.value = gap
   reportForm.value = { activities: [], note: '', occurred_at: localDateTime(gap.ended_at * 1000), resource: '', claimed_delta: null, claim_limit: null }
-  scrollToReportForm()
 }
 function toggleReportActivity(value: string) {
   const clean = '没有其他操作'
@@ -1142,6 +1134,15 @@ onMounted(async () => {
   if (view.value === 'records' && recordDate.value) await loadRecordDay(recordDate.value)
 })
 onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTimer) })
+const reportEditor = ref<HTMLDialogElement>()
+const inventoryEditor = ref<HTMLDialogElement>()
+const sessionEditor = ref<HTMLDialogElement>()
+watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
+  await nextTick()
+  for (const dialog of [reportEditor.value, inventoryEditor.value, sessionEditor.value]) {
+    if (dialog && !dialog.open) dialog.showModal()
+  }
+})
 </script>
 
 <template>
@@ -1264,7 +1265,7 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
           </div>
           <p v-if="inventoryNotice" class="inventory-notice" role="status">✓ {{ inventoryNotice }}</p>
           <section v-if="handLedgerEntries.length" class="recent-manual-ledger" aria-labelledby="recent-manual-ledger-title">
-            <header><div><h4 id="recent-manual-ledger-title">我的手账</h4><p>你自己记的收支、家底和活动都在这里</p></div><button v-if="handLedgerEntries.length > 3" type="button" class="hand-ledger-toggle" @click="handLedgerExpanded = !handLedgerExpanded">{{ handLedgerExpanded ? '收起' : `查看全部 ${handLedgerEntries.length} 条` }}</button></header>
+            <header><div><h4 id="recent-manual-ledger-title">我的手账</h4></div><button v-if="handLedgerEntries.length > 3" type="button" class="hand-ledger-toggle" @click="handLedgerExpanded = !handLedgerExpanded">{{ handLedgerExpanded ? '收起' : `查看全部 ${handLedgerEntries.length} 条` }}</button></header>
             <ul>
               <li v-for="entry in displayedHandLedgerEntries" :key="entry.key">
                 <time>{{ manualReportTime(entry.at) }}</time>
@@ -1280,16 +1281,19 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
               </li>
             </ul>
           </section>
-          <form v-if="inventoryFormOpen" class="manual-inventory-form" @submit.prevent="saveManualInventory">
+          <dialog v-if="inventoryFormOpen" ref="inventoryEditor" class="ledger-editor-dialog" @cancel.prevent="!inventorySaving && (inventoryFormOpen = false, editingInventoryId = null)">
+<form class="manual-inventory-form" @submit.prevent="saveManualInventory">
             <header><div><h4>{{ editingInventoryId ? '修改家底记录' : '更新当前家底' }}</h4><p>不确定的项目可以留空，修改后会重新计算前后账目。</p></div><button type="button" class="inventory-close" aria-label="关闭家底记录" @click="inventoryFormOpen = false; editingInventoryId = null">×</button></header>
             <label class="manual-inventory-time">记录时间<input v-model="inventoryObservedAt" type="datetime-local" required></label>
             <div class="manual-inventory-grid"><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="inventoryForm[name]" type="number" min="0" step="1" inputmode="numeric" placeholder="留空"></label></div>
             <div class="report-form-actions"><button type="submit" class="primary" :disabled="inventorySaving">{{ inventorySaving ? '保存中……' : editingInventoryId ? '保存修改' : '记下当前家底' }}</button><button type="button" class="secondary" @click="inventoryFormOpen = false; editingInventoryId = null">取消</button></div>
-          </form>
+          <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
+</dialog>
           <details class="ledger-evidence"><summary>查看对账依据</summary><p>{{ confidence.detail }}</p></details>
         </section>
 
-        <form v-if="manualSessionFormOpen" class="manual-session-form" @submit.prevent="saveManualSession">
+        <dialog v-if="manualSessionFormOpen" ref="sessionEditor" class="ledger-editor-dialog" @cancel.prevent="!manualSessionSaving && (manualSessionFormOpen = false, editingManualSessionId = null)">
+<form class="manual-session-form" @submit.prevent="saveManualSession">
           <header><div><h4>{{ editingManualSessionId ? '修改手动活动' : '补记一段活动' }}</h4><p>这里只记你自己打的，不会并进まあ丸完成的圈数。</p></div><button type="button" class="inventory-close" aria-label="关闭手动活动" @click="manualSessionFormOpen = false; editingManualSessionId = null">×</button></header>
           <div class="manual-session-fields">
             <label>玩法<select v-model="manualSessionForm.script"><option value="osaka">大阪城</option><option value="raid">联队战</option><option value="edocastle">江户城</option><option value="hanafuda">秘宝之里</option><option value="sortie">合战场</option><option value="yosari">异去</option><option value="pumpkin">季节活动</option></select></label>
@@ -1299,10 +1303,12 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
             <label class="manual-session-note">备注<input v-model="manualSessionForm.note" maxlength="200" placeholder="可不填"></label>
           </div>
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="manualSessionSaving">{{ manualSessionSaving ? '保存中……' : editingManualSessionId ? '保存修改' : '记下这段活动' }}</button><button type="button" class="secondary" @click="manualSessionFormOpen = false; editingManualSessionId = null">取消</button></div>
-        </form>
+        <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
+</dialog>
 
-        <form v-if="reportMode" ref="reportFormEl" class="report-form" @submit.prevent="saveHumanReport(false)">
-          <header class="report-form-heading"><div><h4>{{ reportGap ? '补上这段账' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '补上这笔账' : '记一笔收支' }}</h4><p>{{ reportGap ? '只记你能确定的；具体数额不用硬猜。' : reportForm.claim_limit != null ? '账房已经列出当天线索；想不起来也可以如实记下。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
+        <dialog v-if="reportMode" ref="reportEditor" class="ledger-editor-dialog" @cancel.prevent="!reportSaving && (reportMode = '', reportGap = null, editingManualReport = null)">
+<form class="report-form" @submit.prevent="saveHumanReport(false)">
+          <header class="report-form-heading"><div><h4>{{ reportGap ? '补上这段账' : editingManualReport ? '修改手动收支' : reportForm.claim_limit != null ? '补上这笔账' : '记一笔收支' }}</h4><p>{{ reportGap || reportForm.claim_limit != null ? '只补你能确定的，想不起来可以选“记不清了”。' : '正数是获得，负数是消耗。' }}</p></div><button type="button" class="inventory-close" aria-label="关闭补记" @click="reportMode = ''; reportGap = null; editingManualReport = null">×</button></header>
           <p v-if="reportForm.resource && reportForm.claim_limit != null" class="report-claim-summary"><b>待补：</b>{{ reportForm.resource }} {{ signed(reportForm.claimed_delta) }}</p>
           <template v-if="!reportGap && reportForm.claim_limit == null">
             <fieldset class="multi-resource-entry"><legend>这次有哪些资源变化？</legend><label v-for="name in resourceNames" :key="name">{{ name }}<input v-model.number="manualResourceAmounts[name]" type="number" step="1" placeholder="留空"></label><small>获得填正数，消耗填负数；没有变化的留空。</small></fieldset>
@@ -1312,7 +1318,8 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
           <fieldset><legend>{{ reportGap || reportForm.claim_limit != null ? '你记得它来自哪里？' : '顺手标一下来源（可不选）' }}</legend><button v-for="value in [...humanActivities, '记不清了', ...(reportGap ? ['没有其他操作'] : [])]" :key="value" type="button" :class="{ active: reportForm.activities.includes(value) }" @click="toggleReportActivity(value)">{{ value }}</button></fieldset>
           <label class="human-report-note">补充说明<input v-model="reportForm.note" maxlength="300" :placeholder="reportForm.resource ? '可选，资源和数额已经记好了' : '可选，不用写具体资源数字'"></label>
           <div class="report-form-actions"><button type="submit" class="primary" :disabled="reportSubmitDisabled">{{ reportSaving ? '保存中……' : editingManualReport ? '保存修改' : '记下来' }}</button><button type="button" class="secondary" @click="reportMode = ''; reportGap = null; editingManualReport = null">取消</button></div>
-        </form>
+        <p v-if="error" role="alert" class="report-error">{{ error }}</p></form>
+</dialog>
 
         <section class="resource-trend">
           <header>
@@ -1349,6 +1356,12 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
 </template>
 
 <style scoped>
+.ledger-editor-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; box-sizing: border-box; padding: 20px; border: 1px solid var(--paper-line); border-radius: 12px; background: var(--paper-card); color: var(--ink); }
+.ledger-editor-dialog::backdrop { background: rgb(0 0 0 / 38%); }
+.ledger-editor-dialog .report-form, .ledger-editor-dialog .manual-inventory-form, .ledger-editor-dialog .manual-session-form { margin: 0; padding: 0; border: 0; background: transparent; }
+.ledger-editor-dialog input { min-width: 0; box-sizing: border-box; }
+.ledger-editor-dialog .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 .report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .report-context-toolbar-range { justify-content: flex-end; }
 .ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 12px; }
@@ -1457,13 +1470,13 @@ onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTime
 .ledger-evidence summary { color: var(--fox-gold-deep); cursor: pointer; }
 .ledger-evidence p { margin: 6px 0 0; }
 .inventory-notice { margin: 0 0 10px; padding: 8px 10px; color: #426b35; background: #edf5e8; border-radius: 8px; }
-.recent-manual-ledger { margin-bottom: 12px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 10px; }
+.recent-manual-ledger { margin-bottom: 12px; padding: 8px 0; }
 .recent-manual-ledger > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .recent-manual-ledger h4, .recent-manual-ledger p { margin: 0; }
 .recent-manual-ledger header p, .recent-manual-ledger header small { margin-top: 2px; color: var(--ink-dim); font-size: 11px; }
 .hand-ledger-toggle { padding: 3px 7px; color: var(--fox-gold-deep); background: transparent; border: 0; font-size: 11px; cursor: pointer; }
 .recent-manual-ledger ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; background: var(--paper-card); border-radius: 8px; }
+.recent-manual-ledger li { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--paper-line); }
 .recent-manual-ledger time { color: var(--ink-dim); font-size: 11px; }
 .recent-manual-ledger li span { display: grid; min-width: 0; }
 .recent-manual-ledger li span b { display: flex; align-items: center; gap: 6px; }
