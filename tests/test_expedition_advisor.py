@@ -1014,6 +1014,62 @@ class AdoptEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertFalse(self.path.exists())
 
+    def test_configured_suggestion_saves_changed_time(self):
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
+             patch.object(ea, "party_levels_from_situation", return_value=None):
+            response = self._put({"team_no": 4, "map_code": "B1", "source_start_min": 600, "start_min": 720})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(ec.load_choice_sets(self.path)[1].values())[0]["start_min"], 720)
+
+    def test_configured_suggestion_rejects_team_time_conflict(self):
+        self.timeline["expeditions"] = [{"key": "other", "team_no": 4, "map_code": "C4", "time_min": 650, "duration_min": 180, "will_run": True}]
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60):
+            response = self._put({"team_no": 4, "map_code": "B1", "source_start_min": 600, "start_min": 720})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(self.path.exists())
+
+    def test_configured_suggestion_rejects_changed_preset(self):
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
+             patch.object(ea, "expedition_formation_options", return_value=[]):
+            response = self._put({"team_no": 4, "map_code": "B1", "source_start_min": 600, "start_min": 720, "formation_id": "gone", "formation_signature": "old"})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(self.path.exists())
+
+    def test_configured_suggestion_persists_chosen_preset(self):
+        preset = {"formation_id": "p4", "formation_name": "打刀远征队", "formation_signature": "verified",
+                  "party": {"sum": 100, "max": 100, "count": 1, "names": ["加州清光"]}}
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
+             patch.object(ea, "expedition_formation_options", return_value=[preset]), \
+             patch.object(ea, "party_levels_from_situation", return_value=None):
+            response = self._put({"team_no": 4, "map_code": "B1", "source_start_min": 600, "start_min": 720,
+                                  "formation_id": "p4", "formation_signature": "verified"})
+        self.assertEqual(response.status_code, 200)
+        record = list(ec.load_choice_sets(self.path)[1].values())[0]
+        self.assertEqual(record["formation_name"], "打刀远征队")
+        self.assertEqual(record["formation_signature"], "verified")
+
+    def test_configured_suggestion_rejects_missing_sword_type(self):
+        self.suggestion["map_code"] = "B2"
+        party = {"sum": 100, "max": 100, "count": 1, "names": ["三日月宗近"]}
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
+             patch.object(ea, "party_levels_from_situation", return_value={4: party}):
+            response = self._put({"team_no": 4, "map_code": "B2", "source_start_min": 600, "start_min": 720})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("没有打刀", response.json()["detail"])
+        self.assertFalse(self.path.exists())
+
+    def test_edit_saved_expedition_replaces_old_booking(self):
+        old = ec.adhoc_key(self._today(), 4, 600)
+        self._put({"team_no": 4, "map_code": "B1", "start_min": 600})
+        self.timeline["expeditions"] = [{"key": old, "team_no": 4, "map_code": "B1", "time_min": 600, "duration_min": 90, "will_run": True, "toggleable": True}]
+        with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
+             patch.object(ea, "party_levels_from_situation", return_value=None):
+            response = self._put({"team_no": 4, "map_code": "B1", "source_key": old, "start_min": 720})
+        self.assertEqual(response.status_code, 200)
+        records = ec.load_choice_sets(self.path)[1]
+        self.assertNotIn(old, records)
+        self.assertEqual(len(records), 1)
+
     def test_unknown_team_rejected(self):
         response = self._put({"team_no": 9, "map_code": "B1",
                               "start_min": 600})

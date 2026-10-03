@@ -164,7 +164,7 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
                      start_min: int, duration_min: int, planned_at: str,
                      forced: bool = True, formation_id: str = "",
                      formation_name: str = "", formation_signature: str = "",
-                     path: Path = CHOICES_PATH) -> dict:
+                     replace_key: str = "", path: Path = CHOICES_PATH) -> dict:
     """记下/取消一班自描述 forced 远征（建议引擎采纳的班）。
 
     记录自带 {team_no, map_code, start_min, duration_min, planned_at}，
@@ -180,6 +180,8 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
         for old_key in stale:
             forced_map.pop(old_key, None)
         if forced:
+            if replace_key:
+                forced_map.pop(replace_key, None)
             forced_map[key] = {"team_no": team_no, "map_code": map_code,
                                "planned_at": planned_at,
                                "start_min": int(start_min),

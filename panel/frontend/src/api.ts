@@ -33,6 +33,8 @@ export const api = {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, will_run: willRun }),
   }),
   /** 采纳一条远征建议：那班记 forced（排班关着也单独跑），绝不自动执行 */
+  expeditionSettings: (code: string) => request<{ rewards: Record<string, number>; formations: Record<string, Array<{formation_id: string; formation_name: string; formation_signature: string}>> }>(`/api/day-timeline/expedition-settings/${encodeURIComponent(code)}`),
+  configureDayExpedition: (body: Record<string, unknown>) => request<{ok: boolean}>('/api/day-timeline/expedition-adopt', { method: 'PUT', body: JSON.stringify(body) }),
   adoptDayExpeditionSuggestion: (teamNo: number, mapCode: string, startMin: number, formationId?: string, formationSignature?: string) => request<{ ok: boolean; expeditions: DayTimeline['expeditions']; expedition_suggestions: DayTimeline['expedition_suggestions']; expedition_help: DayTimeline['expedition_help']; expedition_advice_note: string | null }>('/api/day-timeline/expedition-adopt', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ team_no: teamNo, map_code: mapCode, start_min: startMin, formation_id: formationId, formation_signature: formationSignature }),
   }),

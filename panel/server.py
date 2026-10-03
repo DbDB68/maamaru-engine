@@ -2362,6 +2362,18 @@ async def api_set_day_expedition_slot(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/day-timeline/expedition-settings/{code}")
+async def api_expedition_settings(code: str):
+    from touken.runtime_paths import STATE_DIR
+    from .expedition_advisor import load_maps, expedition_formation_options, party_levels_from_situation
+    meta = load_maps().get(code)
+    if not meta:
+        raise HTTPException(404, "找不到这张远征图")
+    parties = party_levels_from_situation(STATE_DIR / "youzu_home_situation.json")
+    return {"rewards": {key: meta[key] for key in ("木炭", "玉钢", "冷却材", "砥石", "小判", "委托符", "加速符") if meta.get(key)},
+            "formations": {str(team): [{key: item[key] for key in ("formation_id", "formation_name", "formation_signature")} for item in expedition_formation_options(team, parties)] for team in range(1, 6)}}
+
+
 @app.put("/api/day-timeline/expedition-adopt")
 async def api_adopt_day_expedition_suggestion(request: Request):
     """采纳一条远征建议 = 写一班自描述 forced（排班关着也到点单独派出）。
@@ -2370,6 +2382,7 @@ async def api_adopt_day_expedition_suggestion(request: Request):
     队伍/图/时刻/时长。重复采纳 409；建议过期（队伍已有安排等）409。
     """
     from . import expedition_advisor
+    from touken.runtime_paths import STATE_DIR
     from .expedition_choices import (adhoc_key, load_choice_sets,
                                      set_forced_adhoc)
 
@@ -2386,22 +2399,62 @@ async def api_adopt_day_expedition_suggestion(request: Request):
             or not isinstance(map_code, str) or not map_code:
         raise HTTPException(400, "请选一条远征建议")
     timeline = _day_timeline_payload()
-    suggestion = next(
-        (item for item in timeline.get("expedition_suggestions") or []
-         if item.get("team_no") == team_no
-         and item.get("map_code") == map_code
-         and item.get("start_min") == start_min), None)
+    configured = "source_start_min" in body or bool(body.get("source_key"))
+    source_key = body.get("source_key") or ""
+    if not isinstance(source_key, str):
+        raise HTTPException(400, "请选择今天的一班远征")
+    if source_key:
+        suggestion = next((item for item in timeline["expeditions"] if item["key"] == source_key and item.get("toggleable")), None)
+        if not suggestion or ":adhoc:" not in source_key:
+            raise HTTPException(409, "这班已临近开班或已处理，请刷新时间表")
+        if suggestion["team_no"] != team_no or suggestion["map_code"] != map_code:
+            raise HTTPException(400, "请保留这班的部队和远征图")
+    else:
+        suggestion = next((item for item in timeline.get("expedition_suggestions") or []
+                           if item.get("team_no") == team_no and item.get("map_code") == map_code
+                           and item.get("start_min") == body.get("source_start_min", start_min)), None)
     if not suggestion:
         raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
-    if (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
+    if configured:
+        now_min = int((time.time() - timeline["day_start"]) // 60)
+        if start_min < now_min or start_min > 1679:
+            raise HTTPException(400, "请选择现在至次日03:59之间的出发时间")
+        meta = expedition_advisor.load_maps()[map_code]
+        duration = int(meta["duration_min"])
+        for item in timeline["expeditions"]:
+            if item["key"] == source_key or not item.get("will_run"):
+                continue
+            if item["team_no"] != team_no and item["map_code"] != map_code:
+                continue
+            begin = item["time_min"]
+            if start_min < begin + item["duration_min"] + 10 and start_min + duration > begin:
+                raise HTTPException(409, "这支部队或远征图在该时间已有安排，请换个出发时间")
+        parties = expedition_advisor.party_levels_from_situation(STATE_DIR / "youzu_home_situation.json")
+        preset = None
+        if body.get("formation_id"):
+            preset = next((item for item in expedition_advisor.expedition_formation_options(team_no, parties)
+                           if item["formation_id"] == body["formation_id"]
+                           and item["formation_signature"] == body.get("formation_signature")), None)
+            if not preset:
+                raise HTTPException(409, "预设已变更或刀剑不可用，请重新选择")
+        party = preset["party"] if preset else (parties or {}).get(team_no)
+        shortfall = expedition_advisor._type_shortfall(meta, party)
+        detail = expedition_advisor._level_shortfall(meta, party)
+        if shortfall or detail:
+            raise HTTPException(400, detail or expedition_advisor._type_block_detail(team_no, party, shortfall))
+        suggestion = {**suggestion, "duration_min": duration,
+                      "formation_id": preset["formation_id"] if preset else "",
+                      "formation_name": preset["formation_name"] if preset else "",
+                      "formation_signature": preset["formation_signature"] if preset else ""}
+    elif (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
         raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
     today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"] + start_min * 60))
     key = adhoc_key(today, team_no, start_min)
     _, forced = load_choice_sets()
-    if key in forced:
+    if key in forced and key != source_key:
         raise HTTPException(409, "这班已经点上了，到点会单独派出")
     set_forced_adhoc(
-        key=key, team_no=team_no, map_code=map_code, start_min=start_min,
+        key=key, replace_key=source_key, team_no=team_no, map_code=map_code, start_min=start_min,
         duration_min=int(suggestion.get("duration_min") or 0),
         formation_id=suggestion.get("formation_id") or "",
         formation_name=suggestion.get("formation_name") or "",

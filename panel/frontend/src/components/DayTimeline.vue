@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
-import type { CustomFormation, ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
+import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 import { canAdoptRaidRecommendation, nextScheduledStart, scheduleMinute } from './report/planningLinkModel'
 
@@ -30,34 +30,6 @@ const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
-const formations = ref<CustomFormation[]>([])
-const formationLoadError = ref('')
-function teamFormationOptions(team: number) {
-  return formations.value.filter(preset => preset.target_team === team)
-}
-function selectedFormation(team: number) {
-  return data.value?.expedition_help.team_formations?.[String(team)] || ''
-}
-async function updateTeamFormation(team: number, event: Event) {
-  if (!data.value || prefsBusy.value || adoptingSuggestion.value) return
-  const fid = (event.target as HTMLSelectElement).value
-  const previous = { ...data.value.expedition_help.team_formations }
-  const next = { ...previous, [String(team)]: fid }
-  data.value.expedition_help.team_formations = next
-  prefsBusy.value = true
-  expeditionMessage.value = ''
-  try {
-    await api.setExpeditionTeamFormations({ [String(team)]: fid })
-    await load()
-    expeditionMessage.value = '编队选择已保存，后续建议已更新。'
-  } catch (error) {
-    expeditionMessage.value = error instanceof Error ? error.message : '编队选择没存上，请重试'
-    if (data.value) data.value.expedition_help.team_formations = previous
-    await load()
-  } finally {
-    prefsBusy.value = false
-  }
-}
 interface DraftRow { time: string; start_mode?: 'now' | 'at'; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
 const gameplayDialog = ref<InstanceType<typeof GameplaySettingsDialog>>()
@@ -83,13 +55,7 @@ let clockTimer: number | undefined
 
 async function load() {
   try {
-    const [timelineResult, formationResult] = await Promise.allSettled([api.dayTimeline(), api.customFormations()])
-    if (formationResult.status === 'fulfilled') {
-      formations.value = formationResult.value.formations
-      formationLoadError.value = ''
-    } else formationLoadError.value = '部队预设暂时没读到，请稍后重试。'
-    if (timelineResult.status !== 'fulfilled') return
-    data.value = timelineResult.value
+    data.value = await api.dayTimeline()
     emit('timelineUpdated', data.value)
     syncSmoothClock()
     if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
@@ -191,32 +157,71 @@ async function toggleAvailableTeam(team: number) {
   }
 }
 
-async function adoptExpeditionSuggestion(suggestion: DayExpeditionSuggestion) {
-  if (adoptingSuggestion.value || prefsBusy.value) return
-  adoptingSuggestion.value = suggestion.key
-  expeditionMessage.value = ''
+const expeditionPopup = ref<{team: number; left: number; suggestion?: DayExpeditionSuggestion; slot?: DayTimelineExpedition} | null>(null)
+const dismissedSuggestions = ref<string[]>([])
+const expeditionDialog = ref<HTMLDialogElement>()
+const expeditionTime = ref('')
+const expeditionFormation = ref('')
+const expeditionConfigError = ref('')
+const expeditionConfigBusy = ref(false)
+const expeditionSettings = ref<Awaited<ReturnType<typeof api.expeditionSettings>>>()
+const configuringExpedition = ref<typeof expeditionPopup.value>(null)
+const expeditionRewards = computed(() => Object.entries(expeditionSettings.value?.rewards || {}).map(([name, count]) => `${count.toLocaleString()} ${name}`).join('、'))
+const expeditionPresetOptions = computed(() => expeditionSettings.value?.formations[String(configuringExpedition.value?.team)] || [])
+function openExpeditionPopup(team: number, left: number, suggestion?: DayExpeditionSuggestion, slot?: DayTimelineExpedition) {
+  popover.value = null
+  expeditionPopup.value = {team, left, suggestion, slot}
+}
+async function configureExpedition() {
+  const selected = expeditionPopup.value
+  if (!selected) return
+  configuringExpedition.value = selected
+  expeditionPopup.value = null
+  expeditionTime.value = fmtMin(selected.suggestion?.start_min ?? selected.slot!.time_min).replace('次日 ', '')
+  expeditionFormation.value = selected.suggestion?.formation_id || selected.slot?.formation_id || ''
+  expeditionSettings.value = undefined
+  expeditionConfigError.value = ''
+  expeditionDialog.value?.showModal()
+  expeditionConfigBusy.value = true
+  try { expeditionSettings.value = await api.expeditionSettings(selected.suggestion?.map_code || selected.slot!.map_code) }
+  catch (error) { expeditionConfigError.value = error instanceof Error ? error.message : '读取配置失败' }
+  finally { expeditionConfigBusy.value = false }
+}
+async function saveExpeditionConfiguration() {
+  const selected = configuringExpedition.value
+  const start = parseTime(expeditionTime.value)
+  if (!selected || start == null || expeditionConfigBusy.value || !expeditionSettings.value) return
+  expeditionConfigBusy.value = true
+  expeditionConfigError.value = ''
   try {
-    await api.adoptDayExpeditionSuggestion(
-      suggestion.team_no, suggestion.map_code, suggestion.start_min, suggestion.formation_id, suggestion.formation_signature)
+    const preset = expeditionPresetOptions.value.find(p => p.formation_id === expeditionFormation.value)
+    if (expeditionFormation.value && !preset) throw new Error('原预设已不可用，请重新选择')
+    await api.configureDayExpedition({team_no: selected.team, map_code: selected.suggestion?.map_code || selected.slot!.map_code,
+      start_min: start, ...(selected.slot ? {source_key: selected.slot.key} : {source_start_min: selected.suggestion!.start_min}),
+      formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || ''})
+    expeditionDialog.value?.close()
     await load()
-    expeditionMessage.value = `部队${TEAM_NAMES[suggestion.team_no] ?? suggestion.team_no} ${fmtMin(suggestion.start_min)} 这班已点上，到点单独派出。`
-  } catch (error) {
-    expeditionMessage.value = error instanceof Error ? error.message : '这班没点上，请重试'
-    await load()
-  } finally {
-    adoptingSuggestion.value = ''
-  }
+  } catch (error) { expeditionConfigError.value = error instanceof Error ? error.message : '这班没有保存，请重试' }
+  finally { expeditionConfigBusy.value = false }
+}
+async function removeExpeditionFromPopup() {
+  const selected = expeditionPopup.value
+  if (!selected) return
+  expeditionPopup.value = null
+  if (selected.suggestion) dismissedSuggestions.value.push(selected.suggestion.key)
+  else if (selected.slot) await toggleExpedition(selected.slot)
 }
 
 function closePopoverOnOutside(event: MouseEvent) {
   const target = event.target as HTMLElement | null
   if (!target) return
   if (target.closest('.tl-popover') || target.closest('.tl-block')) return
+  expeditionPopup.value = null
   popover.value = null
 }
 
 function closePopoverOnEscape(event: KeyboardEvent) {
-  if (event.key === 'Escape') popover.value = null
+  if (event.key === 'Escape') { popover.value = null; expeditionPopup.value = null }
 }
 
 onMounted(() => {
@@ -640,11 +645,12 @@ const popoverBlock = computed(() => {
 })
 
 function openBlockPopover(entry: { index: number; lane: 'task' | 'daily'; left: number }) {
+  expeditionPopup.value = null
   popover.value = { index: entry.index, lane: entry.lane, left: entry.left }
 }
 
 function popoverLeft(left: number): string {
-  return `${Math.min(left, 60)}%`
+  return `max(0px, min(${left}%, calc(100% - 240px)))`
 }
 
 /** 气泡「改参数」：打开编辑器载入当前 booking 草稿，并高亮被点的那块 */
@@ -694,7 +700,7 @@ const expeditionBlocks = computed(() => {
       left: pct(e.time_min),
       width: Math.max(pct(visibleDuration), 0.7),
       cls: e.will_run ? 'tlx-on' : 'tlx-off',
-      title: `${bits.join(' · ')}${e.toggleable ? ' · 点我取消这班' : ''}`,
+      title: `${bits.join(' · ')}${e.toggleable ? ' · 点击配置或移除' : ''}`,
       text: e.map_code,
       rowTitle: `部队${team} · ${e.map_code}`,
       rowDetail: e.state === 'failed_unknown' ? `派遣失败${e.blocked_reason ? `：${e.blocked_reason}` : ''}` : `${durationText(e.duration_min)}远征 · ${stateLabel}`,
@@ -711,7 +717,7 @@ const displayedExpeditionBlocks = expeditionBlocks
 /** 远征建议淡影：投进对应队伍的子泳道，点采纳 = 那班记 forced */
 const expeditionSuggestionBlocks = computed(() => {
   if (!data.value) return []
-  return (data.value.expedition_suggestions || []).map((s) => {
+  return (data.value.expedition_suggestions || []).filter(s => !dismissedSuggestions.value.includes(s.key)).map((s) => {
     const team = TEAM_NAMES[s.team_no] ?? String(s.team_no)
     const visibleDuration = Math.min(Math.max(s.duration_min, 10), DAY - s.start_min)
     const range = `${fmtMin(s.start_min)}–${fmtMin(Math.min(DAY, s.start_min + s.duration_min))}`
@@ -721,7 +727,7 @@ const expeditionSuggestionBlocks = computed(() => {
       teamNo: s.team_no,
       left: pct(s.start_min),
       width: Math.max(pct(visibleDuration), 0.7),
-      title: `建议：部队${team} ${s.map_code}（${range}）· ${s.reason} · 点我采纳`,
+      title: `建议：部队${team} ${s.map_code}（${range}）· ${s.reason} · 点我配置`,
       text: s.map_code,
     }
   })
@@ -928,7 +934,7 @@ const caption = computed(() => {
   if (expeditionBlocks.value.length && !expeditionBlocks.value.some((block) => block.enabled)) {
     return '今天点上的远征班都已过点或取消'
   }
-  return '点绿色的建议淡影，就能丢队出门'
+  return '点绿色建议配置远征，保存后安排出发'
 })
 </script>
 
@@ -960,8 +966,12 @@ const caption = computed(() => {
           <template v-if="expeditionLanes.length">
             <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
               <span class="tl-lane-tag">{{ lane.label }}</span>
-              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击取消这班' : ''}`" :aria-pressed="b.slot.will_run" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="toggleExpedition(b.slot)">{{ b.text }}</button>
-              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @click="adoptExpeditionSuggestion(s.suggestion)">{{ s.text }}</button>
+              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击配置这班' : ''}`" aria-haspopup="true" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="openExpeditionPopup(lane.team, b.left, undefined, b.slot)">{{ b.text }}</button>
+              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @click="openExpeditionPopup(lane.team, s.left, s.suggestion)">{{ s.text }}</button>
+              <div v-if="expeditionPopup?.team === lane.team" class="tl-popover" :style="{left: popoverLeft(expeditionPopup?.left || 0)}">
+                <strong>部队{{ TEAM_NAMES[lane.team] }}远征 {{ expeditionPopup?.suggestion?.map_code || expeditionPopup?.slot?.map_code }}</strong>
+                <div class="tl-popover-actions"><button type="button" @click="configureExpedition">配置</button><button type="button" @click="removeExpeditionFromPopup">移除</button></div>
+              </div>
             </div>
           </template>
           <div v-else class="tl-lane">
@@ -978,7 +988,7 @@ const caption = computed(() => {
               <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
               <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
               <div class="tl-popover-actions">
-                <button type="button" @click="editFromPopover">改参数</button>
+                <button type="button" @click="editFromPopover">配置</button>
                 <button type="button" :disabled="removing" @click="removeFromSchedule">{{ removing ? '移出中…' : '移出安排' }}</button>
               </div>
             </div>
@@ -997,17 +1007,6 @@ const caption = computed(() => {
         </span>
 
       </div>
-      <div v-if="data.expedition_help" class="tl-expedition-formations">
-        <label v-for="team in data.expedition_help.available_teams" :key="team">
-          <span>部队{{ TEAM_NAMES[team] }}远征编队</span>
-          <select title="选择预设后，到点先换队再派出。只影响后续建议，已点上的班保持原安排。" :value="selectedFormation(team)" :disabled="prefsBusy || !!adoptingSuggestion || !!formationLoadError" @change="updateTeamFormation(team, $event)">
-            <option value="">保持现有编队</option>
-            <option v-if="selectedFormation(team) && !teamFormationOptions(team).some(preset => preset.id === selectedFormation(team))" :value="selectedFormation(team)" disabled>原预设已删除或更换部队，请重选</option>
-            <option v-for="preset in teamFormationOptions(team)" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
-          </select>
-        </label>
-      </div>
-      <p v-if="formationLoadError" class="tl-expedition-help-note">{{ formationLoadError }}</p>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
       <div class="tl-compact">
         <div class="tl-mini-meta">
@@ -1137,26 +1136,40 @@ const caption = computed(() => {
     <p v-else-if="!data" class="empty">时间表加载中…</p>
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
+  <dialog ref="expeditionDialog" class="tl-expedition-dialog" @cancel="expeditionConfigBusy && $event.preventDefault()">
+    <h3>部队{{ TEAM_NAMES[configuringExpedition?.team || 1] }}远征 {{ configuringExpedition?.suggestion?.map_code || configuringExpedition?.slot?.map_code }}</h3>
+    <p v-if="expeditionRewards">获取 {{ expeditionRewards }} <small>（大成功参考）</small></p>
+    <p v-else>正在读取远征收益…</p>
+    <label>出发时间<input v-model="expeditionTime" type="time" :disabled="expeditionConfigBusy" /></label>
+    <small>00:00–03:59 为次日凌晨</small>
+    <label>部队编队<select v-model="expeditionFormation" :disabled="expeditionConfigBusy || !expeditionSettings">
+      <option value="">保持现有编队</option>
+      <option v-if="expeditionFormation && !expeditionPresetOptions.some(p => p.formation_id === expeditionFormation)" :value="expeditionFormation" disabled>原预设不可用，请重新选择</option>
+      <option v-for="preset in expeditionPresetOptions" :key="preset.formation_id" :value="preset.formation_id">{{ preset.formation_name }}</option>
+    </select></label>
+    <p v-if="expeditionConfigError" role="alert">{{ expeditionConfigError }}</p>
+    <footer><button type="button" :disabled="expeditionConfigBusy || !expeditionSettings" @click="saveExpeditionConfiguration">保存</button><button type="button" :disabled="expeditionConfigBusy" @click="expeditionDialog?.close()">取消</button></footer>
+  </dialog>
 </template>
 
 <style scoped>
+.tl-expedition-dialog { width: min(460px, calc(100vw - 32px)); box-sizing: border-box; padding: 24px; border: 1px solid var(--paper-line); border-radius: 14px; color: var(--ink); background: var(--paper-card); }
+.tl-expedition-dialog::backdrop { background: rgb(0 0 0 / 38%); }
+.tl-expedition-dialog label { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 8px; }
+.tl-expedition-dialog input, .tl-expedition-dialog select, .tl-expedition-dialog button { padding: 9px 12px; font: inherit; color: var(--ink); background: var(--paper-panel); border: 1px solid var(--paper-line); border-radius: 8px; }
+.tl-expedition-dialog footer { display: flex; gap: 12px; margin-top: 24px; }
+
 .tl-flow-steps { flex-basis: 100%; margin: 8px 0; padding-left: 22px; color: var(--ink-dim); font-size: 12px; }
 .tl-flow-steps li { padding: 4px 0; overflow-wrap: anywhere; }
 .tl-flow-steps li span { margin-right: 10px; }
 .tl-flow-steps li b { color: var(--ink); font-weight: 500; }
 .tl-booked-flow { width: 100%; }
-.tl-expedition-formations { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0; }
-.tl-expedition-formations label { display: flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 12px; }
-.tl-expedition-formations select { min-width: 130px; max-width: 220px; min-height: 32px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper-card); color: var(--ink); font: inherit; }
-@media (max-width: 680px) {
-  .tl-expedition-formations { display: grid; }
-  .tl-expedition-formations label { justify-content: space-between; }
-  .tl-expedition-formations select { min-width: 0; max-width: 60%; }
-}
 
 .tl-tick { white-space: nowrap; }
 .tl-marker i { left: auto; right: 3px; }
 .tl-lane, .tl-mini-axis { overflow: hidden; }
+.tl-lane:has(.tl-popover) { overflow: visible; z-index: 50; }
+.tl-popover { box-sizing: border-box; width: min(240px, 100%); min-width: 0; }
 .tl-mini-ticks { position: relative; height: 14px; display: block; }
 .tl-mini-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .tl-mini-ticks span:first-child { transform: none; }
