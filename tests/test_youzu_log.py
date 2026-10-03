@@ -1022,3 +1022,12 @@ def test_new_asset_observations_backfill_without_rewriting_ledger(tmp_path):
     assert json.loads(state.read_text(encoding="utf-8"))["last_ts"] == 1000
     assert store.client_item_inventory()["assets"]["equip"] == [{"serial_id": 1}]
     store.close()
+
+
+def test_old_unknown_source_keeps_explicit_operation():
+    for endpoint, label in [("sword/dismantle_many", "刀解"), ("shop/buy", "万屋购买"), ("sally/recovercost", "补充活动手形")]:
+        source, note = youzu_log.translate_ledger_source("youzu_log.unknown", endpoint + " 木炭 +4")
+        assert not source.startswith("unknown")
+        assert note.startswith(label)
+    source, _ = youzu_log.translate_ledger_source("youzu_log.unknown", "来源待确认 木炭 +1550")
+    assert source.startswith("unknown")

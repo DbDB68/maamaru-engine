@@ -701,6 +701,12 @@ _LEDGER_ENDPOINT_CATEGORIES = {
 def translate_ledger_source(source: str, note: str) -> tuple[str, str]:
     """翻译游戏记录；旧记录按已保存的动作细节修正分类，不改原始数据库。"""
     endpoint = source.removeprefix("youzu_log.")
+    # Older writers kept a single explicit endpoint in the note while marking
+    # the source unknown. Recover that evidence without guessing mixed changes.
+    if endpoint == "unknown":
+        raw_action = note.split(" ", 1)[0]
+        if "/" + raw_action in _ENDPOINT_LABEL:
+            endpoint = raw_action
     if note.startswith("签到 ") and re.search(r" -\d+$", note):
         return "unknown.youzu_log", "来源待确认"
     if note.startswith("来源待确认"):

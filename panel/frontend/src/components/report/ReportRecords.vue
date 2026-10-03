@@ -248,10 +248,7 @@ function interruptReasonLabel(reason: unknown) {
   const key = String(reason || '')
   return interruptReasonNames[key] || (key ? `原因 ${key}` : '原因未记录')
 }
-const dropReasonNames: Record<string, string> = {
-  auto_march_skips_obtain_animation: '委托行军跳过获得动画',
-  observation_lost: '观察中断', recognizer_error: '认人流程异常',
-}
+
 function loopOutcomeLabel(loop: any) {
   if (loop.end_type === 'sortie.completed') return '完成'
   if (loop.end_type === 'sortie.retreated_before_boss') return '王点前撤退'
@@ -280,8 +277,6 @@ function loopDetail(loop: any) {
   if (loop.end_type === 'sortie.interrupted' && loop.interrupt_reason) parts.push(interruptReasonLabel(loop.interrupt_reason))
   if (loop.drop_observation === 'recognized') parts.push(loop.drops_recognized ? `掉落已识别 ${loop.drops_recognized} 把` : '掉落已识别')
   else if (loop.drop_observation === 'confirmed_none') parts.push('确认无掉落')
-  else if (loop.drop_observation === 'not_observed') parts.push(`未观察掉落（${dropReasonNames[loop.drop_observation_reason] || '原因未记录'}）`)
-  else parts.push('未观察掉落（没有观察数据）')
   return parts.join(' · ')
 }
 
