@@ -4,6 +4,7 @@ import { api } from '../api'
 import { buildJournalPosts } from '../honmaruJournal'
 import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, HonmaruSituationMember, PlanningReport } from '../types'
+import PaperCard from './PaperCard.vue'
 import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
@@ -24,6 +25,7 @@ const swordEventsTruncated = ref(false)
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
 const situationError = ref('')
+const briefUpdatedAt = ref(0)
 const editingProfile = ref(false)
 const writing = ref(false)
 const noteBody = ref('')
@@ -83,7 +85,24 @@ const recentKoban = computed<number | null>(() => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 })
 const nearestEvent = computed<EventTimelineEntry | null>(() => timeline.value?.ongoing[0] || timeline.value?.upcoming[0] || null)
+const latestRun = computed(() => runs.value[0] || null)
+const briefTime = computed(() => briefUpdatedAt.value
+  ? new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(briefUpdatedAt.value)
+  : '--:--')
+const briefFreshness = computed(() => {
+  if (!briefUpdatedAt.value) return '整理中'
+  const minutes = Math.max(0, Math.floor((now.value - briefUpdatedAt.value) / 60000))
+  return minutes < 1 ? '刚刚更新' : minutes < 60 ? `${minutes} 分钟前更新` : `${briefTime.value} 更新`
+})
+const caretakerBrief = computed(() => {
+  if (active.value) return { title: currentActivityTitle.value, detail: currentActivityStep.value || '任务进行中' }
+  const run = latestRun.value
+  if (!run) return { title: '今天的收获', detail: '还没有脚本执务记录' }
+  const title = runTitle(run)
+  return { title, detail: run.status === 'failed' ? '未能完成 · 查看记录' : run.status === 'stopped' ? '已停止' : run.status === 'completed' ? '已完成' : '结果待确认' }
+})
 const todaySwords = computed(() => swordReceiptEntries(swordEvents.value))
+const todaySwordNames = computed(() => [...new Set(todaySwords.value.map(e => e.payload.name))].slice(0, 3).join('、'))
 const nextBlock = computed(() => dayPlan.value?.conductor.enabled
   ? dayPlan.value.conductor.blocks.find(b => b.status === 'running')
     || dayPlan.value.conductor.blocks.filter(b => b.status === 'pending').sort((a, b) => a.start_min - b.start_min)[0]
@@ -92,6 +111,14 @@ function blockTime(minute: number) { return `${String(Math.floor(minute / 60)).p
 const activityPlan = computed(() => {
   const activity = dayPlan.value?.activity
   return activity && activity.name === nearestEvent.value?.name ? activity : null
+})
+const briefChanges = computed(() => {
+  const deltas = latestRun.value?.attributed_resource_delta || {}
+  return Object.entries(deltas)
+    .filter(([, value]) => Number(value))
+    .sort(([left], [right]) => resourceNames.indexOf(left) - resourceNames.indexOf(right))
+    .slice(0, 6)
+    .map(([name, value]) => ({ name, value: signed(Number(value)) }))
 })
 const situationMoments = computed(() => {
   const state = situation.value
@@ -121,7 +148,6 @@ function resource(name: string) {
   return typeof value === 'number' ? value.toLocaleString() : '未记录'
 }
 function dateLabel(date: string) { return date === today.value ? '今天' : date.replaceAll('-', '.') }
-function timeLabel(ts: number) { return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' }) }
 function gameTime(value: string) { return value.slice(0, 16).replaceAll('-', '.') }
 function situationTime(value: string | null) {
   if (!value) return '读取时间不明'
@@ -136,6 +162,7 @@ async function syncSituation() {
   try {
     situation.value = (await api.refreshHonmaruSituation()).situation
     loadErrors.value = await loadSummaries()
+    briefUpdatedAt.value = Date.now()
   }
   catch (error) { situationError.value = errorMessage(error) }
   finally { syncingSituation.value = false }
@@ -157,10 +184,11 @@ function runPostKind(run: any) {
 }
 function runPostText(run: any) {
   const loops = Number(run.loops) || 0
-  if (run.status === 'failed') return `未能完成。${loops > 0 ? `已完成 ${loops} 圈。` : ''}`
-  if (run.status === 'stopped') return `已停止。${loops > 0 ? `已完成 ${loops} 圈。` : ''}`
+  if (run.status === 'failed') return `这趟没能顺利收工。${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
+  if (run.status === 'stopped') return `这趟按你的意思停下了。${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
   if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
-  return ''
+  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在账房的记录里。`
+  return '这趟执务已经收工，完成了哪些事，可以翻开账房记录看看。'
 }
 function runPostFacts(run: any) {
   const facts: string[] = []
@@ -183,6 +211,7 @@ function eventMoment(event: EventTimelineEntry) {
   if (event.days_until_start === 1) return '明天开始'
   return event.days_until_start == null ? '即将开始' : `${event.days_until_start} 天后开始`
 }
+function eventMomentLabel(event: EventTimelineEntry) { return timeline.value?.ongoing.includes(event) ? '结束' : '开始' }
 function eventBudget(event: EventTimelineEntry) {
   if (!event.budget || event.budget.koban_cost == null) return '暂未核算'
   if (event.budget.koban_cost === 0) return '无需额外小判'
@@ -191,6 +220,7 @@ function eventBudget(event: EventTimelineEntry) {
   return '正在核算'
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : '暂时没能保存，请再试一次。' }
+function openBriefReport() { emit('records') }
 
 async function loadHome() {
   const data = await api.honmaruHome()
@@ -226,6 +256,7 @@ async function refresh() {
     ...(results[0]!.status === 'rejected' ? ['个人档案和小记'] : []),
     ...(results[1]!.status === 'fulfilled' ? results[1]!.value : ['本丸近况']),
   ]
+  if (results[1]!.status === 'fulfilled') briefUpdatedAt.value = Date.now()
   loading.value = false
 }
 function editProfile() {
@@ -298,32 +329,31 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     <aside class="honmaru-profile" aria-label="审神者档案">
       <div class="profile-portrait"><img v-if="profile.avatar" :src="profile.avatar" alt="我的头像"><span v-else aria-hidden="true">{{ (profile.saniwa_name || profile.honmaru_name || '丸').slice(0, 1) }}</span></div>
       <h1>{{ homeName }}</h1>
-      <p v-if="profile.motto" class="profile-motto">{{ profile.motto }}</p>
+      <p class="profile-motto">{{ profile.motto || '留一句喜欢的话，给每次回来的自己。' }}</p>
       <div v-if="daysTogether" class="profile-anniversary"><small>就任第</small><strong>{{ daysTogether }}<span> 天</span></strong></div>
       <dl class="profile-facts">
         <div><dt>审神者</dt><dd>{{ profile.saniwa_name || '还没留名' }}</dd></div>
-        <div v-if="profile.province"><dt>属国</dt><dd>{{ profile.province }}</dd></div>
-        <div v-if="profile.joined_on"><dt>就任日</dt><dd>{{ profile.joined_on.replaceAll('-', '.') }}</dd></div>
+        <div><dt>属国</dt><dd>{{ profile.province || '待填写' }}</dd></div>
+        <div><dt>就任日</dt><dd>{{ profile.joined_on?.replaceAll('-', '.') || '待填写' }}</dd></div>
       </dl>
       <button type="button" class="home-text-button profile-edit" :disabled="!homeReady" @click="editProfile">{{ profile.saniwa_name ? '整理我的档案' : '写下我的档案' }} <span aria-hidden="true">↗</span></button>
     </aside>
 
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
-      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
-      <div class="home-today-line"><span v-if="todaySwords.length">今天迎来{{ swordEventsTruncated ? '至少' : '' }} {{ todaySwords.length }} 振刀剑</span><span v-if="nextBlock">{{ nextBlock.status === 'running' ? '正在进行' : blockTime(nextBlock.start_min) + ' 开始' }} · {{ nextBlock.label }}</span></div>
+      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : '庭院无事，按自己的步调来。' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">
-        <h3 class="journal-date">{{ dateLabel(group.date) }}</h3>
+        <h3 class="journal-date">{{ dateLabel(group.date) }}<span v-if="group.date === today">{{ today.replaceAll('-', '.') }}</span></h3>
         <article v-for="entry in group.entries" :key="entry.key" class="journal-entry" :class="{ 'personal-entry': entry.note, 'attention-entry': entry.run?.status === 'failed' }">
-          <template v-if="entry.note"><header class="entry-head"><span class="entry-avatar personal-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt=""><span v-else aria-hidden="true">{{ (profile.saniwa_name || '审').slice(0, 1) }}</span></span><span class="entry-identity"><strong>{{ profile.saniwa_name || '审神者' }}</strong><small>我的小记 · <time>{{ timeLabel(entry.ts) }}</time></small></span><button type="button" class="home-text-button" @click="writeNote(entry.note)">修改</button></header><p class="entry-body">{{ entry.note.body }}</p><small v-if="entry.note.updated_at" class="entry-updated">修改于 {{ eventTime(entry.note.updated_at) }}</small></template>
-          <template v-else-if="entry.post"><header class="entry-head"><span class="entry-avatar activity-avatar"><img :src="`/static/img/ui/${entry.post.icon}`" alt=""></span><span class="entry-identity"><strong>{{ entry.post.label }}</strong><small><time>{{ timeLabel(entry.ts) }}</time></small></span></header><div class="entry-story"><h4>{{ entry.post.title }}</h4><p v-if="entry.post.text">{{ entry.post.text }}</p><details v-if="entry.post.facts.length" class="entry-details"><summary>查看{{ entry.post.label === '远征来信' ? '收获' : '明细' }}</summary><div class="entry-facts"><span v-for="fact in entry.post.facts" :key="fact">{{ fact }}</span></div></details></div></template>
-          <template v-else><header class="entry-head"><span class="entry-avatar activity-avatar"><img :src="`/static/img/ui/${runPostKind(entry.run).icon}`" alt=""></span><span class="entry-identity"><strong>{{ runPostKind(entry.run).label }}</strong><small><time>{{ timeLabel(entry.ts) }}</time></small></span><span class="entry-status" :class="{ 'needs-attention': entry.run.status === 'failed' }">{{ runStatusLabel(entry.run) }}</span></header><div class="entry-story"><h4>{{ runTitle(entry.run) }}</h4><p v-if="runPostText(entry.run)">{{ runPostText(entry.run) }}</p><div v-if="runPostFacts(entry.run).length" class="entry-facts"><span v-for="fact in runPostFacts(entry.run)" :key="fact">{{ fact }}</span></div></div></template>
+          <template v-if="entry.note"><header class="entry-head"><span class="entry-avatar personal-avatar"><img v-if="profile.avatar" :src="profile.avatar" alt=""><span v-else aria-hidden="true">{{ (profile.saniwa_name || '审').slice(0, 1) }}</span></span><span class="entry-identity"><strong>{{ profile.saniwa_name || '审神者' }}</strong><small>我的小记 · <time>{{ eventTime(entry.ts) }}</time></small></span><button type="button" class="home-text-button" @click="writeNote(entry.note)">修改</button></header><p class="entry-body">{{ entry.note.body }}</p><small v-if="entry.note.updated_at" class="entry-updated">修改于 {{ eventTime(entry.note.updated_at) }}</small></template>
+          <template v-else-if="entry.post"><header class="entry-head"><span class="entry-avatar fox-avatar"><img :src="'/static/img/fox_frames/v2/idle/transparent/frame_01.png'" alt=""></span><span class="entry-identity"><strong>狐之助</strong><small>{{ entry.post.label }} · <time>{{ eventTime(entry.ts) }}</time></small></span></header><div class="entry-scene" :style="{ backgroundImage: `url('/static/img/${entry.post.scene}')` }" aria-hidden="true"><span class="scene-stamp"><img :src="`/static/img/ui/${entry.post.icon}`" alt=""></span></div><div class="entry-story"><h4>{{ entry.post.title }}</h4><p>{{ entry.post.text }}</p><div v-if="entry.post.facts.length" class="entry-facts"><span v-for="fact in entry.post.facts" :key="fact">{{ fact }}</span></div></div><footer v-if="entry.post.label !== '刀剑手记'"><button type="button" class="home-text-button" @click="emit('records')">去账房翻记录 →</button></footer></template>
+          <template v-else><header class="entry-head"><span class="entry-avatar fox-avatar"><img :src="'/static/img/fox_frames/v2/idle/transparent/frame_01.png'" alt=""></span><span class="entry-identity"><strong>狐之助</strong><small>{{ runPostKind(entry.run).label }} · <time>{{ eventTime(entry.ts) }}</time></small></span><span class="entry-status" :class="{ 'needs-attention': entry.run.status === 'failed' }">{{ runStatusLabel(entry.run) }}</span></header><div class="entry-scene" :style="{ backgroundImage: `url('/static/img/${runPostKind(entry.run).scene}')` }" aria-hidden="true"><span class="scene-stamp"><img :src="`/static/img/ui/${runPostKind(entry.run).icon}`" alt=""></span></div><div class="entry-story"><h4>{{ runTitle(entry.run) }}</h4><p>{{ runPostText(entry.run) }}</p><div v-if="runPostFacts(entry.run).length" class="entry-facts"><span v-for="fact in runPostFacts(entry.run)" :key="fact">{{ fact }}</span></div></div><footer><button type="button" class="home-text-button" @click="emit('records')">翻开这趟记录 →</button></footer></template>
         </article>
       </section>
       <button v-if="entries.length > limit" class="journal-more home-text-button" type="button" @click="limit += 12">再翻一些记录 ↓</button>
-      <button v-if="filter === 'all' && (runs.length || journalEvents.length || swordDepartures.length)" class="journal-more home-text-button" type="button" @click="emit('records')">全部记录 →</button>
+      <button v-if="runs.length && filter === 'all'" class="journal-more home-text-button" type="button" @click="emit('records')">去账房翻更早的记录 →</button>
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
@@ -341,19 +371,30 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
           <details v-if="filledParties.length || situationMoments.length" class="situation-details"><summary>查看部队与全部时间</summary><div v-if="filledParties.length" class="situation-detail-group"><p>编队 · {{ situationTime(situation.parties_observed_at) }}</p><div v-for="party in filledParties" :key="party.party_no" class="situation-row"><span>第{{ party.party_no }}部队{{ party.party_name && party.party_name !== `第${party.party_no}部队` ? ` · ${party.party_name}` : '' }}</span><strong class="situation-members"><span v-for="(member, index) in party.members" :key="index" class="situation-member" :title="memberTitle(member)">{{ member.label || member.name }}</span></strong></div></div><div v-if="situationMoments.length" class="situation-detail-group"><p>全部时间记录</p><div v-for="moment in situationMoments" :key="moment.key" class="situation-row"><strong>{{ moment.label }}</strong><small>{{ gameTime(moment.time) }} · {{ situationTime(moment.observedAt) }}</small></div></div></details>
         </template>
       </section>
+      <PaperCard v-if="active || latestRun || todaySwords.length || nextBlock" variant="dashboard" class="home-brief">
+        <header class="brief-meta"><span>狐之助小报</span><span>{{ briefFreshness }}</span></header>
+        <h2>{{ caretakerBrief.title }}</h2>
+        <p class="brief-detail">{{ caretakerBrief.detail }}<small v-if="!active && latestRun"> · {{ eventTime(Number(latestRun.ended_at || latestRun.started_at)) }}</small></p>
+        <p v-if="todaySwords.length" class="home-daily-fact">今天收获{{ swordEventsTruncated ? '至少' : '' }} {{ todaySwords.length }} 振刀剑<br><small>{{ todaySwordNames }}{{ new Set(todaySwords.map(e => e.payload.name)).size > 3 ? '等' : '' }}</small></p>
+        <p v-if="nextBlock" class="home-daily-fact">{{ nextBlock.status === 'running' ? '正在跑' : blockTime(nextBlock.start_min) + ' 接下来' }} · {{ nextBlock.label }}</p>
+        <div v-if="briefChanges.length" class="brief-changes" aria-label="这一趟的家底变化"><span v-for="item in briefChanges" :key="item.name"><b>{{ item.name }}</b> {{ item.value }}</span></div>
+        <button type="button" class="home-text-button" @click="openBriefReport">查看账房记录 →</button>
+      </PaperCard>
       <section class="home-planning-card home-finances">
-        <h2>家底</h2>
-        <p class="finance-lead">小判 <strong>{{ fmt(recentKoban) }}</strong></p>
-        <details class="finance-details"><summary>资源与预留</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name === '加速符' ? '加速符·极' : name }}</dt><dd>{{ resource(name) }}</dd></div></dl><p v-if="kobanWatch?.reserved" class="planning-note">预留 {{ fmt(kobanWatch.reserved) }} 小判 · 可安排 {{ fmt(kobanWatch.available) }}</p><p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀可锻 {{ fmt(resourceWatch.forge_capacity) }} 炉</p></details>
-        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
+        <p class="home-eyebrow">博多账房</p>
+        <h2>小判与锻刀</h2>
+        <p class="finance-lead">{{ kobanWatch?.available == null ? '最近的小判记录' : '可安排的小判' }} <strong>{{ fmt(kobanWatch?.available ?? recentKoban) }}</strong></p>
+        <p class="planning-note">{{ kobanWatch?.available == null ? '可动用数额还未核算，去规划里安排。' : `账本 ${fmt(kobanWatch.current)} · 预留 ${fmt(kobanWatch.reserved)}` }}</p>
+        <p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀还能锻 {{ fmt(resourceWatch.forge_capacity) }} 炉<span v-if="resourceWatch.limiting.length"> · {{ resourceWatch.limiting.join('、') }}先卡住</span></p>
+        <p v-if="kobanWatch?.budgets?.some(b => b.amount)" class="planning-note">预留给 {{ kobanWatch.budgets.filter(b => b.amount).map(b => `${b.event} ${fmt(b.amount)}`).join(' · ') }}</p>
+        <details class="finance-details"><summary>查看家底明细</summary><dl><div v-for="name in resourceNames" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl></details>
+        <div class="finance-links"><button type="button" class="home-text-button" @click="emit('planning')">去规划安排 →</button><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
       </section>
       <section class="home-planning-card home-event-card">
-        <p class="home-eyebrow">活动</p>
+        <p class="home-eyebrow">近期活动</p>
         <template v-if="nearestEvent">
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
-          <p class="home-event-time">{{ eventMoment(nearestEvent) }}</p>
-          <p v-if="nearestEvent.budget?.tama_current != null" class="home-event-progress">{{ fmt(nearestEvent.budget.tama_current) }}<span v-if="nearestEvent.budget.tama_target != null"> / {{ fmt(nearestEvent.budget.tama_target) }}</span> {{ nearestEvent.budget.currency || '活动点数' }}</p>
-          <details class="finance-details"><summary>今日进度与预算</summary><dl class="planning-rows"><div v-if="activityPlan?.completed_today != null"><dt>今天完成</dt><dd>{{ activityPlan.completed_today }} 圈</dd></div><div v-if="activityPlan"><dt>建议再跑</dt><dd>{{ activityPlan.target_runs }} 圈</dd></div><div><dt>预算</dt><dd>{{ eventBudget(nearestEvent) }}</dd></div></dl></details>
+          <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div><div v-if="nearestEvent.budget?.tama_current != null"><dt>{{ nearestEvent.budget.currency || '活动点数' }}</dt><dd>{{ fmt(nearestEvent.budget.tama_current) }}{{ nearestEvent.budget.tama_target != null ? ` / ${fmt(nearestEvent.budget.tama_target)}` : '' }}</dd></div><div v-if="activityPlan"><dt>今天完成</dt><dd>{{ activityPlan.completed_today }} 圈</dd></div><div v-if="activityPlan"><dt>接下来建议</dt><dd>{{ activityPlan.target_runs }} 圈</dd></div></dl>
         </template>
         <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
         <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
@@ -417,9 +458,9 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-day { margin-top: 24px; }
 .honmaru-home .journal-date { font-size: 13px; display: flex; align-items: center; gap: 10px; margin-bottom: 13px; color: var(--home-green); }
 .journal-date span { font-size: 10px; color: var(--ink-dim); font-weight: 400; }
-.journal-entry { padding: 16px 0; border-bottom: 1px solid var(--paper-line); overflow-wrap: anywhere; }
-.journal-entry.attention-entry .entry-story h4 { color: #a03f32; }
-.journal-entry.personal-entry { position: relative; padding: 16px; margin-block: 12px; background: var(--paper-card); border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 3px), 97% 100%, 93% calc(100% - 2px), 88% 100%, 82% calc(100% - 2px), 76% 100%, 69% calc(100% - 2px), 62% 100%, 54% calc(100% - 2px), 47% 100%, 39% calc(100% - 2px), 31% 100%, 23% calc(100% - 2px), 15% 100%, 8% calc(100% - 2px), 0 100%); }
+.journal-entry { padding: 15px 17px; margin-bottom: 16px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: var(--r-md); box-shadow: 0 3px 12px #3d32290b; overflow: hidden; }
+.journal-entry.attention-entry { border-color: #d7aa9d; }
+.journal-entry.personal-entry { position: relative; border-left: 3px solid #c6ae76; box-shadow: 0 2px 3px #3d322908; clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 3px), 97% 100%, 93% calc(100% - 2px), 88% 100%, 82% calc(100% - 2px), 76% 100%, 69% calc(100% - 2px), 62% 100%, 54% calc(100% - 2px), 47% 100%, 39% calc(100% - 2px), 31% 100%, 23% calc(100% - 2px), 15% 100%, 8% calc(100% - 2px), 0 100%); }
 .journal-entry.personal-entry::after { content: ''; position: absolute; top: 0; right: 0; width: 11px; height: 11px; background: linear-gradient(225deg, var(--paper) 0 47%, #c9bda7 50% 57%, #eee6d5 60%); }
 .journal-entry.personal-entry header button { margin-right: 8px; }
 .journal-entry .entry-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
@@ -431,13 +472,10 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .entry-identity { display: grid; min-width: 0; gap: 2px; }
 .entry-identity strong { font-size: 12px; font-weight: 600; }
 .entry-identity small { color: var(--ink-dim); font-size: 10px; }
-.entry-story { padding-left: 46px; }
-.activity-avatar { background: transparent; }
-.activity-avatar img { width: 24px; height: 24px; object-fit: contain; }
-.entry-details { margin-top: 9px; }
-.entry-details summary { color: var(--home-green); cursor: pointer; font-size: 11px; }
-.home-today-line { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-dim); font-size: 12px; margin-bottom: 18px; }
-.home-today-line:empty { display: none; }
+.entry-scene { position: relative; height: 105px; margin: 0 0 13px; border-radius: 5px; background-color: #e7dfcc; background-position: center 62%; background-size: cover; }
+.scene-stamp { position: absolute; right: 10px; bottom: -11px; display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid var(--paper-card); border-radius: 50%; background: #e8ecdf; box-shadow: 0 2px 5px #3d32292b; }
+.scene-stamp img { width: 19px; height: 19px; object-fit: contain; }
+.entry-story { padding: 0 1px; }
 .entry-story p { margin-top: 7px; color: var(--ink-dim); font-size: 12px; line-height: 1.7; }
 .entry-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
 .entry-facts span { padding: 4px 8px; color: var(--home-green); background: #e9eee5; border-radius: 4px; font-size: 10px; }
@@ -452,7 +490,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .journal-empty h3 { margin: 14px 0 10px; font-size: 17px; font-weight: 500; }
 .journal-empty p { color: var(--ink-dim); line-height: 1.9; font-size: 12px; margin-bottom: 18px; }
 .honmaru-keepsakes { display: grid; gap: 25px; min-width: 0; }
-.home-situation { padding: 0 0 20px; border-bottom: 1px solid var(--paper-line); min-width: 0; }
+.home-situation { padding: 16px; border: 1px solid var(--paper-line); background: var(--paper-card); border-radius: 12px; min-width: 0; }
 .home-situation header { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
 .home-situation header h2 { margin: 2px 0 12px; }
 .home-situation .home-text-button { white-space: nowrap; }
@@ -476,11 +514,18 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .situation-moment .moment-done { color: #315f42; font-weight: 600; }
 .finance-details-caption { margin: 10px 0 0; color: var(--ink-dim); font-size: 10px; }
 .honmaru-keepsakes h2 { font-size: 15px; margin-bottom: 12px; }
+.home-brief { position: relative; padding: 20px 18px 17px; border: 1px solid #e3d5b7; background: #f3ecd9; border-radius: var(--r-md); box-shadow: 2px 3px 0 #e5dac4; }
+.home-brief::before { content: ''; width: 45px; height: 13px; position: absolute; top: -6px; left: calc(50% - 22px); background: #d3c79a88; transform: rotate(-4deg); }
+.brief-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; color: #806748; font-size: 10px; }
+.home-brief h2 { color: #173d6e; font-weight: 500; }
+.home-daily-fact { margin-top: 10px !important; font-size: 12px; line-height: 1.6; }
+.home-daily-fact small { color: var(--ink-dim); overflow-wrap: anywhere; }
+.brief-detail { color: #173d6e; font-size: 12px; line-height: 1.65; }
+.brief-changes { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 9px 0; padding: 8px 10px; color: #53635b; background: linear-gradient(105deg, #edf0e7d9, #dce4dbb8 52%, #f4f3e9c7); border-block: 1px solid #ffffff75; box-shadow: inset 0 1px 4px #fff8, 0 1px 2px #625a4b14; backdrop-filter: blur(.6px); font-size: 10px; }
+.brief-changes span { white-space: nowrap; }
+.brief-changes b { font-weight: 500; }
 .honmaru-home .home-muted { color: #796e5f; font-size: 12px; line-height: 1.8; margin: 6px 0 12px; }
-.home-planning-card { padding: 0 0 20px; border-bottom: 1px solid var(--paper-line); }
-.honmaru-home .home-event-time { color: var(--ink-dim); font-size: 12px; margin-bottom: 12px; }
-.home-event-progress { font-size: 14px; line-height: 1.7; font-variant-numeric: tabular-nums; }
-.home-event-progress span { color: var(--ink-dim); }
+.home-planning-card { padding: 17px 16px; border: 1px solid var(--paper-line); background: var(--paper-card); }
 .honmaru-keepsakes .home-planning-card h2 { margin: 0 0 12px; color: #173d6e; font-size: 15px; font-weight: 500; }
 .home-planning-card .home-eyebrow { margin-bottom: 5px; color: #a87416; }
 .pencil-mark { position: relative; z-index: 0; display: inline-block; padding-inline: 2px; font-weight: inherit; }
