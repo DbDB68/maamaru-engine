@@ -116,6 +116,8 @@ class Batch(SakuraMixin):
     def sortie_stream(self, **kw):
         assert kw['formation_mode'] == 'auto'
         assert kw['formation'] == '鱼鳞阵'
+        assert kw['injury_action'] == 'stop'
+        self.last_threshold = kw['repair_threshold']
         self.calls.append('battle')
         yield (f"[出阵] ✓ 全部 1 圈跑完，部队{kw['team_no']}辛苦啦，收工！"
                if self.round_ok else '绝不出阵')
@@ -213,7 +215,18 @@ def test_builder_uses_captain_and_batch_size_even_with_legacy_slot():
 
     agent = Agent()
     list(_build_sakura(agent, 'unused', {'team_no': '4', 'slot': '6', 'sword_count': '3'}))
-    assert agent.kwargs == {'team_no': 4, 'slot': 1, 'sword_count': 3}
+    assert agent.kwargs == {'team_no': 4, 'slot': 1, 'sword_count': 3, 'repair_threshold': 'light'}
+    list(_build_sakura(agent, 'unused', {'team_no': '4', 'repair_threshold': 'heavy'}))
+    assert agent.kwargs['repair_threshold'] == 'heavy'
+
+
+def test_sakura_passes_heavy_threshold_to_shared_departure_and_rejects_invalid():
+    host = Batch(fatigue=(49, 100))
+    list(host.sakura_stream(repair_threshold='heavy'))
+    assert host.last_threshold == 'heavy'
+    host = Batch()
+    list(host.sakura_stream(repair_threshold='invalid'))
+    assert not host.calls
 
 
 def test_legacy_preset_selection_does_not_silently_clear_team_one():

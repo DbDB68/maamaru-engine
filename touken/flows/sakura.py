@@ -78,13 +78,16 @@ class SakuraMixin:
     def sakura_stream(self, team_no: int = 5, slot: int = 1,
                       target: int = 100, max_rounds: int = 40,
                       auto_swap: bool = True, swap_threshold: int = 50,
-                      sword_count: int = 1):
+                      sword_count: int = 1, repair_threshold: str = "light"):
         """全本丸轮刷：单人队长，疲劳≤49入选，100卸装换人。"""
         if team_no not in _TEAM_TAB or slot != 1:
             yield "[刷花] 请指定部队1-5的队长位，单人刷花不支持其他位置"
             return
         if not 1 <= sword_count <= 1000 or max_rounds < 1:
             yield "[刷花] 本次刷花数量或圈数上限无效，停止"
+            return
+        if repair_threshold not in ('light', 'medium', 'heavy'):
+            yield "[刷花] 伤势停止条件无效，未清队"
             return
         target, swap_threshold = 100, 50
         yield f"[刷花] 部队{team_no}，本次最多刷 {sword_count} 振，只选上锁、等级>1、疲劳≤49的刀"
@@ -124,7 +127,9 @@ class SakuraMixin:
                 round_done = stop = False
                 for msg in self.sortie_stream(chapter=1, map_no=1, team_no=team_no,
                                               auto_march=True, max_loops=1,
-                                              formation_mode="auto", formation="鱼鳞阵"):
+                                              formation_mode="auto", formation="鱼鳞阵",
+                                              repair_threshold=repair_threshold,
+                                              injury_action="stop"):
                     yield msg
                     round_done |= msg == f"[出阵] ✓ 全部 1 圈跑完，部队{team_no}辛苦啦，收工！"
                     stop |= any(word in msg for word in ("绝不出阵", "强制停", "行军中断"))

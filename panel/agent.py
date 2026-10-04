@@ -72,6 +72,7 @@ _TOOLS = [
                 "properties": {
                     "team_no": {"type": "integer", "description": "部队编号", "default": 1},
                     "sword_count": {"type": "integer", "description": "本次刷几振", "default": 1, "minimum": 1, "maximum": 1000},
+                    "repair_threshold": {"type": "string", "description": "伤势停止条件", "enum": ["light", "medium", "heavy"], "default": "light"},
                 },
             },
         },

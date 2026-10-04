@@ -739,7 +739,8 @@ def _build_sakura(agent, config_path, params):
         return
     yield from agent.sakura_stream(
         team_no=_i(params, "team_no", 1),
-        slot=1, sword_count=_i(params, "sword_count", 1))
+        slot=1, sword_count=_i(params, "sword_count", 1),
+        repair_threshold=params.get("repair_threshold") or "light")
 
 
 def _build_sword_inventory(agent, config_path, params):
@@ -1266,6 +1267,8 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _wrap_inventory("刷花", _build_sakura),
                 params=[_team_field("1"),
+                        next(field for field in _march_and_injury_fields()
+                             if field["key"] == "repair_threshold"),
                         {"key": "sword_count", "type": "number", "label": "本次刷几振",
                          "default": 1, "min": 1, "max": 1000,
                          "help": "先解散所选部队的队员，再替换队长；按樱吹雪升序，只选已上锁、等级大于1、疲劳≤49的刀，不按标签筛选。每振刷到100后卸装换人。"}])
