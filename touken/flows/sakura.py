@@ -101,7 +101,7 @@ class SakuraMixin:
                 if selected is False:
                     yield f"[刷花] 没有可选的疲劳≤49刀剑，已完成 {completed} 振，收工"
                 return
-            fatigue = yield from self._check_fatigue(team_no, 1)
+            fatigue = yield from self._check_fatigue(team_no, 1, in_place=True)
             if fatigue is None or not 0 <= fatigue <= 49:
                 yield "[刷花] 换入后未确认疲劳≤49，停止"
                 return
@@ -332,18 +332,25 @@ class SakuraMixin:
 
     # ==================== 读疲劳 ====================
 
-    def _check_fatigue(self, team_no: int, slot: int):
+    def _check_fatigue(self, team_no: int, slot: int, *, in_place: bool = False):
         """
         导航到编队 → 切部队标签 → OCR 读疲劳。
         Returns: 疲劳值 int；读不到返回 None（yield from 接返回值）
         """
-        for nav_msg in self.navigate_to_stream("编队"):
-            yield nav_msg
-        if self.current_location != "编队":
-            yield "[刷花] 到不了编队"
-            return None
-        self.maa.click(Point(*_TEAM_TAB[team_no]))
-        time.sleep(1.5)
+        if in_place:
+            # 换人已回到所选部队，直接读，不重走目录或重选部队。
+            self.maa.screenshot(force=True)
+            if not self.maa.ocr("部队编成", roi_4to4(500, 0, 780, 60)):
+                yield "[刷花] 换人后未确认编队页，停止"
+                return None
+        else:
+            for nav_msg in self.navigate_to_stream("编队"):
+                yield nav_msg
+            if self.current_location != "编队":
+                yield "[刷花] 到不了编队"
+                return None
+            self.maa.click(Point(*_TEAM_TAB[team_no]))
+            time.sleep(1.5)
         self.maa.screenshot(force=True)
 
         cy = _ROW_CY[slot - 1]

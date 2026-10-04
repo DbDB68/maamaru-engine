@@ -6,6 +6,29 @@ from touken.flows.sakura import SakuraMixin
 from touken.maa_adapter import Point
 
 
+def test_selected_captain_fatigue_is_read_without_navigation_or_team_clicks():
+    class Maa:
+        def screenshot(self, force=False):
+            pass
+
+        def ocr(self, text, roi):
+            return Point(640, 30)
+
+        def ocr_all(self, roi):
+            return [('疲劳49/100', Point(350, 196))]
+
+    host = SakuraMixin()
+    host.maa = Maa()
+    # 没有导航和点击接口：选人后应只观察当前编队页。
+    stream = host._check_fatigue(1, 1, in_place=True)
+    try:
+        next(stream)
+    except StopIteration as result:
+        assert result.value == 49
+    else:
+        raise AssertionError('unexpected navigation')
+
+
 class Batch(SakuraMixin):
     def __init__(self, selections=(True, True), fatigue=(49, 80, 100, 49, 100), serials=(1, 2)):
         self.selections = iter(selections)
@@ -24,7 +47,7 @@ class Batch(SakuraMixin):
         yield 'select'
         return next(self.selections)
 
-    def _check_fatigue(self, team, slot):
+    def _check_fatigue(self, team, slot, *, in_place=False):
         yield 'read'
         return next(self.fatigue)
 
