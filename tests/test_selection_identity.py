@@ -1,0 +1,75 @@
+from unittest.mock import patch
+
+from touken.selection_identity import identity_target, selected_serial
+from touken.flows.formation_editor import decide_match
+
+
+def event(body, endpoint='/party/list', epoch=101):
+    return {'payload': {'status': 0, **body}, 'endpoint': endpoint,
+            'status': 200, 'direction': 'S->C', 'epoch_test': epoch}
+
+
+def test_equipped_base_scout_is_never_compared_to_displayed_bonus():
+    sword = {'sword_id': '3', 'level': '35', 'ranbu_level': '9',
+             'hp_max': '50', 'scout': '35', 'horse_serial_id': '123'}
+    with patch('touken.selection_identity.youzu_log._event_epoch',
+               side_effect=lambda e: e['epoch_test']):
+        target = identity_target([event({'sword': {'1': sword}})], 1, 100)
+        assert target['recon'] is None
+        assert target['survival_max'] == 50
+        sword['horse_serial_id'] = None
+        assert identity_target([event({'sword': {'1': sword}})], 1, 100)['recon'] == 35
+        sword['artifact_serial_id1'] = '4'
+        assert identity_target([event({'sword': {'1': sword}})], 1, 100)['survival_max'] is None
+        assert identity_target([event({'sword': {'1': sword}}, epoch=99)], 1, 100) is None
+
+
+def test_post_selection_reads_requested_slot_and_rejects_old_or_failed_response():
+    body = {'2': {'slot': {'3': {'serial_id': '456'}, '1': {'serial_id': '999'}}}}
+    with patch('touken.selection_identity.youzu_log._event_epoch',
+               side_effect=lambda e: e['epoch_test']):
+        assert selected_serial([event(body, '/party/setsword')], 2, 3, 100) == 456
+        assert selected_serial([event(body, '/party/setsword', 99)], 2, 3, 100) is None
+        failed = event(body, '/party/setsword')
+        failed['payload']['status'] = 1
+        assert selected_serial([failed], 2, 3, 100) is None
+
+
+def test_ranbu_disambiguates_but_identical_copies_remain_ambiguous():
+    target = {'name': '狮子王', 'sword_catalog_id': 'lion', 'level': 1,
+              'tou_level': 2, 'survival_max': 45, 'recon': 25}
+    fields = ('name', 'level', 'tou_level', 'survival_max', 'recon')
+    rows = [{**target, 'y': 200}, {**target, 'tou_level': 1, 'y': 300},
+            {**target, 'tou_level': 1, 'y': 400}]
+    assert decide_match([rows], target, fields)['status'] == 'unique'
+    target['tou_level'] = 1
+    assert decide_match([rows], target, fields)['status'] == 'ambiguous'
+    target['tou_level'] = 2
+    rows[1]['tou_level'] = None
+    rows[1]['fatigue'] = rows[0]['fatigue'] = 49
+    assert decide_match([rows], target, fields)['status'] == 'ambiguous'
+
+
+def test_number_verification_failure_prevents_changed_result():
+    from test_formation_editor import _std_setup, _target, _row, _run, _DECOY_PAGE, HASEBE
+    maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
+    read = host._read_list_page
+
+    def enriched():
+        rows, bad = read()
+        for row in rows:
+            row.update(tou_level=9, survival_max=50, recon=45)
+        return rows, bad
+
+    evidence = {'sword_catalog_id': HASEBE, 'form': 'normal', 'level': 35,
+                'tou_level': 9, 'survival_max': 50, 'recon': 45}
+    for actual, expected in ((456, 'changed'), (999, 'screen_unrecognized'),
+                             (None, 'screen_unrecognized')):
+        maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
+        read = host._read_list_page
+        with patch.object(host, '_read_list_page', side_effect=enriched), \
+                patch('touken.selection_identity.client_events', return_value=[]), \
+                patch('touken.selection_identity.identity_target', return_value=evidence), \
+                patch('touken.selection_identity.selected_serial', side_effect=[0, actual]):
+            result = _run(host, target=_target(observation_id='youzu:456'))
+        assert result['result'] == expected

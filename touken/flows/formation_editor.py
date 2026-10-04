@@ -482,7 +482,8 @@ def decide_match(pages, target, match_fields=DEFAULT_MATCH_FIELDS,
     # 安全边界：剔除只发生在「已知字段全一致」时——同名两振若疲劳或
     # 等级任一不同，半遮副本不会被剔，照样 ambiguous 停下；裁决点击
     # 永远只落在证据充分的确认行上。
-    if confirmed and unconfirmed:
+    if confirmed and unconfirmed and not any(
+            field in match_fields for field in ('tou_level', 'survival_max', 'recon')):
         def _weak_copy_of_confirmed(item):
             _p, r, _m = item
             for _cp, c in confirmed:
@@ -888,6 +889,10 @@ class FormationEditorMixin:
         max_pages = int(max_pages or cfg.get("max_pages") or _MAX_PAGES)
 
         tgt, err = normalize_target(target)
+        self._selection_identity_target = None
+        identity_since = time.time() - 1
+        observation = str((tgt or {}).get("observation_id") or "")
+        client_serial = int(observation[6:]) if re.fullmatch(r"youzu:\d+", observation) else None
         ranked = bool(tgt and tgt.get("selection_policy") == "locked_highest_level")
         if ranked and tgt.get("form") not in ("normal", "kiwame"):
             err = "按等级选人需要明确普通/极形态"
@@ -925,6 +930,24 @@ class FormationEditorMixin:
             yield f"[编队] {slot_no}号位读不出（失明页？），停"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "换前观察失败：整页读不出", entry_shell=shell)
+        if client_serial is not None and not ranked:
+            from ..selection_identity import client_events, identity_target, selected_serial
+            events = client_events(self.maa)
+            evidence = identity_target(events, client_serial, time.time() - 300)
+            if (not evidence or evidence['level'] is None or evidence['tou_level'] is None
+                    or evidence['sword_catalog_id'] != tgt['sword_catalog_id']):
+                yield "[编队] 没有读到近期编队的目标编号和数值，未换人"
+                return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
+                                    "本次客户端身份资料不完整", entry_shell=shell)
+            tgt.update(evidence)
+            match_fields = tuple(field for field in
+                                 ('name', 'level', 'tou_level', 'survival_max', 'recon')
+                                 if field == 'name' or tgt.get(field) is not None)
+            self._selection_identity_target = tgt
+            if selected_serial(events, team_no, slot_no, identity_since) == client_serial:
+                yield f"[编队] {slot_no}号位客户端编号已是目标，无需换人"
+                return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
+                                    "本次客户端部队编号与目标一致", entry_shell=shell)
         m = slot_matches_target(slot_before, tgt, match_fields)
         nonlevel_fields = tuple(field for field in match_fields if field != "level")
         nonlevel_match = slot_matches_target(slot_before, tgt, nonlevel_fields)
@@ -936,7 +959,7 @@ class FormationEditorMixin:
                  else None)
             # 刀剑等级增长可与旧目标不同；其余可见指纹在完整刀账中唯一
             # 才能证明是同一振。形态章漏识别不能单独否决这条实例证据。
-        if m is True and not ranked:
+        if m is True and not ranked and client_serial is None:
             yield f"[编队] {slot_no}号位已确认是目标，零点击收工"
             return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
                                 "换人前已确认目标就在该槽位，未做任何换人点击",
@@ -1029,6 +1052,7 @@ class FormationEditorMixin:
                                 entry_shell=shell, before=slot_before,
                                 team_before=team_before)
 
+        selected_at = time.time() - 1
         self.maa.click(Point(_DECIDE_X, row["y"] + _DECIDE_DY))
         if not self._wait_list_closed():
             yield ("[编队] 决定已点但列表不关闭：目标可能被游戏规则禁用"
@@ -1038,13 +1062,23 @@ class FormationEditorMixin:
                                 entry_shell=shell, before=slot_before,
                                 team_before=team_before)
 
+        if client_serial is not None and not ranked:
+            from ..selection_identity import client_events, selected_serial
+            actual = selected_serial(client_events(self.maa), team_no, slot_no, selected_at)
+            if actual != client_serial:
+                yield "[编队] 选入后客户端编号未核对成功，停止；不继续装备或出发"
+                return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
+                                    "已点决定，但实际编号未确认是目标；队伍可能已变化",
+                                    entry_shell=shell, before=slot_before,
+                                    team_before=team_before)
         # 「决定」后列表已关闭就结束。本阶段不再 OCR 回读当前队伍：回读
         # 误识别不能反过来把一次正常换人报成失败，也不拿未经独立盘点的
         # 读数刷新编队档案。
+        verification = "客户端编号已确认" if client_serial is not None and not ranked else "未做编队回读"
         yield (f"[编队] ✓ 已决定：部队{team_no} {slot_no}号位 ← "
-               f"{tgt['name']}（本阶段不做回读）")
+               f"{tgt['name']}（{verification}）")
         return self._finish(CHANGED, team_no, slot_no, tgt,
-                            "已点击决定且选择列表正常关闭；未做编队回读",
+                            f"已点击决定且选择列表正常关闭；{verification}",
                             entry_shell=shell, before=slot_before,
                             team_before=team_before,
                             pages_scanned=len(pages))
@@ -1226,6 +1260,22 @@ class FormationEditorMixin:
         rows, unreadable = self._parse_selection_rows(tokens)
         for row in rows:
             row["lock_status"] = recognize_selection_lock(image, row["y"])
+            target = getattr(self, '_selection_identity_target', None)
+            if target and row.get('sword_catalog_id') == target['sword_catalog_id']:
+                y = row['y']
+                if not 170 < y < 650:
+                    continue  # 裁掉的上下边缘行没有完整数值证据。
+                tokens = self.maa.ocr_all(roi_4to4(470, y - 48, 591, y - 27)) or []
+                text = ''.join(t for t, _ in tokens)
+                levels = re.findall(r'乱舞\s*(\d+)\s*级', text)
+                row['tou_level'] = int(levels[0]) if len(levels) == 1 else None
+                for field, x in (('survival_max', 596), ('recon', 873)):
+                    if target.get(field) is None:
+                        continue
+                    tokens = self.maa.ocr_all(roi_4to4(x + 3, y - 21, x + 52, y + 13)) or []
+                    numbers = [int(t.strip()) for t, _ in tokens
+                               if re.fullmatch(r'\d{1,3}', t.strip())]
+                    row[field] = numbers[0] if len(numbers) == 1 else None
         return rows, unreadable
 
     def _scan_selection_list(self, max_pages, *, swipe_next=_SWIPE_NEXT,
