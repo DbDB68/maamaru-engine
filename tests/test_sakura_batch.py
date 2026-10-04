@@ -48,8 +48,11 @@ class Batch(SakuraMixin):
         return False
 
     def sortie_stream(self, **kw):
+        assert kw['formation_mode'] == 'auto'
+        assert kw['formation'] == '鱼鳞阵'
         self.calls.append('battle')
-        yield '圈打完' if self.round_ok else '绝不出阵'
+        yield (f"[出阵] ✓ 全部 1 圈跑完，部队{kw['team_no']}辛苦啦，收工！"
+               if self.round_ok else '绝不出阵')
 
 
 def test_batch_unloads_before_next_selection_and_respects_count():

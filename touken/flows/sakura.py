@@ -123,9 +123,10 @@ class SakuraMixin:
                 yield f"[刷花] 第 {index + 1}/{sword_count} 振，第 {rd} 圈（疲劳 {fatigue}/100）"
                 round_done = stop = False
                 for msg in self.sortie_stream(chapter=1, map_no=1, team_no=team_no,
-                                              auto_march=True, max_loops=1):
+                                              auto_march=True, max_loops=1,
+                                              formation_mode="auto", formation="鱼鳞阵"):
                     yield msg
-                    round_done |= "圈打完" in msg
+                    round_done |= msg == f"[出阵] ✓ 全部 1 圈跑完，部队{team_no}辛苦啦，收工！"
                     stop |= any(word in msg for word in ("绝不出阵", "强制停", "行军中断"))
                 if stop or not round_done:
                     yield "[刷花] 这圈未完成或被安全规矩拦下，停止刷花"
