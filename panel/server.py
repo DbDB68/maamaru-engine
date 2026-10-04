@@ -1268,7 +1268,7 @@ register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了�
                 params=[_team_field("1"),
                         {"key": "sword_count", "type": "number", "label": "本次刷几振",
                          "default": 1, "min": 1, "max": 1000,
-                         "help": "先解散所选部队的队员，再替换队长；全本丸按樱吹雪升序选疲劳≤49的刀，不区分上锁和标签。每振刷到100后卸装换人。"}])
+                         "help": "先解散所选部队的队员，再替换队长；按樱吹雪升序，只选已上锁、等级大于1、疲劳≤49的刀，不按标签筛选。每振刷到100后卸装换人。"}])
 def _build_practice(agent, config_path, params):
     # 面板单跑演练：真打 + 部队可选（_build_simple 裸调会掉进 dry_run 认人演习模式）
     team_no = yield from _team_with_preset_stream(agent, params, default=2)

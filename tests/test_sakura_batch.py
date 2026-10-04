@@ -6,6 +6,49 @@ from touken.flows.sakura import SakuraMixin
 from touken.maa_adapter import Point
 
 
+def test_sakura_requires_confirmed_lock_and_sword_level_above_one():
+    host = SakuraMixin()
+    class Maa:
+        text = '刀剑39级'
+        def ocr_all(self, roi):
+            return [(self.text, Point(530, 135))]
+    host.maa = Maa()
+    for lock, text, expected in (
+            ('locked', '刀剑39级', True), ('locked', '刀剑1级', False),
+            ('unlocked', '刀剑39级', False), ('unknown', '刀剑39级', False),
+            ('locked', '乱舞9级', False), ('locked', '', False),
+            ('locked', '刀剑39级刀剑40级', False)):
+        host.maa.text = text
+        with patch('touken.flows.formation_editor.recognize_selection_lock', return_value=lock):
+            assert host._sakura_candidate_eligible(None, 200) is expected
+
+
+def test_sakura_skips_ineligible_row_before_deciding():
+    class Maa:
+        clicks = []
+        def screenshot(self, force=False):
+            return None
+        def ocr(self, text, roi):
+            return Point(640, 30)
+        def ocr_all(self, roi):
+            if roi.x == 460:
+                return [('疲劳49/100', Point(540, 200)), ('疲劳49/100', Point(540, 300))]
+            return [('次郎太刀', Point(150, 294))]
+        def click(self, point):
+            self.clicks.append((point.x, point.y))
+        def template_match(self, *args, **kwargs):
+            return None
+    host = SakuraMixin()
+    host.maa = Maa()
+    with patch.object(host, '_sakura_sort_list', return_value=True), \
+            patch.object(host, '_sakura_candidate_eligible', side_effect=[False, True]), \
+            patch.object(host, '_wait_list_closed', return_value=True, create=True), \
+            patch('touken.flows.sakura.time.sleep'):
+        list(host._swap_tired_in(1, 50))
+    assert (1197, 160) not in host.maa.clicks
+    assert (1197, 260) in host.maa.clicks
+
+
 def test_selected_captain_fatigue_is_read_without_navigation_or_team_clicks():
     class Maa:
         def screenshot(self, force=False):

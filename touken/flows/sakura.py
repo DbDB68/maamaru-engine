@@ -7,9 +7,9 @@
   游戏机制：队长位必定+疲劳，誉（MVP）也+疲劳——所以刷花是
   【队长一个人穿好刀装，单挑 1-1】，不能往队里塞别人（会抢誉）。
 
-流程（全本丸轮刷，不按上锁或标签筛选）：
+流程（全本丸轮刷，只选上锁且等级大于1的刀，不按标签筛选）：
   编队 → 解散指定部队 → 替换列表按樱吹雪升序
-  → 选疲劳≤49的刀 → 取消期间限定/远战勾选 → 自动装备刀装
+  → 选已上锁、等级>1、疲劳≤49的刀 → 取消期间限定/远战勾选 → 自动装备刀装
   → 队长单挑1-1，复用既有出阵保护 → 疲劳100 → 全部卸装
   → 换下一振，达到本次数量或没有候选时收工
 
@@ -87,7 +87,7 @@ class SakuraMixin:
             yield "[刷花] 本次刷花数量或圈数上限无效，停止"
             return
         target, swap_threshold = 100, 50
-        yield f"[刷花] 部队{team_no}，本次最多刷 {sword_count} 振，疲劳≤49入选"
+        yield f"[刷花] 部队{team_no}，本次最多刷 {sword_count} 振，只选上锁、等级>1、疲劳≤49的刀"
         if not (yield from self._prepare_sakura_team(team_no)):
             return
         completed = 0
@@ -379,7 +379,7 @@ class SakuraMixin:
 
         seen_pages = set()
         for page in range(_SEL_MAX_PAGES):
-            self.maa.screenshot(force=True)
+            image = self.maa.screenshot(force=True)
             # 整列 OCR 按 y 分行找"疲劳"——列表滚动后行位置会飘，不写死行坐标
             tokens = self.maa.ocr_all(roi_4to4(460, 100, 620, 700))
             fingerprint = tuple((t, round(p.y)) for t, p in tokens)
@@ -411,6 +411,8 @@ class SakuraMixin:
                         break
                 if value is None or not 0 <= value < threshold:
                     continue
+                if not self._sakura_candidate_eligible(image, fy):
+                    continue
                 # 找到累的了：读个名字好汇报（过名册校正错别字），点决定
                 # （按钮中心≈疲劳行上方40）
                 name_tokens = self.maa.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
@@ -436,6 +438,17 @@ class SakuraMixin:
         # 完整扫描上限不等于没有候选：不能把没扫完说成全军飘花。
         yield "[刷花·换人] 名单扫描达到上限，停止；未确认全本丸都已飘花"
         return None
+
+    def _sakura_candidate_eligible(self, image, fatigue_y):
+        """锁和刀剑等级都要正面读到；未知、未锁、1级均跳过。"""
+        from .formation_editor import recognize_selection_lock
+        # 名字行在疲劳行上方约6px；复用同源校准的选择列表锁识别。
+        if recognize_selection_lock(image, fatigue_y - 6) != 'locked':
+            return False
+        tokens = self.maa.ocr_all(roi_4to4(470, fatigue_y - 84, 591, fatigue_y - 57)) or []
+        text = ''.join(t for t, _ in tokens)
+        levels = re.findall(r'刀剑\s*(\d{1,3})\s*级', text)
+        return len(levels) == 1 and int(levels[0]) > 1
 
     def _sakura_sort_list(self):
         if not self._open_filter_panel():

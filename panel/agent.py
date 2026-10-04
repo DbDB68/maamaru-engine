@@ -66,7 +66,7 @@ _TOOLS = [
         "type": "function",
         "function": {
             "name": "run_sakura",
-            "description": "刷花：先解散指定部队的队员，全本丸按樱吹雪升序轮选疲劳≤49的刀，单人刷到100后卸装换下一振",
+            "description": "刷花：先解散指定部队的队员，按樱吹雪升序选已上锁、等级大于1、疲劳≤49的刀，单人刷到100后卸装换下一振",
             "parameters": {
                 "type": "object",
                 "properties": {
